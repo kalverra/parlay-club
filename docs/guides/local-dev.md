@@ -4,7 +4,7 @@ title: Local development
 type: guide
 summary: Install the tools, build the CSS, and run the server on your machine with the dev defaults.
 tags: [development, mise, tailwind, server]
-sources: [mise.toml, web/*.go, web/tailwind/*.css, web/templates/*.html, cmd/server/main.go, internal/config/config.go]
+sources: [mise.toml, web/*.go, web/tailwind/*.css, web/templates/*.html, cmd/server/main.go, internal/config/config.go, internal/auth/*.go]
 last_verified: 2026-11-01
 ---
 
@@ -48,6 +48,9 @@ Then open <http://localhost:8080>. Dev defaults set `APP_ENV=dev`, port 8080, an
 Override any of them with an environment variable, for example `PORT=9000 go run ./cmd/server`. The full list is in
 [Configuration](../reference/config.md).
 
+The app asks for the passcode first. In dev it is `dev`. After that, pick a name or add one, and the tabs load. See
+[Access](../concepts/access.md) for how the cookies and the picker work.
+
 Dev logs print as readable console lines; prod logs are JSON.
 
 Template edits show up on the next request, because in dev the server reads `web/templates/` from disk every time. Go
@@ -57,6 +60,9 @@ changes need a restart. So do static files such as `web/static/app.js`, because 
 
 In dev, `PASSCODE` defaults to `dev` and `SESSION_KEY` has a fixed dev value, so a fresh checkout starts without any
 secrets. Prod rejects an empty passcode and a session key under 32 bytes; see [Configuration](../reference/config.md).
+
+The browser stores two signed cookies for a year, so the passcode step is a one-time thing per browser. To start over,
+clear the site's cookies or use a private window. Changing `PASSCODE` or `SESSION_KEY` signs every browser out.
 
 ## Database
 
@@ -76,4 +82,4 @@ golangci-lint run ./...
 go test -short -race ./...
 ```
 
-Every tab loads: Slip, Games, Research, and Record Book each show a placeholder for now.
+Every tab loads: after signing in, Slip, Games, Research, and Record Book each show a placeholder for now.
