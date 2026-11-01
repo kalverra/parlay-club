@@ -47,7 +47,7 @@ builds the parts every later change stands on. Read before starting:
 
 - [x] Add the Tailwind v4 CLI to mise.toml and a go:generate directive in web/embed.go that writes web/static/app.css
 - [x] Vendor HTMX 2.x into web/static and add app.js with the local-time formatter for time elements
-- [ ] Add the base layout with top bar and bottom tab bar (Slip, Games, Research, Record Book placeholders)
+- [x] Add the base layout with top bar and bottom tab bar (Slip, Games, Research, Record Book placeholders)
 - [ ] Serve /static with cache headers and render templates from embed, reloading from disk when APP_ENV=dev
 - [ ] Docs: add docs/guides/local-dev.md (mise install, go generate, run the server, passcode dev)
 

@@ -1,0 +1,64 @@
+{{define "layout"}}<!doctype html>
+<html lang="en" class="h-full">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="color-scheme" content="dark">
+    <meta name="theme-color" content="#020617">
+    <title>{{.Title}} · Sunday Parlay Club</title>
+    <link rel="stylesheet" href="/static/app.css">
+    <script src="/static/htmx-2.0.11.min.js" defer></script>
+    <script src="/static/app.js" defer></script>
+  </head>
+  <body class="min-h-full bg-slate-950 text-slate-100 antialiased">
+    <a
+      href="#content"
+      class="sr-only focus:not-sr-only focus:absolute focus:left-3 focus:top-3 focus:z-30 focus:rounded-md focus:bg-slate-800 focus:px-3 focus:py-2 focus:text-sm"
+      >Skip to content</a
+    >
+
+    <header class="sticky top-0 z-20 border-b border-slate-800 bg-slate-900/95 backdrop-blur">
+      <div class="mx-auto flex h-14 w-full max-w-3xl items-center gap-3 px-4">
+        {{if .WeekLabel}}
+          <span class="shrink-0 text-sm font-semibold text-slate-200">{{.WeekLabel}}</span>
+        {{end}}
+        {{if gt (len .Slips) 1}}
+          <label for="slip-switcher" class="sr-only">Slip</label>
+          <select
+            id="slip-switcher"
+            class="min-w-0 rounded-md border border-slate-700 bg-slate-800 px-2 py-1 text-sm text-slate-100"
+          >
+            {{range .Slips}}<option value="{{.ID}}"{{if .Current}} selected{{end}}>{{.Name}}</option>{{end}}
+          </select>
+        {{end}}
+        <span class="flex-1"></span>
+        {{if .User}}
+          <a href="/me" class="flex shrink-0 items-center" aria-label="Your profile" title="{{.User.Name}}">
+            <span
+              class="flex h-9 w-9 items-center justify-center rounded-full text-sm font-semibold text-slate-950 {{.User.AvatarClass}}"
+              >{{.User.Initials}}</span
+            >
+          </a>
+        {{end}}
+      </div>
+    </header>
+
+    <main id="content" class="mx-auto w-full max-w-3xl px-4 pt-4 pb-28">
+      {{template "content" .}}
+    </main>
+
+    <nav
+      class="fixed inset-x-0 bottom-0 z-20 border-t border-slate-800 bg-slate-900/95 pb-[env(safe-area-inset-bottom)] backdrop-blur"
+      aria-label="Main"
+    >
+      <div class="mx-auto grid w-full max-w-3xl grid-cols-4">
+        {{range .Tabs}}<a
+            href="{{.Href}}"
+            class="flex flex-col items-center gap-1 px-1 py-3 text-center text-[11px] leading-tight font-medium text-slate-400 aria-[current=page]:font-semibold aria-[current=page]:text-sky-400"
+            {{if .Current}}aria-current="page"{{end}}>{{.Label}}</a
+          >{{end}}
+      </div>
+    </nav>
+  </body>
+</html>
+{{end}}
