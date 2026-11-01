@@ -16,6 +16,7 @@ import (
 
 	"github.com/rs/zerolog"
 
+	"github.com/kalverra/parlay-club/internal/auth"
 	"github.com/kalverra/parlay-club/internal/config"
 	"github.com/kalverra/parlay-club/internal/db"
 	"github.com/kalverra/parlay-club/internal/web"
@@ -66,9 +67,13 @@ func run() error {
 		return err
 	}
 
+	store := db.NewStore(database)
+	cookies := auth.NewCookies(cfg.SessionKey, cfg.Passcode, cfg.IsProd())
+	handlers := auth.NewHandlers(logger, store, cookies, renderer, nil)
+
 	server := &http.Server{
 		Addr:              net.JoinHostPort("", strconv.Itoa(cfg.Port)),
-		Handler:           newMux(web.New(logger, renderer)),
+		Handler:           newMux(web.New(logger, renderer), handlers.Routes),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	return listenAndServe(ctx, logger, server)
@@ -104,10 +109,12 @@ func newLogger(cfg config.Config, out io.Writer) zerolog.Logger {
 	return zerolog.New(writer).Level(cfg.LogLevel).With().Timestamp().Logger()
 }
 
-// newMux builds the routes. The web shell serves every path except /healthz.
-func newMux(shell http.Handler) *http.ServeMux {
+// newMux builds the routes. The auth screens sit on the outer mux, and the web
+// shell serves every path except /healthz and those screens.
+func newMux(shell http.Handler, authRoutes func(*http.ServeMux)) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", healthz)
+	authRoutes(mux)
 	mux.Handle("/", shell)
 	return mux
 }

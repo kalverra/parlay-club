@@ -4,6 +4,7 @@ package auth
 import (
 	"crypto/hmac"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"net/http"
 	"strconv"
@@ -44,6 +45,12 @@ func NewCookies(sessionKey, passcode string, secure bool) *Cookies {
 // passcode.
 func (c *Cookies) SetPasscode(w http.ResponseWriter) {
 	http.SetCookie(w, c.cookie(PasscodeCookie, c.mac(c.passcode)))
+}
+
+// PasscodeMatches reports whether input is the group passcode. It compares in
+// constant time so a wrong guess cannot be narrowed down by its timing.
+func (c *Cookies) PasscodeMatches(input string) bool {
+	return subtle.ConstantTimeCompare([]byte(input), []byte(c.passcode)) == 1
 }
 
 // HasPasscode reports whether r carries a valid passcode cookie. A missing,

@@ -145,6 +145,30 @@ func TestHasPasscodeRejectsAnotherSessionKey(t *testing.T) {
 	assert.False(t, auth.NewCookies("another-session-key-long-enough", testPasscode, false).HasPasscode(request))
 }
 
+func TestPasscodeMatches(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		input string
+		want  bool
+	}{
+		"exact":     {input: testPasscode, want: true},
+		"wrong":     {input: "hut-hutt", want: false},
+		"prefix":    {input: testPasscode[:len(testPasscode)-1], want: false},
+		"empty":     {input: "", want: false},
+		"padded":    {input: " " + testPasscode, want: false},
+		"uppercase": {input: "HUT-HUT", want: false},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, test.want, testCookies(false).PasscodeMatches(test.input))
+		})
+	}
+}
+
 func TestSetUserCookie(t *testing.T) {
 	t.Parallel()
 
