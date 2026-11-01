@@ -22,7 +22,8 @@ func TestHealthz(t *testing.T) {
 	t.Parallel()
 
 	recorder := httptest.NewRecorder()
-	newMux().ServeHTTP(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/healthz", nil))
+	newMux(http.NotFoundHandler()).
+		ServeHTTP(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/healthz", nil))
 
 	assert.Equal(t, http.StatusOK, recorder.Code)
 	assert.Equal(t, "ok", recorder.Body.String())

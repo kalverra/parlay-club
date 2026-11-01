@@ -18,6 +18,8 @@ import (
 
 	"github.com/kalverra/parlay-club/internal/config"
 	"github.com/kalverra/parlay-club/internal/db"
+	"github.com/kalverra/parlay-club/internal/web"
+	assets "github.com/kalverra/parlay-club/web"
 )
 
 // shutdownTimeout leaves two seconds of Cloud Run's ten before the instance is
@@ -59,12 +61,37 @@ func run() error {
 		return err
 	}
 
+	renderer, err := newRenderer(cfg)
+	if err != nil {
+		return err
+	}
+
 	server := &http.Server{
 		Addr:              net.JoinHostPort("", strconv.Itoa(cfg.Port)),
-		Handler:           newMux(),
+		Handler:           newMux(web.New(logger, renderer)),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	return listenAndServe(ctx, logger, server)
+}
+
+// newRenderer reads templates from disk on every request in dev, so an edit
+// shows up on reload, and from the binary in prod.
+func newRenderer(cfg config.Config) (*web.Renderer, error) {
+	if cfg.IsProd() {
+		renderer, err := web.NewRenderer(assets.Templates, false)
+		if err != nil {
+			return nil, fmt.Errorf("load templates: %w", err)
+		}
+
+		return renderer, nil
+	}
+
+	renderer, err := web.NewRenderer(os.DirFS("web"), true)
+	if err != nil {
+		return nil, fmt.Errorf("load templates from web/ (run from the repo root): %w", err)
+	}
+
+	return renderer, nil
 }
 
 // newLogger writes JSON in prod for Cloud Run's log parser and a readable
@@ -77,10 +104,11 @@ func newLogger(cfg config.Config, out io.Writer) zerolog.Logger {
 	return zerolog.New(writer).Level(cfg.LogLevel).With().Timestamp().Logger()
 }
 
-// newMux builds the routes. Later phases add auth and the web handlers here.
-func newMux() *http.ServeMux {
+// newMux builds the routes. The web shell serves every path except /healthz.
+func newMux(shell http.Handler) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", healthz)
+	mux.Handle("/", shell)
 	return mux
 }
 

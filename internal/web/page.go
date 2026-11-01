@@ -66,6 +66,16 @@ func (p Page) Tabs() []NavTab {
 	return tabs
 }
 
+// Label returns the tab's display name.
+func (t Tab) Label() string {
+	for _, tab := range navTabs {
+		if tab.Tab == t {
+			return tab.Label
+		}
+	}
+	return string(t)
+}
+
 // Initials returns up to two uppercase letters from a name for its avatar.
 func Initials(name string) string {
 	initials := make([]rune, 0, 2)
