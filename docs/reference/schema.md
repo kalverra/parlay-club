@@ -1,15 +1,65 @@
-# Schema
+---
+id: schema
+title: Database schema
+type: reference
+summary: SQLite tables, how migrations are tracked and applied, and the connection settings behind every query.
+tags: [database, sqlite, migrations]
+sources: [internal/db/migrations/*.sql, internal/db/migrate.go, internal/db/db.go]
+last_verified: 2026-11-01
+---
 
-SQLite via `modernc.org/sqlite`. Connection pragmas are in architecture.md "Database access".
+# Database schema
+
+## Summary
+
+One SQLite file, opened by `internal/db.Open`, holds every table the app uses. `0001_init.sql` creates all of them, so
+later changes add no migrations until the schema itself changes.
+
+## Connection settings
+
+`internal/db.Open` sets these pragmas on every connection:
+
+| Pragma        | Value    | Why                                               |
+| ------------- | -------- | ------------------------------------------------- |
+| `journal_mode` | `WAL`   | Reads continue while a write is in flight.        |
+| `busy_timeout` | `5000`  | Wait for a lock instead of failing at once.       |
+| `foreign_keys` | `1`     | SQLite enforces foreign keys only when asked.     |
+| `synchronous`  | `NORMAL`| The safe pairing with WAL.                        |
+
+Transactions begin with `_txlock=immediate`, and the pool is capped at one connection. Traffic is tiny, and a single
+connection rules out `SQLITE_BUSY`.
+
+`Open` creates the database directory when missing and fails if the first connection cannot be made.
 
 ## Migrations
 
-- Files: `internal/db/migrations/NNNN_name.sql`, embedded, applied in order inside one transaction each.
-- The applied version is `PRAGMA user_version`. A migration runs only when its number is greater.
-- `0001_init.sql` creates every table below, including ones later changes use, so early changes need no migrations.
-  Later schema changes add new files; never edit an applied file.
+- Files live in `internal/db/migrations/NNNN_name.sql` and are embedded in the binary.
+- `db.Migrate` applies every file whose number is greater than `PRAGMA user_version`, in number order.
+- Each file runs in its own transaction. The migration's statements and its `user_version` bump commit together, so a
+  failed migration leaves neither behind.
+- A fresh database ends at version 1 with every table below.
+- Never edit an applied file. Add `0002_name.sql` and up.
+- `PRAGMA user_version` on the database file is the only record of what ran.
 
 ## Tables
+
+| Table            | Holds                                                        |
+| ---------------- | ------------------------------------------------------------ |
+| `users`          | Group members, their avatar color, home book, and active flag. |
+| `weeks`          | NFL weeks, keyed `season*1000 + season_type*100 + week_num`.  |
+| `games`          | One row per ESPN event: teams, kickoff, venue, weather, scores. |
+| `odds`           | Odds API prices per game, book, market, and selection.        |
+| `slips`          | One shared parlay per week, with status and result.           |
+| `slip_members`   | Who is on a slip and when they locked in.                     |
+| `legs`           | Picks on a slip, with market, selection, line, odds, and result. |
+| `wagers`         | Optional stake, odds, and boost per member per slip.          |
+| `player_matches` | Odds player name to ESPN athlete ID, per team.                |
+| `activity`       | Human-readable slip history; `user_id` is NULL for system entries. |
+| `sync_state`     | Last fetch time per outside data source, plus remaining odds credits. |
+
+## DDL
+
+The definitions below match `internal/db/migrations/0001_init.sql`, which is the source of truth.
 
 ```sql
 CREATE TABLE users (
@@ -139,10 +189,10 @@ CREATE TABLE sync_state (
 );
 ```
 
-## Notes
+## Conventions
 
 - Timestamps are RFC 3339 UTC text. Parse them with `time.RFC3339`.
 - Booleans are `INTEGER` 0/1.
 - A leg's kickoff lock comes from `games.kickoff_utc`; it is not stored.
-- The slip's reference odds are computed when rendered (product.md "Odds and payout"), not stored.
-- `slips.status` and `slips.result` are written by `internal/slips` whenever locks or leg results change.
+- A slip's reference odds are not stored; any view that shows them computes them.
+- `slips.status` and `slips.result` stay in step with lock and leg-result changes.
