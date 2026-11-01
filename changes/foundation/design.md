@@ -37,7 +37,7 @@ builds the parts every later change stands on. Read before starting:
 
 ### Phase 1: Server and database
 
-- [ ] Add internal/config with the env table from plan/architecture.md and tests for dev defaults and prod errors
+- [x] Add internal/config with the env table from plan/architecture.md and tests for dev defaults and prod errors
 - [ ] Add internal/db Open with pragmas and MaxOpenConns(1); test that WAL and foreign keys are on
 - [ ] Add the embedded migration runner and 0001_init.sql; test fresh DB version and idempotent rerun
 - [ ] Add cmd/server with zerolog, /healthz, and graceful shutdown on SIGTERM
