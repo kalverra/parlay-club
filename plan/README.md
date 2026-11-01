@@ -25,8 +25,7 @@ Every change is done when its acceptance checks pass and the verify commands in 
 | Doc                                    | Covers                                                                |
 | -------------------------------------- | --------------------------------------------------------------------- |
 | [product.md](product.md)               | Users, slips, legs, locking, odds math, grading, Record Book, screens |
-| [architecture.md](architecture.md)     | Repo layout, config, routes, auth, live updates, refresh, deploy      |
-| [schema.md](schema.md)                 | SQLite schema and migrations                                          |
+| [architecture.md](architecture.md)     | Repo layout, routes, auth, live updates, refresh, deploy              |
 | [data-sources.md](data-sources.md)     | ESPN, Open-Meteo, The Odds API, matching, fixtures                    |
 | [analyzer.md](analyzer.md)             | Warning types and every rule with exact triggers                      |
 

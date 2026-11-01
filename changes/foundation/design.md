@@ -41,7 +41,7 @@ builds the parts every later change stands on. Read before starting:
 - [x] Add internal/db Open with pragmas and MaxOpenConns(1); test that WAL and foreign keys are on
 - [x] Add the embedded migration runner and 0001_init.sql; test fresh DB version and idempotent rerun
 - [x] Add cmd/server with zerolog, /healthz, and graceful shutdown on SIGTERM
-- [ ] Docs: add docs/reference/config.md and docs/reference/schema.md; delete plan/schema.md and plan Config section
+- [x] Docs: add docs/reference/config.md and docs/reference/schema.md; delete plan/schema.md and plan Config section
 
 ### Phase 2: Web shell
 

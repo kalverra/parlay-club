@@ -46,23 +46,6 @@ Dockerfile
 Handlers stay thin: parse the request, call `slips`/`db`, render. Rules live in `internal/slips`, not in handlers or
 SQL.
 
-## Config
-
-All from env. Parsed once in `internal/config`; the server exits on invalid config.
-
-| Var                 | Default (dev)        | Notes                                                           |
-| ------------------- | -------------------- | --------------------------------------------------------------- |
-| `APP_ENV`           | `dev`                | `dev` or `prod`                                                 |
-| `PORT`              | `8080`               | Cloud Run sets it                                               |
-| `DB_PATH`           | `./data/parlay.db`   | Directory created if missing                                    |
-| `PASSCODE`          | `dev`                | Required in prod                                                |
-| `SESSION_KEY`       | fixed dev string     | Required in prod, ≥ 32 bytes; signs cookies                     |
-| `ODDS_API_KEY`      | empty                | Empty disables Odds API calls; the board shows "no lines"       |
-| `LOG_LEVEL`         | `debug`              | `info` in prod                                                  |
-| `LITESTREAM_BUCKET` | —                    | Read by Litestream, not the app                                 |
-
-`./data/` is in `.gitignore`. In dev, templates reload from disk on each request so edits show without a restart.
-
 ## Routes
 
 Go 1.22+ method patterns. All routes except `/healthz`, `/login`, and `/static/` need the auth cookie; all except those
