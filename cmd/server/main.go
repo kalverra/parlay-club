@@ -73,7 +73,7 @@ func run() error {
 
 	server := &http.Server{
 		Addr:              net.JoinHostPort("", strconv.Itoa(cfg.Port)),
-		Handler:           newMux(web.New(logger, renderer), handlers.Routes),
+		Handler:           newMux(web.New(logger, renderer), web.StaticHandler(), handlers),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	return listenAndServe(ctx, logger, server)
@@ -109,14 +109,20 @@ func newLogger(cfg config.Config, out io.Writer) zerolog.Logger {
 	return zerolog.New(writer).Level(cfg.LogLevel).With().Timestamp().Logger()
 }
 
-// newMux builds the routes. The auth screens sit on the outer mux, and the web
-// shell serves every path except /healthz and those screens.
-func newMux(shell http.Handler, authRoutes func(*http.ServeMux)) *http.ServeMux {
+// newMux builds the routes. Health, static files, and the passcode and picker
+// screens sit outside the shell's checks. Everything else needs a passcode and
+// a user, and every non-GET form must come from HTMX.
+func newMux(shell, static http.Handler, handlers *auth.Handlers) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", healthz)
-	authRoutes(mux)
-	mux.Handle("/", shell)
-	return mux
+	mux.Handle("GET /static/{path...}", static)
+	handlers.Routes(mux)
+
+	app := http.NewServeMux()
+	app.Handle("/", shell)
+	mux.Handle("/", handlers.RequirePasscode(handlers.RequireUser(app)))
+
+	return handlers.CSRF(mux)
 }
 
 // healthz answers Cloud Run's startup and liveness probes.

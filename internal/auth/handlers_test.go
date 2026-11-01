@@ -29,6 +29,7 @@ type fixture struct {
 	store    *db.Store
 	database *sql.DB
 	cookies  *auth.Cookies
+	passcode *http.Cookie
 	waits    []time.Duration
 }
 
@@ -50,6 +51,11 @@ func newFixture(t *testing.T) *fixture {
 		cookies:  auth.NewCookies(testSessionKey, testPasscode, false),
 	}
 
+	passcodeRecorder := httptest.NewRecorder()
+	f.cookies.SetPasscode(passcodeRecorder)
+	f.passcode = cookieFrom(passcodeRecorder, auth.PasscodeCookie)
+	require.NotNil(t, f.passcode)
+
 	handlers := auth.NewHandlers(
 		zerolog.Nop(),
 		f.store,
@@ -62,9 +68,12 @@ func newFixture(t *testing.T) *fixture {
 	return f
 }
 
-// serve runs request through the auth routes.
+// serve runs request through the auth routes the way a browser that already
+// typed the passcode would.
 func (f *fixture) serve(t *testing.T, request *http.Request) *httptest.ResponseRecorder {
 	t.Helper()
+
+	request.AddCookie(f.passcode)
 
 	recorder := httptest.NewRecorder()
 	f.mux.ServeHTTP(recorder, request)

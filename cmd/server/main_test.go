@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/kalverra/parlay-club/internal/auth"
 	"github.com/kalverra/parlay-club/internal/config"
 )
 
@@ -22,7 +23,7 @@ func TestHealthz(t *testing.T) {
 	t.Parallel()
 
 	recorder := httptest.NewRecorder()
-	newMux(http.NotFoundHandler(), func(*http.ServeMux) {}).
+	newMux(http.NotFoundHandler(), http.NotFoundHandler(), newTestHandlers()).
 		ServeHTTP(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/healthz", nil))
 
 	assert.Equal(t, http.StatusOK, recorder.Code)
@@ -30,19 +31,44 @@ func TestHealthz(t *testing.T) {
 	assert.Equal(t, "text/plain; charset=utf-8", recorder.Header().Get("Content-Type"))
 }
 
-func TestMuxMountsAuthRoutes(t *testing.T) {
+func TestMuxProtectsShell(t *testing.T) {
 	t.Parallel()
 
-	mux := newMux(http.NotFoundHandler(), func(mux *http.ServeMux) {
-		mux.HandleFunc("GET /login", func(w http.ResponseWriter, _ *http.Request) {
-			w.WriteHeader(http.StatusNoContent)
-		})
+	shell := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
 	})
+	mux := newMux(shell, http.NotFoundHandler(), newTestHandlers())
 
 	recorder := httptest.NewRecorder()
-	mux.ServeHTTP(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/login", nil))
+	mux.ServeHTTP(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/games", nil))
 
-	assert.Equal(t, http.StatusNoContent, recorder.Code, "auth routes are registered before the shell")
+	assert.Equal(t, http.StatusFound, recorder.Code)
+	assert.Equal(t, "/login", recorder.Header().Get("Location"))
+}
+
+func TestMuxServesStaticWithoutAuth(t *testing.T) {
+	t.Parallel()
+
+	static := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux := newMux(http.NotFoundHandler(), static, newTestHandlers())
+
+	recorder := httptest.NewRecorder()
+	mux.ServeHTTP(recorder, httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodGet,
+		"/static/app.css",
+		nil,
+	))
+
+	assert.Equal(t, http.StatusNoContent, recorder.Code, "static files load on the login page")
+}
+
+// newTestHandlers builds auth handlers that need no database or templates.
+func newTestHandlers() *auth.Handlers {
+	cookies := auth.NewCookies("test-session-key-long-enough-for-anything", "hut", false)
+	return auth.NewHandlers(zerolog.Nop(), nil, cookies, nil, nil)
 }
 
 func TestLoggerWritesJSONInProd(t *testing.T) {

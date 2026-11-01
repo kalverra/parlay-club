@@ -62,13 +62,15 @@ func NewHandlers(
 }
 
 // Routes mounts the passcode and picker screens. The three POST forms are the
-// only non-GET requests exempt from the CSRF header check.
+// only non-GET requests exempt from the CSRF header check. The picker and the
+// add-name form need the passcode but not yet a user, since picking is how a
+// browser gets its user.
 func (h *Handlers) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /login", h.loginForm)
 	mux.HandleFunc("POST /login", h.login)
-	mux.HandleFunc("GET /who", h.whoForm)
-	mux.HandleFunc("POST /who", h.who)
-	mux.HandleFunc("POST /users", h.addUser)
+	mux.Handle("GET /who", h.RequirePasscode(http.HandlerFunc(h.whoForm)))
+	mux.Handle("POST /who", h.RequirePasscode(http.HandlerFunc(h.who)))
+	mux.Handle("POST /users", h.RequirePasscode(http.HandlerFunc(h.addUser)))
 }
 
 // LoginPage is the data for the passcode screen.
