@@ -22,12 +22,27 @@ func TestHealthz(t *testing.T) {
 	t.Parallel()
 
 	recorder := httptest.NewRecorder()
-	newMux(http.NotFoundHandler()).
+	newMux(http.NotFoundHandler(), func(*http.ServeMux) {}).
 		ServeHTTP(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/healthz", nil))
 
 	assert.Equal(t, http.StatusOK, recorder.Code)
 	assert.Equal(t, "ok", recorder.Body.String())
 	assert.Equal(t, "text/plain; charset=utf-8", recorder.Header().Get("Content-Type"))
+}
+
+func TestMuxMountsAuthRoutes(t *testing.T) {
+	t.Parallel()
+
+	mux := newMux(http.NotFoundHandler(), func(mux *http.ServeMux) {
+		mux.HandleFunc("GET /login", func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusNoContent)
+		})
+	})
+
+	recorder := httptest.NewRecorder()
+	mux.ServeHTTP(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/login", nil))
+
+	assert.Equal(t, http.StatusNoContent, recorder.Code, "auth routes are registered before the shell")
 }
 
 func TestLoggerWritesJSONInProd(t *testing.T) {

@@ -8,11 +8,14 @@ import (
 )
 
 // pageFiles maps a page name to the template file that defines its content.
+// The shell and the auth screens share the layout, so they share this map.
 var pageFiles = map[string]string{
 	"slip":     "templates/slip.html",
 	"games":    "templates/games.html",
 	"research": "templates/research.html",
 	"record":   "templates/record.html",
+	"login":    "templates/login.html",
+	"who":      "templates/who.html",
 }
 
 // Renderer parses and runs the page templates. It is safe to use from several
@@ -47,9 +50,9 @@ func NewRenderer(fsys fs.FS, reload bool) (*Renderer, error) {
 	return renderer, nil
 }
 
-// Render returns the page's full HTML. It buffers, so a failed render writes
-// nothing.
-func (r *Renderer) Render(name string, data Page) ([]byte, error) {
+// Render returns the page's full HTML for data, which must satisfy the layout's
+// fields. It buffers, so a failed render writes nothing.
+func (r *Renderer) Render(name string, data any) ([]byte, error) {
 	tmpl, err := r.template(name)
 	if err != nil {
 		return nil, err
