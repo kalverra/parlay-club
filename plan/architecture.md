@@ -86,16 +86,6 @@ and `/who` need the user cookie.
 Rule violations from `internal/slips` return 422 with a short message rendered in the form. HTMX responses that change
 the slip return the refreshed panel.
 
-## Auth
-
-- `pc_auth` cookie: `HMAC-SHA256(SESSION_KEY, PASSCODE)` hex. Changing the passcode logs everyone out.
-- `pc_user` cookie: `{userID}.{HMAC-SHA256(SESSION_KEY, "user:"+userID)}`.
-- Both: `HttpOnly`, `SameSite=Lax`, `Secure` in prod, `Path=/`, max age 1 year. Compare MACs in constant time.
-- A wrong passcode waits 1 second before re-rendering the form.
-- Middleware redirects with 302, or for requests carrying `HX-Request: true` replies 200 with `HX-Redirect`.
-- CSRF: every non-GET request except `POST /login`, `POST /who`, and `POST /users` must carry `HX-Request: true`;
-  otherwise 403. A custom header can't be sent cross-site without CORS, and `SameSite=Lax` covers the three forms.
-
 ## Live updates
 
 ### Hub (`internal/live`)
