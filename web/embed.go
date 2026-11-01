@@ -10,3 +10,9 @@ import "embed"
 //
 //go:embed static
 var Static embed.FS
+
+// Templates holds the page templates. The layout defines "layout" and each
+// page file defines the "content" block it wraps.
+//
+//go:embed templates
+var Templates embed.FS
