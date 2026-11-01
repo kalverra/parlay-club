@@ -53,7 +53,7 @@ builds the parts every later change stands on. Read before starting:
 
 ### Phase 3: Passcode and user picker
 
-- [ ] Add users Store methods: list active, create with next avatar color, get by ID
+- [x] Add users Store methods: list active, create with next avatar color, get by ID
 - [ ] Add internal/auth cookie signing and constant-time verification for pc_auth and pc_user
 - [ ] Add /login, /who, and POST /users handlers with templates; wrong passcode waits 1 s
 - [ ] Add RequirePasscode, RequireUser, and CSRF middleware with HX-Redirect handling
