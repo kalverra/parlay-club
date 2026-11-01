@@ -21,7 +21,7 @@ exits with status 1 when any value is invalid.
 | ------------------- | ------------------ | ------------------------------------------------------------------------ |
 | `APP_ENV`           | `dev`              | `dev` or `prod`. Any other value is an error.                            |
 | `PORT`              | `8080`             | Must be 1–65535. Cloud Run sets it.                                      |
-| `DB_PATH`           | `./data/parlay.db` | The directory is created if missing. Relative paths resolve from the working directory. |
+| `DB_PATH`           | `./data/parlay.db` | The directory is created if missing; `data/` is gitignored. Relative paths resolve from the working directory. |
 | `PASSCODE`          | `dev`              | Required in prod.                                                        |
 | `SESSION_KEY`       | fixed dev string   | Required in prod, at least 32 bytes.                                     |
 | `ODDS_API_KEY`      | empty              | Empty disables Odds API calls.                                           |
