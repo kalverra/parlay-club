@@ -26,6 +26,7 @@ import (
 // templates.
 type fixture struct {
 	mux      *http.ServeMux
+	handlers *auth.Handlers
 	store    *db.Store
 	database *sql.DB
 	cookies  *auth.Cookies
@@ -63,6 +64,7 @@ func newFixture(t *testing.T) *fixture {
 		renderer,
 		func(delay time.Duration) { f.waits = append(f.waits, delay) },
 	)
+	f.handlers = handlers
 	handlers.Routes(f.mux)
 
 	return f
