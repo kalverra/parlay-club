@@ -1,0 +1,32 @@
+# Project good-vibes config.
+#
+# Layers, lowest to highest: embedded defaults, ~/.config/good-vibes/config.toml,
+# this file, good-vibes.local.toml, GOOD_VIBES_* env, flags.
+# Run `good-vibes config show --origin` to see where every value comes from.
+
+# Fail older binaries instead of letting them misread this file.
+# min_version = "0.1.0"
+
+[change]
+dir = "changes"
+
+[flow]
+# Require accepted_by, accepted_at, and accepted_in before design or implement.
+require_accept = false
+
+[docs]
+root = "docs"
+
+[implement]
+mode = "balanced"
+# Run after each worker turn. CI also checks that `go generate` leaves no diff;
+# that check can't run here because worker changes are not committed yet.
+verify = [
+  "go generate ./...",
+  "golangci-lint run ./...",
+  "go test -short -race ./...",
+]
+
+[harness.claude.tiers]
+mid = "sonnet"
+top = "opus"

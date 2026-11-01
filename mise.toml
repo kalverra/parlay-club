@@ -1,0 +1,9 @@
+[tools]
+go = "latest"
+golangci-lint = "latest"
+
+betterleaks = "latest"
+typos = "latest"
+goreleaser = "latest"
+rumdl = "latest"
+"aqua:kjanat/actionlint" = "latest"
