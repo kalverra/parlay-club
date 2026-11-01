@@ -1,8 +1,6 @@
 package web_test
 
 import (
-	"bytes"
-	"html/template"
 	"io/fs"
 	"regexp"
 	"strings"
@@ -37,16 +35,21 @@ func TestLayoutLinksAssets(t *testing.T) {
 
 	out := renderPage(t, "slip", webui.Page{Title: "Slip", Tab: webui.TabSlip})
 
-	assert.Contains(t, out, `href="/static/app.css"`)
-	assert.Contains(t, out, `src="/static/app.js"`)
+	assert.Contains(t, out, "/static/app.css?v=")
+	assert.Contains(t, out, "/static/app.js?v=")
 
-	// The template names the HTMX version, so check that the file it asks for
-	// is the one that was vendored.
-	match := regexp.MustCompile(`src="/static/(htmx-[^"]+\.min\.js)"`).FindStringSubmatch(out)
-	require.Len(t, match, 2)
+	urls := regexp.MustCompile(`/static/[^"]+`).FindAllString(out, -1)
+	require.NotEmpty(t, urls)
 
-	_, err := fs.Stat(assets.Static, "static/"+match[1])
-	require.NoError(t, err)
+	for _, url := range urls {
+		name, query, found := strings.Cut(strings.TrimPrefix(url, "/static/"), "?")
+		assert.True(t, found, "asset URL %s has no cache-busting query", url)
+		assert.NotEmpty(t, query)
+
+		// The template names the vendored file, so check it was really vendored.
+		_, err := fs.Stat(assets.Static, "static/"+name)
+		require.NoError(t, err, "template links missing asset %s", url)
+	}
 }
 
 func TestLayoutTopBar(t *testing.T) {
@@ -127,15 +130,11 @@ func TestPlaceholderPages(t *testing.T) {
 func renderPage(t *testing.T, page string, data webui.Page) string {
 	t.Helper()
 
-	tmpl, err := template.New("layout").ParseFS(
-		assets.Templates,
-		"templates/layout.html",
-		"templates/"+page+".html",
-	)
+	renderer, err := webui.NewRenderer(assets.Templates, false)
 	require.NoError(t, err)
 
-	var out bytes.Buffer
-	require.NoError(t, tmpl.ExecuteTemplate(&out, "layout", data))
+	html, err := renderer.Render(page, data)
+	require.NoError(t, err)
 
-	return out.String()
+	return string(html)
 }
