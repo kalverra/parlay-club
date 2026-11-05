@@ -37,7 +37,7 @@ Each change's `design.md` is its contract; the entries below are summaries. Chan
 Changes 6–8 follow; their designs are written after 1–5 land.
 
 `history-and-deploy` runs interactively because the user runs the GCP setup. The others run with
-`good-vibes implement <slug> --mode balanced`.
+`good-vibes implement <slug> --style orchestrated`.
 
 ### 1. `foundation`
 
