@@ -21,6 +21,19 @@ Sunday, Nov 8. It runs interactively: the user runs the GCP setup and the first 
 - `deploy/setup.sh` is idempotent `gcloud` and prints the GitHub variables. The agent writes it; the user runs it.
 - Workflows: `ci.yml` and `deploy.yml` per `plan/architecture.md` CI, with `deploy/blackout.sh` gating deploys.
 
+## Verification
+
+- `go test ./...` and `golangci-lint run ./...` pass.
+- `SetLegResult` table tests cover every case in `plan/product.md` "Grading", including a VOID leg and a PUSH on an
+  exact line; a past-week slip accepts free-text `OTHER` legs.
+- Loading the history file twice creates each slip once, creates unknown users, and computes each slip result from its
+  legs.
+- A local container smoke test writes a slip, restarts the container, and confirms Litestream restored the data.
+- `deploy/blackout.sh` exits 1 inside both game windows and 0 outside them, using `NOW`.
+- `ci.yml` runs the generate-diff check, lint, and tests; `deploy.yml` refuses a blacked-out deploy unless `force` is
+  set.
+- A user can follow the setup runbook alone and reach a working Cloud Run URL with data that survives a restart.
+
 ## Risks
 
 - Litestream config syntax differs by version: pin one release and confirm against its docs.
@@ -32,27 +45,27 @@ Sunday, Nov 8. It runs interactively: the user runs the GCP setup and the first 
 
 ### Phase 1: Grading by hand
 
-- [ ] Add SetLegResult with slip result and status recompute; table tests for every Grading case
-- [ ] Add the result chip menu on each leg and PUT /legs/{id}/result
-- [ ] Allow past weeks in the create-slip form; test a past-week slip with free-text OTHER legs
+- [ ] Add SetLegResult with slip result and status recompute, its table tests for every Grading case, and the result
+  chip menu on each leg with PUT /legs/{id}/result
+- [ ] Allow past weeks in the create-slip form and test a past-week slip with free-text OTHER legs
 - [ ] Docs: add grading to docs/concepts/slips.md; delete the manual grading parts from plan/product.md
 
 ### Phase 2: History file
 
-- [ ] Add internal/seed and an empty seed/history.yaml with a commented example; load it at boot
-- [ ] Tests: loading twice creates each slip once; unknown users are created; results compute slip result
+- [ ] Add internal/seed and an empty seed/history.yaml with a commented example, load it at boot, and test that loading
+  twice creates each slip once, unknown users are created, and results compute slip result
 - [ ] Docs: add docs/reference/history-file.md; delete History from plan/product.md
 
 ### Phase 3: Container and persistence
 
-- [ ] Add the Dockerfile, deploy/litestream.yml, and deploy/entrypoint.sh with a pinned Litestream release
-- [ ] Smoke test locally: build, run with a file replica, write a slip, restart, and confirm it restored
+- [ ] Add the Dockerfile, deploy/litestream.yml, and deploy/entrypoint.sh with a pinned Litestream release, and smoke
+  test locally: build, run with a file replica, write a slip, restart, and confirm it restored
 - [ ] Docs: add docs/concepts/persistence.md; delete Persistence from plan/architecture.md
 
 ### Phase 4: CI and deploy
 
 - [ ] Add .github/workflows/ci.yml with generate-diff check, lint, and tests
-- [ ] Add deploy/blackout.sh with a test script covering both windows via NOW
-- [ ] Add deploy/setup.sh for every resource in plan/architecture.md One-time setup
+- [ ] Add deploy/blackout.sh with a test script covering both windows via NOW, and deploy/setup.sh for every resource in
+  plan/architecture.md One-time setup
 - [ ] Add .github/workflows/deploy.yml with blackout gate, WIF auth, build, push, and gcloud run deploy
 - [ ] Docs: add docs/runbooks/deploy.md and docs/guides/gcp-setup.md; delete Deploy and CI from plan/architecture.md

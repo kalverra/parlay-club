@@ -9,16 +9,18 @@ the free tier, with about $20 of GCP credits as the safety net.
 `plan/` holds the **target design**: behavior that is not built yet. `docs/` holds **living docs**: the system as it is
 now. Work moves from one to the other through good-vibes changes.
 
-1. Each section under "Changes" below is one good-vibes change, built in order.
-2. A change's `design.md` cites the `plan/` sections it builds, rather than copying them. Its TODO phases come from the
-   change's deliverables and acceptance checks below.
+1. Each section under "Changes" below is one good-vibes change, built in order. A change starts as a proposal in
+   `changes/<slug>/proposal.md`, then gets a design in `changes/<slug>/design.md`.
+2. A change's `design.md` cites the `plan/` sections it builds, rather than copying them. Its Verification section comes
+   from the acceptance checks below. Its TODO phases come from the deliverables, with each phase a short list of
+   vertical tasks that ship behavior and tests together.
 3. Each phase's `Docs:` task moves the parts it built out of `plan/` and into living docs under `docs/` (concepts and
    reference, with front matter), then deletes them from `plan/`. `plan/` shrinks as the app grows; when the last change
    closes, it is empty.
 4. When a plan doc is silent or wrong, pick the simplest option that fits [AGENTS.md](../AGENTS.md), record it in the
    change's design, and fix the plan doc.
 
-Every change is done when its acceptance checks pass and the verify commands in `good-vibes.toml` are green.
+Every change is done when its Verification checks pass and the verify commands in `good-vibes.toml` are green.
 
 ## Plan docs
 

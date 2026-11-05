@@ -1,18 +1,32 @@
 ---
 slug: grading-record-book
 status: proposed
-created: 2026-11-01
+created: "2026-11-01"
 ---
 
 # Auto-grading and Record Book
 
-## Why
+## Context
 
 Grading by hand every week is tedious, and the group wants season bragging rights.
 
-## Problem
-
 Results aren't graded automatically, and there is no season record or leaderboard.
+
+## Goals and non-goals
+
+**Goals:**
+
+- Grade legs from ESPN box scores once games go final, lazily through refresh.
+- Let any member override a grade, keeping `graded_by` accurate.
+- Show a Record Book per season: group record and units, streaks, a leaderboard, and the Parlay Terrorist badge.
+- Let each member log an optional wager per slip and show dollar P/L.
+
+**Non-goals:**
+
+- Live in-game grading before a game is final.
+- Scheduled grading jobs or a second process.
+- Sportsbook integrations or handling money.
+- Changing the grading rules in `plan/product.md`.
 
 ## Decision
 

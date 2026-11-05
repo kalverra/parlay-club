@@ -22,6 +22,19 @@ Games tab. Props wait for `props-research`. Read before starting:
   from the `odds` table for members' home books.
 - Leg form gains a game picker limited to games not yet kicked off (past-week slips keep it optional).
 
+## Verification
+
+- `go test ./...` and `golangci-lint run ./...` pass; each `TestLive*` skips under `-short`.
+- Saved fixtures parse the full slate, a live week, and an international game; rerunning a sync changes no rows.
+- Event matching finds every game in a full saved slate, and weather parsing returns the kickoff-window max wind, gust,
+  and precipitation.
+- Fake-clock tests prove refresh runs only when stale, never twice at once, never below a credit floor, and backs off
+  for 5 minutes after an error.
+- Opening the same game twice inside the cache window spends credits once.
+- Quick-add creates the selected spread, moneyline, or total with the game and price set; reference odds use the
+  member's home book and fall back to the median.
+- At phone width the Games tab shows kickoff, lines, weather badges, status, and the "lines as of" note.
+
 ## Risks
 
 - ESPN field paths may differ from `plan/data-sources.md`. Confirm against fixtures first and fix the doc.
@@ -33,36 +46,36 @@ Games tab. Props wait for `props-research`. Read before starting:
 
 ### Phase 1: ESPN scoreboard
 
-- [ ] Save scoreboard fixtures (a full regular week, one with live games, one with an international game)
-- [ ] Add internal/ingest/espn scoreboard client and parser with Sunday/Monday ET filter; test against fixtures
-- [ ] Add Store upserts for weeks and games; test that rerunning a sync changes nothing
+- [ ] Save scoreboard fixtures (a full regular week, one with live games, one with an international game), add the
+  internal/ingest/espn scoreboard client and parser with the Sunday/Monday ET filter, and test against the fixtures
+- [ ] Add Store upserts for weeks and games and test that rerunning a sync changes nothing
 - [ ] Docs: add docs/reference/data-sources.md with the ESPN scoreboard section; delete it from plan/data-sources.md
 
 ### Phase 2: Weather
 
 - [ ] Build the venue coordinates map from this season's scoreboards, international venues included
-- [ ] Add internal/ingest/weather Open-Meteo client for the 3-hour kickoff window; test max wind, gust, precip
+- [ ] Add the Open-Meteo client for the 3-hour kickoff window and test max wind, gust, and precipitation
 - [ ] Docs: add Open-Meteo and venues to docs/reference/data-sources.md; delete them from plan/data-sources.md
 
 ### Phase 3: Game lines
 
-- [ ] Save /events and /odds fixtures; add internal/ingest/odds client with credit header parsing
-- [ ] Add event matching to ESPN games; test zero misses across a full saved slate
-- [ ] Map h2h, spreads, totals into odds rows per book; test against fixtures
-- [ ] Add a TestLive per source that skips under -short
+- [ ] Save /events and /odds fixtures, add the odds client with credit header parsing, and map h2h, spreads, and totals
+  into odds rows per book with fixture tests
+- [ ] Add event matching to ESPN games, test zero misses across a full saved slate, and add a TestLive per source that
+  skips under -short
 - [ ] Docs: add game lines, budget, and bookmakers to docs/reference/data-sources.md; delete them from plan/
 
 ### Phase 4: Refresh
 
-- [ ] Add internal/refresh with staleness rules per source, single-flight, 5-minute backoff, and credit floors
-- [ ] Wire Kick into full-page GET middleware and publish week and slip topics after changed syncs
-- [ ] Fake-clock tests: refresh only when stale, never twice at once, never below a floor, backoff after errors
-- [ ] Replace the SSE LiveWindow stub with the real game-window check; test it
+- [ ] Add internal/refresh with staleness rules per source, single-flight, 5-minute backoff, and credit floors, with
+  fake-clock tests for each rule
+- [ ] Wire Kick into full-page GET middleware, publish week and slip topics after changed syncs, and replace the SSE
+  LiveWindow stub with the real game-window check and its test
 - [ ] Docs: add docs/concepts/data-refresh.md; delete Refresh from plan/architecture.md
 
 ### Phase 5: Games tab
 
-- [ ] Build game cards with local kickoff, lines (home book else median), weather badges, status, and lines-as-of note
-- [ ] Add quick-add pills for both spreads, both moneylines, over and under, plus Custom leg with the game set
+- [ ] Build game cards with local kickoff, lines (home book else median), weather badges, status, and the lines-as-of
+  note, plus quick-add pills for both spreads, both moneylines, over, under, and Custom leg
 - [ ] Add the game picker and kickoff lock to the leg form, and reference odds on the slip
 - [ ] Docs: update docs/reference/routes.md and docs/concepts/slips.md; delete Games tab from plan/product.md

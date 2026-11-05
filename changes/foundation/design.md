@@ -26,6 +26,18 @@ builds the parts every later change stands on. Read before starting:
 - `internal/web` renders the layout: top bar with the current user's avatar, and a bottom tab bar whose four tabs show
   placeholders.
 
+## Verification
+
+- `go test ./...` and `golangci-lint run ./...` pass.
+- A fresh database migrates to `user_version` 1 and a second run changes nothing; WAL and foreign keys are on.
+- The server starts with dev defaults, serves `/healthz` with `ok`, and exits within the 8 s deadline on SIGTERM.
+- A wrong passcode waits about 1 s and sets no cookie; the right passcode sets `pc_auth`, the picker sets `pc_user`, and
+  adding a name selects it.
+- Missing, tampered, and inactive-user cookies redirect; `HX-Request: true` gets `HX-Redirect`; a non-GET request
+  without the header gets 403 except the three exempt forms.
+- At phone width the layout shows the top bar, the current user's avatar, and the four tab placeholders; static files
+  carry cache headers and dev reloads templates from disk.
+
 ## Risks
 
 - Tailwind v4 standalone CLI availability through mise: if no mise backend works, download a pinned release in the
