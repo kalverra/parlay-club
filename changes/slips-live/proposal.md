@@ -6,14 +6,28 @@ created: "2026-11-01"
 
 # Live shared slips
 
-## Why
+## Context
 
 Picks live in a group chat today. On Sunday morning nobody knows whose legs are in, what the parlay pays, or whether
 someone changed their mind.
 
-## Problem
-
 The group needs one shared slip that everyone edits at the same time and that updates on every phone without a refresh.
+
+## Goals and non-goals
+
+**Goals:**
+
+- Give each week one or more shared slips with a chosen set of members and the same number of legs per member.
+- Enforce membership, leg limits, kickoff locks, lock-in, and unlock rules on the server.
+- Show combined odds, reference odds, and a payout calculator with stake and profit boost.
+- Push changes to every open phone within a second over SSE.
+- Let friends type legs in by hand in this change.
+
+**Non-goals:**
+
+- NFL data, game lines, weather, or player props. `slate-and-lines` and `props-research` add those.
+- Grading, the Record Book, or loading past slips.
+- Sportsbook integrations or handling money.
 
 ## Decision
 

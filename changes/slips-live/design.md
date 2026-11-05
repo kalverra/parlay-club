@@ -24,6 +24,18 @@ an optional game; `slate-and-lines` adds the game picker. Read before starting:
 - Handlers in `internal/web` stay thin. Partials refresh on `slip-updated from:body`.
 - Kickoff lock (rule 3) is coded and tested now with games inserted directly in tests.
 
+## Verification
+
+- `go test ./...` and `golangci-lint run ./...` pass.
+- Parlay table tests cover both conversion directions, a 3-leg combo, profit boost, push legs dropped, and an even-count
+  median reference price.
+- Every rule in `plan/product.md` "Editing and locking" has a table test with an injected clock, including kickoff locks
+  and a past-week slip.
+- A handler test drives two SSE subscribers through an add-leg request and both receive the update; the stream sends
+  `bye` at both deadlines, and the client reconnects when the tab becomes visible.
+- At phone width the Slip tab shows members, legs, lock state, payout, and activity; a rule violation returns 422 and
+  renders its message in the form.
+
 ## Risks
 
 - Cloud Run and proxies may buffer SSE: set `Content-Type: text/event-stream`, `Cache-Control: no-cache`,
@@ -34,30 +46,29 @@ an optional game; `slate-and-lines` adds the game picker. Read before starting:
 
 ### Phase 1: Parlay math
 
-- [ ] Add internal/parlay conversions, combined odds, payout with boost, units, and median reference price
-- [ ] Table tests: both conversion directions, 3-leg combo, boost, push legs dropped, even-count median
+- [ ] Add internal/parlay conversions, combined odds, payout with boost, units, and median reference price, with table
+  tests for both conversion directions, a 3-leg combo, boost, push legs dropped, and an even-count median
 - [ ] Docs: add docs/reference/odds-math.md; delete the Odds and payout section from plan/product.md
 
 ### Phase 2: Slip rules
 
-- [ ] Add Store methods for weeks, slips, members, legs, and activity
-- [ ] Add internal/slips create slip with defaults copied from the previous slip
-- [ ] Add member add/remove, legs_per_member change, and leg add/edit/delete with selection text generation
-- [ ] Add lock in, unlock, and slip status updates, each writing one activity entry
-- [ ] Table tests for every rule in Editing and locking with an injected clock, including past-week slips
+- [ ] Add Store methods for weeks, slips, members, legs, and activity, and create-slip defaults copied from the previous
+  slip, with tests
+- [ ] Add member and leg mutations, lock in, unlock, and slip status updates with one activity entry each, and table
+  tests for every Editing and locking rule with an injected clock, including past-week slips
 - [ ] Docs: add docs/concepts/slips.md; delete Slips, Legs, and Editing and locking from plan/product.md
 
 ### Phase 3: Live updates
 
 - [ ] Add internal/live hub with topic subscribe, unsubscribe, and coalescing publish; test bursts and unsubscribe
-- [ ] Add the SSE handler with pings and deadlines; test slip-updated delivery and bye at both deadlines
-- [ ] Add the EventSource client to app.js with refresh triggers, bye handling, and visibility close/reopen
+- [ ] Add the SSE handler with pings and deadlines, plus the EventSource client with refresh triggers, bye handling, and
+  visibility close/reopen; test slip-updated delivery and bye at both deadlines
 - [ ] Docs: add docs/concepts/live-updates.md; delete Live updates from plan/architecture.md
 
 ### Phase 4: Slip tab
 
-- [ ] Add routes and handlers for change 2 rows in the routes table, mapping rule errors to 422
-- [ ] Build the Slip tab: header, member sections, leg form bottom sheet, lock and unlock, activity feed
-- [ ] Add the payout calculator partial with 300 ms debounce and the profile page with home book and active toggles
-- [ ] Add a handler test that drives two SSE subscribers through an add-leg request
+- [ ] Add routes and handlers for change 2 rows in the routes table, mapping rule errors to 422, and a handler test that
+  drives two SSE subscribers through an add-leg request
+- [ ] Build the Slip tab: header, member sections, leg form bottom sheet, lock and unlock, activity feed, the payout
+  calculator with 300 ms debounce, and the profile page with home book and active toggles
 - [ ] Docs: add docs/reference/routes.md for built routes; delete those rows from plan/architecture.md
