@@ -49,25 +49,25 @@ builds the parts every later change stands on. Read before starting:
 
 ### Phase 1: Server and database
 
-- [ ] Add internal/config with the env table from plan/architecture.md and tests for dev defaults and prod errors
-- [ ] Add internal/db Open with pragmas and MaxOpenConns(1); test that WAL and foreign keys are on
-- [ ] Add the embedded migration runner and 0001_init.sql; test fresh DB version and idempotent rerun
-- [ ] Add cmd/server with zerolog, /healthz, and graceful shutdown on SIGTERM
-- [ ] Docs: add docs/reference/config.md and docs/reference/schema.md; delete plan/schema.md and plan Config section
+- [x] Add internal/config with the env table from plan/architecture.md and tests for dev defaults and prod errors
+- [x] Add internal/db Open with pragmas and MaxOpenConns(1); test that WAL and foreign keys are on
+- [x] Add the embedded migration runner and 0001_init.sql; test fresh DB version and idempotent rerun
+- [x] Add cmd/server with zerolog, /healthz, and graceful shutdown on SIGTERM
+- [x] Docs: add docs/reference/config.md and docs/reference/schema.md; delete plan/schema.md and plan Config section
 
 ### Phase 2: Web shell
 
-- [ ] Add the Tailwind v4 CLI to mise.toml and a go:generate directive in web/embed.go that writes web/static/app.css
-- [ ] Vendor HTMX 2.x into web/static and add app.js with the local-time formatter for time elements
-- [ ] Add the base layout with top bar and bottom tab bar (Slip, Games, Research, Record Book placeholders)
-- [ ] Serve /static with cache headers and render templates from embed, reloading from disk when APP_ENV=dev
-- [ ] Docs: add docs/guides/local-dev.md (mise install, go generate, run the server, passcode dev)
+- [x] Add the Tailwind v4 CLI to mise.toml and a go:generate directive in web/embed.go that writes web/static/app.css
+- [x] Vendor HTMX 2.x into web/static and add app.js with the local-time formatter for time elements
+- [x] Add the base layout with top bar and bottom tab bar (Slip, Games, Research, Record Book placeholders)
+- [x] Serve /static with cache headers and render templates from embed, reloading from disk when APP_ENV=dev
+- [x] Docs: add docs/guides/local-dev.md (mise install, go generate, run the server, passcode dev)
 
 ### Phase 3: Passcode and user picker
 
-- [ ] Add users Store methods: list active, create with next avatar color, get by ID
-- [ ] Add internal/auth cookie signing and constant-time verification for pc_auth and pc_user
-- [ ] Add /login, /who, and POST /users handlers with templates; wrong passcode waits 1 s
-- [ ] Add RequirePasscode, RequireUser, and CSRF middleware with HX-Redirect handling
-- [ ] Test redirects for missing, tampered, and inactive-user cookies, HX-Redirect, and CSRF rejection
-- [ ] Docs: add docs/concepts/access.md; delete Users and access and Auth sections from plan/
+- [x] Add users Store methods: list active, create with next avatar color, get by ID
+- [x] Add internal/auth cookie signing and constant-time verification for pc_auth and pc_user
+- [x] Add /login, /who, and POST /users handlers with templates; wrong passcode waits 1 s
+- [x] Add RequirePasscode, RequireUser, and CSRF middleware with HX-Redirect handling
+- [x] Test redirects for missing, tampered, and inactive-user cookies, HX-Redirect, and CSRF rejection
+- [x] Docs: add docs/concepts/access.md; delete Users and access and Auth sections from plan/
