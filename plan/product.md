@@ -1,16 +1,5 @@
 # Product
 
-## Users and access
-
-- One shared group passcode. After it, a "who are you?" picker sets the user cookie. No accounts or passwords.
-- The picker lists active users and has an "Add a name" field. Names are unique, case-insensitive, 1–24 characters.
-- A new user gets the next color from a fixed palette of 8 Tailwind colors (`avatar_color`), round robin.
-- Users have an `active` flag. Inactive users (past guests) are hidden from the picker and member lists but keep their
-  history. Any user can toggle any other user's `active` flag from the profile page.
-- Each user picks a **home book** on their profile page from the bookmaker list in data-sources.md. It defaults to none,
-  which means "use the median price."
-- The core group is 3 people. Guests join for a week or two.
-
 ## Slips
 
 - A **week** is an ESPN NFL week: season, season type (regular or postseason), and week number.

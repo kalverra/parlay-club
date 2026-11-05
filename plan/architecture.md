@@ -46,23 +46,6 @@ Dockerfile
 Handlers stay thin: parse the request, call `slips`/`db`, render. Rules live in `internal/slips`, not in handlers or
 SQL.
 
-## Config
-
-All from env. Parsed once in `internal/config`; the server exits on invalid config.
-
-| Var                 | Default (dev)        | Notes                                                           |
-| ------------------- | -------------------- | --------------------------------------------------------------- |
-| `APP_ENV`           | `dev`                | `dev` or `prod`                                                 |
-| `PORT`              | `8080`               | Cloud Run sets it                                               |
-| `DB_PATH`           | `./data/parlay.db`   | Directory created if missing                                    |
-| `PASSCODE`          | `dev`                | Required in prod                                                |
-| `SESSION_KEY`       | fixed dev string     | Required in prod, ≥ 32 bytes; signs cookies                     |
-| `ODDS_API_KEY`      | empty                | Empty disables Odds API calls; the board shows "no lines"       |
-| `LOG_LEVEL`         | `debug`              | `info` in prod                                                  |
-| `LITESTREAM_BUCKET` | —                    | Read by Litestream, not the app                                 |
-
-`./data/` is in `.gitignore`. In dev, templates reload from disk on each request so edits show without a restart.
-
 ## Routes
 
 Go 1.22+ method patterns. All routes except `/healthz`, `/login`, and `/static/` need the auth cookie; all except those
@@ -102,16 +85,6 @@ and `/who` need the user cookie.
 
 Rule violations from `internal/slips` return 422 with a short message rendered in the form. HTMX responses that change
 the slip return the refreshed panel.
-
-## Auth
-
-- `pc_auth` cookie: `HMAC-SHA256(SESSION_KEY, PASSCODE)` hex. Changing the passcode logs everyone out.
-- `pc_user` cookie: `{userID}.{HMAC-SHA256(SESSION_KEY, "user:"+userID)}`.
-- Both: `HttpOnly`, `SameSite=Lax`, `Secure` in prod, `Path=/`, max age 1 year. Compare MACs in constant time.
-- A wrong passcode waits 1 second before re-rendering the form.
-- Middleware redirects with 302, or for requests carrying `HX-Request: true` replies 200 with `HX-Redirect`.
-- CSRF: every non-GET request except `POST /login`, `POST /who`, and `POST /users` must carry `HX-Request: true`;
-  otherwise 403. A custom header can't be sent cross-site without CORS, and `SameSite=Lax` covers the three forms.
 
 ## Live updates
 
