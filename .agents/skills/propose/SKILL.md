@@ -5,22 +5,24 @@ description: Write a good-vibes proposal in changes/<slug>/proposal.md. Use when
 
 # Propose a change
 
-A proposal says why a change is worth making. It does not say how.
+A proposal explains why a change is worth making and sets the direction. It includes a brief high-level how and why this
+way, saving detailed mechanics for the design.
 
 ## Steps
 
 1. Choose a slug: lowercase, hyphenated, no number prefix. Run `good-vibes propose <slug> --title "<Title>"`. This
    writes `changes/<slug>/proposal.md`.
 2. Fill the three sections in plain language:
-   - **Why** — what happens today and why it hurts. Use numbers or links when you have them.
-   - **Problem** — the specific problem this change solves.
-   - **Decision** — what we will do, in one or two paragraphs.
+   - **Context** — what happens today and why it hurts. Use numbers or links when you have them.
+   - **Goals and non-goals** — why solve it now, what success looks like, and explicit non-goals to bound scope.
+   - **Decision** — 1–3 paragraphs on the chosen direction, high-level shape, and why it beats obvious alternatives.
 3. Delete the HTML comments once a section is done.
 4. Leave `status: proposed`. A person accepts the change, not an agent.
 5. Run `good-vibes check <slug>` and fix what it reports.
 
 ## Rules
 
-- No implementation detail: no file names, schemas, or API signatures. Those belong in the design.
-- Do not accept your own proposal. `good-vibes accept` needs a person's name and a review URL.
+- Save detailed mechanics for the design: no file paths, schemas, or API signatures. The proposal gives the high-level
+  shape and rationale; `design.md` specifies how it works.
+- Do not accept your own proposal. `good-vibes accept` needs a person's name; a review URL is optional.
 - One change, one problem. If you need two Decisions, write two proposals.

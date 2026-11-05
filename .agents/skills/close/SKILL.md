@@ -10,10 +10,12 @@ record the change leaves, so the close-out keeps what a future reader needs and 
 
 ## Steps
 
-1. Read `changes/<slug>/proposal.md`, `design.md`, and every handoff in `changes/<slug>/handoffs/`.
+1. Read `changes/<slug>/proposal.md`, `design.md`, `summary.md` when the change ran, and every handoff in
+   `changes/<slug>/handoffs/`.
 2. Write `changes/<slug>/closeout.md` with a `# Close-out` title and these sections, in order:
    - **Consequences** — what got easier, what got harder, and what we would revisit.
-   - **Alternatives considered** — options the design or the work rejected, and why.
+   - **Alternatives considered** — rejected options and trade-offs distilled from `proposal.md`, `design.md`, and
+     `handoffs/`, explaining why each was not chosen.
    - **Implementation notes** — where the plan was wrong, and limits a user or maintainer will hit.
    - **Follow-ups** — work left open, each item specific enough to propose.
 3. Write "None." in a section with nothing to say. `done` refuses an empty or missing section.
