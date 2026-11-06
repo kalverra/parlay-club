@@ -19,43 +19,34 @@ const (
 // csrfExempt lists the plain forms that may post without the HX-Request
 // header. Everything else non-GET must come from HTMX.
 var csrfExempt = map[string]bool{
-	"POST /login": true,
-	"POST /who":   true,
-	"POST /users": true,
+	"POST /logout":    true,
+	"POST /dev/login": true,
 }
 
-// RequirePasscode sends a browser without a valid passcode cookie to the
-// passcode screen.
-func (h *Handlers) RequirePasscode(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !h.cookies.HasPasscode(r) {
-			redirect(w, r, "/login")
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
-// RequireUser sends a browser without a valid, active user cookie to the
-// picker, and hands the loaded user to the next handler.
+// RequireUser sends a browser without a valid session to the sign-in screen,
+// and hands the loaded user to the next handler. It also refuses an inactive
+// user and an email that has left the allow list.
 func (h *Handlers) RequireUser(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		id, ok := h.cookies.UserID(r)
+		id, ok := h.cookies.SessionID(r)
 		if !ok {
-			redirect(w, r, "/who")
+			redirect(w, r)
 			return
 		}
 
 		user, err := h.store.UserByID(r.Context(), id)
 		switch {
 		case errors.Is(err, db.ErrUserNotFound):
-			redirect(w, r, "/who")
+			redirect(w, r)
 			return
 		case err != nil:
 			h.serverError(w, err)
 			return
 		case !user.Active:
-			redirect(w, r, "/who")
+			redirect(w, r)
+			return
+		case !h.gate.Allows(user.Email):
+			redirect(w, r)
 			return
 		}
 
@@ -64,8 +55,8 @@ func (h *Handlers) RequireUser(next http.Handler) http.Handler {
 }
 
 // CSRF rejects a non-GET request that did not come from HTMX. A custom header
-// cannot be sent cross-site without CORS, and SameSite=Lax covers the three
-// plain forms that skip the check.
+// cannot be sent cross-site without CORS, and SameSite=Lax covers the plain
+// forms that skip the check.
 func (h *Handlers) CSRF(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet || csrfExempt[r.Method+" "+r.URL.Path] {
@@ -94,14 +85,14 @@ func UserFrom(ctx context.Context) (db.User, bool) {
 	return user, ok
 }
 
-// redirect sends a browser to target. An HTMX request gets a 200 with
-// HX-Redirect instead of a 302, because HTMX would swap a redirect's empty body
-// into the page rather than navigate.
-func redirect(w http.ResponseWriter, r *http.Request, target string) {
+// redirect sends a browser to the sign-in screen. An HTMX request gets a 200
+// with HX-Redirect instead of a 302, because HTMX would swap a redirect's empty
+// body into the page rather than navigate.
+func redirect(w http.ResponseWriter, r *http.Request) {
 	if strings.EqualFold(r.Header.Get(hxRequest), "true") {
-		w.Header().Set(hxRedirect, target)
+		w.Header().Set(hxRedirect, "/login")
 		w.WriteHeader(http.StatusOK)
 		return
 	}
-	http.Redirect(w, r, target, http.StatusFound)
+	http.Redirect(w, r, "/login", http.StatusFound)
 }

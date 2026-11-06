@@ -29,6 +29,7 @@ type User struct {
 	Name        string
 	Initials    string
 	AvatarClass string
+	PictureURL  string
 }
 
 // Page is everything the layout needs from a page.

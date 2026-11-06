@@ -5,15 +5,15 @@ type: reference
 summary: SQLite tables, how migrations are tracked and applied, and the connection settings behind every query.
 tags: [database, sqlite, migrations]
 sources: [internal/db/migrations/*.sql, internal/db/migrate.go, internal/db/db.go]
-last_verified: 2026-11-01
+last_verified: 2026-11-05
 ---
 
 # Database schema
 
 ## Summary
 
-One SQLite file, opened by `internal/db.Open`, holds every table the app uses. `0001_init.sql` creates all of them, so
-later changes add no migrations until the schema itself changes.
+One SQLite file, opened by `internal/db.Open`, holds every table the app uses. `0001_init.sql` creates the tables, and
+`0002_google_identity.sql` rebuilds `users` to add Google identity columns and drop the unique name rule.
 
 ## Connection settings
 
@@ -37,15 +37,18 @@ connection rules out `SQLITE_BUSY`.
 - `db.Migrate` applies every file whose number is greater than `PRAGMA user_version`, in number order.
 - Each file runs in its own transaction. The migration's statements and its `user_version` bump commit together, so a
   failed migration leaves neither behind.
-- A fresh database ends at version 1 with every table below.
-- Never edit an applied file. Add `0002_name.sql` and up.
+- A fresh database ends at version 2 with every table below.
+- `0002_google_identity.sql` rebuilds `users` in its transaction with the SQLite 12-step method and
+  `PRAGMA defer_foreign_keys = ON`, so the drop and rename keep every child row valid. Existing rows keep their `id`,
+  name, color, home book, active flag, and creation time, and come back with no Google identity.
+- Never edit an applied file. Add `0003_name.sql` and up.
 - `PRAGMA user_version` on the database file is the only record of what ran.
 
 ## Tables
 
 | Table            | Holds                                                        |
 | ---------------- | ------------------------------------------------------------ |
-| `users`          | Group members, their avatar color, home book, and active flag. |
+| `users`          | Group members, their Google identity, avatar color, home book, and active flag. |
 | `weeks`          | NFL weeks, keyed `season*1000 + season_type*100 + week_num`.  |
 | `games`          | One row per ESPN event: teams, kickoff, venue, weather, scores. |
 | `odds`           | Odds API prices per game, book, market, and selection.        |
@@ -57,19 +60,41 @@ connection rules out `SQLITE_BUSY`.
 | `activity`       | Human-readable slip history; `user_id` is NULL for system entries. |
 | `sync_state`     | Last fetch time per outside data source, plus remaining odds credits. |
 
+## Users and identity
+
+`users.name` is no longer unique. Google display names collide, so two people can share one, and `users_name` is a plain
+case-insensitive index for lookups. A user's display name changes only by hand; sign-in never renames a linked row.
+
+Three nullable columns hold the Google identity:
+
+- `google_sub` is Google's stable subject and is unique. It is `NULL` for a history-import user who has not signed in.
+- `email` is the verified Google address, unique and compared without case.
+- `picture_url` is the Google profile picture. It refreshes on every sign-in.
+
+`auth.SignIn` is the only writer of these columns. It links by `google_sub`, then by `email`, then by the gate's
+`email=Name` hand match, and otherwise creates a user. An unlinked row keeps its history when it gains an identity. See
+[Access](../concepts/access.md) for the full resolution order.
+
+`active` still turns a person off without deleting their slips and legs. `avatar_color` still comes from the fixed
+palette, and a linked user keeps the color they already have.
+
 ## DDL
 
-The definitions below match `internal/db/migrations/0001_init.sql`, which is the source of truth.
+The definitions below match `internal/db/migrations/`, which is the source of truth.
 
 ```sql
 CREATE TABLE users (
   id           INTEGER PRIMARY KEY,
-  name         TEXT NOT NULL UNIQUE COLLATE NOCASE,
+  name         TEXT NOT NULL COLLATE NOCASE,
   avatar_color TEXT NOT NULL,                  -- Tailwind color name, e.g. 'sky'
   home_book    TEXT,                           -- Odds API bookmaker key; NULL = median
   active       INTEGER NOT NULL DEFAULT 1,
-  created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+  created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+  google_sub   TEXT UNIQUE,                    -- stable OpenID Connect subject
+  email        TEXT UNIQUE COLLATE NOCASE,     -- verified Google email
+  picture_url  TEXT                            -- Google profile picture
 );
+CREATE INDEX users_name ON users(name COLLATE NOCASE);
 
 CREATE TABLE weeks (
   id          INTEGER PRIMARY KEY,             -- season*1000 + season_type*100 + week_num, e.g. 2026209

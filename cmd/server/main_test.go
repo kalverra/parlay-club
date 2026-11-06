@@ -67,8 +67,8 @@ func TestMuxServesStaticWithoutAuth(t *testing.T) {
 
 // newTestHandlers builds auth handlers that need no database or templates.
 func newTestHandlers() *auth.Handlers {
-	cookies := auth.NewCookies("test-session-key-long-enough-for-anything", "hut", false)
-	return auth.NewHandlers(zerolog.Nop(), nil, cookies, nil, nil)
+	cookies := auth.NewCookies("test-session-key-long-enough-for-anything", false)
+	return auth.NewHandlers(zerolog.Nop(), nil, cookies, auth.NewGate(nil), nil, nil, false)
 }
 
 func TestLoggerWritesJSONInProd(t *testing.T) {

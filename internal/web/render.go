@@ -10,12 +10,12 @@ import (
 // pageFiles maps a page name to the template file that defines its content.
 // The shell and the auth screens share the layout, so they share this map.
 var pageFiles = map[string]string{
-	"slip":     "templates/slip.html",
-	"games":    "templates/games.html",
-	"research": "templates/research.html",
-	"record":   "templates/record.html",
-	"login":    "templates/login.html",
-	"who":      "templates/who.html",
+	"slip":      "templates/slip.html",
+	"games":     "templates/games.html",
+	"research":  "templates/research.html",
+	"record":    "templates/record.html",
+	"login":     "templates/login.html",
+	"dev-login": "templates/dev-login.html",
 }
 
 // Renderer parses and runs the page templates. It is safe to use from several
@@ -83,7 +83,7 @@ func (r *Renderer) template(name string) (*template.Template, error) {
 func (r *Renderer) parse(file string) (*template.Template, error) {
 	tmpl, err := template.New("root").
 		Funcs(template.FuncMap{"asset": AssetURL}).
-		ParseFS(r.fsys, "templates/layout.html", file)
+		ParseFS(r.fsys, "templates/layout.html", "templates/avatar.html", file)
 	if err != nil {
 		return nil, fmt.Errorf("parse templates: %w", err)
 	}

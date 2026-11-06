@@ -10,8 +10,8 @@ import (
 	"github.com/kalverra/parlay-club/internal/db"
 )
 
-// initSchemaVersion is the version 0001_init.sql records.
-const initSchemaVersion = 1
+// latestSchemaVersion is the version the last migration records.
+const latestSchemaVersion = 2
 
 func TestMigrateFreshDatabase(t *testing.T) {
 	t.Parallel()
@@ -19,7 +19,7 @@ func TestMigrateFreshDatabase(t *testing.T) {
 	database := openTestDB(t)
 	require.NoError(t, db.Migrate(t.Context(), database))
 
-	assert.Equal(t, initSchemaVersion, schemaVersion(t, database))
+	assert.Equal(t, latestSchemaVersion, schemaVersion(t, database))
 	assert.ElementsMatch(t, []string{
 		"activity",
 		"games",
@@ -45,7 +45,7 @@ func TestMigrateRerunKeepsVersionAndData(t *testing.T) {
 
 	require.NoError(t, db.Migrate(t.Context(), database))
 
-	assert.Equal(t, initSchemaVersion, schemaVersion(t, database))
+	assert.Equal(t, latestSchemaVersion, schemaVersion(t, database))
 	assert.Equal(t, 1, userCount(t, database))
 }
 
