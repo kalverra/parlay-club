@@ -76,6 +76,39 @@ func TestLayoutTopBar(t *testing.T) {
 	assert.Contains(t, out, "bg-sky-500")
 }
 
+func TestAvatarShowsPicture(t *testing.T) {
+	t.Parallel()
+
+	out := renderPage(t, "slip", webui.Page{
+		Title: "Slip",
+		Tab:   webui.TabSlip,
+		User: &webui.User{
+			Name:        "Adam Hamrick",
+			Initials:    "AH",
+			AvatarClass: "bg-sky-500",
+			PictureURL:  "https://example.com/ada.png",
+		},
+	})
+
+	assert.Contains(t, out, `src="https://example.com/ada.png"`)
+	assert.Contains(t, out, `referrerpolicy="no-referrer"`)
+	assert.NotContains(t, out, ">AH</span")
+}
+
+func TestAvatarFallsBackToInitials(t *testing.T) {
+	t.Parallel()
+
+	out := renderPage(t, "slip", webui.Page{
+		Title: "Slip",
+		Tab:   webui.TabSlip,
+		User:  &webui.User{Name: "Adam Hamrick", Initials: "AH", AvatarClass: "bg-sky-500"},
+	})
+
+	assert.Contains(t, out, ">AH</span")
+	assert.Contains(t, out, "bg-sky-500")
+	assert.NotContains(t, out, "<img")
+}
+
 func TestLayoutHidesSwitcherForOneSlip(t *testing.T) {
 	t.Parallel()
 

@@ -1,0 +1,15 @@
+{{define "avatar"}}
+{{if .PictureURL}}
+  <img
+    src="{{.PictureURL}}"
+    alt=""
+    referrerpolicy="no-referrer"
+    class="h-9 w-9 shrink-0 rounded-full object-cover"
+  >
+{{else}}
+  <span
+    class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-semibold text-slate-950 {{.AvatarClass}}"
+    >{{.Initials}}</span
+  >
+{{end}}
+{{end}}
