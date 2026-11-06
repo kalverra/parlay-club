@@ -1,6 +1,7 @@
 package web_test
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -10,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/kalverra/parlay-club/internal/db"
 	webui "github.com/kalverra/parlay-club/internal/web"
 	assets "github.com/kalverra/parlay-club/web"
 )
@@ -77,12 +79,79 @@ func TestShellUnknownPath(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, recorder.Code)
 }
 
+func TestShellRendersSignedInUser(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		user db.User
+		want []string
+		deny []string
+	}{
+		{
+			name: "initials",
+			user: db.User{Name: "Adam Hamrick", AvatarColor: db.AvatarColor("sky")},
+			want: []string{`href="/me"`, `title="Adam Hamrick"`, ">AH</span", "bg-sky-500"},
+			deny: []string{"<img"},
+		},
+		{
+			name: "picture",
+			user: db.User{
+				Name:        "Adam Hamrick",
+				AvatarColor: db.AvatarColor("sky"),
+				PictureURL:  "https://example.com/ada.png",
+			},
+			want: []string{
+				`href="/me"`,
+				`title="Adam Hamrick"`,
+				`src="https://example.com/ada.png"`,
+				`referrerpolicy="no-referrer"`,
+			},
+			deny: []string{">AH</span"},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			handler := newShellWithUser(t, func(context.Context) (db.User, bool) {
+				return test.user, true
+			})
+
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, httptest.NewRequestWithContext(
+				t.Context(),
+				http.MethodGet,
+				"/",
+				nil,
+			))
+
+			require.Equal(t, http.StatusOK, recorder.Code)
+			body := recorder.Body.String()
+			for _, want := range test.want {
+				assert.Contains(t, body, want)
+			}
+			for _, deny := range test.deny {
+				assert.NotContains(t, body, deny)
+			}
+		})
+	}
+}
+
 // newShell builds the web routes the way the server does.
 func newShell(t *testing.T) http.Handler {
+	t.Helper()
+
+	return newShellWithUser(t, nil)
+}
+
+// newShellWithUser builds the web routes with a stub user lookup.
+func newShellWithUser(t *testing.T, userFrom webui.UserFrom) http.Handler {
 	t.Helper()
 
 	renderer, err := webui.NewRenderer(assets.Templates, false)
 	require.NoError(t, err)
 
-	return webui.New(zerolog.Nop(), renderer)
+	return webui.New(zerolog.Nop(), renderer, userFrom)
 }
