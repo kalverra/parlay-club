@@ -23,6 +23,9 @@ an optional game; `slate-and-lines` adds the game picker. Read before starting:
 - `web/static/app.js` gains the `EventSource` client: refresh triggers, `bye`, and close/reopen on visibility.
 - Handlers in `internal/web` stay thin. Partials refresh on `slip-updated from:body`.
 - Kickoff lock (rule 3) is coded and tested now with games inserted directly in tests.
+- Groups later (`groups`): build for one club but keep the seams open. `internal/live` topics take a string key and the
+  hub knows nothing about slip or week names, so `groups` can prefix a group id. Slip store methods take the acting user
+  rather than reading a global club. Do not add a group table or column in this change.
 
 ## Verification
 

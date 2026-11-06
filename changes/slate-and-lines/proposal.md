@@ -36,3 +36,7 @@ The app has no NFL data: no games, no lines, no weather.
 Pull the Sunday and Monday slate from ESPN, stadium weather from Open-Meteo, and game lines from The Odds API, fetched
 only when someone opens the app and the data is stale. Show a game board with lines and weather badges, and let friends
 add a spread, moneyline, or total in one tap. Stay well inside the Odds API's 500 free credits a month.
+
+Heads up on `groups`: slate, weather, and lines are the same for everyone, so they stay global and shared by every
+group. That also keeps Odds API credit use flat when more groups arrive. Only the live-update topics and each member's
+home-book prices touch a group.

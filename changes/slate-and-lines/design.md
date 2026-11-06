@@ -21,6 +21,9 @@ Games tab. Props wait for `props-research`. Read before starting:
 - Quick-add pills call the existing add-leg path with fields prefilled; reference odds use `internal/parlay` with prices
   from the `odds` table for members' home books.
 - Leg form gains a game picker limited to games not yet kicked off (past-week slips keep it optional).
+- Groups later (`groups`): games, odds, weather, and `sync_state` stay global and shared, so a second group adds no
+  credit use. The topics published after a sync go through one helper, so `groups` can fan out to each group's streams
+  in one place.
 
 ## Verification
 

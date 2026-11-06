@@ -33,3 +33,6 @@ Results aren't graded automatically, and there is no season record or leaderboar
 
 Grade legs automatically from ESPN box scores once games end, with hand overrides. Add the Record Book: group record and
 units, streaks, a leaderboard, the Parlay Terrorist badge, and optional per-person dollar tracking.
+
+Heads up on `groups`: the Record Book is per group. The leaderboard, streaks, and badge count only a group's own slips,
+and a solo player gets a record of one. Grading itself stays global, since a game result is the same for everyone.

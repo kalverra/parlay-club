@@ -4,7 +4,7 @@ title: Local development
 type: guide
 summary: Start the app with hot reload, set up the git hooks, and fall back to a plain server run when you need it.
 tags: [development, mise, air, tailwind, server]
-sources: [mise.toml, .air.toml, lefthook.yml, web/*.go, web/tailwind/*.css, web/templates/*.html, cmd/server/main.go, internal/config/config.go, internal/auth/*.go]
+sources: [mise.toml, .air.toml, scripts/dev.sh, lefthook.yml, web/*.go, web/tailwind/*.css, web/templates/*.html, cmd/server/main.go, internal/config/config.go, internal/auth/*.go]
 last_verified: 2026-11-05
 ---
 
@@ -22,9 +22,13 @@ mise run dev
 ```
 
 That command installs the missing tools on the first run, regenerates `web/static/app.css`, builds the server, and
-starts it at <http://localhost:8080>. Leave it running while you edit. Dev defaults set `APP_ENV=dev`, port 8080, and
-the database at `./data/parlay.db`. Override any of them with an environment variable, for example
-`PORT=9000 mise run dev`. The full list is in [Configuration](../reference/config.md).
+starts it. Once `/healthz` answers, it opens the app in Chrome. If Chrome is not installed it uses your default browser;
+with no desktop opener it prints the URL instead. The browser opens once per run, so rebuilds do not open more tabs.
+Leave it running while you edit.
+
+Dev defaults set `APP_ENV=dev`, port 8080, and the database at `./data/parlay.db`. Override any of them with an
+environment variable, for example `PORT=9000 mise run dev`, which opens port 9000. The full list is in
+[Configuration](../reference/config.md).
 
 The app asks for the passcode first. In dev it is `dev`. After that, pick a name or add one, and the tabs load. See
 [Access](../concepts/access.md) for how the cookies and the picker work.
