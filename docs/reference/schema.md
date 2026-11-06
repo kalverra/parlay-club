@@ -5,7 +5,7 @@ type: reference
 summary: SQLite tables, how migrations are tracked and applied, and the connection settings behind every query.
 tags: [database, sqlite, migrations]
 sources: [internal/db/migrations/*.sql, internal/db/migrate.go, internal/db/db.go]
-last_verified: 2026-11-05
+last_verified: 2026-11-06
 ---
 
 # Database schema

@@ -9,6 +9,7 @@
 ## Decision
 
 - [Foundation](decisions/foundation.md): Build a bootable web server with a local database, a shared group passcode, and a "who are you?" picker that remembers each friend on their device.
+- [Google sign-in](decisions/google-oauth.md): Replace the passcode and the name picker with Google's OpenID Connect sign-in.
 - [Hot reload local dev](decisions/hot-reload-dev.md): Add [air](https://github.com/air-verse/air) as the dev runner, pinned in `mise.toml` from the mise registry.
 
 ## Guide

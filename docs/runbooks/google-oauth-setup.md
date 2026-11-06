@@ -5,7 +5,7 @@ type: runbook
 summary: Create the Google Web client, register the local and prod redirect URIs, publish the consent screen, and set the client secrets.
 tags: [google, oauth, setup, secrets, deploy, runbook]
 sources: [internal/auth/provider.go, internal/auth/handlers.go, internal/config/config.go, cmd/server/main.go]
-last_verified: 2026-11-05
+last_verified: 2026-11-06
 ---
 
 # Google OAuth setup
