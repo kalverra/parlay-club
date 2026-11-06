@@ -30,6 +30,7 @@ func TestLoadDevDefaults(t *testing.T) {
 	assert.Equal(t, "dev", cfg.Passcode)
 	assert.NotEmpty(t, cfg.SessionKey)
 	assert.Empty(t, cfg.OddsAPIKey)
+	assert.Empty(t, cfg.AllowedEmails)
 	assert.Equal(t, zerolog.DebugLevel, cfg.LogLevel)
 }
 
@@ -54,6 +55,33 @@ func TestLoadOverridesEveryValue(t *testing.T) {
 	assert.Equal(t, "short-is-fine-in-dev", cfg.SessionKey)
 	assert.Equal(t, "odds-key", cfg.OddsAPIKey)
 	assert.Equal(t, zerolog.WarnLevel, cfg.LogLevel)
+}
+
+func TestLoadParsesAllowedEmails(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := config.Load(envFrom(map[string]string{
+		"ALLOWED_EMAILS": " Ada@Example.com , bob@example.com=Bob Smith,,",
+	}))
+	require.NoError(t, err)
+
+	assert.Equal(t, []config.AllowedEmail{
+		{Email: "ada@example.com"},
+		{Email: "bob@example.com", Name: "Bob Smith"},
+	}, cfg.AllowedEmails)
+}
+
+func TestLoadRejectsMalformedAllowedEmails(t *testing.T) {
+	t.Parallel()
+
+	_, err := config.Load(envFrom(map[string]string{
+		"ALLOWED_EMAILS": "ada@example.com,not-an-email,bob=Bob",
+	}))
+	require.Error(t, err)
+
+	assert.Contains(t, err.Error(), `ALLOWED_EMAILS entry "not-an-email"`)
+	assert.Contains(t, err.Error(), `ALLOWED_EMAILS entry "bob=Bob"`)
+	assert.NotContains(t, err.Error(), "ada@example.com")
 }
 
 func TestLoadProdDefaults(t *testing.T) {

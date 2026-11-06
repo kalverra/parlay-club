@@ -59,13 +59,15 @@ type User struct {
 	AvatarColor AvatarColor
 	HomeBook    *string
 	Active      bool
+	Email       string
+	PictureURL  string
 }
 
 // ListActiveUsers returns the users shown in the picker and member lists,
 // ordered by name. Inactive users keep their history but drop out of both.
 func (s *Store) ListActiveUsers(ctx context.Context) ([]User, error) {
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, name, avatar_color, home_book, active
+	rows, err := s.conn().QueryContext(ctx, `
+		SELECT id, name, avatar_color, home_book, active, email, picture_url
 		FROM users
 		WHERE active = 1
 		ORDER BY name COLLATE NOCASE`)
@@ -92,53 +94,80 @@ func (s *Store) ListActiveUsers(ctx context.Context) ([]User, error) {
 // round robin over every stored user, inactive ones included, so a returning
 // guest keeps a stable position in the rotation.
 func (s *Store) CreateUser(ctx context.Context, name string) (User, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
+	var user User
+	err := s.Tx(ctx, func(tx *Store) error {
+		taken, err := tx.nameTaken(ctx, name)
+		if err != nil {
+			return err
+		}
+		if taken {
+			return ErrNameTaken
+		}
+
+		user, err = tx.insertUser(ctx, name, "", "", "")
+		return err
+	})
 	if err != nil {
 		return User{}, fmt.Errorf("create user %q: %w", name, err)
 	}
-	defer func() { _ = tx.Rollback() }()
+	return user, nil
+}
 
-	taken, err := nameTaken(ctx, tx, name)
+// CreateUserWithIdentity adds a user with a Google subject and email. Names may
+// repeat: Google display names collide, and the sign-in flow does not rename an
+// existing person to match one.
+func (s *Store) CreateUserWithIdentity(
+	ctx context.Context,
+	name, email, googleSub, picture string,
+) (User, error) {
+	var user User
+	err := s.Tx(ctx, func(tx *Store) error {
+		var err error
+		user, err = tx.insertUser(ctx, name, email, googleSub, picture)
+		return err
+	})
 	if err != nil {
 		return User{}, fmt.Errorf("create user %q: %w", name, err)
 	}
-	if taken {
-		return User{}, fmt.Errorf("create user %q: %w", name, ErrNameTaken)
-	}
+	return user, nil
+}
 
+// insertUser writes one row with the next palette color. Empty identity values
+// are stored as NULL, so an unlinked user has no google_sub.
+func (s *Store) insertUser(ctx context.Context, name, email, googleSub, picture string) (User, error) {
 	var count int
-	if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM users").Scan(&count); err != nil {
-		return User{}, fmt.Errorf("create user %q: %w", name, err)
+	if err := s.conn().QueryRowContext(ctx, "SELECT count(*) FROM users").Scan(&count); err != nil {
+		return User{}, fmt.Errorf("count users: %w", err)
 	}
 	color := avatarPalette[count%len(avatarPalette)]
 
-	result, err := tx.ExecContext(ctx,
-		"INSERT INTO users (name, avatar_color) VALUES (?, ?)", name, string(color))
+	result, err := s.conn().ExecContext(ctx, `
+		INSERT INTO users (name, avatar_color, email, google_sub, picture_url)
+		VALUES (?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''))`,
+		name, string(color), email, googleSub, picture)
 	if err != nil {
-		return User{}, fmt.Errorf("create user %q: %w", name, err)
+		return User{}, fmt.Errorf("insert user: %w", err)
 	}
 	id, err := result.LastInsertId()
 	if err != nil {
-		return User{}, fmt.Errorf("create user %q: %w", name, err)
+		return User{}, fmt.Errorf("insert user: %w", err)
 	}
 
-	if err := tx.Commit(); err != nil {
-		return User{}, fmt.Errorf("create user %q: %w", name, err)
+	user, err := s.UserByID(ctx, id)
+	if err != nil {
+		return User{}, err
 	}
-
-	return User{ID: id, Name: name, AvatarColor: color, Active: true}, nil
+	return user, nil
 }
 
 // UserByID returns the user with the given ID. A missing row wraps
 // ErrUserNotFound. The Active flag comes back so callers can refuse a signed
 // cookie for a user who has since been deactivated.
 func (s *Store) UserByID(ctx context.Context, id int64) (User, error) {
-	row := s.db.QueryRowContext(ctx, `
-		SELECT id, name, avatar_color, home_book, active
+	user, err := scanUser(s.conn().QueryRowContext(ctx, `
+		SELECT id, name, avatar_color, home_book, active, email, picture_url
 		FROM users
-		WHERE id = ?`, id)
-
-	user, err := scanUser(row)
+		WHERE id = ?`, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return User{}, fmt.Errorf("user %d: %w", id, ErrUserNotFound)
 	}
@@ -148,10 +177,104 @@ func (s *Store) UserByID(ctx context.Context, id int64) (User, error) {
 	return user, nil
 }
 
+// UserByGoogleSub returns the user linked to an OpenID Connect subject. A
+// missing row wraps ErrUserNotFound.
+func (s *Store) UserByGoogleSub(ctx context.Context, sub string) (User, error) {
+	user, err := scanUser(s.conn().QueryRowContext(ctx, `
+		SELECT id, name, avatar_color, home_book, active, email, picture_url
+		FROM users
+		WHERE google_sub = ?`, sub))
+	if errors.Is(err, sql.ErrNoRows) {
+		return User{}, fmt.Errorf("user with google sub: %w", ErrUserNotFound)
+	}
+	if err != nil {
+		return User{}, fmt.Errorf("user with google sub: %w", err)
+	}
+	return user, nil
+}
+
+// UserByEmail returns the user holding email, ignoring case. A missing row
+// wraps ErrUserNotFound.
+func (s *Store) UserByEmail(ctx context.Context, email string) (User, error) {
+	user, err := scanUser(s.conn().QueryRowContext(ctx, `
+		SELECT id, name, avatar_color, home_book, active, email, picture_url
+		FROM users
+		WHERE email = ?`, email))
+	if errors.Is(err, sql.ErrNoRows) {
+		return User{}, fmt.Errorf("user with email: %w", ErrUserNotFound)
+	}
+	if err != nil {
+		return User{}, fmt.Errorf("user with email: %w", err)
+	}
+	return user, nil
+}
+
+// UnlinkedUserByName returns a user with name who has no Google subject. Names
+// compare ignoring case. A missing row wraps ErrUserNotFound.
+func (s *Store) UnlinkedUserByName(ctx context.Context, name string) (User, error) {
+	user, err := scanUser(s.conn().QueryRowContext(ctx, `
+		SELECT id, name, avatar_color, home_book, active, email, picture_url
+		FROM users
+		WHERE name = ? AND google_sub IS NULL
+		ORDER BY id
+		LIMIT 1`, name))
+	if errors.Is(err, sql.ErrNoRows) {
+		return User{}, fmt.Errorf("unlinked user named %q: %w", name, ErrUserNotFound)
+	}
+	if err != nil {
+		return User{}, fmt.Errorf("unlinked user named %q: %w", name, err)
+	}
+	return user, nil
+}
+
+// LinkGoogle attaches a Google subject, email, and picture to an existing user.
+// A missing row wraps ErrUserNotFound.
+func (s *Store) LinkGoogle(
+	ctx context.Context,
+	id int64,
+	googleSub, email, picture string,
+) (User, error) {
+	result, err := s.conn().ExecContext(ctx, `
+		UPDATE users
+		SET google_sub = NULLIF(?, ''),
+			email = NULLIF(?, ''),
+			picture_url = NULLIF(?, '')
+		WHERE id = ?`, googleSub, email, picture, id)
+	if err != nil {
+		return User{}, fmt.Errorf("link user %d: %w", id, err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return User{}, fmt.Errorf("link user %d: %w", id, err)
+	}
+	if affected == 0 {
+		return User{}, fmt.Errorf("link user %d: %w", id, ErrUserNotFound)
+	}
+	return s.UserByID(ctx, id)
+}
+
+// SetUserPicture refreshes one user's picture. An empty picture clears it. A
+// missing row wraps ErrUserNotFound.
+func (s *Store) SetUserPicture(ctx context.Context, id int64, picture string) (User, error) {
+	result, err := s.conn().ExecContext(ctx,
+		"UPDATE users SET picture_url = NULLIF(?, '') WHERE id = ?", picture, id)
+	if err != nil {
+		return User{}, fmt.Errorf("set picture for user %d: %w", id, err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return User{}, fmt.Errorf("set picture for user %d: %w", id, err)
+	}
+	if affected == 0 {
+		return User{}, fmt.Errorf("set picture for user %d: %w", id, ErrUserNotFound)
+	}
+	return s.UserByID(ctx, id)
+}
+
 // nameTaken reports whether a user already holds name, ignoring case.
-func nameTaken(ctx context.Context, tx *sql.Tx, name string) (bool, error) {
+func (s *Store) nameTaken(ctx context.Context, name string) (bool, error) {
 	var taken bool
-	err := tx.QueryRowContext(ctx,
+	err := s.conn().QueryRowContext(ctx,
 		"SELECT EXISTS (SELECT 1 FROM users WHERE name = ?)", name).Scan(&taken)
 	return taken, err
 }
@@ -167,13 +290,29 @@ func scanUser(row rowScanner) (User, error) {
 		user     User
 		color    string
 		homeBook sql.NullString
+		email    sql.NullString
+		picture  sql.NullString
 	)
-	if err := row.Scan(&user.ID, &user.Name, &color, &homeBook, &user.Active); err != nil {
+	if err := row.Scan(
+		&user.ID,
+		&user.Name,
+		&color,
+		&homeBook,
+		&user.Active,
+		&email,
+		&picture,
+	); err != nil {
 		return User{}, err
 	}
 	user.AvatarColor = AvatarColor(color)
 	if homeBook.Valid {
 		user.HomeBook = &homeBook.String
+	}
+	if email.Valid {
+		user.Email = email.String
+	}
+	if picture.Valid {
+		user.PictureURL = picture.String
 	}
 	return user, nil
 }
