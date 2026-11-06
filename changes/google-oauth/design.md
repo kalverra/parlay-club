@@ -126,7 +126,7 @@ Effort: medium (small flow, but a table rebuild, account linking, and two Google
 - [x] Add the Google `Provider`, the start and callback handlers, the `pc_session` cookie, `/login`, the friendly 403,
   `POST /logout`, and the dev login. Delete the passcode, picker, and `pc_auth`/`pc_user`. Prod config requires the Google
   values and drops `PASSCODE`. Tests cover the flow, session, and config cases above.
-- [ ] Add the `avatar` partial with picture and initials fallback, and show it in the top bar, with a render test.
+- [x] Add the `avatar` partial with picture and initials fallback, and show it in the top bar, with a render test.
 - [ ] Docs: rewrite `docs/concepts/access.md`; update `docs/reference/config.md`, `docs/reference/schema.md`, and
   `docs/guides/local-dev.md`; add `docs/runbooks/google-oauth-setup.md` (create the Web client, the two redirect URIs,
   publish the consent screen, set the secrets); fix the Routes and Deploy secrets rows in `plan/architecture.md`.

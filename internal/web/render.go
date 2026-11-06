@@ -83,7 +83,7 @@ func (r *Renderer) template(name string) (*template.Template, error) {
 func (r *Renderer) parse(file string) (*template.Template, error) {
 	tmpl, err := template.New("root").
 		Funcs(template.FuncMap{"asset": AssetURL}).
-		ParseFS(r.fsys, "templates/layout.html", file)
+		ParseFS(r.fsys, "templates/layout.html", "templates/avatar.html", file)
 	if err != nil {
 		return nil, fmt.Errorf("parse templates: %w", err)
 	}
