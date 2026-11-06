@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -68,15 +69,44 @@ func run() error {
 	}
 
 	store := db.NewStore(database)
-	cookies := auth.NewCookies(cfg.SessionKey, cfg.Passcode, cfg.IsProd())
-	handlers := auth.NewHandlers(logger, store, cookies, renderer, nil)
+	cookies := auth.NewCookies(cfg.SessionKey, cfg.IsProd())
+	gate := auth.NewGate(cfg.AllowedEmails)
+
+	provider, err := newProvider(ctx, cfg)
+	if err != nil {
+		return err
+	}
+
+	devLogin := !cfg.IsProd() && cfg.GoogleClientID == ""
+	handlers := auth.NewHandlers(logger, store, cookies, gate, renderer, provider, devLogin)
 
 	server := &http.Server{
 		Addr:              net.JoinHostPort("", strconv.Itoa(cfg.Port)),
-		Handler:           newMux(web.New(logger, renderer), web.StaticHandler(), handlers),
+		Handler:           newMux(web.New(logger, renderer, auth.UserFrom), web.StaticHandler(), handlers),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	return listenAndServe(ctx, logger, server)
+}
+
+// newProvider builds the Google sign-in provider, or returns nil when Google is
+// not configured in dev.
+func newProvider(ctx context.Context, cfg config.Config) (auth.Provider, error) {
+	if cfg.GoogleClientID == "" {
+		return nil, nil //nolint:nilnil // no provider is the dev-only case.
+	}
+
+	provider, err := auth.NewGoogleProvider(
+		ctx,
+		cfg.GoogleClientID,
+		cfg.GoogleClientSecret,
+		strings.TrimRight(cfg.BaseURL, "/")+"/auth/google/callback",
+		"",
+	)
+	if err != nil {
+		return nil, fmt.Errorf("google sign-in: %w", err)
+	}
+
+	return provider, nil
 }
 
 // newRenderer reads templates from disk on every request in dev, so an edit
@@ -109,9 +139,9 @@ func newLogger(cfg config.Config, out io.Writer) zerolog.Logger {
 	return zerolog.New(writer).Level(cfg.LogLevel).With().Timestamp().Logger()
 }
 
-// newMux builds the routes. Health, static files, and the passcode and picker
-// screens sit outside the shell's checks. Everything else needs a passcode and
-// a user, and every non-GET form must come from HTMX.
+// newMux builds the routes. Health, static files, and the sign-in screens sit
+// outside the shell's checks. Everything else needs a signed-in user, and every
+// non-GET form must come from HTMX or be one of the plain forms.
 func newMux(shell, static http.Handler, handlers *auth.Handlers) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", healthz)
@@ -120,7 +150,7 @@ func newMux(shell, static http.Handler, handlers *auth.Handlers) http.Handler {
 
 	app := http.NewServeMux()
 	app.Handle("/", shell)
-	mux.Handle("/", handlers.RequirePasscode(handlers.RequireUser(app)))
+	mux.Handle("/", handlers.RequireUser(app))
 
 	return handlers.CSRF(mux)
 }

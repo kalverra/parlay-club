@@ -35,10 +35,7 @@
         <span class="flex-1"></span>
         {{if .User}}
           <a href="/me" class="flex shrink-0 items-center" aria-label="Your profile" title="{{.User.Name}}">
-            <span
-              class="flex h-9 w-9 items-center justify-center rounded-full text-sm font-semibold text-slate-950 {{.User.AvatarClass}}"
-              >{{.User.Initials}}</span
-            >
+            {{template "avatar" .User}}
           </a>
         {{end}}
       </div>

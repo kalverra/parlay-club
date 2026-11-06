@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/rs/zerolog"
 )
@@ -22,21 +23,31 @@ const (
 const (
 	defaultPort       = 8080
 	defaultDBPath     = "./data/parlay.db"
-	defaultPasscode   = "dev"
 	devSessionKey     = "dev-session-key-not-for-production"
 	minSessionKeySize = 32
 )
 
+// AllowedEmail is one ALLOWED_EMAILS entry. Name is empty unless the entry is
+// written as email=Name, which links a Google account to a history-import user
+// with that name.
+type AllowedEmail struct {
+	Email string
+	Name  string
+}
+
 // Config holds every value the app reads from the environment. LITESTREAM_BUCKET
 // is absent on purpose: Litestream reads it, not the app.
 type Config struct {
-	AppEnv     string
-	Port       int
-	DBPath     string
-	Passcode   string
-	SessionKey string
-	OddsAPIKey string
-	LogLevel   zerolog.Level
+	AppEnv             string
+	Port               int
+	DBPath             string
+	SessionKey         string
+	GoogleClientID     string
+	GoogleClientSecret string
+	BaseURL            string
+	OddsAPIKey         string
+	LogLevel           zerolog.Level
+	AllowedEmails      []AllowedEmail
 }
 
 // IsProd reports whether production rules apply.
@@ -52,25 +63,93 @@ func Load(env Env) (Config, error) {
 		problems = append(problems, fmt.Errorf("APP_ENV must be %q or %q, got %q", EnvDev, EnvProd, appEnv))
 	}
 	prod := appEnv == EnvProd
+	port := portOr(env, &problems)
 
 	cfg := Config{
-		AppEnv:     appEnv,
-		Port:       portOr(env, &problems),
-		DBPath:     valueOr(env, "DB_PATH", defaultDBPath),
-		Passcode:   devDefault(env, "PASSCODE", defaultPasscode, prod),
-		SessionKey: devDefault(env, "SESSION_KEY", devSessionKey, prod),
-		OddsAPIKey: env("ODDS_API_KEY"),
-		LogLevel:   levelOr(env, prod, &problems),
+		AppEnv:             appEnv,
+		Port:               port,
+		DBPath:             valueOr(env, "DB_PATH", defaultDBPath),
+		SessionKey:         devDefault(env, "SESSION_KEY", devSessionKey, prod),
+		GoogleClientID:     devDefault(env, "GOOGLE_CLIENT_ID", "", prod),
+		GoogleClientSecret: devDefault(env, "GOOGLE_CLIENT_SECRET", "", prod),
+		BaseURL:            baseURLOr(env, port, prod),
+		OddsAPIKey:         env("ODDS_API_KEY"),
+		LogLevel:           levelOr(env, prod, &problems),
 	}
 
-	if prod && cfg.Passcode == "" {
-		problems = append(problems, errors.New("PASSCODE is required in prod"))
+	allowedEmails, err := parseAllowedEmails(env("ALLOWED_EMAILS"))
+	if err != nil {
+		problems = append(problems, err)
 	}
+	cfg.AllowedEmails = allowedEmails
+
 	if prod && len(cfg.SessionKey) < minSessionKeySize {
 		problems = append(problems, fmt.Errorf("SESSION_KEY must be at least %d bytes in prod", minSessionKeySize))
 	}
+	if prod {
+		problems = append(problems, requiredInProd(env, "GOOGLE_CLIENT_ID")...)
+		problems = append(problems, requiredInProd(env, "GOOGLE_CLIENT_SECRET")...)
+		problems = append(problems, requiredInProd(env, "BASE_URL")...)
+		if len(cfg.AllowedEmails) == 0 {
+			problems = append(problems, errors.New("ALLOWED_EMAILS must list at least one email in prod"))
+		}
+	}
 
 	return cfg, errors.Join(problems...)
+}
+
+// requiredInProd reports a missing required variable.
+func requiredInProd(env Env, key string) []error {
+	if strings.TrimSpace(env(key)) == "" {
+		return []error{fmt.Errorf("%s is required in prod", key)}
+	}
+	return nil
+}
+
+// baseURLOr returns the public base URL without a trailing slash. Dev defaults
+// to the local server; prod must set it.
+func baseURLOr(env Env, port int, prod bool) string {
+	if value := strings.TrimRight(strings.TrimSpace(env("BASE_URL")), "/"); value != "" {
+		return value
+	}
+	if prod {
+		return ""
+	}
+	return fmt.Sprintf("http://localhost:%d", port)
+}
+
+// parseAllowedEmails reads a comma list of email or email=Name entries. Empty
+// segments are ignored so a trailing comma is harmless, and emails are stored
+// lowercase so the gate compares them without case.
+func parseAllowedEmails(raw string) ([]AllowedEmail, error) {
+	var (
+		entries  []AllowedEmail
+		problems []error
+	)
+	for part := range strings.SplitSeq(raw, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+
+		email, name, _ := strings.Cut(part, "=")
+		email = strings.ToLower(strings.TrimSpace(email))
+		name = strings.TrimSpace(name)
+		if !looksLikeEmail(email) {
+			problems = append(problems,
+				fmt.Errorf("ALLOWED_EMAILS entry %q must be email or email=Name", part))
+			continue
+		}
+		entries = append(entries, AllowedEmail{Email: email, Name: name})
+	}
+	return entries, errors.Join(problems...)
+}
+
+// looksLikeEmail rejects the obvious typos an allow list entry can carry
+// without pulling in address parsing that would accept display names.
+func looksLikeEmail(email string) bool {
+	at := strings.LastIndex(email, "@")
+	return at > 0 && at < len(email)-1 && !strings.ContainsAny(email, " \t")
 }
 
 // valueOr returns the variable's value, or fallback when it is unset or empty.
