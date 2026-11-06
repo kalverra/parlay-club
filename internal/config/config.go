@@ -23,7 +23,6 @@ const (
 const (
 	defaultPort       = 8080
 	defaultDBPath     = "./data/parlay.db"
-	defaultPasscode   = "dev"
 	devSessionKey     = "dev-session-key-not-for-production"
 	minSessionKeySize = 32
 )
@@ -39,14 +38,16 @@ type AllowedEmail struct {
 // Config holds every value the app reads from the environment. LITESTREAM_BUCKET
 // is absent on purpose: Litestream reads it, not the app.
 type Config struct {
-	AppEnv        string
-	Port          int
-	DBPath        string
-	Passcode      string
-	SessionKey    string
-	OddsAPIKey    string
-	LogLevel      zerolog.Level
-	AllowedEmails []AllowedEmail
+	AppEnv             string
+	Port               int
+	DBPath             string
+	SessionKey         string
+	GoogleClientID     string
+	GoogleClientSecret string
+	BaseURL            string
+	OddsAPIKey         string
+	LogLevel           zerolog.Level
+	AllowedEmails      []AllowedEmail
 }
 
 // IsProd reports whether production rules apply.
@@ -62,15 +63,18 @@ func Load(env Env) (Config, error) {
 		problems = append(problems, fmt.Errorf("APP_ENV must be %q or %q, got %q", EnvDev, EnvProd, appEnv))
 	}
 	prod := appEnv == EnvProd
+	port := portOr(env, &problems)
 
 	cfg := Config{
-		AppEnv:     appEnv,
-		Port:       portOr(env, &problems),
-		DBPath:     valueOr(env, "DB_PATH", defaultDBPath),
-		Passcode:   devDefault(env, "PASSCODE", defaultPasscode, prod),
-		SessionKey: devDefault(env, "SESSION_KEY", devSessionKey, prod),
-		OddsAPIKey: env("ODDS_API_KEY"),
-		LogLevel:   levelOr(env, prod, &problems),
+		AppEnv:             appEnv,
+		Port:               port,
+		DBPath:             valueOr(env, "DB_PATH", defaultDBPath),
+		SessionKey:         devDefault(env, "SESSION_KEY", devSessionKey, prod),
+		GoogleClientID:     devDefault(env, "GOOGLE_CLIENT_ID", "", prod),
+		GoogleClientSecret: devDefault(env, "GOOGLE_CLIENT_SECRET", "", prod),
+		BaseURL:            baseURLOr(env, port, prod),
+		OddsAPIKey:         env("ODDS_API_KEY"),
+		LogLevel:           levelOr(env, prod, &problems),
 	}
 
 	allowedEmails, err := parseAllowedEmails(env("ALLOWED_EMAILS"))
@@ -79,14 +83,39 @@ func Load(env Env) (Config, error) {
 	}
 	cfg.AllowedEmails = allowedEmails
 
-	if prod && cfg.Passcode == "" {
-		problems = append(problems, errors.New("PASSCODE is required in prod"))
-	}
 	if prod && len(cfg.SessionKey) < minSessionKeySize {
 		problems = append(problems, fmt.Errorf("SESSION_KEY must be at least %d bytes in prod", minSessionKeySize))
 	}
+	if prod {
+		problems = append(problems, requiredInProd(env, "GOOGLE_CLIENT_ID")...)
+		problems = append(problems, requiredInProd(env, "GOOGLE_CLIENT_SECRET")...)
+		problems = append(problems, requiredInProd(env, "BASE_URL")...)
+		if len(cfg.AllowedEmails) == 0 {
+			problems = append(problems, errors.New("ALLOWED_EMAILS must list at least one email in prod"))
+		}
+	}
 
 	return cfg, errors.Join(problems...)
+}
+
+// requiredInProd reports a missing required variable.
+func requiredInProd(env Env, key string) []error {
+	if strings.TrimSpace(env(key)) == "" {
+		return []error{fmt.Errorf("%s is required in prod", key)}
+	}
+	return nil
+}
+
+// baseURLOr returns the public base URL without a trailing slash. Dev defaults
+// to the local server; prod must set it.
+func baseURLOr(env Env, port int, prod bool) string {
+	if value := strings.TrimRight(strings.TrimSpace(env("BASE_URL")), "/"); value != "" {
+		return value
+	}
+	if prod {
+		return ""
+	}
+	return fmt.Sprintf("http://localhost:%d", port)
 }
 
 // parseAllowedEmails reads a comma list of email or email=Name entries. Empty

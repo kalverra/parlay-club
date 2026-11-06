@@ -1,14 +1,13 @@
 package auth
 
 import (
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"errors"
-	"fmt"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
-	"time"
-	"unicode/utf8"
 
 	"github.com/rs/zerolog"
 
@@ -16,20 +15,14 @@ import (
 	webui "github.com/kalverra/parlay-club/internal/web"
 )
 
-const (
-	// maxNameLength is the longest user name, in characters.
-	maxNameLength = 24
-	// failDelay is how long a wrong passcode waits before the form returns.
-	failDelay = time.Second
-	// maxFormBytes caps a submitted form; these forms hold a word or two.
-	maxFormBytes = 4 << 10
+// maxFormBytes caps a submitted form; these forms hold a word or two.
+const maxFormBytes = 4 << 10
 
-	wrongPasscode = "That passcode didn't match. Try again."
-	badUser       = "Pick a name from the list."
-	goneUser      = "That name is no longer on the list."
-	inactiveUser  = "That name is no longer active."
-	takenName     = "That name is already taken."
-	blankName     = "Add a name first."
+const (
+	googleNotInvited = "That Google account isn't on the list yet. Ask whoever runs the club to add you."
+	devNotInvited    = "That email isn't on the list yet. Ask whoever runs the club to add you."
+	signInFailed     = "Sign-in didn't work. Try again."
+	blankEmail       = "Add an email first."
 )
 
 // Renderer renders a full page by name.
@@ -37,195 +30,228 @@ type Renderer interface {
 	Render(name string, data any) ([]byte, error)
 }
 
-// Handlers serves the passcode screen and the user picker.
+// Handlers serves sign-in, the Google round trip, and logout.
 type Handlers struct {
 	logger   zerolog.Logger
 	store    *db.Store
 	cookies  *Cookies
+	gate     Gate
 	renderer Renderer
-	wait     func(time.Duration)
+	provider Provider
+	dev      bool
 }
 
-// NewHandlers builds the auth screens. wait receives the pause after a wrong
-// passcode; nil uses time.Sleep.
+// NewHandlers builds the auth screens. provider is nil when Google is not
+// configured, and dev turns on the local sign-in routes.
 func NewHandlers(
 	logger zerolog.Logger,
 	store *db.Store,
 	cookies *Cookies,
+	gate Gate,
 	renderer Renderer,
-	wait func(time.Duration),
+	provider Provider,
+	dev bool,
 ) *Handlers {
-	if wait == nil {
-		wait = time.Sleep
+	return &Handlers{
+		logger:   logger,
+		store:    store,
+		cookies:  cookies,
+		gate:     gate,
+		renderer: renderer,
+		provider: provider,
+		dev:      dev,
 	}
-	return &Handlers{logger: logger, store: store, cookies: cookies, renderer: renderer, wait: wait}
 }
 
-// Routes mounts the passcode and picker screens. The three POST forms are the
-// only non-GET requests exempt from the CSRF header check. The picker and the
-// add-name form need the passcode but not yet a user, since picking is how a
-// browser gets its user.
+// Routes mounts the sign-in screens. POST /logout and POST /dev/login are
+// plain forms, so CSRF exempts them.
 func (h *Handlers) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /login", h.loginForm)
-	mux.HandleFunc("POST /login", h.login)
-	mux.Handle("GET /who", h.RequirePasscode(http.HandlerFunc(h.whoForm)))
-	mux.Handle("POST /who", h.RequirePasscode(http.HandlerFunc(h.who)))
-	mux.Handle("POST /users", h.RequirePasscode(http.HandlerFunc(h.addUser)))
+	mux.HandleFunc("POST /logout", h.logout)
+
+	if h.provider != nil {
+		mux.HandleFunc("GET /auth/google/start", h.googleStart)
+		mux.HandleFunc("GET /auth/google/callback", h.googleCallback)
+	}
+
+	if h.dev {
+		mux.HandleFunc("GET /dev/login", h.devLoginForm)
+		mux.HandleFunc("POST /dev/login", h.devLogin)
+	}
 }
 
-// LoginPage is the data for the passcode screen.
+// LoginPage is the data for the sign-in screen.
 type LoginPage struct {
 	webui.Page
-	Error string
+	Error  string
+	Google bool
+	Dev    bool
 }
 
-// WhoPage is the data for the user picker.
-type WhoPage struct {
+// DevLoginPage is the data for the local sign-in form.
+type DevLoginPage struct {
 	webui.Page
-	Users []PickerUser
 	Error string
+	Email string
 	Name  string
 }
 
-// PickerUser is one row in the user picker.
-type PickerUser struct {
-	ID          int64
-	Name        string
-	Initials    string
-	AvatarClass string
-}
-
-// loginForm shows the passcode form.
+// loginForm shows the sign-in screen.
 func (h *Handlers) loginForm(w http.ResponseWriter, _ *http.Request) {
 	h.renderLogin(w, http.StatusOK, "")
 }
 
-// login checks the submitted passcode. A wrong one waits a second, so guessing
-// stays slow even if the answer looks cheap.
-func (h *Handlers) login(w http.ResponseWriter, r *http.Request) {
+// logout clears the session cookie and returns to the sign-in screen.
+func (h *Handlers) logout(w http.ResponseWriter, r *http.Request) {
+	h.cookies.ClearSession(w)
+	http.Redirect(w, r, "/login", http.StatusSeeOther)
+}
+
+// googleStart begins the authorization code flow. It stores state, nonce, and
+// the PKCE verifier in a signed cookie, then sends the browser to Google.
+func (h *Handlers) googleStart(w http.ResponseWriter, r *http.Request) {
+	state, err := randomToken()
+	if err != nil {
+		h.serverError(w, err)
+		return
+	}
+	nonce, err := randomToken()
+	if err != nil {
+		h.serverError(w, err)
+		return
+	}
+	verifier, err := randomToken()
+	if err != nil {
+		h.serverError(w, err)
+		return
+	}
+
+	h.cookies.SetOAuth(w, OAuthState{State: state, Nonce: nonce, Verifier: verifier})
+	http.Redirect(w, r, h.provider.AuthURL(state, nonce, pkceChallenge(verifier)), http.StatusFound)
+}
+
+// googleCallback checks the round trip, exchanges the code, signs the person
+// in, and returns them to the app.
+func (h *Handlers) googleCallback(w http.ResponseWriter, r *http.Request) {
+	saved, ok := h.cookies.OAuthState(r)
+	if !ok {
+		h.renderLogin(w, http.StatusBadRequest, signInFailed)
+		return
+	}
+	if r.URL.Query().Get("state") != saved.State {
+		h.cookies.ClearOAuth(w)
+		h.renderLogin(w, http.StatusBadRequest, signInFailed)
+		return
+	}
+
+	code := r.URL.Query().Get("code")
+	if code == "" {
+		h.cookies.ClearOAuth(w)
+		h.renderLogin(w, http.StatusBadRequest, signInFailed)
+		return
+	}
+
+	identity, err := h.provider.Exchange(r.Context(), code, saved.Verifier, saved.Nonce)
+	if err != nil {
+		h.logger.Warn().Err(err).Msg("google sign-in")
+		h.cookies.ClearOAuth(w)
+		h.renderLogin(w, http.StatusBadRequest, signInFailed)
+		return
+	}
+
+	user, ok := h.signIn(w, r, identity, googleNotInvited)
+	if !ok {
+		return
+	}
+
+	h.cookies.ClearOAuth(w)
+	h.cookies.SetSession(w, user.ID)
+	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+// devLoginForm shows the local sign-in form.
+func (h *Handlers) devLoginForm(w http.ResponseWriter, _ *http.Request) {
+	h.renderDevLogin(w, http.StatusOK, "", "", "")
+}
+
+// devLogin signs in a local identity without Google.
+func (h *Handlers) devLogin(w http.ResponseWriter, r *http.Request) {
 	form, err := readForm(w, r)
 	if err != nil {
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return
 	}
 
-	if !h.cookies.PasscodeMatches(form.Get("passcode")) {
-		h.wait(failDelay)
-		h.renderLogin(w, http.StatusUnauthorized, wrongPasscode)
+	email := strings.TrimSpace(form.Get("email"))
+	name := strings.TrimSpace(form.Get("name"))
+	if !validEmail(email) {
+		h.renderDevLogin(w, http.StatusUnprocessableEntity, email, name, blankEmail)
 		return
 	}
 
-	h.cookies.SetPasscode(w)
-	http.Redirect(w, r, "/who", http.StatusSeeOther)
+	user, ok := h.signIn(w, r, Identity{
+		Sub:   "dev:" + email,
+		Email: email,
+		Name:  name,
+	}, devNotInvited)
+	if !ok {
+		return
+	}
+
+	h.cookies.SetSession(w, user.ID)
+	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
-// whoForm shows the picker and the add-name form.
-func (h *Handlers) whoForm(w http.ResponseWriter, r *http.Request) {
-	h.renderWho(w, r, http.StatusOK, "", "")
-}
-
-// who signs in the chosen user. A stale or tampered ID comes back as a form
-// error, so a person can pick again without losing the page.
-func (h *Handlers) who(w http.ResponseWriter, r *http.Request) {
-	form, err := readForm(w, r)
-	if err != nil {
-		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
-		return
-	}
-
-	id, err := strconv.ParseInt(form.Get("user_id"), 10, 64)
-	if err != nil {
-		h.renderWho(w, r, http.StatusUnprocessableEntity, "", badUser)
-		return
-	}
-
-	user, err := h.store.UserByID(r.Context(), id)
+// signIn resolves a verified identity and renders the failure itself. It
+// reports whether the caller should continue with a session.
+func (h *Handlers) signIn(
+	w http.ResponseWriter,
+	r *http.Request,
+	identity Identity,
+	notInvited string,
+) (db.User, bool) {
+	user, err := SignIn(r.Context(), h.store, h.gate, identity)
 	switch {
-	case errors.Is(err, db.ErrUserNotFound):
-		h.renderWho(w, r, http.StatusUnprocessableEntity, "", goneUser)
-		return
+	case errors.Is(err, ErrNotInvited):
+		h.renderLogin(w, http.StatusForbidden, notInvited)
+		return db.User{}, false
+	case errors.Is(err, ErrIncompleteIdentity):
+		h.renderLogin(w, http.StatusBadRequest, signInFailed)
+		return db.User{}, false
 	case err != nil:
 		h.serverError(w, err)
-		return
-	case !user.Active:
-		h.renderWho(w, r, http.StatusUnprocessableEntity, "", inactiveUser)
-		return
+		return db.User{}, false
 	}
-
-	h.cookies.SetUser(w, user.ID)
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+	return user, true
 }
 
-// addUser creates a name and picks it. Only the person who added it signs in as
-// that name; everyone else finds it in the picker next time.
-func (h *Handlers) addUser(w http.ResponseWriter, r *http.Request) {
-	form, err := readForm(w, r)
-	if err != nil {
-		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
-		return
-	}
-
-	name := strings.TrimSpace(form.Get("name"))
-	if message := nameProblem(name); message != "" {
-		h.renderWho(w, r, http.StatusUnprocessableEntity, name, message)
-		return
-	}
-
-	user, err := h.store.CreateUser(r.Context(), name)
-	if errors.Is(err, db.ErrNameTaken) {
-		h.renderWho(w, r, http.StatusUnprocessableEntity, name, takenName)
-		return
-	}
-	if err != nil {
-		h.serverError(w, err)
-		return
-	}
-
-	h.cookies.SetUser(w, user.ID)
-	http.Redirect(w, r, "/", http.StatusSeeOther)
-}
-
-// nameProblem returns the message for an invalid name, or "" when it is valid.
-func nameProblem(name string) string {
-	switch {
-	case name == "":
-		return blankName
-	case utf8.RuneCountInString(name) > maxNameLength:
-		return fmt.Sprintf("Names can be at most %d characters.", maxNameLength)
-	default:
-		return ""
-	}
-}
-
-// renderLogin writes the passcode screen with an optional error.
+// renderLogin writes the sign-in screen with an optional error.
 func (h *Handlers) renderLogin(w http.ResponseWriter, status int, message string) {
 	//nolint:modernize // naming the embedded layout field keeps the data readable.
-	page := LoginPage{Page: webui.Page{Title: "Passcode"}, Error: message}
+	page := LoginPage{
+		Page:   webui.Page{Title: "Sign in"},
+		Error:  message,
+		Google: h.provider != nil,
+		Dev:    h.dev,
+	}
 	h.render(w, status, "login", page)
 }
 
-// renderWho loads the active users and renders the picker. name is what the
-// add-name field should keep showing after a rejected submission.
-func (h *Handlers) renderWho(w http.ResponseWriter, r *http.Request, status int, name, message string) {
-	users, err := h.store.ListActiveUsers(r.Context())
-	if err != nil {
-		h.serverError(w, err)
-		return
-	}
-
-	picker := make([]PickerUser, len(users))
-	for i, user := range users {
-		picker[i] = PickerUser{
-			ID:          user.ID,
-			Name:        user.Name,
-			Initials:    webui.Initials(user.Name),
-			AvatarClass: user.AvatarColor.Class(),
-		}
-	}
-
+// renderDevLogin writes the local sign-in form with an optional error. email
+// and name are what the fields should keep showing after a rejected submit.
+func (h *Handlers) renderDevLogin(
+	w http.ResponseWriter,
+	status int,
+	email, name, message string,
+) {
 	//nolint:modernize // naming the embedded layout field keeps the data readable.
-	page := WhoPage{Page: webui.Page{Title: "Who are you?"}, Users: picker, Error: message, Name: name}
-	h.render(w, status, "who", page)
+	page := DevLoginPage{
+		Page:  webui.Page{Title: "Dev sign-in"},
+		Error: message,
+		Email: email,
+		Name:  name,
+	}
+	h.render(w, status, "dev-login", page)
 }
 
 // render writes a full page. Auth pages carry names, so browsers must not store
@@ -254,7 +280,29 @@ func (h *Handlers) serverError(w http.ResponseWriter, err error) {
 func readForm(w http.ResponseWriter, r *http.Request) (url.Values, error) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxFormBytes)
 	if err := r.ParseForm(); err != nil {
-		return nil, fmt.Errorf("parse form: %w", err)
+		return nil, err
 	}
 	return r.PostForm, nil
+}
+
+// randomToken returns 32 random bytes as URL-safe base64 without padding.
+func randomToken() (string, error) {
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(buf), nil
+}
+
+// pkceChallenge returns the S256 challenge for a verifier.
+func pkceChallenge(verifier string) string {
+	sum := sha256.Sum256([]byte(verifier))
+	return base64.RawURLEncoding.EncodeToString(sum[:])
+}
+
+// validEmail rejects an obvious typo without pulling in address parsing that
+// would accept display names.
+func validEmail(email string) bool {
+	at := strings.LastIndex(email, "@")
+	return at > 0 && at < len(email)-1 && !strings.ContainsAny(email, " \t")
 }

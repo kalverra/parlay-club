@@ -4,11 +4,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/kalverra/parlay-club/internal/auth"
+	"github.com/kalverra/parlay-club/internal/config"
 	"github.com/kalverra/parlay-club/internal/db"
 )
 
@@ -43,18 +45,6 @@ func serveProbe(handler http.Handler, request *http.Request) *httptest.ResponseR
 	return recorder
 }
 
-// userCookie returns the signed cookie for id.
-func (f *fixture) userCookie(t *testing.T, id int64) *http.Cookie {
-	t.Helper()
-
-	recorder := httptest.NewRecorder()
-	f.cookies.SetUser(recorder, id)
-
-	cookie := cookieFrom(recorder, auth.UserCookie)
-	require.NotNil(t, cookie)
-	return cookie
-}
-
 // tamperedCopy returns a copy of cookie with a broken signature.
 func tamperedCopy(cookie *http.Cookie) *http.Cookie {
 	//nolint:gosec // the handler set the real attributes; only the value changes here.
@@ -63,83 +53,37 @@ func tamperedCopy(cookie *http.Cookie) *http.Cookie {
 	return &broken
 }
 
-func TestRequirePasscodeRedirects(t *testing.T) {
-	t.Parallel()
-
-	f := newFixture(t)
-
-	tests := map[string]*http.Cookie{
-		"missing":  nil,
-		"tampered": tamperedCopy(f.passcode),
-	}
-
-	for name, cookie := range tests {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			next := &probe{}
-			var cookies []*http.Cookie
-			if cookie != nil {
-				cookies = append(cookies, cookie)
-			}
-
-			recorder := serveProbe(
-				f.handlers.RequirePasscode(next),
-				guardedRequest(t, http.MethodGet, "/games", cookies...),
-			)
-
-			assert.Equal(t, http.StatusFound, recorder.Code)
-			assert.Equal(t, "/login", recorder.Header().Get("Location"))
-			assert.False(t, next.called)
-		})
-	}
-}
-
-func TestRequirePasscodeAllowsValidCookie(t *testing.T) {
-	t.Parallel()
-
-	f := newFixture(t)
-	next := &probe{}
-
-	recorder := serveProbe(
-		f.handlers.RequirePasscode(next),
-		guardedRequest(t, http.MethodGet, "/games", f.passcode),
-	)
-
-	assert.Equal(t, http.StatusNoContent, recorder.Code)
-	assert.True(t, next.called)
-}
-
-func TestRequirePasscodeUsesHXRedirect(t *testing.T) {
-	t.Parallel()
-
-	f := newFixture(t)
-	next := &probe{}
-	request := guardedRequest(t, http.MethodGet, "/games")
-	request.Header.Set("Hx-Request", "true")
-
-	recorder := serveProbe(f.handlers.RequirePasscode(next), request)
-
-	assert.Equal(t, http.StatusOK, recorder.Code)
-	assert.Equal(t, "/login", recorder.Header().Get("Hx-Redirect"))
-	assert.Empty(t, recorder.Body.String())
-	assert.False(t, next.called)
-}
-
 func TestRequireUserRedirects(t *testing.T) {
 	t.Parallel()
 
 	f := newFixture(t)
-	active := f.addUser(t, "Ada")
-	inactive := f.addUser(t, "Grace")
+	active := f.addUserWithEmail(t, "Ada", "ada@example.com")
+	inactive := f.addUserWithEmail(t, "Grace", "grace@example.com")
 	_, err := f.database.ExecContext(t.Context(), "UPDATE users SET active = 0 WHERE id = ?", inactive.ID)
 	require.NoError(t, err)
 
+	oldUserCookie := &http.Cookie{
+		Name:     "pc_user",
+		Value:    "1.signature",
+		Secure:   true,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	}
+	expired := &http.Cookie{
+		Name:     auth.SessionCookie,
+		Value:    sessionValue(t, active.ID, time.Now().Add(-time.Minute).Unix()),
+		Secure:   true,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	}
+
 	tests := map[string]*http.Cookie{
 		"missing":       nil,
-		"tampered":      tamperedCopy(f.userCookie(t, active.ID)),
-		"unknown user":  f.userCookie(t, 404),
-		"inactive user": f.userCookie(t, inactive.ID),
+		"tampered":      tamperedCopy(f.sessionCookie(t, active.ID)),
+		"expired":       expired,
+		"old pc_user":   oldUserCookie,
+		"unknown user":  f.sessionCookie(t, 404),
+		"inactive user": f.sessionCookie(t, inactive.ID),
 	}
 
 	for name, cookie := range tests {
@@ -158,22 +102,55 @@ func TestRequireUserRedirects(t *testing.T) {
 			)
 
 			assert.Equal(t, http.StatusFound, recorder.Code)
-			assert.Equal(t, "/who", recorder.Header().Get("Location"))
+			assert.Equal(t, "/login", recorder.Header().Get("Location"))
 			assert.False(t, next.called)
 		})
 	}
+}
+
+func TestRequireUserChecksTheGateEveryRequest(t *testing.T) {
+	t.Parallel()
+
+	f := newFixtureWith(t, newFakeProvider(), auth.NewGate([]config.AllowedEmail{
+		{Email: "ada@example.com"},
+	}), true)
+	ada := f.addUserWithEmail(t, "Ada", "ada@example.com")
+
+	next := &probe{}
+	allowed := serveProbe(
+		f.handlers.RequireUser(next),
+		guardedRequest(t, http.MethodGet, "/", f.sessionCookie(t, ada.ID)),
+	)
+	require.Equal(t, http.StatusNoContent, allowed.Code)
+	require.True(t, next.called)
+
+	// The list loses Ada, and her existing cookie stops working on the next load.
+	f = newFixtureWith(t, newFakeProvider(), auth.NewGate([]config.AllowedEmail{
+		{Email: "friend@example.com"},
+	}), true)
+	ada = f.addUserWithEmail(t, "Ada", "ada@example.com")
+
+	next = &probe{}
+	denied := serveProbe(
+		f.handlers.RequireUser(next),
+		guardedRequest(t, http.MethodGet, "/", f.sessionCookie(t, ada.ID)),
+	)
+
+	assert.Equal(t, http.StatusFound, denied.Code)
+	assert.Equal(t, "/login", denied.Header().Get("Location"))
+	assert.False(t, next.called)
 }
 
 func TestRequireUserAllowsActiveUser(t *testing.T) {
 	t.Parallel()
 
 	f := newFixture(t)
-	ada := f.addUser(t, "Ada")
+	ada := f.addUserWithEmail(t, "Ada", "ada@example.com")
 	next := &probe{}
 
 	recorder := serveProbe(
 		f.handlers.RequireUser(next),
-		guardedRequest(t, http.MethodGet, "/", f.userCookie(t, ada.ID)),
+		guardedRequest(t, http.MethodGet, "/", f.sessionCookie(t, ada.ID)),
 	)
 
 	assert.Equal(t, http.StatusNoContent, recorder.Code)
@@ -193,7 +170,7 @@ func TestRequireUserUsesHXRedirect(t *testing.T) {
 	recorder := serveProbe(f.handlers.RequireUser(next), request)
 
 	assert.Equal(t, http.StatusOK, recorder.Code)
-	assert.Equal(t, "/who", recorder.Header().Get("Hx-Redirect"))
+	assert.Equal(t, "/login", recorder.Header().Get("Hx-Redirect"))
 	assert.Empty(t, recorder.Body.String())
 	assert.False(t, next.called)
 }
@@ -202,18 +179,18 @@ func TestRequireUserHXRedirectForInactiveUser(t *testing.T) {
 	t.Parallel()
 
 	f := newFixture(t)
-	gone := f.addUser(t, "Grace")
+	gone := f.addUserWithEmail(t, "Grace", "grace@example.com")
 	_, err := f.database.ExecContext(t.Context(), "UPDATE users SET active = 0 WHERE id = ?", gone.ID)
 	require.NoError(t, err)
 
 	next := &probe{}
-	request := guardedRequest(t, http.MethodGet, "/", f.userCookie(t, gone.ID))
+	request := guardedRequest(t, http.MethodGet, "/", f.sessionCookie(t, gone.ID))
 	request.Header.Set("Hx-Request", "true")
 
 	recorder := serveProbe(f.handlers.RequireUser(next), request)
 
 	assert.Equal(t, http.StatusOK, recorder.Code)
-	assert.Equal(t, "/who", recorder.Header().Get("Hx-Redirect"))
+	assert.Equal(t, "/login", recorder.Header().Get("Hx-Redirect"))
 	assert.False(t, next.called)
 }
 
@@ -222,10 +199,11 @@ func TestCSRFAllowsSafeAndExemptRequests(t *testing.T) {
 
 	f := newFixture(t)
 	tests := map[string]struct{ method, target string }{
-		"get page":      {http.MethodGet, "/games"},
-		"post login":    {http.MethodPost, "/login"},
-		"post who":      {http.MethodPost, "/who"},
-		"post add name": {http.MethodPost, "/users"},
+		"get page":       {http.MethodGet, "/games"},
+		"google start":   {http.MethodGet, "/auth/google/start"},
+		"google return":  {http.MethodGet, "/auth/google/callback"},
+		"post logout":    {http.MethodPost, "/logout"},
+		"post dev login": {http.MethodPost, "/dev/login"},
 	}
 
 	for name, test := range tests {
@@ -253,8 +231,8 @@ func TestCSRFRejectsUnmarkedWrites(t *testing.T) {
 		"put":                             {http.MethodPut, "/slips/1"},
 		"patch":                           {http.MethodPatch, "/slips/1"},
 		"delete":                          {http.MethodDelete, "/legs/1"},
-		"exempt path with another verb":   {http.MethodPut, "/login"},
-		"exempt path with trailing slash": {http.MethodPost, "/users/"},
+		"exempt path with another verb":   {http.MethodPut, "/logout"},
+		"exempt path with trailing slash": {http.MethodPost, "/dev/login/"},
 	}
 
 	for name, test := range tests {
