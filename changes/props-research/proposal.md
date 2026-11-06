@@ -2,6 +2,7 @@
 slug: props-research
 status: proposed
 created: "2026-11-01"
+depends_on: [history-and-deploy]
 ---
 
 # Props and research

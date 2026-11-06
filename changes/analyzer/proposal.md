@@ -2,6 +2,7 @@
 slug: analyzer
 status: designed
 created: "2026-11-01"
+depends_on: [slate-and-lines]
 ---
 
 # Sharp-friend analyzer

@@ -2,6 +2,7 @@
 slug: grading-record-book
 status: proposed
 created: "2026-11-01"
+depends_on: [props-research]
 ---
 
 # Auto-grading and Record Book

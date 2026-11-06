@@ -7,3 +7,6 @@ good-vibes.local.toml
 
 # Local SQLite data
 data/
+
+# Air build output from `mise run dev`
+tmp/

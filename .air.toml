@@ -1,0 +1,36 @@
+# Air config for `mise run dev`. See docs/guides/local-dev.md.
+#
+# Air watches Go, template, and static JS/CSS edits, regenerates the Tailwind
+# output, then builds and restarts ./tmp/server.
+#
+# Generated and runtime outputs must stay excluded or the loop feeds itself:
+#   - web/static/app.css is rewritten by pre_cmd on every build.
+#   - data/ holds the SQLite database and tmp/ holds the binary and build log.
+
+root = "."
+tmp_dir = "tmp"
+
+[build]
+  # Regenerate app.css so the embedded copy matches the templates.
+  pre_cmd = ["go generate ./..."]
+  cmd = "go build -o ./tmp/server ./cmd/server"
+  entrypoint = ["./tmp/server"]
+  include_ext = ["go", "html", "css", "js"]
+  exclude_dir = ["tmp", "data", "docs", "changes", "plan"]
+  exclude_file = ["web/static/app.css"]
+  exclude_regex = ["_test\\.go"]
+  exclude_unchanged = true
+  # Cap a burst of writes at about one rebuild every two seconds.
+  delay = 2000
+  # Keep the last good binary serving while a build fails.
+  stop_on_error = false
+  # Send SIGINT first so the server runs its existing shutdown path.
+  send_interrupt = true
+  kill_delay = "2s"
+
+[log]
+  time = false
+
+[misc]
+  # Ctrl-C leaves no build directory behind.
+  clean_on_exit = true
