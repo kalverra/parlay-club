@@ -24,7 +24,7 @@ below needs to close and reopen on tab visibility.
 cmd/server/              main: config, wiring, HTTP server, graceful shutdown
 internal/config/         env parsing and validation
 internal/db/             Open (pragmas), migrations/*.sql (embedded), Store with all queries
-internal/auth/           cookies, login/who handlers, middleware
+internal/auth/           session and OAuth cookies, sign-in handlers, middleware
 internal/slips/          slip, member, leg rules (product.md "Editing and locking"); publishes to live
 internal/parlay/         odds math, payout, units
 internal/live/           hub and SSE handler
@@ -48,16 +48,18 @@ SQL.
 
 ## Routes
 
-Go 1.22+ method patterns. All routes except `/healthz`, `/login`, and `/static/` need the auth cookie; all except those
-and `/who` need the user cookie.
+Go 1.22+ method patterns. All routes except `/healthz`, `/static/`, `/login`, `POST /logout`, the Google sign-in
+routes, and the dev sign-in routes need a signed-in user.
 
 | Method + path                              | Purpose                                                  | Change |
 | ------------------------------------------ | -------------------------------------------------------- | ----- |
 | `GET /healthz`                             | 200 `ok`                                                 | 1     |
 | `GET /static/{path...}`                    | Embedded assets, long cache headers, hashed via query    | 1     |
-| `GET /login`, `POST /login`                | Passcode form                                            | 1     |
-| `GET /who`, `POST /who`                    | Pick user                                                | 1     |
-| `POST /users`                              | Add a name, then select it                               | 1     |
+| `GET /login`                               | Sign-in page: Google button, plus a dev link when Google is off | 1     |
+| `POST /logout`                             | Clear the session and return to `/login`                 | 1     |
+| `GET /auth/google/start`                   | Start the Google round trip                              | 1     |
+| `GET /auth/google/callback`                | Finish Google sign-in                                    | 1     |
+| `GET /dev/login`, `POST /dev/login`        | Local sign-in, dev only and only when Google is not configured | 1     |
 | `GET /me`, `POST /me`                      | Profile: home book; `POST /users/{id}/active` toggles    | 2     |
 | `GET /`                                    | Newest slip of current week, else create form            | 2     |
 | `GET /slips/new`, `POST /slips`            | Create slip                                              | 2     |
@@ -170,8 +172,8 @@ gcloud run deploy parlay-club --image ... --region us-central1 \
   --min-instances 0 --max-instances 1 --concurrency 80 --cpu 1 --memory 512Mi \
   --timeout 3600 --cpu-boost --allow-unauthenticated \
   --service-account parlay-runtime@PROJECT.iam.gserviceaccount.com \
-  --set-env-vars APP_ENV=prod,DB_PATH=/data/parlay.db,LITESTREAM_BUCKET=BUCKET \
-  --set-secrets PASSCODE=passcode:latest,SESSION_KEY=session-key:latest,ODDS_API_KEY=odds-api-key:latest
+  --set-env-vars APP_ENV=prod,DB_PATH=/data/parlay.db,LITESTREAM_BUCKET=BUCKET,BASE_URL=https://SERVICE_URL,ALLOWED_EMAILS=you@example.com \
+  --set-secrets SESSION_KEY=session-key:latest,GOOGLE_CLIENT_ID=google-client-id:latest,GOOGLE_CLIENT_SECRET=google-client-secret:latest,ODDS_API_KEY=odds-api-key:latest
 ```
 
 ### One-time setup (`deploy/setup.sh`, run by the user)
@@ -181,15 +183,19 @@ Idempotent `gcloud` script taking `PROJECT_ID` and `BILLING_ACCOUNT`:
 - enable `run`, `artifactregistry`, `secretmanager`, `iamcredentials`, `sts`, `billingbudgets` APIs;
 - GCS bucket in `us-central1` for Litestream;
 - Artifact Registry Docker repo with a cleanup policy keeping the last 3 images (free tier is 0.5 GB);
-- service account `parlay-runtime`: `storage.objectAdmin` on the bucket, `secretmanager.secretAccessor` on the 3
+- service account `parlay-runtime`: `storage.objectAdmin` on the bucket, `secretmanager.secretAccessor` on the 4
   secrets;
 - service account `parlay-deployer`: `run.admin`, `artifactregistry.writer`, `iam.serviceAccountUser` on
   `parlay-runtime`;
 - Workload Identity pool and GitHub OIDC provider limited to repo `kalverra/parlay-club`, bound to `parlay-deployer`;
-- secrets `passcode`, `session-key`, `odds-api-key` created empty (the user adds versions);
+- secrets `session-key`, `google-client-id`, `google-client-secret`, `odds-api-key` created empty (the user adds
+  versions);
 - a $5 billing budget with email alerts at 50%, 90%, 100%;
 - print the values to store as GitHub repo variables: `GCP_PROJECT`, `GCP_REGION`, `WIF_PROVIDER`, `DEPLOY_SA`,
   `RUNTIME_SA`, `LITESTREAM_BUCKET`, `AR_REPO`.
+
+The user sets `BASE_URL` and `ALLOWED_EMAILS` as Cloud Run environment variables at deploy time. The Google client
+values come from the Web client in the [Google OAuth setup runbook](../docs/runbooks/google-oauth-setup.md).
 
 `docs/deploy.md` walks the user through running it, adding secret values, and setting the GitHub variables.
 

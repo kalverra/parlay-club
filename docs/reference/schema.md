@@ -39,7 +39,8 @@ connection rules out `SQLITE_BUSY`.
   failed migration leaves neither behind.
 - A fresh database ends at version 2 with every table below.
 - `0002_google_identity.sql` rebuilds `users` in its transaction with the SQLite 12-step method and
-  `PRAGMA defer_foreign_keys = ON`, so the drop and rename keep every child row valid.
+  `PRAGMA defer_foreign_keys = ON`, so the drop and rename keep every child row valid. Existing rows keep their `id`,
+  name, color, home book, active flag, and creation time, and come back with no Google identity.
 - Never edit an applied file. Add `0003_name.sql` and up.
 - `PRAGMA user_version` on the database file is the only record of what ran.
 
@@ -58,6 +59,24 @@ connection rules out `SQLITE_BUSY`.
 | `player_matches` | Odds player name to ESPN athlete ID, per team.                |
 | `activity`       | Human-readable slip history; `user_id` is NULL for system entries. |
 | `sync_state`     | Last fetch time per outside data source, plus remaining odds credits. |
+
+## Users and identity
+
+`users.name` is no longer unique. Google display names collide, so two people can share one, and `users_name` is a plain
+case-insensitive index for lookups. A user's display name changes only by hand; sign-in never renames a linked row.
+
+Three nullable columns hold the Google identity:
+
+- `google_sub` is Google's stable subject and is unique. It is `NULL` for a history-import user who has not signed in.
+- `email` is the verified Google address, unique and compared without case.
+- `picture_url` is the Google profile picture. It refreshes on every sign-in.
+
+`auth.SignIn` is the only writer of these columns. It links by `google_sub`, then by `email`, then by the gate's
+`email=Name` hand match, and otherwise creates a user. An unlinked row keeps its history when it gains an identity. See
+[Access](../concepts/access.md) for the full resolution order.
+
+`active` still turns a person off without deleting their slips and legs. `avatar_color` still comes from the fixed
+palette, and a linked user keeps the color they already have.
 
 ## DDL
 

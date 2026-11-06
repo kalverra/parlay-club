@@ -26,8 +26,9 @@ starts it at <http://localhost:8080>. Leave it running while you edit. Dev defau
 the database at `./data/parlay.db`. Override any of them with an environment variable, for example
 `PORT=9000 mise run dev`. The full list is in [Configuration](../reference/config.md).
 
-The app asks for the passcode first. In dev it is `dev`. After that, pick a name or add one, and the tabs load. See
-[Access](../concepts/access.md) for how the cookies and the picker work.
+With no Google values set, the app opens on `/login` with a "Sign in without Google (dev)" link. Click it, enter any
+email, and optionally a name, and the tabs load. The dev form calls the same sign-in code as Google, including
+`ALLOWED_EMAILS` and history linking. See [Access](../concepts/access.md) for the session and the gate.
 
 Dev logs print as readable console lines; prod logs are JSON.
 
@@ -90,13 +91,40 @@ That runs the pinned Tailwind CLI and rewrites `web/static/app.css`. The file is
 
 HTMX and `app.js` in `web/static/` are not built. They ship as written.
 
-## Passcode
+## Sign-in
 
-In dev, `PASSCODE` defaults to `dev` and `SESSION_KEY` has a fixed dev value, so a fresh checkout starts without any
-secrets. Prod rejects an empty passcode and a session key under 32 bytes; see [Configuration](../reference/config.md).
+In dev, `SESSION_KEY` has a fixed value and `ALLOWED_EMAILS` is empty, so a fresh checkout starts without secrets and
+the dev form lets any email in. Prod rejects a short session key, an empty allow list, and missing Google values; see
+[Configuration](../reference/config.md).
 
-The browser stores two signed cookies for a year, so the passcode step is a one-time thing per browser. To start over,
-clear the site's cookies or use a private window. Changing `PASSCODE` or `SESSION_KEY` signs every browser out.
+To exercise the allow list locally, set it before starting:
+
+```sh
+ALLOWED_EMAILS="you@example.com,friendo@example.com=Friend" mise run dev
+```
+
+An email with no matching entry gets the friendly 403 page. The `=Friend` form links that email to an unlinked history
+user named `Friend` on first sign-in. This is the one-time hand match for imported history; a linked user keeps the
+name already stored.
+
+The session cookie lasts 30 days. To start fresh, clear the site's cookies, use a private window, or post to `/logout`
+(the shell has no sign-out link yet). Changing `SESSION_KEY` signs every browser out.
+
+### With real Google
+
+To use the real Google flow locally, create a Web client and register the local redirect URI in the
+[Google OAuth setup runbook](../runbooks/google-oauth-setup.md). Then start the server with the client values:
+
+```sh
+GOOGLE_CLIENT_ID="..." \
+GOOGLE_CLIENT_SECRET="..." \
+ALLOWED_EMAILS="you@example.com" \
+mise run dev
+```
+
+`BASE_URL` defaults to `http://localhost:8080`, which must match the registered redirect URI
+`http://localhost:8080/auth/google/callback`. If you change `PORT`, change `BASE_URL` to match. With a client ID set,
+`/dev/login` is not registered, so use the Google button.
 
 ## Database
 

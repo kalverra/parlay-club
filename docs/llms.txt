@@ -4,7 +4,7 @@
 
 ## Concept
 
-- [Access](concepts/access.md): How one shared passcode, two signed cookies, and the name picker decide who is using the app.
+- [Access](concepts/access.md): How Google sign-in, the email allow list, and one signed session cookie decide who is using the app.
 
 ## Decision
 
@@ -19,3 +19,7 @@
 
 - [Configuration](reference/config.md): Environment variables the server reads, their dev defaults, and the values it rejects in prod.
 - [Database schema](reference/schema.md): SQLite tables, how migrations are tracked and applied, and the connection settings behind every query.
+
+## Runbook
+
+- [Google OAuth setup](runbooks/google-oauth-setup.md): Create the Google Web client, register the local and prod redirect URIs, publish the consent screen, and set the client secrets.
