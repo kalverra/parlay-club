@@ -9,3 +9,14 @@ typos = "latest"
 goreleaser = "latest"
 rumdl = "latest"
 "aqua:kjanat/actionlint" = "latest"
+
+# Hot-reload runner for `mise run dev`; see .air.toml.
+air = "1.67.4"
+
+[tasks.dev]
+description = "Run the server on port 8080 with hot reload"
+run = "exec air"
+
+[tasks.setup]
+description = "Install the git hooks in this clone"
+run = "lefthook install"

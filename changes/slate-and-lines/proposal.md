@@ -2,6 +2,7 @@
 slug: slate-and-lines
 status: designed
 created: "2026-11-01"
+depends_on: [slips-live]
 ---
 
 # Slate, weather, and lines

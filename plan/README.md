@@ -41,8 +41,8 @@ Changes 6–8 follow; their designs are written after 1–5 land.
 
 ### 1. `foundation`
 
-Server, database with the full schema, passcode and user picker, phone-first page shell. Design:
-[changes/foundation/design.md](../changes/foundation/design.md).
+Server, database with the full schema, passcode and user picker, phone-first page shell. Done; decision:
+[docs/decisions/foundation.md](../docs/decisions/foundation.md).
 
 ### 2. `slips-live`
 

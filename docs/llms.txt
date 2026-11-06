@@ -6,9 +6,14 @@
 
 - [Access](concepts/access.md): How one shared passcode, two signed cookies, and the name picker decide who is using the app.
 
+## Decision
+
+- [Foundation](decisions/foundation.md): Build a bootable web server with a local database, a shared group passcode, and a "who are you?" picker that remembers each friend on their device.
+- [Hot reload local dev](decisions/hot-reload-dev.md): Add [air](https://github.com/air-verse/air) as the dev runner, pinned in `mise.toml` from the mise registry.
+
 ## Guide
 
-- [Local development](guides/local-dev.md): Install the tools, build the CSS, and run the server on your machine with the dev defaults.
+- [Local development](guides/local-dev.md): Start the app with hot reload, set up the git hooks, and fall back to a plain server run when you need it.
 
 ## Reference
 

@@ -2,6 +2,7 @@
 slug: slips-live
 status: designed
 created: "2026-11-01"
+depends_on: [foundation]
 ---
 
 # Live shared slips

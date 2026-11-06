@@ -2,6 +2,7 @@
 slug: live-api-watch
 status: proposed
 created: "2026-11-01"
+depends_on: [grading-record-book]
 ---
 
 # Live API watch
