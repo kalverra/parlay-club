@@ -5,7 +5,7 @@ type: reference
 summary: Environment variables the server reads, their dev defaults, and the values it rejects in prod.
 tags: [config, environment, startup, google, oauth]
 sources: [internal/config/config.go, cmd/server/main.go]
-last_verified: 2026-11-05
+last_verified: 2026-11-06
 ---
 
 # Configuration

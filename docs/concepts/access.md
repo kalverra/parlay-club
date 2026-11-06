@@ -5,7 +5,7 @@ type: concept
 summary: How Google sign-in, the email allow list, and one signed session cookie decide who is using the app.
 tags: [auth, google, oauth, cookies, middleware, csrf]
 sources: [internal/auth/cookies.go, internal/auth/handlers.go, internal/auth/middleware.go, internal/auth/signin.go, internal/auth/gate.go, internal/auth/provider.go, internal/db/users.go, cmd/server/main.go, web/templates/login.html, web/templates/dev-login.html, web/templates/avatar.html]
-last_verified: 2026-11-05
+last_verified: 2026-11-06
 ---
 
 # Access
