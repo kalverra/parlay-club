@@ -20,6 +20,9 @@ Sunday, Nov 8. It runs interactively: the user runs the GCP setup and the first 
   then runs `litestream replicate -exec`. A `LITESTREAM_REPLICA_URL` override lets local runs use a `file` replica.
 - `deploy/setup.sh` is idempotent `gcloud` and prints the GitHub variables. The agent writes it; the user runs it.
 - Workflows: `ci.yml` and `deploy.yml` per `plan/architecture.md` CI, with `deploy/blackout.sh` gating deploys.
+- Groups and `google-oauth` later: `internal/seed` resolves each person through one function. Today it creates a user by
+  name; once Google sign-in lands, that function matches by email or an alias, and `groups` points it at a group. Keep
+  `seed/history.yaml` free of group fields for now.
 
 ## Verification
 

@@ -14,8 +14,8 @@ rumdl = "latest"
 air = "1.67.4"
 
 [tasks.dev]
-description = "Run the server on port 8080 with hot reload"
-run = "exec air"
+description = "Run the server with hot reload and open it in Chrome"
+run = "./scripts/dev.sh"
 
 [tasks.setup]
 description = "Install the git hooks in this clone"

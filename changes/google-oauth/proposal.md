@@ -1,7 +1,7 @@
 ---
 slug: google-oauth
-status: proposed
-created: 2026-11-05
+status: designed
+created: "2026-11-05"
 effort: medium
 ---
 
@@ -25,6 +25,7 @@ in as anyone. And revoking one person means rotating the passcode for everybody.
 - Each person is one stable user, so slips, picks, and history follow them across devices.
 - Only invited friends can get in for now. A stranger with a Google account is turned away with a friendly message.
 - Existing users from the foundation and the history import keep their data.
+- Local testing stays easy. A developer can sign in without a real Google round trip, and prod uses real Google sign-in.
 - A user is a person, not a member of one fixed club. Nothing here should have to be undone when groups arrive.
 
 **Non-goals:**

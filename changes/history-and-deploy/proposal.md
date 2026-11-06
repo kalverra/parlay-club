@@ -35,3 +35,7 @@ There is no way to deploy, to keep data across restarts, to record results, or t
 Deploy to Cloud Run inside the free tier, with the database backed up to Cloud Storage and deploys blocked during game
 windows. Add hand grading of legs with automatic slip results, slips for past weeks, and a history file that loads the
 group's past parlays. This is the last change before the Nov 8 target.
+
+Heads up on `groups` and `google-oauth`: this change ships the single club first, with the history file creating users
+by name. Once Google sign-in lands, those users must be matched to real accounts, and `groups` will load the history
+into the club's first group. The history loader should stay easy to point at a group and a person later.
