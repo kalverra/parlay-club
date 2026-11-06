@@ -10,12 +10,12 @@ import (
 // pageFiles maps a page name to the template file that defines its content.
 // The shell and the auth screens share the layout, so they share this map.
 var pageFiles = map[string]string{
-	"slip":     "templates/slip.html",
-	"games":    "templates/games.html",
-	"research": "templates/research.html",
-	"record":   "templates/record.html",
-	"login":    "templates/login.html",
-	"who":      "templates/who.html",
+	"slip":      "templates/slip.html",
+	"games":     "templates/games.html",
+	"research":  "templates/research.html",
+	"record":    "templates/record.html",
+	"login":     "templates/login.html",
+	"dev-login": "templates/dev-login.html",
 }
 
 // Renderer parses and runs the page templates. It is safe to use from several

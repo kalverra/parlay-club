@@ -22,7 +22,7 @@ func signInGate(entries ...config.AllowedEmail) auth.Gate {
 func seedIdentity(t *testing.T, f *fixture, name, email, sub, picture string) db.User {
 	t.Helper()
 
-	user, err := f.store.CreateUser(t.Context(), name)
+	user, err := f.store.CreateUserWithIdentity(t.Context(), name, "", "", "")
 	require.NoError(t, err)
 
 	_, err = f.database.ExecContext(t.Context(), `

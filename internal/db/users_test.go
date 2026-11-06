@@ -23,15 +23,22 @@ func openTestStore(t *testing.T) (*db.Store, *sql.DB) {
 	return db.NewStore(database), database
 }
 
+// createUser adds an unlinked user with just a name.
+func createUser(t *testing.T, store *db.Store, name string) db.User {
+	t.Helper()
+
+	user, err := store.CreateUserWithIdentity(t.Context(), name, "", "", "")
+	require.NoError(t, err)
+	return user
+}
+
 func TestCreateUserAssignsNextPaletteColor(t *testing.T) {
 	t.Parallel()
 
 	store, _ := openTestStore(t)
 
-	first, err := store.CreateUser(t.Context(), "Ada")
-	require.NoError(t, err)
-	second, err := store.CreateUser(t.Context(), "Grace")
-	require.NoError(t, err)
+	first := createUser(t, store, "Ada")
+	second := createUser(t, store, "Grace")
 
 	assert.Positive(t, first.ID)
 	assert.Equal(t, "Ada", first.Name)
@@ -53,29 +60,26 @@ func TestCreateUserWrapsPaletteAround(t *testing.T) {
 
 	// The palette holds eight colors, so the ninth user starts it over.
 	for i := range 8 {
-		_, err := store.CreateUser(t.Context(), fmt.Sprintf("Guest %d", i))
-		require.NoError(t, err)
+		createUser(t, store, fmt.Sprintf("Guest %d", i))
 	}
-	ninth, err := store.CreateUser(t.Context(), "Ada")
-	require.NoError(t, err)
+	ninth := createUser(t, store, "Ada")
 
 	assert.Equal(t, db.AvatarColor("sky"), ninth.AvatarColor)
 	assert.Equal(t, "bg-sky-500", ninth.AvatarColor.Class())
 }
 
-func TestCreateUserRejectsDuplicateNameIgnoringCase(t *testing.T) {
+func TestCreateUserAllowsDuplicateNames(t *testing.T) {
 	t.Parallel()
 
 	store, _ := openTestStore(t)
-	_, err := store.CreateUser(t.Context(), "Ada")
-	require.NoError(t, err)
+	first := createUser(t, store, "Ada")
+	second := createUser(t, store, "ada")
 
-	_, err = store.CreateUser(t.Context(), "ada")
-	require.ErrorIs(t, err, db.ErrNameTaken)
+	assert.NotEqual(t, first.ID, second.ID, "Google display names may collide")
 
 	users, err := store.ListActiveUsers(t.Context())
 	require.NoError(t, err)
-	assert.Len(t, users, 1)
+	assert.Len(t, users, 2)
 }
 
 func TestListActiveUsersSkipsInactiveAndOrdersByName(t *testing.T) {
@@ -83,8 +87,7 @@ func TestListActiveUsersSkipsInactiveAndOrdersByName(t *testing.T) {
 
 	store, database := openTestStore(t)
 	for _, name := range []string{"charlie", "Ada", "Bob"} {
-		_, err := store.CreateUser(t.Context(), name)
-		require.NoError(t, err)
+		createUser(t, store, name)
 	}
 	_, err := database.ExecContext(t.Context(), "UPDATE users SET active = 0 WHERE name = 'Bob'")
 	require.NoError(t, err)
@@ -114,9 +117,8 @@ func TestUserByIDReturnsHomeBookAndActiveFlag(t *testing.T) {
 	t.Parallel()
 
 	store, database := openTestStore(t)
-	user, err := store.CreateUser(t.Context(), "Ada")
-	require.NoError(t, err)
-	_, err = database.ExecContext(t.Context(), `
+	user := createUser(t, store, "Ada")
+	_, err := database.ExecContext(t.Context(), `
 		UPDATE users SET home_book = 'draftkings', active = 0 WHERE id = ?`, user.ID)
 	require.NoError(t, err)
 

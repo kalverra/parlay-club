@@ -123,7 +123,7 @@ Effort: medium (small flow, but a table rebuild, account linking, and two Google
 
 ### Phase 2: Replace the passcode
 
-- [ ] Add the Google `Provider`, the start and callback handlers, the `pc_session` cookie, `/login`, the friendly 403,
+- [x] Add the Google `Provider`, the start and callback handlers, the `pc_session` cookie, `/login`, the friendly 403,
   `POST /logout`, and the dev login. Delete the passcode, picker, and `pc_auth`/`pc_user`. Prod config requires the Google
   values and drops `PASSCODE`. Tests cover the flow, session, and config cases above.
 - [ ] Add the `avatar` partial with picture and initials fallback, and show it in the top bar, with a render test.

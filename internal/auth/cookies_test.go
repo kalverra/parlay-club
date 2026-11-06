@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -15,14 +16,11 @@ import (
 	"github.com/kalverra/parlay-club/internal/auth"
 )
 
-const (
-	testSessionKey = "test-session-key-long-enough-for-anything"
-	testPasscode   = "hut-hut"
-)
+const testSessionKey = "test-session-key-long-enough-for-anything"
 
-// testCookies builds a signer over the test key and passcode.
+// testCookies builds a signer over the test key.
 func testCookies(secure bool) *auth.Cookies {
-	return auth.NewCookies(testSessionKey, testPasscode, secure)
+	return auth.NewCookies(testSessionKey, secure)
 }
 
 // signedValue repeats the documented MAC so a test fails if the wire format
@@ -34,6 +32,22 @@ func signedValue(t *testing.T, payload string) string {
 	_, err := mac.Write([]byte(payload))
 	require.NoError(t, err)
 	return hex.EncodeToString(mac.Sum(nil))
+}
+
+// sessionValue builds a session cookie value for id and expiry.
+func sessionValue(t *testing.T, id, expiry int64) string {
+	t.Helper()
+
+	payload := strconv.FormatInt(id, 10) + "." + strconv.FormatInt(expiry, 10)
+	return payload + "." + signedValue(t, "session:"+payload)
+}
+
+// oauthValue builds a pc_oauth cookie value for one round trip.
+func oauthValue(t *testing.T, state, nonce, verifier string, issued time.Time) string {
+	t.Helper()
+
+	payload := state + "." + nonce + "." + verifier + "." + strconv.FormatInt(issued.Unix(), 10)
+	return payload + "." + signedValue(t, "oauth:"+payload)
 }
 
 // responseCookie returns the named cookie a handler set, failing the test when
@@ -68,14 +82,17 @@ func tampered(value string) string {
 	return string(replacement) + value[1:]
 }
 
-func TestSetPasscodeCookie(t *testing.T) {
+func TestSetSessionCookie(t *testing.T) {
 	t.Parallel()
 
 	tests := map[string]struct {
 		secure bool
+		id     int64
 	}{
-		"dev":  {secure: false},
-		"prod": {secure: true},
+		"dev":        {secure: false, id: 42},
+		"prod":       {secure: true, id: 42},
+		"large id":   {secure: true, id: 9007199254740993},
+		"first user": {secure: false, id: 1},
 	}
 
 	for name, test := range tests {
@@ -83,172 +100,115 @@ func TestSetPasscodeCookie(t *testing.T) {
 			t.Parallel()
 
 			w := httptest.NewRecorder()
-			testCookies(test.secure).SetPasscode(w)
+			testCookies(test.secure).SetSession(w, test.id)
 
-			cookie := responseCookie(t, w, auth.PasscodeCookie)
-			assert.Equal(t, signedValue(t, testPasscode), cookie.Value)
+			cookie := responseCookie(t, w, auth.SessionCookie)
 			assert.Equal(t, "/", cookie.Path)
-			assert.Equal(t, 365*24*60*60, cookie.MaxAge)
+			assert.Equal(t, 30*24*60*60, cookie.MaxAge)
 			assert.True(t, cookie.HttpOnly)
 			assert.Equal(t, http.SameSiteLaxMode, cookie.SameSite)
 			assert.Equal(t, test.secure, cookie.Secure)
+
+			parts := splitCookie(t, cookie.Value, 3)
+			assert.Equal(t, strconv.FormatInt(test.id, 10), parts[0])
+			expiry, err := strconv.ParseInt(parts[1], 10, 64)
+			require.NoError(t, err)
+			assert.WithinDuration(t,
+				time.Now().Add(30*24*time.Hour), time.Unix(expiry, 0), time.Minute)
+			assert.Equal(t, signedValue(t, "session:"+parts[0]+"."+parts[1]), parts[2])
 		})
 	}
 }
 
-func TestHasPasscode(t *testing.T) {
-	t.Parallel()
-
-	w := httptest.NewRecorder()
-	testCookies(false).SetPasscode(w)
-
-	assert.True(t, testCookies(false).HasPasscode(requestWithCookie(t, responseCookie(t, w, auth.PasscodeCookie))))
-}
-
-func TestHasPasscodeWithoutCookie(t *testing.T) {
-	t.Parallel()
-
-	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
-	assert.False(t, testCookies(false).HasPasscode(request))
-}
-
-func TestHasPasscodeRejectsTamperedValue(t *testing.T) {
-	t.Parallel()
-
-	w := httptest.NewRecorder()
-	testCookies(true).SetPasscode(w)
-	//nolint:gosec // the handler set these attributes; the test tampers with the value.
-	cookie := responseCookie(t, w, auth.PasscodeCookie)
-	cookie.Value = tampered(cookie.Value)
-
-	assert.False(t, testCookies(true).HasPasscode(requestWithCookie(t, cookie)))
-}
-
-func TestHasPasscodeRejectsAnotherPasscode(t *testing.T) {
-	t.Parallel()
-
-	w := httptest.NewRecorder()
-	testCookies(false).SetPasscode(w)
-	request := requestWithCookie(t, responseCookie(t, w, auth.PasscodeCookie))
-
-	// A new passcode issues different MACs, which logs every browser out.
-	assert.False(t, auth.NewCookies(testSessionKey, "new-passcode", false).HasPasscode(request))
-}
-
-func TestHasPasscodeRejectsAnotherSessionKey(t *testing.T) {
-	t.Parallel()
-
-	w := httptest.NewRecorder()
-	testCookies(false).SetPasscode(w)
-	request := requestWithCookie(t, responseCookie(t, w, auth.PasscodeCookie))
-
-	assert.False(t, auth.NewCookies("another-session-key-long-enough", testPasscode, false).HasPasscode(request))
-}
-
-func TestPasscodeMatches(t *testing.T) {
-	t.Parallel()
-
-	tests := map[string]struct {
-		input string
-		want  bool
-	}{
-		"exact":     {input: testPasscode, want: true},
-		"wrong":     {input: "hut-hutt", want: false},
-		"prefix":    {input: testPasscode[:len(testPasscode)-1], want: false},
-		"empty":     {input: "", want: false},
-		"padded":    {input: " " + testPasscode, want: false},
-		"uppercase": {input: "HUT-HUT", want: false},
-	}
-
-	for name, test := range tests {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			assert.Equal(t, test.want, testCookies(false).PasscodeMatches(test.input))
-		})
-	}
-}
-
-func TestSetUserCookie(t *testing.T) {
+func TestSessionID(t *testing.T) {
 	t.Parallel()
 
 	for _, id := range []int64{1, 42, 9007199254740993} {
 		w := httptest.NewRecorder()
-		testCookies(true).SetUser(w, id)
+		testCookies(false).SetSession(w, id)
 
-		cookie := responseCookie(t, w, auth.UserCookie)
-		assert.Equal(t, "/", cookie.Path)
-		assert.Equal(t, 365*24*60*60, cookie.MaxAge)
-		assert.True(t, cookie.HttpOnly)
-		assert.True(t, cookie.Secure)
-		assert.Equal(t, http.SameSiteLaxMode, cookie.SameSite)
-
-		idText := strconv.FormatInt(id, 10)
-		assert.Equal(t, idText+"."+signedValue(t, "user:"+idText), cookie.Value)
-	}
-}
-
-func TestUserID(t *testing.T) {
-	t.Parallel()
-
-	for _, id := range []int64{1, 42, 9007199254740993} {
-		w := httptest.NewRecorder()
-		testCookies(false).SetUser(w, id)
-
-		got, ok := testCookies(false).UserID(requestWithCookie(t, responseCookie(t, w, auth.UserCookie)))
+		got, ok := testCookies(false).SessionID(requestWithCookie(t, responseCookie(t, w, auth.SessionCookie)))
 		require.True(t, ok)
 		assert.Equal(t, id, got)
 	}
 }
 
-func TestUserIDWithoutCookie(t *testing.T) {
+func TestSessionIDWithoutCookie(t *testing.T) {
 	t.Parallel()
 
-	_, ok := testCookies(false).UserID(httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil))
+	_, ok := testCookies(false).SessionID(
+		httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil))
 	assert.False(t, ok)
 }
 
-func TestUserIDRejectsTamperedSignature(t *testing.T) {
+func TestSessionIDRejectsTamperedSignature(t *testing.T) {
 	t.Parallel()
 
 	w := httptest.NewRecorder()
-	testCookies(true).SetUser(w, 42)
+	testCookies(true).SetSession(w, 42)
 	//nolint:gosec // the handler set these attributes; the test tampers with the value.
-	cookie := responseCookie(t, w, auth.UserCookie)
-	cookie.Value = "42." + tampered(cookie.Value[len("42."):])
+	cookie := responseCookie(t, w, auth.SessionCookie)
+	cookie.Value = tampered(cookie.Value)
 
-	_, ok := testCookies(true).UserID(requestWithCookie(t, cookie))
+	_, ok := testCookies(true).SessionID(requestWithCookie(t, cookie))
 	assert.False(t, ok)
 }
 
-func TestUserIDRejectsTamperedID(t *testing.T) {
+func TestSessionIDRejectsTamperedID(t *testing.T) {
 	t.Parallel()
 
 	w := httptest.NewRecorder()
-	testCookies(true).SetUser(w, 42)
+	testCookies(true).SetSession(w, 42)
 	//nolint:gosec // the handler set these attributes; the test tampers with the value.
-	cookie := responseCookie(t, w, auth.UserCookie)
-	cookie.Value = "43." + cookie.Value[len("42."):]
+	cookie := responseCookie(t, w, auth.SessionCookie)
+	parts := splitCookie(t, cookie.Value, 3)
+	cookie.Value = "43." + parts[1] + "." + parts[2]
 
-	_, ok := testCookies(true).UserID(requestWithCookie(t, cookie))
+	_, ok := testCookies(true).SessionID(requestWithCookie(t, cookie))
 	assert.False(t, ok)
 }
 
-func TestUserIDRejectsMalformedCookie(t *testing.T) {
+func TestSessionIDRejectsExpiredCookie(t *testing.T) {
 	t.Parallel()
 
-	signature := signedValue(t, "user:42")
+	cookie := &http.Cookie{
+		Name:     auth.SessionCookie,
+		Value:    sessionValue(t, 42, time.Now().Add(-time.Minute).Unix()),
+		Secure:   true,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	}
+
+	_, ok := testCookies(false).SessionID(requestWithCookie(t, cookie))
+	assert.False(t, ok)
+}
+
+func TestSessionIDRejectsAnotherSessionKey(t *testing.T) {
+	t.Parallel()
+
+	w := httptest.NewRecorder()
+	testCookies(false).SetSession(w, 42)
+	request := requestWithCookie(t, responseCookie(t, w, auth.SessionCookie))
+
+	_, ok := auth.NewCookies("another-session-key-long-enough", false).SessionID(request)
+	assert.False(t, ok)
+}
+
+func TestSessionIDRejectsMalformedCookie(t *testing.T) {
+	t.Parallel()
+
+	signature := signedValue(t, "session:42.4102444800")
 	tests := map[string]string{
 		"empty":          "",
-		"no dot":         "42",
-		"no id":          ".signature",
-		"no signature":   "42.",
-		"non-numeric id": "forty-two." + signature,
-		"zero id":        "0." + signedValue(t, "user:0"),
-		"negative id":    "-1." + signedValue(t, "user:-1"),
-		"leading zero":   "042." + signedValue(t, "user:042"),
-		"padded id":      " 42." + signedValue(t, "user: 42"),
-		"extra dot":      "42." + signature + ".extra",
+		"no dots":        "42",
+		"two parts":      "42.4102444800",
+		"no id":          ".4102444800." + signature,
+		"no expiry":      "42.." + signature,
+		"non-numeric id": "forty-two.4102444800." + signedValue(t, "session:forty-two.4102444800"),
+		"zero id":        "0.4102444800." + signedValue(t, "session:0.4102444800"),
+		"negative id":    "-1.4102444800." + signedValue(t, "session:-1.4102444800"),
+		"leading zero":   "042.4102444800." + signedValue(t, "session:042.4102444800"),
+		"extra dot":      "42.4102444800." + signature + ".extra",
 	}
 
 	for name, value := range tests {
@@ -256,25 +216,126 @@ func TestUserIDRejectsMalformedCookie(t *testing.T) {
 			t.Parallel()
 
 			cookie := &http.Cookie{
-				Name:     auth.UserCookie,
+				Name:     auth.SessionCookie,
 				Value:    value,
 				Secure:   true,
 				HttpOnly: true,
 				SameSite: http.SameSiteLaxMode,
 			}
-			_, ok := testCookies(true).UserID(requestWithCookie(t, cookie))
+			_, ok := testCookies(false).SessionID(requestWithCookie(t, cookie))
 			assert.False(t, ok)
 		})
 	}
 }
 
-func TestUserIDRejectsAnotherSessionKey(t *testing.T) {
+func TestClearSessionCookie(t *testing.T) {
 	t.Parallel()
 
 	w := httptest.NewRecorder()
-	testCookies(false).SetUser(w, 42)
-	request := requestWithCookie(t, responseCookie(t, w, auth.UserCookie))
+	testCookies(true).ClearSession(w)
 
-	_, ok := auth.NewCookies("another-session-key-long-enough", testPasscode, false).UserID(request)
+	cookie := responseCookie(t, w, auth.SessionCookie)
+	assert.Empty(t, cookie.Value)
+	assert.Equal(t, "/", cookie.Path)
+	assert.Negative(t, cookie.MaxAge)
+	assert.True(t, cookie.Secure)
+
+	_, ok := testCookies(true).SessionID(requestWithCookie(t, cookie))
 	assert.False(t, ok)
+}
+
+func TestSetOAuthCookie(t *testing.T) {
+	t.Parallel()
+
+	w := httptest.NewRecorder()
+	testCookies(true).SetOAuth(w, auth.OAuthState{
+		State: "state-1", Nonce: "nonce-1", Verifier: "verifier-1",
+	})
+
+	cookie := responseCookie(t, w, auth.OAuthCookie)
+	assert.Equal(t, "/auth", cookie.Path)
+	assert.Equal(t, 10*60, cookie.MaxAge)
+	assert.True(t, cookie.HttpOnly)
+	assert.True(t, cookie.Secure)
+	assert.Equal(t, http.SameSiteLaxMode, cookie.SameSite)
+
+	state, ok := testCookies(true).OAuthState(requestWithCookie(t, cookie))
+	require.True(t, ok)
+	assert.Equal(t, auth.OAuthState{State: "state-1", Nonce: "nonce-1", Verifier: "verifier-1"}, state)
+}
+
+func TestOAuthStateRejectsTamperedValue(t *testing.T) {
+	t.Parallel()
+
+	w := httptest.NewRecorder()
+	testCookies(false).SetOAuth(w, auth.OAuthState{
+		State: "state-1", Nonce: "nonce-1", Verifier: "verifier-1",
+	})
+	//nolint:gosec // the handler set these attributes; the test tampers with the value.
+	cookie := responseCookie(t, w, auth.OAuthCookie)
+	cookie.Value = tampered(cookie.Value)
+
+	_, ok := testCookies(false).OAuthState(requestWithCookie(t, cookie))
+	assert.False(t, ok)
+}
+
+func TestOAuthStateRejectsExpiredCookie(t *testing.T) {
+	t.Parallel()
+
+	cookie := &http.Cookie{
+		Name:     auth.OAuthCookie,
+		Value:    oauthValue(t, "state", "nonce", "verifier", time.Now().Add(-11*time.Minute)),
+		Secure:   true,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	}
+
+	_, ok := testCookies(false).OAuthState(requestWithCookie(t, cookie))
+	assert.False(t, ok)
+}
+
+func TestOAuthStateWithoutCookie(t *testing.T) {
+	t.Parallel()
+
+	_, ok := testCookies(false).OAuthState(
+		httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil))
+	assert.False(t, ok)
+}
+
+func TestClearOAuthCookie(t *testing.T) {
+	t.Parallel()
+
+	w := httptest.NewRecorder()
+	testCookies(false).ClearOAuth(w)
+
+	cookie := responseCookie(t, w, auth.OAuthCookie)
+	assert.Empty(t, cookie.Value)
+	assert.Equal(t, "/auth", cookie.Path)
+	assert.Negative(t, cookie.MaxAge)
+
+	_, ok := testCookies(false).OAuthState(requestWithCookie(t, cookie))
+	assert.False(t, ok)
+}
+
+// splitCookie splits value on dots and fails the test when the part count is
+// wrong.
+func splitCookie(t *testing.T, value string, want int) []string {
+	t.Helper()
+
+	parts := splitDots(value)
+	require.Len(t, parts, want, "cookie value %q", value)
+	return parts
+}
+
+// splitDots splits on dots without importing strings in every test.
+func splitDots(value string) []string {
+	var parts []string
+	start := 0
+	for i := range len(value) {
+		if value[i] == '.' {
+			parts = append(parts, value[start:i])
+			start = i + 1
+		}
+	}
+	return append(parts, value[start:])
 }

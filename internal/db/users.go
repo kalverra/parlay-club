@@ -7,12 +7,8 @@ import (
 	"fmt"
 )
 
-var (
-	// ErrUserNotFound is returned when a user lookup matches no row.
-	ErrUserNotFound = errors.New("user not found")
-	// ErrNameTaken is returned when a new user's name matches an existing user.
-	ErrNameTaken = errors.New("name taken")
-)
+// ErrUserNotFound is returned when a user lookup matches no row.
+var ErrUserNotFound = errors.New("user not found")
 
 // AvatarColor is a palette name stored in users.avatar_color.
 type AvatarColor string
@@ -88,29 +84,6 @@ func (s *Store) ListActiveUsers(ctx context.Context) ([]User, error) {
 		return nil, fmt.Errorf("list active users: %w", err)
 	}
 	return users, nil
-}
-
-// CreateUser adds an active user with the next palette color. The palette runs
-// round robin over every stored user, inactive ones included, so a returning
-// guest keeps a stable position in the rotation.
-func (s *Store) CreateUser(ctx context.Context, name string) (User, error) {
-	var user User
-	err := s.Tx(ctx, func(tx *Store) error {
-		taken, err := tx.nameTaken(ctx, name)
-		if err != nil {
-			return err
-		}
-		if taken {
-			return ErrNameTaken
-		}
-
-		user, err = tx.insertUser(ctx, name, "", "", "")
-		return err
-	})
-	if err != nil {
-		return User{}, fmt.Errorf("create user %q: %w", name, err)
-	}
-	return user, nil
 }
 
 // CreateUserWithIdentity adds a user with a Google subject and email. Names may
@@ -269,14 +242,6 @@ func (s *Store) SetUserPicture(ctx context.Context, id int64, picture string) (U
 		return User{}, fmt.Errorf("set picture for user %d: %w", id, ErrUserNotFound)
 	}
 	return s.UserByID(ctx, id)
-}
-
-// nameTaken reports whether a user already holds name, ignoring case.
-func (s *Store) nameTaken(ctx context.Context, name string) (bool, error) {
-	var taken bool
-	err := s.conn().QueryRowContext(ctx,
-		"SELECT EXISTS (SELECT 1 FROM users WHERE name = ?)", name).Scan(&taken)
-	return taken, err
 }
 
 // rowScanner is the Scan method shared by *sql.Row and *sql.Rows.
