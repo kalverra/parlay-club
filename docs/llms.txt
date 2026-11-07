@@ -24,6 +24,7 @@
 
 - [Configuration](reference/config.md): Environment variables the server reads, their dev defaults, and the values it rejects in prod.
 - [Odds math](reference/odds-math.md): The formulas in internal/parlay for converting American and decimal odds, combining legs, picking a reference price, and computing payout and units.
+- [Routes](reference/routes.md): Every HTTP route the server serves, the middleware in front of them, and the status codes, HTMX headers, and SSE frames handlers return.
 - [Database schema](reference/schema.md): SQLite tables, including groups and their members, how migrations are tracked and applied, and the connection settings behind every query.
 
 ## Runbook

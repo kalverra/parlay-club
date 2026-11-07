@@ -49,43 +49,11 @@ SQL.
 
 ## Routes
 
-Go 1.22+ method patterns. All routes except `/healthz`, `/static/`, `/login`, `POST /logout`, the Google sign-in routes,
-and the dev sign-in routes need a signed-in user. Every authenticated route also runs the group scope, which picks the
-active group or falls back to one the person belongs to.
+Built routes are documented in [docs/reference/routes.md](../docs/reference/routes.md). These are the routes still to
+come. They use Go 1.22+ method patterns and inherit the same sign-in and group scope as the built ones.
 
 | Method + path                              | Purpose                                                  | Change |
 | ------------------------------------------ | -------------------------------------------------------- | ------ |
-| `GET /healthz`                             | 200 `ok`                                                 | 1     |
-| `GET /static/{path...}`                    | Embedded assets, long cache headers, hashed via query    | 1     |
-| `GET /login`                               | Sign-in page: Google button, plus a dev link when Google is off | 1     |
-| `POST /logout`                             | Clear the session and active-group cookies and return to `/login` | 1     |
-| `GET /auth/google/start`                   | Start the Google round trip                              | 1     |
-| `GET /auth/google/callback`                | Finish Google sign-in                                    | 1     |
-| `GET /dev/login`, `POST /dev/login`        | Local sign-in, dev only and only when Google is not configured | 1     |
-| `GET /groups`                              | Group list, create form, invite links, leave             | groups |
-| `POST /groups`                             | Create a group and make it active                        | groups |
-| `POST /groups/switch`                      | Make one of the caller's groups active                   | groups |
-| `POST /groups/{id}/reset-invite`           | Mint a new invite link and kill the old one              | groups |
-| `POST /groups/{id}/leave`                  | Leave a group, keeping the person's legs                 | groups |
-| `GET /join/{token}`                        | Join page naming the group and its members               | groups |
-| `POST /join/{token}`                       | Join the group, idempotently                             | groups |
-| `GET /me`, `POST /me`                      | Profile: home book; `POST /users/{id}/active` toggles    | 2     |
-| `GET /`                                    | Newest slip of the current week in the active group, else create form | 2     |
-| `GET /slips/new`, `POST /slips`            | Create slip                                              | 2     |
-| `GET /slips/{id}`                          | Full page                                                | 2     |
-| `GET /slips/{id}/panel`                    | Slip panel partial (members, legs, odds, banner)         | 2     |
-| `GET /slips/{id}/payout?stake=&boost=`     | Payout partial                                           | 2     |
-| `GET /slips/{id}/activity`                 | Activity partial                                         | 2     |
-| `POST /slips/{id}/members`                 | Add member                                               | 2     |
-| `DELETE /slips/{id}/members/{userID}`      | Remove member                                            | 2     |
-| `PATCH /slips/{id}`                        | Change `legs_per_member` or name                         | 2     |
-| `GET /slips/{id}/legs/new?game_id=`        | Leg form partial                                         | 2     |
-| `POST /slips/{id}/legs`                    | Add leg                                                  | 2     |
-| `GET /legs/{id}/edit`, `PUT /legs/{id}`    | Edit leg                                                 | 2     |
-| `DELETE /legs/{id}`                        | Delete leg                                               | 2     |
-| `POST /slips/{id}/lock`                    | Current user locks in                                    | 2     |
-| `POST /slips/{id}/unlock`                  | Unlock slip                                              | 2     |
-| `GET /slips/{id}/events`                   | SSE stream                                               | 2     |
 | `GET /weeks/{weekID}/games`                | Game board partial                                       | 3     |
 | `GET /games/{id}/quickadd?slip_id=`        | Quick-add pills (`props-research`: triggers prop fetch)           | 3     |
 | `PUT /legs/{id}/result`                    | Manual grade                                             | 5     |
@@ -93,9 +61,6 @@ active group or falls back to one the person belongs to.
 | `GET /research/games/{id}`                 | Game research partial                                    | 6     |
 | `GET /record?season=`                      | Record Book for the active group                          | 7     |
 | `PUT /slips/{id}/wagers/me`                | Log own wager                                            | 7     |
-
-Rule violations from `internal/slips` return 422 with a short message rendered in the form. HTMX responses that change
-the slip return the refreshed panel.
 
 ## Refresh
 
