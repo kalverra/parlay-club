@@ -1,6 +1,6 @@
 ---
 slug: raw-response-archive
-status: designed
+status: implementing
 created: "2026-11-07"
 depends_on:
     - slate-and-lines

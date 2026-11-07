@@ -2,9 +2,9 @@
 id: schema
 title: Database schema
 type: reference
-summary: SQLite tables, including groups and their members, how migrations are tracked and applied, and the connection settings behind every query.
-tags: [database, sqlite, migrations, groups]
-sources: [internal/db/migrations/*.sql, internal/db/migrate.go, internal/db/db.go, internal/db/groups.go]
+summary: SQLite tables, including groups and their members and the raw external response archive, how migrations are tracked and applied, and the connection settings behind every query.
+tags: [database, sqlite, migrations, groups, archive, api, raw-responses]
+sources: [internal/db/migrations/*.sql, internal/db/migrate.go, internal/db/db.go, internal/db/groups.go, internal/db/archive.go, internal/db/archive_read.go, internal/ingest/archive/transport.go]
 last_verified: 2026-11-07
 ---
 
@@ -14,7 +14,8 @@ last_verified: 2026-11-07
 
 One SQLite file, opened by `internal/db.Open`, holds every table the app uses. `0001_init.sql` creates the tables,
 including groups, their members, and `slips.group_id`. `0002_google_identity.sql` rebuilds `users` to add Google
-identity columns and drop the unique name rule.
+identity columns and drop the unique name rule. `0003_api_archive.sql` adds the raw response archive, `api_bodies` and
+`api_responses`; see [Archive](../concepts/archive.md).
 
 ## Connection settings
 
@@ -38,13 +39,14 @@ connection rules out `SQLITE_BUSY`.
 - `db.Migrate` applies every file whose number is greater than `PRAGMA user_version`, in number order.
 - Each file runs in its own transaction. The migration's statements and its `user_version` bump commit together, so a
   failed migration leaves neither behind.
-- A fresh database ends at version 2 with every table below.
+- A fresh database ends at version 3 with every table below.
 - `0001_init.sql` creates `groups`, `group_members`, and `slips.group_id`. A database created before groups existed has
   the old `slips` shape, so delete it and let the migrations rebuild.
 - `0002_google_identity.sql` rebuilds `users` in its transaction with the SQLite 12-step method and
   `PRAGMA defer_foreign_keys = ON`, so the drop and rename keep every child row valid. Existing rows keep their `id`,
   name, color, home book, active flag, and creation time, and come back with no Google identity.
-- Never edit an applied file. Add `0003_name.sql` and up.
+- `0003_api_archive.sql` creates the two archive tables and their two indexes. It changes no existing table.
+- Never edit an applied file. Add `0004_name.sql` and up.
 - `PRAGMA user_version` on the database file is the only record of what ran.
 
 ## Tables
@@ -64,6 +66,8 @@ connection rules out `SQLITE_BUSY`.
 | `player_matches` | Odds player name to ESPN athlete ID, per team.                |
 | `activity`       | Human-readable slip history; `user_id` is NULL for system entries. |
 | `sync_state`     | Last fetch time per outside data source, plus remaining odds credits. |
+| `api_bodies`     | Raw external response bodies, gzipped and keyed by the SHA-256 of the uncompressed bytes. |
+| `api_responses`  | One row per archived external call: source, key, redacted URL, status, time, and body hash. |
 
 ## Users and identity
 
@@ -245,12 +249,48 @@ CREATE TABLE sync_state (
   fetched_at             TEXT NOT NULL,
   odds_credits_remaining INTEGER               -- set by Odds API sources only
 );
+
+CREATE TABLE api_bodies (
+  sha256   TEXT PRIMARY KEY,     -- hex of the uncompressed body
+  encoding TEXT NOT NULL,        -- 'gzip'
+  size     INTEGER NOT NULL,     -- uncompressed bytes
+  body     BLOB NOT NULL
+);
+
+CREATE TABLE api_responses (
+  id                INTEGER PRIMARY KEY,
+  source            TEXT NOT NULL,       -- espn | weather | odds
+  key               TEXT NOT NULL,       -- sync_state source key, or host+path
+  method            TEXT NOT NULL,
+  url               TEXT NOT NULL,       -- apiKey redacted
+  status            INTEGER NOT NULL,
+  fetched_at        TEXT NOT NULL,
+  duration_ms       INTEGER NOT NULL,
+  body_sha256       TEXT NOT NULL REFERENCES api_bodies(sha256),
+  credits_remaining INTEGER,             -- x-requests-remaining, odds only
+  credits_used      INTEGER,             -- x-requests-last, odds only
+  CHECK (status BETWEEN 200 AND 299)
+);
+CREATE INDEX api_responses_key ON api_responses(key, fetched_at);
+CREATE INDEX api_responses_source ON api_responses(source, fetched_at);
 ```
+
+## API archive
+
+`api_responses` holds one row per archived external call. `body_sha256` points at `api_bodies`, where the body is
+gzipped and stored once per distinct uncompressed payload. A source that polls on a schedule and returns the same JSON
+adds a response row but no second body. The app inserts these rows and never updates or deletes them.
+
+Both writes happen in one transaction, so a response row never points at a missing body. `status` only ever holds a 2xx
+code, and `url` has The Odds API's `apiKey` value replaced by `REDACTED`. `credits_remaining` and `credits_used` are set
+for `source = 'odds'` and stay `NULL` for the other sources. See [Archive](../concepts/archive.md) for what is kept and
+how to read it.
 
 ## Conventions
 
 - Timestamps are RFC 3339 UTC text. Parse them with `time.RFC3339`.
 - Booleans are `INTEGER` 0/1.
+- `api_bodies.body` is gzipped unless `encoding` says otherwise. Decompress it before treating it as JSON.
 - A leg's kickoff lock comes from `games.kickoff_utc`; it is not stored.
 - A slip's reference odds are not stored; any view that shows them computes them.
 - `slips.status` and `slips.result` stay in step with lock and leg-result changes.

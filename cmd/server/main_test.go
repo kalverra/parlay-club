@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -20,6 +22,11 @@ import (
 	"github.com/kalverra/parlay-club/internal/config"
 	"github.com/kalverra/parlay-club/internal/db"
 	"github.com/kalverra/parlay-club/internal/groups"
+	"github.com/kalverra/parlay-club/internal/ingest/archive"
+	"github.com/kalverra/parlay-club/internal/ingest/espn"
+	"github.com/kalverra/parlay-club/internal/ingest/odds"
+	"github.com/kalverra/parlay-club/internal/ingest/weather"
+	"github.com/kalverra/parlay-club/internal/refresh"
 )
 
 // passthrough stands in for the group scope in tests that do not need one.
@@ -281,4 +288,265 @@ func TestServeDrainsInflightRequestOnShutdown(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("serve did not return after the in-flight request finished")
 	}
+}
+
+// The fixed instant and kickoff the ingest wiring test works against: the
+// Saturday before a Sunday game, inside both the weather and odds windows.
+var (
+	ingestKickoff = time.Date(2026, time.November, 8, 18, 0, 0, 0, time.UTC)
+	ingestNow     = time.Date(2026, time.November, 7, 16, 0, 0, 0, time.UTC)
+)
+
+// archiveTestAPIKey is the Odds API key the wiring test hands the client. It
+// must never reach the archive.
+const archiveTestAPIKey = "archive-test-key"
+
+// TestRefreshArchivesEveryIngestCall drives one refresh pass through real
+// ingest clients over fake sources. It proves the cmd/server client archives
+// each call under the refresh source key without changing the parsed rows or
+// the sync state the app already wrote.
+func TestRefreshArchivesEveryIngestCall(t *testing.T) {
+	t.Parallel()
+
+	database, err := db.Open(filepath.Join(t.TempDir(), "parlay.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { assert.NoError(t, database.Close()) })
+	require.NoError(t, db.Migrate(t.Context(), database))
+	store := db.NewStore(database)
+
+	client := newIngestClient(store)
+	require.IsType(t, &archive.Transport{}, client.Transport, "the ingest client archives every call")
+	assert.Equal(t, ingestTimeout, client.Timeout)
+
+	service := refresh.New(refresh.Deps{
+		Store:      store,
+		Scoreboard: espn.NewClient(fakeESPN(t).URL, client),
+		Forecast:   weather.NewClient(fakeWeather(t).URL, client),
+		Lines:      odds.NewClient(fakeOdds(t).URL, archiveTestAPIKey, client),
+		Now:        func() time.Time { return ingestNow },
+		Logger:     zerolog.Nop(),
+	})
+	service.KickContext(t.Context())
+
+	weatherKey := refresh.WeatherSource("401")
+	waitForSyncStates(t, store, refresh.ScoreboardSource, weatherKey, refresh.OddsLinesSource)
+
+	rows, err := store.ListAPIResponses(t.Context(), db.APIResponseFilter{})
+	require.NoError(t, err)
+	require.Len(t, rows, 4, "one row per outside call")
+
+	keyCounts := make(map[string]int, 3)
+	var eventsRow, linesRow db.APIResponse
+	for _, row := range rows {
+		keyCounts[row.Key]++
+		assert.Equal(t, http.MethodGet, row.Method)
+		assert.Equal(t, http.StatusOK, row.Status)
+		assert.WithinDuration(t, time.Now(), row.FetchedAt, time.Minute, "the archive stamps real time")
+		assert.NotContains(t, row.URL, archiveTestAPIKey, "the Odds API key never reaches the archive")
+
+		body, err := store.APIResponseBody(t.Context(), row.BodySHA256)
+		require.NoError(t, err)
+		assert.NotEmpty(t, body)
+
+		switch row.Key {
+		case refresh.ScoreboardSource:
+			assert.Equal(t, archive.SourceESPN, row.Source)
+			assert.Nil(t, row.CreditsRemaining)
+			assert.Nil(t, row.CreditsUsed)
+		case weatherKey:
+			assert.Equal(t, archive.SourceWeather, row.Source)
+			assert.Nil(t, row.CreditsRemaining)
+			assert.Nil(t, row.CreditsUsed)
+		case refresh.OddsLinesSource:
+			assert.Equal(t, archive.SourceOdds, row.Source)
+			assert.Contains(t, row.URL, "apiKey=REDACTED")
+			if strings.Contains(row.URL, "/events") {
+				eventsRow = row
+			} else {
+				linesRow = row
+			}
+		}
+	}
+	assert.Equal(t, map[string]int{
+		refresh.ScoreboardSource: 1,
+		weatherKey:               1,
+		refresh.OddsLinesSource:  2,
+	}, keyCounts, "ESPN and weather once each, and the Odds API's free event list plus paid lines")
+
+	require.NotEmpty(t, eventsRow.BodySHA256, "the free event list is archived")
+	require.NotNil(t, eventsRow.CreditsRemaining)
+	assert.Equal(t, 490, *eventsRow.CreditsRemaining)
+	require.NotNil(t, eventsRow.CreditsUsed)
+	assert.Equal(t, 0, *eventsRow.CreditsUsed)
+
+	require.NotEmpty(t, linesRow.BodySHA256, "the paid lines call is archived")
+	require.NotNil(t, linesRow.CreditsRemaining)
+	assert.Equal(t, 489, *linesRow.CreditsRemaining)
+	require.NotNil(t, linesRow.CreditsUsed)
+	assert.Equal(t, 1, *linesRow.CreditsUsed)
+
+	game, err := store.GameByID(t.Context(), "401")
+	require.NoError(t, err)
+	assert.Equal(t, "BUF", game.HomeTeam)
+	assert.Equal(t, "MIA", game.AwayTeam)
+	require.NotNil(t, game.TempF)
+	assert.InDelta(t, 41.6, *game.TempF, 1e-9)
+	require.NotNil(t, game.OddsEventID)
+	assert.Equal(t, "evt-1", *game.OddsEventID)
+
+	parsedOdds, err := store.OddsForGame(t.Context(), "401")
+	require.NoError(t, err)
+	assert.Len(t, parsedOdds, 2, "the archive does not duplicate or drop parsed odds rows")
+
+	for _, key := range []string{refresh.ScoreboardSource, weatherKey, refresh.OddsLinesSource} {
+		state, err := store.SyncState(t.Context(), key)
+		require.NoError(t, err)
+		assert.Equal(t, ingestNow, state.FetchedAt, "the archive leaves %s's sync state alone", key)
+	}
+	oddsState, err := store.SyncState(t.Context(), refresh.OddsLinesSource)
+	require.NoError(t, err)
+	require.NotNil(t, oddsState.OddsCreditsRemaining)
+	assert.Equal(t, 489, *oddsState.OddsCreditsRemaining)
+}
+
+// waitForSyncStates blocks until every source has recorded a fetch. Refresh
+// runs in the background, so the test waits for the pass before reading.
+func waitForSyncStates(t *testing.T, store *db.Store, keys ...string) {
+	t.Helper()
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		missing := false
+		for _, key := range keys {
+			_, err := store.SyncState(t.Context(), key)
+			if errors.Is(err, db.ErrSyncStateNotFound) {
+				missing = true
+				break
+			}
+			require.NoError(t, err)
+		}
+		if !missing {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("refresh did not record every source: %v", keys)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// fakeESPN serves one scheduled Sunday game at Highmark Stadium.
+func fakeESPN(t *testing.T) *httptest.Server {
+	t.Helper()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/scoreboard", r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"season": map[string]any{"year": 2026, "type": 2},
+			"week":   map[string]any{"number": 9},
+			"events": []any{map[string]any{
+				"id":     "401",
+				"date":   ingestKickoff.Format(time.RFC3339),
+				"status": map[string]any{"type": map[string]any{"state": "pre"}},
+				"competitions": []any{map[string]any{
+					"competitors": []any{
+						map[string]any{
+							"homeAway": "home",
+							"team": map[string]any{
+								"id": "2", "abbreviation": "BUF", "displayName": "Buffalo Bills",
+							},
+						},
+						map[string]any{
+							"homeAway": "away",
+							"team": map[string]any{
+								"id": "15", "abbreviation": "MIA", "displayName": "Miami Dolphins",
+							},
+						},
+					},
+					"venue": map[string]any{
+						"id": "11938", "fullName": "Highmark Stadium", "indoor": false,
+					},
+				}},
+			}},
+		})
+	}))
+	t.Cleanup(server.Close)
+	return server
+}
+
+// fakeWeather serves the three-hour kickoff window Open-Meteo would return for
+// Highmark Stadium.
+func fakeWeather(t *testing.T) *httptest.Server {
+	t.Helper()
+
+	start := ingestKickoff.UTC().Truncate(time.Hour)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/v1/forecast", r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"hourly": map[string]any{
+				"time": []string{
+					start.Format("2006-01-02T15:04"),
+					start.Add(time.Hour).Format("2006-01-02T15:04"),
+					start.Add(2 * time.Hour).Format("2006-01-02T15:04"),
+				},
+				"temperature_2m": []float64{41.6, 42.0, 42.7},
+				"precipitation":  []float64{0, 0, 0},
+				"wind_speed_10m": []float64{6.3, 5.0, 4.0},
+				"wind_gusts_10m": []float64{18.3, 15.0, 12.0},
+			},
+		})
+	}))
+	t.Cleanup(server.Close)
+	return server
+}
+
+// fakeOdds serves the free event list and the paid game lines, with the credit
+// headers each call would carry.
+func fakeOdds(t *testing.T) *httptest.Server {
+	t.Helper()
+
+	event := map[string]any{
+		"id":            "evt-1",
+		"commence_time": ingestKickoff.Format(time.RFC3339),
+		"home_team":     "Buffalo Bills",
+		"away_team":     "Miami Dolphins",
+	}
+	lines := map[string]any{
+		"id":            "evt-1",
+		"commence_time": ingestKickoff.Format(time.RFC3339),
+		"home_team":     "Buffalo Bills",
+		"away_team":     "Miami Dolphins",
+		"bookmakers": []any{map[string]any{
+			"key": "draftkings",
+			"markets": []any{map[string]any{
+				"key": "h2h",
+				"outcomes": []any{
+					map[string]any{"name": "Buffalo Bills", "price": -155},
+					map[string]any{"name": "Miami Dolphins", "price": 135},
+				},
+			}},
+		}},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, archiveTestAPIKey, r.URL.Query().Get("apiKey"))
+		w.Header().Set("Content-Type", "application/json")
+
+		switch r.URL.Path {
+		case "/events":
+			w.Header().Set("X-Requests-Remaining", "490")
+			w.Header().Set("X-Requests-Last", "0")
+			_ = json.NewEncoder(w).Encode([]any{event})
+		case "/odds":
+			w.Header().Set("X-Requests-Remaining", "489")
+			w.Header().Set("X-Requests-Last", "1")
+			_ = json.NewEncoder(w).Encode([]any{lines})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	return server
 }

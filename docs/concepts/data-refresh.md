@@ -2,9 +2,9 @@
 id: data-refresh
 title: Data refresh
 type: concept
-summary: How page loads drive lazy syncs of the slate, weather, and game lines, with per-source staleness windows, single-flight, failure backoff, and Odds API credit floors.
-tags: [refresh, sync, lazy, staleness, singleflight, backoff, credits, odds, weather, slate, live-window]
-sources: [internal/refresh/refresh.go, internal/refresh/rules.go, internal/refresh/sources.go, internal/refresh/publish.go, internal/refresh/live.go, internal/db/sync.go, cmd/server/main.go]
+summary: How page loads drive lazy syncs of the slate, weather, and game lines, with per-source staleness windows, single-flight, failure backoff, Odds API credit floors, and an archive of every successful response.
+tags: [refresh, sync, lazy, staleness, singleflight, backoff, credits, odds, weather, slate, live-window, archive, raw-responses]
+sources: [internal/refresh/refresh.go, internal/refresh/rules.go, internal/refresh/sources.go, internal/refresh/publish.go, internal/refresh/live.go, internal/db/sync.go, internal/ingest/archive/transport.go, cmd/server/main.go]
 last_verified: 2026-11-07
 ---
 
@@ -43,6 +43,16 @@ does not cancel a sync, and every source gets its own 30 second timeout. Tests w
 Within a source, `singleflight` keyed by its `sync_state` source key lets concurrent page loads share one fetch. The
 work inside the flight re-reads the staleness state before fetching, so a load that joined after the first run finished
 does not fetch stale data twice.
+
+## Archive
+
+Each source labels its requests with `archive.WithKey(ctx, src.key)` in `refresh`, using the same string it writes to
+`sync_state`. The shared ingest client in `cmd/server` wraps its transport with `archive.Transport`, so every successful
+response is saved under that key before the client parses it. See [Response archive](archive.md).
+
+The save sits beside the sync, not inside its transaction. A failed archive write is logged and dropped, so it never
+fails a sync or changes the parsed rows. Both Odds calls in one pass, the free `/events` list and the paid `/odds` call,
+use `odds:lines` today, so both rows carry that key.
 
 ## Staleness rules
 
