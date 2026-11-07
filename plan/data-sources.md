@@ -25,24 +25,6 @@ into `testdata/` and confirm the paths against it; fix this doc where they diffe
 
 ## ESPN (free, no auth, unofficial)
 
-### Scoreboard
-
-`GET https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard`
-
-With no params it returns the current week. For a specific week: `?seasontype={2|3}&week={n}&dates={season}`.
-
-| Field                                               | Use                                         |
-| --------------------------------------------------- | ------------------------------------------- |
-| `season.year`, `season.type`, `week.number`         | Week row                                    |
-| `events[].id`                                       | `games.id`                                  |
-| `events[].date`                                     | `kickoff_utc`                               |
-| `events[].competitions[0].competitors[]`            | `homeAway`, `team.abbreviation`, `team.displayName`, `team.id`, `score` |
-| `events[].competitions[0].venue`                    | `id`, `fullName`, `indoor`                  |
-| `events[].status.type.state`                        | `pre` → SCHEDULED, `in` → LIVE, `post` → FINAL |
-
-- Keep only events whose kickoff in `America/New_York` falls on Sunday or Monday.
-- Upsert games; never delete them (a flexed game keeps its ID).
-
 ### Summary (injuries, box score)
 
 `GET https://site.api.espn.com/apis/site/v2/sports/football/nfl/summary?event={id}`
