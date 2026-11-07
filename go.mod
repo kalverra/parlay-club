@@ -8,6 +8,7 @@ require (
 	github.com/rs/zerolog v1.35.1
 	github.com/stretchr/testify v1.12.1
 	golang.org/x/oauth2 v0.37.0
+	golang.org/x/sync v0.24.0
 	modernc.org/sqlite v1.61.1
 )
 
