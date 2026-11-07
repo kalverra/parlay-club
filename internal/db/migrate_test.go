@@ -11,7 +11,7 @@ import (
 )
 
 // latestSchemaVersion is the version the last migration records.
-const latestSchemaVersion = 2
+const latestSchemaVersion = 3
 
 func TestMigrateFreshDatabase(t *testing.T) {
 	t.Parallel()
@@ -22,6 +22,8 @@ func TestMigrateFreshDatabase(t *testing.T) {
 	assert.Equal(t, latestSchemaVersion, schemaVersion(t, database))
 	assert.ElementsMatch(t, []string{
 		"activity",
+		"api_bodies",
+		"api_responses",
 		"games",
 		"group_members",
 		"groups",

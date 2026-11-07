@@ -123,6 +123,9 @@ Rejected:
   lost, which is acceptable for research data.
 - **Fallback labels.** A client that skips the label gets host + path keys. Rows are still kept, but harder to join with
   `sync_state`. The wiring test checks every client sets one.
+- **One Odds key covers two calls.** The free event list and the paid lines call both archive under `odds:lines`, because
+  that is the one `sync_state` key and credit balance for the pass. Rows are distinguishable by URL path; a later change
+  can split them into `odds:events` and `odds:lines` if modeling needs that.
 - **Secrets in bodies.** None of the three sources echo credentials today. If one does, the redaction step must extend
   to bodies; the test above covers the known case only.
 
@@ -132,17 +135,17 @@ Effort: medium (a small package, but the seam must sit under every client and fa
 
 ### Phase 1: Archive transport and store
 
-- [ ] Add the migration and the archive package: the `RoundTripper`, URL redaction, label context helpers, the gzip and
+- [x] Add the migration and the archive package: the `RoundTripper`, URL redaction, label context helpers, the gzip and
       hash body store, and the sink as a `Store` method, tested against a fake server and a temp DB for success,
       failure, oversize, dedupe, redaction, and credit headers
-- [ ] Add the read API (list by key prefix and time, fetch body by hash) and test the byte-for-byte round trip
-- [ ] Docs: add the tables to `docs/reference/schema.md` and write `docs/concepts/archive.md` covering what is kept, the
+- [x] Add the read API (list by key prefix and time, fetch body by hash) and test the byte-for-byte round trip
+- [x] Docs: add the tables to `docs/reference/schema.md` and write `docs/concepts/archive.md` covering what is kept, the
   labels, and how to query it
 
 ### Phase 2: Wire it under the clients
 
-- [ ] Build the ingest `*http.Client` in `cmd/server` with `archive.Transport` as its transport, set the key label in
+- [x] Build the ingest `*http.Client` in `cmd/server` with `archive.Transport` as its transport, set the key label in
       `refresh` for every source, and test with fake servers that one pass over ESPN, weather, and Odds API archives one
       row per call, leaves parsed rows and `sync_state` unchanged, and leaves OAuth traffic unrecorded
-- [ ] Docs: note the archive in `plan/data-sources.md` (or `docs/reference/data-sources.md` if `slate-and-lines` moved
+- [x] Docs: note the archive in `plan/data-sources.md` (or `docs/reference/data-sources.md` if `slate-and-lines` moved
       it), the Refresh section of `plan/architecture.md`, and add a size-check note to the runbooks

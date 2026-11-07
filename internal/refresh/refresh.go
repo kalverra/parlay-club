@@ -20,6 +20,7 @@ import (
 	"golang.org/x/sync/singleflight"
 
 	"github.com/kalverra/parlay-club/internal/db"
+	"github.com/kalverra/parlay-club/internal/ingest/archive"
 	"github.com/kalverra/parlay-club/internal/ingest/espn"
 	"github.com/kalverra/parlay-club/internal/ingest/odds"
 	"github.com/kalverra/parlay-club/internal/ingest/weather"
@@ -228,6 +229,9 @@ func (s *Service) refresh(parent context.Context, src source, now time.Time) {
 
 	ctx, cancel := context.WithTimeout(parent, syncTimeout)
 	defer cancel()
+	// Label every outside call with the same key sync_state uses, so the
+	// archive and the sync record join cleanly.
+	ctx = archive.WithKey(ctx, src.key)
 
 	due, err := s.shouldRun(ctx, src)
 	if err != nil {

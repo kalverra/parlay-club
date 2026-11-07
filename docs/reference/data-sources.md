@@ -2,9 +2,9 @@
 id: data-sources
 title: Data sources
 type: reference
-summary: The free sources behind the slate, the ESPN scoreboard endpoint and its Sunday and Monday filter, the Open-Meteo forecast behind a game's weather, and The Odds API game lines, bookmakers, and credit budget.
-tags: [data, espn, scoreboard, games, sync, fixtures, weather, open-meteo, venues, odds, lines, bookmakers, credits, budget]
-sources: [internal/ingest/espn/client.go, internal/ingest/espn/scoreboard.go, internal/db/weeks.go, internal/db/games.go, internal/ingest/weather/client.go, internal/ingest/weather/forecast.go, internal/ingest/weather/venues.go, internal/ingest/odds/client.go, internal/ingest/odds/events.go, internal/ingest/odds/lines.go, internal/ingest/odds/match.go]
+summary: The free sources behind the slate, the ESPN scoreboard endpoint and its Sunday and Monday filter, the Open-Meteo forecast behind a game's weather, The Odds API game lines, bookmakers, and credit budget, and the raw response archive every successful call leaves.
+tags: [data, espn, scoreboard, games, sync, fixtures, weather, open-meteo, venues, odds, lines, bookmakers, credits, budget, archive, raw-responses, sqlite]
+sources: [internal/ingest/espn/client.go, internal/ingest/espn/scoreboard.go, internal/db/weeks.go, internal/db/games.go, internal/ingest/weather/client.go, internal/ingest/weather/forecast.go, internal/ingest/weather/venues.go, internal/ingest/odds/client.go, internal/ingest/odds/events.go, internal/ingest/odds/lines.go, internal/ingest/odds/match.go, internal/ingest/archive/transport.go, internal/db/archive.go, cmd/server/main.go, internal/refresh/refresh.go]
 last_verified: 2026-11-07
 ---
 
@@ -15,6 +15,24 @@ last_verified: 2026-11-07
 Each source gets a client package under `internal/ingest/`. A client takes a base URL and an `*http.Client` in its
 constructor, defaults to a 10 second timeout, sends `User-Agent: parlay-club`, returns plain structs, and never touches
 the database. The caller decides when to fetch and writes results through the `Store`.
+
+## Response archive
+
+Every successful call to these sources is saved raw before the client parses it. The ingest `*http.Client` built in
+`cmd/server` has `archive.Transport` as its transport, so the clients stay database-free and cannot forget a call.
+
+- A 2xx response of at most 8 MiB is kept. The uncompressed bytes go in `api_bodies`, gzipped and keyed by their
+  SHA-256, so an unchanged payload stores one body row. Each call adds one `api_responses` row with the source, key,
+  method, redacted URL, status, time, duration, and body hash.
+- Non-2xx responses, transport errors, timeouts, and bodies over the cap pass through unrecorded. A sink error is logged
+  and dropped, so the client still gets its response.
+- The stored URL keeps every query parameter except the Odds API's `apiKey`, which becomes `REDACTED`. Odds responses
+  also fill `credits_remaining` from `x-requests-remaining` and `credits_used` from `x-requests-last`.
+- The `key` is the `sync_state` key that `refresh` puts in the request context. If a client forgets the label, the
+  transport falls back to `host + path`.
+
+The archive is research data. No page or route reads it. See [Response archive](../concepts/archive.md) for the tables,
+the read API, and the size check.
 
 ## ESPN (free, no auth, unofficial)
 

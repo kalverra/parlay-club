@@ -21,6 +21,7 @@ import (
 	"github.com/kalverra/parlay-club/internal/config"
 	"github.com/kalverra/parlay-club/internal/db"
 	"github.com/kalverra/parlay-club/internal/groups"
+	"github.com/kalverra/parlay-club/internal/ingest/archive"
 	"github.com/kalverra/parlay-club/internal/ingest/espn"
 	"github.com/kalverra/parlay-club/internal/ingest/odds"
 	"github.com/kalverra/parlay-club/internal/ingest/weather"
@@ -34,6 +35,10 @@ import (
 // shutdownTimeout leaves two seconds of Cloud Run's ten before the instance is
 // killed, so in-flight requests finish and Litestream can sync.
 const shutdownTimeout = 8 * time.Second
+
+// ingestTimeout bounds one outside API call. It matches the ingest clients'
+// own defaults, which the shared client replaces.
+const ingestTimeout = 10 * time.Second
 
 func main() {
 	if err := run(); err != nil {
@@ -90,11 +95,12 @@ func run() error {
 
 	hub := &live.Hub{}
 	slipService := slips.New(store, hub, nil)
+	ingestClient := newIngestClient(store)
 	refresher := refresh.New(refresh.Deps{
 		Store:      store,
-		Scoreboard: espn.NewClient("", nil),
-		Forecast:   weather.NewClient("", nil),
-		Lines:      odds.NewClient("", cfg.OddsAPIKey, nil),
+		Scoreboard: espn.NewClient("", ingestClient),
+		Forecast:   weather.NewClient("", ingestClient),
+		Lines:      odds.NewClient("", cfg.OddsAPIKey, ingestClient),
 		Publisher:  hub,
 		Logger:     logger,
 	})
@@ -123,6 +129,17 @@ func run() error {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	return listenAndServe(ctx, logger, server)
+}
+
+// newIngestClient builds the HTTP client every ingest source shares. Its
+// transport archives each successful response in the app's database, so the
+// clients stay database-free and cannot forget to record a call. The auth
+// package keeps its own client and never passes through this one.
+func newIngestClient(store *db.Store) *http.Client {
+	return &http.Client{
+		Timeout:   ingestTimeout,
+		Transport: archive.NewTransport(http.DefaultTransport, store, nil),
+	}
 }
 
 // newProvider builds the Google sign-in provider, or returns nil when Google is
