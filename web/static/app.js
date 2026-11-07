@@ -90,3 +90,69 @@ document.addEventListener("click", (event) => {
   }
   closeGroupSwitcher(event);
 });
+
+// Live updates. The slip page marks its body with data-live-url. One
+// EventSource per page carries only signals, so the page refetches the
+// partials it shows. The server says bye at its deadline, and the tab closes
+// the stream while hidden because iOS Safari drops background connections.
+let liveURL = "";
+let liveSource = null;
+
+function openLive() {
+  if (!liveURL || document.hidden || liveSource) {
+    return;
+  }
+
+  liveSource = new EventSource(liveURL);
+
+  liveSource.addEventListener("slip-updated", () => {
+    htmx.trigger(document.body, "slip-updated");
+  });
+
+  liveSource.addEventListener("board-updated", () => {
+    htmx.trigger(document.body, "board-updated");
+  });
+
+  liveSource.addEventListener("bye", closeLive);
+}
+
+function closeLive() {
+  if (!liveSource) {
+    return;
+  }
+
+  liveSource.close();
+  liveSource = null;
+}
+
+// A reopen may have missed events while the tab was hidden or the stream was
+// past its deadline, so refetch both partials.
+function refreshLive() {
+  if (!liveURL) {
+    return;
+  }
+
+  htmx.trigger(document.body, "slip-updated");
+  htmx.trigger(document.body, "board-updated");
+}
+
+const liveRoot = document.querySelector("[data-live-url]");
+if (liveRoot) {
+  liveURL = liveRoot.getAttribute("data-live-url") || "";
+  openLive();
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) {
+    closeLive();
+    return;
+  }
+
+  openLive();
+  refreshLive();
+});
+
+window.addEventListener("focus", () => {
+  openLive();
+  refreshLive();
+});

@@ -66,7 +66,7 @@ an optional game; `slate-and-lines` adds the game picker. Read before starting:
 ### Phase 3: Live updates
 
 - [x] Add internal/live hub with topic subscribe, unsubscribe, and coalescing publish; test bursts and unsubscribe
-- [ ] Add the SSE handler with pings and deadlines, plus the EventSource client with refresh triggers, bye handling, and
+- [x] Add the SSE handler with pings and deadlines, plus the EventSource client with refresh triggers, bye handling, and
   visibility close/reopen; test slip-updated delivery and bye at both deadlines
 - [ ] Docs: add docs/concepts/live-updates.md; delete Live updates from plan/architecture.md
 
