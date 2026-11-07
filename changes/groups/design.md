@@ -108,10 +108,10 @@ URL (rewrites every route in the other designs); roles (not wanted).
   `sync_state` credits after launch.
 - Invite links are bearer secrets. 128-bit tokens, one-click reset, and a join page that shows only names limit the
   harm.
-- `groups` is landing before the three waiting changes, so Phase 2 lands only `groups.Scope` and the `pc_group` cookie.
-  The slip, live, and seed work waits for the code those changes build, and their slip code is written group-aware
-  instead of adapted. The route-table isolation, same-name, live, and credit tests move with that code; they cannot
-  exist until there are slip routes, a hub, and a seed.
+- `groups` is landing before the three waiting changes, so this change lands the schema, `groups.Scope`, the `pc_group`
+  cookie, and the group screens. The slip, live, and seed work waits for the code those changes build, and their slip
+  code is written group-aware instead of adapted. The route-table isolation, same-name, live, and credit tests move with
+  that code; they cannot exist until there are slip routes, a hub, and a seed.
 
 ## TODO
 
@@ -137,6 +137,6 @@ Effort: hard (a new scope check on every route, plus open sign-up, across slips,
 - [x] Add `JoinByToken`, `ResetInvite`, and `Leave`, the join routes, and the login return path through `pc_oauth`, with
   the join-flow tests
 - [x] Build the `/groups` page, create form, invite copy and reset, leave, and the top-bar switcher at phone width
-- [ ] Docs: add `docs/concepts/groups.md`; update `docs/concepts/access.md`, `docs/concepts/slips.md`,
+- [x] Docs: add `docs/concepts/groups.md`; update `docs/concepts/access.md`, `docs/concepts/slips.md`,
   `docs/concepts/live-updates.md`, `docs/reference/schema.md`, and `docs/reference/config.md`; fix Routes in
   `plan/architecture.md` and delete the Record Book group notes that this change moves into the docs

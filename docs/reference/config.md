@@ -5,7 +5,7 @@ type: reference
 summary: Environment variables the server reads, their dev defaults, and the values it rejects in prod.
 tags: [config, environment, startup, google, oauth]
 sources: [internal/config/config.go, cmd/server/main.go]
-last_verified: 2026-11-06
+last_verified: 2026-11-07
 ---
 
 # Configuration
@@ -26,22 +26,19 @@ exits with status 1 when any value is invalid.
 | `GOOGLE_CLIENT_ID`     | empty                    | The OAuth Web client ID. Empty in dev means the dev sign-in form. Required in prod. |
 | `GOOGLE_CLIENT_SECRET` | empty                    | The OAuth Web client secret. Required in prod.                                |
 | `BASE_URL`             | `http://localhost:{PORT}` | Public base URL without a trailing slash. The redirect URI is `BASE_URL + /auth/google/callback`. Required in prod. |
-| `ALLOWED_EMAILS`       | empty                    | Comma list of `email` or `email=Name`. Empty allows everyone in dev; required in prod. |
 | `ODDS_API_KEY`         | empty                    | Empty disables Odds API calls.                                                |
 | `LOG_LEVEL`            | `debug`                  | A zerolog level: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `panic`, `disabled`. `prod` defaults to `info`. |
 | `LITESTREAM_BUCKET`    | unset                    | Read by Litestream, not by the app.                                           |
 
 Dev falls back to `http://localhost:{PORT}` for `BASE_URL` and a fixed `SESSION_KEY`. It never invents Google values. In
-prod, a missing `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `BASE_URL`, `ALLOWED_EMAILS`, or `SESSION_KEY` fails startup
-instead of falling back.
+prod, a missing `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `BASE_URL`, or `SESSION_KEY` fails startup instead of
+falling back.
 
 `BASE_URL` is trimmed of trailing slashes. It must match the scheme, host, and port registered on the Google client, or
 sign-in stops at `redirect_uri_mismatch`. The app builds the redirect URI by appending `/auth/google/callback`.
 
-`ALLOWED_EMAILS` entries are trimmed and compared without case. Empty segments are ignored, so a trailing comma is
-harmless. An entry with no `@` or with whitespace is an error, because a typo there would silently lock someone out. An
-`email=Name` entry lets that email claim an unlinked history user with that name on first sign-in; see
-[Access](../concepts/access.md). When the list is empty in dev, every email is allowed.
+Sign-up is open, so there is no email list to configure. Group membership is what decides who sees which slips; see
+[Groups](../concepts/groups.md).
 
 ## Rejected values
 
@@ -55,9 +52,6 @@ The server prints every problem it finds, one per line, and exits 1. It does not
 | `GOOGLE_CLIENT_ID` is empty in prod      | `GOOGLE_CLIENT_ID is required in prod`                         |
 | `GOOGLE_CLIENT_SECRET` is empty in prod  | `GOOGLE_CLIENT_SECRET is required in prod`                     |
 | `BASE_URL` is empty in prod              | `BASE_URL is required in prod`                                 |
-| `ALLOWED_EMAILS` is empty in prod        | `ALLOWED_EMAILS must list at least one email in prod`          |
-| `ALLOWED_EMAILS` entry is malformed      | `ALLOWED_EMAILS entry "..." must be email or email=Name`       |
 | `LOG_LEVEL` is not a known level         | `LOG_LEVEL is not a known level, got "..."`                    |
 
-Dev accepts a short `SESSION_KEY`, an empty allow list, and no Google values, so a fresh checkout starts without
-secrets. `ALLOWED_EMAILS` is still validated in dev, so a typo fails at startup.
+Dev accepts a short `SESSION_KEY` and no Google values, so a fresh checkout starts without secrets.
