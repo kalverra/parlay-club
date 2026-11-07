@@ -1,8 +1,9 @@
 ---
 slug: slate-and-lines
-status: designed
+status: implementing
 created: "2026-11-01"
-depends_on: [slips-live]
+depends_on:
+    - slips-live
 ---
 
 # Slate, weather, and lines

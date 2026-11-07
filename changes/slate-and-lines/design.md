@@ -49,7 +49,7 @@ Games tab. Props wait for `props-research`. Read before starting:
 
 ### Phase 1: ESPN scoreboard
 
-- [ ] Save scoreboard fixtures (a full regular week, one with live games, one with an international game), add the
+- [x] Save scoreboard fixtures (a full regular week, one with live games, one with an international game), add the
   internal/ingest/espn scoreboard client and parser with the Sunday/Monday ET filter, and test against the fixtures
 - [ ] Add Store upserts for weeks and games and test that rerunning a sync changes nothing
 - [ ] Docs: add docs/reference/data-sources.md with the ESPN scoreboard section; delete it from plan/data-sources.md
