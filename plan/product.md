@@ -1,6 +1,7 @@
 # Product
 
-Slips, weeks, members, legs, and the editing and locking rules live in [Slips](../docs/concepts/slips.md).
+Slips, weeks, members, legs, and the editing and locking rules live in [Slips](../docs/concepts/slips.md), which also
+covers the Games tab.
 
 ## Grading
 
@@ -92,14 +93,8 @@ columns and Record Book is a top-nav link.
   - **analyzer banner:** green "Looks clean" when there are no warnings, else one card per warning, sorted Danger, Warn,
     Info, colored red, amber, blue, showing the message and the legs involved with their owners;
   - activity feed, collapsed by default, newest first.
-- **Games tab:** one card per game sorted by kickoff: `BUF @ MIA`, local kickoff time, spread and total (home-book
-  price, else median), weather badge, status (upcoming, live, final). Badges: 🏠 Indoor (gray); 💨 wind mph (amber at ≥
-  15, red at ≥ 20); 🌧 when precipitation ≥ 0.1 in/hr. Tapping a card expands quick-add pills: both spreads, both
-  moneylines, Over and Under, plus "Custom leg" (opens the leg form with the game set). From `props-research`, prop
-  pills too. A pill adds the leg in one tap; the leg can be edited afterward.
 - **Research tab (`props-research`):** opens from a game card or a player name. Player view: last-5 bars, green over the
   line and red under, with median and mean marked, plus season games played. Game view: key injuries filtered to QB, RB,
   WR, TE, LT, C, CB, S.
 - **Record Book tab (`grading-record-book`):** as described above.
 - Times render as `<time datetime="{UTC ISO}">` and `app.js` formats them in the browser's local zone.
-- A "lines as of 10:42 AM" note sits under the game board, from `sync_state`.

@@ -142,4 +142,5 @@ golangci-lint run ./...
 go test -short -race ./...
 ```
 
-Every tab loads: after signing in, Slip, Games, Research, and Record Book each show a placeholder for now.
+Every tab loads: after signing in, the Games tab shows the latest week's board once the slate syncs, and Research and
+Record Book show a placeholder for now.

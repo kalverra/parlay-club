@@ -54,8 +54,6 @@ come. They use Go 1.22+ method patterns and inherit the same sign-in and group s
 
 | Method + path                              | Purpose                                                  | Change |
 | ------------------------------------------ | -------------------------------------------------------- | ------ |
-| `GET /weeks/{weekID}/games`                | Game board partial                                       | 3     |
-| `GET /games/{id}/quickadd?slip_id=`        | Quick-add pills (`props-research`: triggers prop fetch)           | 3     |
 | `PUT /legs/{id}/result`                    | Manual grade                                             | 5     |
 | `GET /research/players/{espnID}?leg_id=`   | Player research partial                                  | 6     |
 | `GET /research/games/{id}`                 | Game research partial                                    | 6     |
