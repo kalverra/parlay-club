@@ -83,12 +83,18 @@ type LinesClient interface {
 	Lines(ctx context.Context) ([]odds.Line, odds.Credits, error)
 }
 
+// Publisher receives live change signals. *live.Hub satisfies it.
+type Publisher interface {
+	Publish(topic string)
+}
+
 // Deps are the services refresh works with.
 type Deps struct {
 	Store      *db.Store
 	Scoreboard ScoreboardClient
 	Forecast   ForecastClient
 	Lines      LinesClient
+	Publisher  Publisher
 	Now        Clock
 	Logger     zerolog.Logger
 }
@@ -100,6 +106,7 @@ type Service struct {
 	scoreboard ScoreboardClient
 	forecast   ForecastClient
 	lines      LinesClient
+	publisher  Publisher
 	now        Clock
 	logger     zerolog.Logger
 
@@ -131,6 +138,7 @@ func New(deps Deps) *Service {
 		scoreboard: deps.Scoreboard,
 		forecast:   deps.Forecast,
 		lines:      deps.Lines,
+		publisher:  deps.Publisher,
 		now:        now,
 		logger:     deps.Logger,
 		backoff:    make(map[string]time.Time),

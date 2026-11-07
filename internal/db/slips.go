@@ -161,6 +161,30 @@ func (s *Store) SlipsForWeek(ctx context.Context, groupID, weekID int64) ([]Slip
 	return slips, nil
 }
 
+// SlipIDsForWeek returns every slip ID in a week across all groups, oldest
+// first. Refresh uses it to signal every affected slip after a board change.
+func (s *Store) SlipIDsForWeek(ctx context.Context, weekID int64) ([]int64, error) {
+	rows, err := s.conn().QueryContext(ctx,
+		"SELECT id FROM slips WHERE week_id = ? ORDER BY id", weekID)
+	if err != nil {
+		return nil, fmt.Errorf("list slip ids for week %d: %w", weekID, err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	ids := make([]int64, 0)
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("list slip ids for week %d: %w", weekID, err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list slip ids for week %d: %w", weekID, err)
+	}
+	return ids, nil
+}
+
 // NewestSlipForWeek returns the most recently created slip in a group's week.
 // A missing row wraps ErrSlipNotFound.
 func (s *Store) NewestSlipForWeek(ctx context.Context, groupID, weekID int64) (Slip, error) {

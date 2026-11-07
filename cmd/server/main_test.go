@@ -25,11 +25,64 @@ import (
 // passthrough stands in for the group scope in tests that do not need one.
 func passthrough(next http.Handler) http.Handler { return next }
 
+func TestKickOnPageRunsOnlyForFullPageGETs(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		method  string
+		path    string
+		headers map[string]string
+		want    int
+	}{
+		{name: "slip page", method: http.MethodGet, path: "/", want: 1},
+		{name: "games page", method: http.MethodGet, path: "/games", want: 1},
+		{
+			name:   "htmx partial",
+			method: http.MethodGet, path: "/slips/7/panel",
+			headers: map[string]string{"HX-Request": "true"},
+			want:    0,
+		},
+		{
+			name:   "sse stream",
+			method: http.MethodGet, path: "/slips/7/events",
+			headers: map[string]string{"Accept": "text/event-stream"},
+			want:    0,
+		},
+		{
+			name:   "sse path without an accept header",
+			method: http.MethodGet, path: "/slips/7/events",
+			want: 0,
+		},
+		{name: "form post", method: http.MethodPost, path: "/groups", want: 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			calls := 0
+			handler := kickOnPage(func() { calls++ })(http.HandlerFunc(
+				func(w http.ResponseWriter, _ *http.Request) {
+					w.WriteHeader(http.StatusNoContent)
+				}))
+
+			request := httptest.NewRequestWithContext(t.Context(), tt.method, tt.path, nil)
+			for key, value := range tt.headers {
+				request.Header.Set(key, value)
+			}
+			handler.ServeHTTP(httptest.NewRecorder(), request)
+
+			assert.Equal(t, tt.want, calls)
+		})
+	}
+}
+
 func TestHealthz(t *testing.T) {
 	t.Parallel()
 
 	recorder := httptest.NewRecorder()
-	newMux(http.NotFoundHandler(), http.NotFoundHandler(), newTestHandlers(), nil, passthrough).
+	newMux(http.NotFoundHandler(), http.NotFoundHandler(), newTestHandlers(), nil, passthrough, nil).
 		ServeHTTP(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/healthz", nil))
 
 	assert.Equal(t, http.StatusOK, recorder.Code)
@@ -43,7 +96,7 @@ func TestMuxProtectsShell(t *testing.T) {
 	shell := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	})
-	mux := newMux(shell, http.NotFoundHandler(), newTestHandlers(), nil, passthrough)
+	mux := newMux(shell, http.NotFoundHandler(), newTestHandlers(), nil, passthrough, nil)
 
 	recorder := httptest.NewRecorder()
 	mux.ServeHTTP(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/games", nil))
@@ -58,7 +111,7 @@ func TestMuxServesStaticWithoutAuth(t *testing.T) {
 	static := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	})
-	mux := newMux(http.NotFoundHandler(), static, newTestHandlers(), nil, passthrough)
+	mux := newMux(http.NotFoundHandler(), static, newTestHandlers(), nil, passthrough, nil)
 
 	recorder := httptest.NewRecorder()
 	mux.ServeHTTP(recorder, httptest.NewRequestWithContext(
@@ -104,7 +157,8 @@ func TestMuxScopesShellToActiveGroup(t *testing.T) {
 		got, hasGot = groups.From(r.Context())
 		w.WriteHeader(http.StatusNoContent)
 	})
-	mux := newMux(shell, http.NotFoundHandler(), handlers, nil, scope)
+	kicks := 0
+	mux := newMux(shell, http.NotFoundHandler(), handlers, nil, scope, func() { kicks++ })
 
 	signed := httptest.NewRecorder()
 	cookies.SetSession(signed, user.ID)
@@ -115,6 +169,7 @@ func TestMuxScopesShellToActiveGroup(t *testing.T) {
 	mux.ServeHTTP(recorder, request)
 
 	assert.Equal(t, http.StatusNoContent, recorder.Code)
+	assert.Equal(t, 1, kicks, "a signed-in full-page GET starts a refresh pass")
 	assert.True(t, hasGot, "the shell runs after the group scope")
 	assert.Equal(t, group, got)
 

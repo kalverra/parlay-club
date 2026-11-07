@@ -171,6 +171,26 @@ func TestSlipsForWeekReturnsTheGroupsSlipsNewestFirst(t *testing.T) {
 	assert.Equal(t, second.ID, newest.ID)
 }
 
+func TestSlipIDsForWeekReturnsEveryGroupsSlips(t *testing.T) {
+	t.Parallel()
+
+	store, _ := openTestStore(t)
+	ada := createUser(t, store, "Ada")
+	bob := createUser(t, store, "Bob")
+	group := createTestGroup(t, store, ada)
+	other := createTestGroup(t, store, bob)
+	week := createTestWeek(t, store, 9)
+	older := createTestWeek(t, store, 8)
+
+	first := createTestSlip(t, store, group, week, "Week 9", 2, ada)
+	second := createTestSlip(t, store, other, week, "Their Week 9", 2, bob)
+	createTestSlip(t, store, group, older, "Week 8", 2, ada)
+
+	ids, err := store.SlipIDsForWeek(t.Context(), week.ID)
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []int64{first.ID, second.ID}, ids)
+}
+
 func TestNewestSlipForWeekReportsAMissingWeek(t *testing.T) {
 	t.Parallel()
 

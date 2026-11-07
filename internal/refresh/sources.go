@@ -62,11 +62,13 @@ func (s *Service) syncScoreboard(ctx context.Context, now time.Time) (bool, erro
 	}
 
 	changed := false
+	var weekID int64
 	err = s.store.Tx(ctx, func(tx *db.Store) error {
 		week, err := tx.UpsertWeek(ctx, board.Season.Year, board.Season.Type, board.Week.Number)
 		if err != nil {
 			return err
 		}
+		weekID = week.ID
 		existing, err := tx.GamesForWeek(ctx, week.ID)
 		if err != nil {
 			return err
@@ -91,6 +93,9 @@ func (s *Service) syncScoreboard(ctx context.Context, now time.Time) (bool, erro
 	})
 	if err != nil {
 		return changed, err
+	}
+	if changed {
+		s.publishWeek(ctx, weekID)
 	}
 	return changed, nil
 }
@@ -155,6 +160,9 @@ func (s *Service) syncWeather(ctx context.Context, game db.Game, now time.Time) 
 	if err != nil {
 		return changed, err
 	}
+	if changed {
+		s.publishWeek(ctx, game.WeekID)
+	}
 	return changed, nil
 }
 
@@ -166,6 +174,7 @@ func (s *Service) syncOdds(ctx context.Context, games []db.Game, now time.Time) 
 		return false, nil
 	}
 
+	weekID := games[0].WeekID
 	events, credits, err := s.lines.Events(ctx)
 	if err != nil {
 		return false, fmt.Errorf("odds events: %w", err)
@@ -185,7 +194,7 @@ func (s *Service) syncOdds(ctx context.Context, games []db.Game, now time.Time) 
 			Int("remaining", credits.Remaining).
 			Int("floor", OddsLinesFloor).
 			Msg("odds lines paused below credit floor")
-		return s.writeOdds(ctx, matches, nil, credits.Remaining, now)
+		return s.publishOdds(ctx, weekID, matches, nil, credits.Remaining, now)
 	}
 
 	lines, lineCredits, err := s.lines.Lines(ctx)
@@ -214,7 +223,27 @@ func (s *Service) syncOdds(ctx context.Context, games []db.Game, now time.Time) 
 		rows = append(rows, row)
 	}
 
-	return s.writeOdds(ctx, matches, rows, lineCredits.Remaining, now)
+	return s.publishOdds(ctx, weekID, matches, rows, lineCredits.Remaining, now)
+}
+
+// publishOdds writes the odds sync's rows and signals the week when anything
+// changed. Below-floor calls pass no rows but still store the free matches.
+func (s *Service) publishOdds(
+	ctx context.Context,
+	weekID int64,
+	matches map[string]string,
+	rows []db.Odds,
+	remaining int,
+	now time.Time,
+) (bool, error) {
+	changed, err := s.writeOdds(ctx, matches, rows, remaining, now)
+	if err != nil {
+		return changed, err
+	}
+	if changed {
+		s.publishWeek(ctx, weekID)
+	}
+	return changed, nil
 }
 
 // writeOdds records the event matches, the priced rows, and the fetch in one
