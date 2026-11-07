@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -297,6 +298,206 @@ func TestSignedOutVisitorSignsInAndJoins(t *testing.T) {
 	require.Equal(t, http.StatusNoContent, home.Code)
 	assert.True(t, f.shell.called)
 	assert.Equal(t, f.group, f.shell.group)
+}
+
+// groupPath builds the path for one group action.
+func groupPath(id int64, action string) string {
+	return "/groups/" + strconv.FormatInt(id, 10) + "/" + action
+}
+
+func TestGroupsPageListsGroupsAndInviteLinks(t *testing.T) {
+	t.Parallel()
+
+	f := newJoinFixture(t)
+	second, err := f.store.Create(t.Context(), f.member.ID, "Lake House")
+	require.NoError(t, err)
+
+	recorder := f.serve(t, request(t, http.MethodGet, "/groups"), f.sessionCookie(t, f.member.ID))
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	body := recorder.Body.String()
+	assert.Contains(t, body, "Sunday Parlay Club")
+	assert.Contains(t, body, "Lake House")
+	assert.Contains(t, body, f.group.InviteToken)
+	assert.Contains(t, body, second.InviteToken)
+	assert.Contains(t, body, `hx-post="/groups"`)
+	assert.Contains(t, body, groupPath(f.group.ID, "reset-invite"))
+	assert.Contains(t, body, groupPath(f.group.ID, "leave"))
+	assert.Equal(t, 2, strings.Count(body, ">Active</span"),
+		"one Active badge on the card, one in the top-bar switcher")
+	assert.Contains(t, body, "data-group-switcher", "two groups show the top-bar switcher")
+}
+
+func TestGroupsPageRefusesToLeaveTheOnlyGroup(t *testing.T) {
+	t.Parallel()
+
+	f := newJoinFixture(t)
+
+	recorder := f.serve(t, request(t, http.MethodGet, "/groups"), f.sessionCookie(t, f.member.ID))
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	body := recorder.Body.String()
+	assert.Contains(t, body, "You can't leave your only group.")
+	assert.NotContains(t, body, groupPath(f.group.ID, "leave"))
+}
+
+func TestCreateGroupAddsItAndSwitchesToIt(t *testing.T) {
+	t.Parallel()
+
+	f := newJoinFixture(t)
+	session := f.sessionCookie(t, f.member.ID)
+
+	recorder := f.serve(t, htmxPostForm(t, "/groups", url.Values{"name": {"Lake House"}}), session)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	assert.Equal(t, "/groups", recorder.Header().Get("Hx-Redirect"))
+
+	memberships, err := f.store.ForUser(t.Context(), f.member.ID)
+	require.NoError(t, err)
+	require.Len(t, memberships, 2)
+
+	created := memberships[1]
+	assert.Equal(t, "Lake House", created.Name)
+
+	groupCookie := lastGroupCookie(recorder)
+	require.NotNil(t, groupCookie)
+	id, ok := f.cookies.GroupID(requestWithGroupCookie(t, groupCookie))
+	require.True(t, ok)
+	assert.Equal(t, created.ID, id, "the new group becomes active")
+}
+
+func TestCreateGroupWithABlankNameIsRefused(t *testing.T) {
+	t.Parallel()
+
+	f := newJoinFixture(t)
+	session := f.sessionCookie(t, f.member.ID)
+
+	recorder := f.serve(t, htmxPostForm(t, "/groups", url.Values{"name": {"  "}}), session)
+
+	assert.Equal(t, http.StatusUnprocessableEntity, recorder.Code)
+
+	memberships, err := f.store.ForUser(t.Context(), f.member.ID)
+	require.NoError(t, err)
+	assert.Len(t, memberships, 1, "no group was created")
+}
+
+func TestResetInviteKillsTheOldLink(t *testing.T) {
+	t.Parallel()
+
+	f := newJoinFixture(t)
+	session := f.sessionCookie(t, f.member.ID)
+	oldToken := f.group.InviteToken
+
+	recorder := f.serve(
+		t,
+		htmxPostForm(t, groupPath(f.group.ID, "reset-invite"), url.Values{}),
+		session,
+	)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	assert.Equal(t, "true", recorder.Header().Get("Hx-Refresh"))
+
+	dead := f.serve(t, request(t, http.MethodGet, "/join/"+oldToken), session)
+	assert.Equal(t, http.StatusNotFound, dead.Code, "the old link stops working")
+
+	memberships, err := f.store.ForUser(t.Context(), f.member.ID)
+	require.NoError(t, err)
+	require.Len(t, memberships, 1)
+	assert.NotEqual(t, oldToken, memberships[0].InviteToken)
+
+	live := f.serve(t, request(t, http.MethodGet, "/join/"+memberships[0].InviteToken), session)
+	assert.Equal(t, http.StatusOK, live.Code)
+}
+
+func TestLeaveRemovesTheMembershipAndPicksAnotherGroup(t *testing.T) {
+	t.Parallel()
+
+	f := newJoinFixture(t)
+	second, err := f.store.Create(t.Context(), f.member.ID, "Lake House")
+	require.NoError(t, err)
+	session := f.sessionCookie(t, f.member.ID)
+
+	recorder := f.serve(
+		t,
+		htmxPostForm(t, groupPath(f.group.ID, "leave"), url.Values{}),
+		session,
+	)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	assert.Equal(t, "/groups", recorder.Header().Get("Hx-Redirect"))
+
+	member, err := f.store.IsMember(t.Context(), f.group.ID, f.member.ID)
+	require.NoError(t, err)
+	assert.False(t, member)
+
+	groupCookie := lastGroupCookie(recorder)
+	require.NotNil(t, groupCookie)
+	id, ok := f.cookies.GroupID(requestWithGroupCookie(t, groupCookie))
+	require.True(t, ok)
+	assert.Equal(t, second.ID, id, "the remaining group becomes active")
+}
+
+func TestLeaveTheOnlyGroupIsRefused(t *testing.T) {
+	t.Parallel()
+
+	f := newJoinFixture(t)
+
+	recorder := f.serve(
+		t,
+		htmxPostForm(t, groupPath(f.group.ID, "leave"), url.Values{}),
+		f.sessionCookie(t, f.member.ID),
+	)
+
+	assert.Equal(t, http.StatusUnprocessableEntity, recorder.Code)
+
+	member, err := f.store.IsMember(t.Context(), f.group.ID, f.member.ID)
+	require.NoError(t, err)
+	assert.True(t, member)
+}
+
+func TestSwitchChangesTheActiveGroup(t *testing.T) {
+	t.Parallel()
+
+	f := newJoinFixture(t)
+	second, err := f.store.Create(t.Context(), f.member.ID, "Lake House")
+	require.NoError(t, err)
+
+	recorder := f.serve(
+		t,
+		htmxPostForm(t, "/groups/switch", url.Values{
+			"group_id": {strconv.FormatInt(second.ID, 10)},
+		}),
+		f.sessionCookie(t, f.member.ID),
+	)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	assert.Equal(t, "true", recorder.Header().Get("Hx-Refresh"))
+
+	groupCookie := lastGroupCookie(recorder)
+	require.NotNil(t, groupCookie)
+	id, ok := f.cookies.GroupID(requestWithGroupCookie(t, groupCookie))
+	require.True(t, ok)
+	assert.Equal(t, second.ID, id)
+}
+
+func TestSwitchToAGroupYouAreNotInIsNotFound(t *testing.T) {
+	t.Parallel()
+
+	f := newJoinFixture(t)
+	other := f.addUser(t)
+	memberships, err := f.store.ForUser(t.Context(), other.ID)
+	require.NoError(t, err)
+	require.Len(t, memberships, 1)
+
+	recorder := f.serve(
+		t,
+		htmxPostForm(t, "/groups/switch", url.Values{
+			"group_id": {strconv.FormatInt(memberships[0].ID, 10)},
+		}),
+		f.sessionCookie(t, f.member.ID),
+	)
+
+	assert.Equal(t, http.StatusNotFound, recorder.Code)
 }
 
 // sessionCookie returns a signed session cookie for id.

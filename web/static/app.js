@@ -51,3 +51,42 @@ if (document.readyState === "loading") {
 } else {
   formatTimes(document);
 }
+
+// Copies an invite link from its read-only input, then briefly says so.
+async function copyInvite(button) {
+  const source = document.querySelector(button.getAttribute("data-copy-target"));
+  if (!source) {
+    return;
+  }
+
+  try {
+    await navigator.clipboard.writeText(source.value);
+  } catch {
+    source.select();
+    document.execCommand("copy");
+  }
+
+  const label = button.textContent;
+  button.textContent = "Copied";
+  setTimeout(() => {
+    button.textContent = label;
+  }, 1500);
+}
+
+// Closes the top bar's group sheet when a tap lands outside it.
+function closeGroupSwitcher(event) {
+  for (const switcher of document.querySelectorAll("details[data-group-switcher][open]")) {
+    if (!switcher.contains(event.target)) {
+      switcher.open = false;
+    }
+  }
+}
+
+document.addEventListener("click", (event) => {
+  const copyButton = event.target.closest("[data-copy-target]");
+  if (copyButton) {
+    copyInvite(copyButton);
+    return;
+  }
+  closeGroupSwitcher(event);
+});

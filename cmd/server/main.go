@@ -85,7 +85,7 @@ func run() error {
 	server := &http.Server{
 		Addr: net.JoinHostPort("", strconv.Itoa(cfg.Port)),
 		Handler: newMux(
-			web.New(logger, renderer, auth.UserFrom),
+			web.New(logger, renderer, auth.UserFrom, groups.Options),
 			web.StaticHandler(),
 			handlers,
 			groupHandlers,

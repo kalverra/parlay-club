@@ -4,12 +4,12 @@ package groups
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 
 	"github.com/rs/zerolog"
 
 	"github.com/kalverra/parlay-club/internal/db"
+	webui "github.com/kalverra/parlay-club/internal/web"
 )
 
 // Group is one boundary for slips and their members.
@@ -69,9 +69,20 @@ func Scope(
 				return
 			}
 
-			group, err := activeGroup(r, w, user.ID, store, cookies)
+			memberships, err := store.ForUser(r.Context(), user.ID)
 			if err != nil {
-				logger.Error().Err(err).Int64("user", user.ID).Msg("resolve active group")
+				logger.Error().Err(err).Int64("user", user.ID).Msg("list groups")
+				http.Error(
+					w,
+					http.StatusText(http.StatusInternalServerError),
+					http.StatusInternalServerError,
+				)
+				return
+			}
+			if len(memberships) == 0 {
+				logger.Error().
+					Int64("user", user.ID).
+					Msg("user belongs to no group")
 				http.Error(
 					w,
 					http.StatusText(http.StatusInternalServerError),
@@ -80,7 +91,9 @@ func Scope(
 				return
 			}
 
-			next.ServeHTTP(w, r.WithContext(withGroup(r.Context(), group)))
+			group := activeGroup(r, w, memberships, cookies)
+			ctx := withMemberships(r.Context(), memberships)
+			next.ServeHTTP(w, r.WithContext(withGroup(ctx, group)))
 		})
 	}
 }
@@ -90,29 +103,20 @@ func Scope(
 func activeGroup(
 	r *http.Request,
 	w http.ResponseWriter,
-	userID int64,
-	store Store,
+	memberships []Group,
 	cookies GroupCookie,
-) (Group, error) {
-	memberships, err := store.ForUser(r.Context(), userID)
-	if err != nil {
-		return Group{}, err
-	}
-	if len(memberships) == 0 {
-		return Group{}, fmt.Errorf("user %d belongs to no group", userID)
-	}
-
+) Group {
 	if wanted, ok := cookies.GroupID(r); ok {
 		for _, group := range memberships {
 			if group.ID == wanted {
-				return group, nil
+				return group
 			}
 		}
 	}
 
 	group := memberships[0]
 	cookies.SetGroup(w, group.ID)
-	return group, nil
+	return group
 }
 
 // groupKey is the context key for the group Scope chose.
@@ -128,4 +132,42 @@ func withGroup(ctx context.Context, group Group) context.Context {
 func From(ctx context.Context) (Group, bool) {
 	group, ok := ctx.Value(groupKey{}).(Group)
 	return group, ok
+}
+
+// membershipsKey is the context key for every group the person belongs to.
+type membershipsKey struct{}
+
+// withMemberships returns ctx carrying the person's groups.
+func withMemberships(ctx context.Context, memberships []Group) context.Context {
+	return context.WithValue(ctx, membershipsKey{}, memberships)
+}
+
+// membershipsFrom returns the groups Scope loaded, oldest membership first.
+func membershipsFrom(ctx context.Context) ([]Group, bool) {
+	memberships, ok := ctx.Value(membershipsKey{}).([]Group)
+	return memberships, ok
+}
+
+// Options returns the groups to offer in the top bar's switcher, with the
+// active one marked. It reads what Scope put on the context, so it costs no
+// extra query. A request outside Scope gets nil.
+func Options(ctx context.Context) []webui.GroupOption {
+	active, ok := From(ctx)
+	if !ok {
+		return nil
+	}
+	memberships, ok := membershipsFrom(ctx)
+	if !ok {
+		return nil
+	}
+
+	options := make([]webui.GroupOption, 0, len(memberships))
+	for _, group := range memberships {
+		options = append(options, webui.GroupOption{
+			ID:      group.ID,
+			Name:    group.Name,
+			Current: group.ID == active.ID,
+		})
+	}
+	return options
 }

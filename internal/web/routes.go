@@ -20,6 +20,11 @@ type pageRoute struct {
 // auth.UserFrom; tests pass a stub.
 type UserFrom func(context.Context) (db.User, bool)
 
+// GroupsFrom returns the groups to offer in the top bar's switcher, with the
+// active one marked. The server passes groups.Options, which reads what the
+// group scope put on the context; tests may pass nil.
+type GroupsFrom func(context.Context) []GroupOption
+
 // pageRoutes are the shell's pages, in tab order. Later changes replace the
 // placeholders with real screens.
 var pageRoutes = []pageRoute{
@@ -30,12 +35,17 @@ var pageRoutes = []pageRoute{
 }
 
 // New returns the shell's routes: the four tab pages and /static.
-func New(logger zerolog.Logger, renderer *Renderer, userFrom UserFrom) http.Handler {
+func New(
+	logger zerolog.Logger,
+	renderer *Renderer,
+	userFrom UserFrom,
+	groupsFrom GroupsFrom,
+) http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("GET /static/{path...}", StaticHandler())
 
 	for _, route := range pageRoutes {
-		mux.Handle(route.pattern, pageHandler(logger, renderer, route, userFrom))
+		mux.Handle(route.pattern, pageHandler(logger, renderer, route, userFrom, groupsFrom))
 	}
 
 	return mux
@@ -47,6 +57,7 @@ func pageHandler(
 	renderer *Renderer,
 	route pageRoute,
 	userFrom UserFrom,
+	groupsFrom GroupsFrom,
 ) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		page := Page{Title: route.tab.Label(), Tab: route.tab}
@@ -54,6 +65,9 @@ func pageHandler(
 			if user, ok := userFrom(r.Context()); ok {
 				page.User = pageUser(user)
 			}
+		}
+		if groupsFrom != nil {
+			page.Groups = groupsFrom(r.Context())
 		}
 
 		html, err := renderer.Render(route.page, page)
