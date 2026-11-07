@@ -1,0 +1,518 @@
+package slips
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/kalverra/parlay-club/internal/db"
+)
+
+// Errors a handler can map to a 422 with a short message.
+var (
+	// ErrNotMember is returned when the acting user is not on the slip.
+	ErrNotMember = errors.New("you're not on this slip")
+	// ErrNotOwner is returned when a member touches someone else's leg.
+	ErrNotOwner = errors.New("that leg belongs to someone else")
+	// ErrLegLimit is returned when a member already has legs_per_member legs.
+	ErrLegLimit = errors.New("you've already added all your legs")
+	// ErrLegsPerMemberTooLow is returned when a lower limit would leave someone
+	// with too many legs.
+	ErrLegsPerMemberTooLow = errors.New("a member already has more legs than that")
+	// ErrKickoffLocked is returned once a leg's game has kicked off.
+	ErrKickoffLocked = errors.New("that game already kicked off")
+	// ErrLockedIn is returned when a locked-in member tries to change their legs.
+	ErrLockedIn = errors.New("you've locked in")
+	// ErrLegsNotReady is returned when a member locks in without exactly
+	// legs_per_member legs.
+	ErrLegsNotReady = errors.New("add all your legs before locking in")
+	// ErrSlipNotOpen is returned when a slip setting changes after lock in.
+	ErrSlipNotOpen = errors.New("the slip is locked")
+	// ErrNotLocked is returned when unlock matches no lock.
+	ErrNotLocked = errors.New("nobody is locked in")
+	// ErrMemberHasLegs is returned when a member with legs is removed.
+	ErrMemberHasLegs = errors.New("delete their legs first")
+)
+
+// Publisher tells live listeners that a slip changed. *live.Hub implements it.
+type Publisher interface {
+	Publish(topic string)
+}
+
+// Service enforces product.md "Editing and locking". Every mutation checks the
+// rules, writes the change and one activity entry in a transaction, updates the
+// slip's status, then publishes slip:{id}. now is injected so the kickoff and
+// locking rules stay testable.
+type Service struct {
+	store   *db.Store
+	publish Publisher
+	now     func() time.Time
+}
+
+// New builds a Service over store. A nil publisher skips live updates, and a
+// nil now uses the wall clock.
+func New(store *db.Store, publish Publisher, now func() time.Time) *Service {
+	if now == nil {
+		now = time.Now
+	}
+	return &Service{store: store, publish: publish, now: now}
+}
+
+// AddMember puts userID on the slip. Members can change only while the slip is
+// OPEN, adding someone already there changes nothing, and the caller must be a
+// member.
+func (s *Service) AddMember(ctx context.Context, actorID, slipID, userID int64) error {
+	changed := false
+	err := s.store.Tx(ctx, func(tx *db.Store) error {
+		slip, actor, members, err := loadSlip(ctx, tx, slipID, actorID)
+		if err != nil {
+			return err
+		}
+		if slip.Status != db.SlipOpen {
+			return ErrSlipNotOpen
+		}
+		for _, member := range members {
+			if member.User.ID == userID {
+				return nil
+			}
+		}
+
+		added, err := tx.UserByID(ctx, userID)
+		if err != nil {
+			return err
+		}
+		if err := tx.AddSlipMember(ctx, slipID, userID); err != nil {
+			return err
+		}
+		if _, err := tx.AddActivity(ctx, slipID, &actorID,
+			fmt.Sprintf("%s added %s", actor.User.Name, added.Name)); err != nil {
+			return err
+		}
+		changed = true
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("add user %d to slip %d: %w", userID, slipID, err)
+	}
+	if changed {
+		s.notify(slipID)
+	}
+	return nil
+}
+
+// RemoveMember takes userID off the slip. Members can change only while the
+// slip is OPEN, and a member who still has legs must have them deleted first.
+func (s *Service) RemoveMember(ctx context.Context, actorID, slipID, userID int64) error {
+	err := s.store.Tx(ctx, func(tx *db.Store) error {
+		slip, actor, members, err := loadSlip(ctx, tx, slipID, actorID)
+		if err != nil {
+			return err
+		}
+		if slip.Status != db.SlipOpen {
+			return ErrSlipNotOpen
+		}
+
+		var removed *db.SlipMember
+		for i := range members {
+			if members[i].User.ID == userID {
+				removed = &members[i]
+				break
+			}
+		}
+		if removed == nil {
+			return db.ErrSlipMemberNotFound
+		}
+
+		legs, err := tx.LegsForSlip(ctx, slipID)
+		if err != nil {
+			return err
+		}
+		for _, leg := range legs {
+			if leg.UserID == userID {
+				return ErrMemberHasLegs
+			}
+		}
+		if err := tx.RemoveSlipMember(ctx, slipID, userID); err != nil {
+			return err
+		}
+		_, err = tx.AddActivity(ctx, slipID, &actorID,
+			fmt.Sprintf("%s removed %s", actor.User.Name, removed.User.Name))
+		return err
+	})
+	if err != nil {
+		return fmt.Errorf("remove user %d from slip %d: %w", userID, slipID, err)
+	}
+	s.notify(slipID)
+	return nil
+}
+
+// UpdateSlip changes a slip's name and legs per member. Both can change only
+// while the slip is OPEN, and the limit cannot drop below a member's current
+// leg count. One activity entry records what changed; a no-op writes none.
+func (s *Service) UpdateSlip(
+	ctx context.Context,
+	actorID, slipID int64,
+	name string,
+	legsPerMember int,
+) (db.Slip, error) {
+	var (
+		updated db.Slip
+		changed bool
+	)
+	err := s.store.Tx(ctx, func(tx *db.Store) error {
+		slip, actor, _, err := loadSlip(ctx, tx, slipID, actorID)
+		if err != nil {
+			return err
+		}
+		if slip.Status != db.SlipOpen {
+			return ErrSlipNotOpen
+		}
+		if legsPerMember < slip.LegsPerMember {
+			legs, err := tx.LegsForSlip(ctx, slipID)
+			if err != nil {
+				return err
+			}
+			counts := make(map[int64]int, len(legs))
+			for _, leg := range legs {
+				counts[leg.UserID]++
+			}
+			for _, count := range counts {
+				if count > legsPerMember {
+					return ErrLegsPerMemberTooLow
+				}
+			}
+		}
+
+		updated, err = tx.UpdateSlip(ctx, slipID, name, legsPerMember)
+		if err != nil {
+			return err
+		}
+		message := slipChange(actor.User.Name, slip, updated)
+		if message == "" {
+			return nil
+		}
+		if _, err := tx.AddActivity(ctx, slipID, &actorID, message); err != nil {
+			return err
+		}
+		changed = true
+		return nil
+	})
+	if err != nil {
+		return db.Slip{}, fmt.Errorf("update slip %d: %w", slipID, err)
+	}
+	if changed {
+		s.notify(slipID)
+	}
+	return updated, nil
+}
+
+// AddLeg adds one pick for the acting member. Membership, the leg limit,
+// kickoff locks, and lock in all apply. The leg's owner is the acting user.
+func (s *Service) AddLeg(ctx context.Context, actorID int64, leg db.Leg) (db.Leg, error) {
+	now := s.now()
+	var created db.Leg
+	err := s.store.Tx(ctx, func(tx *db.Store) error {
+		slip, actor, _, err := loadSlip(ctx, tx, leg.SlipID, actorID)
+		if err != nil {
+			return err
+		}
+		if actor.LockedAt != nil {
+			return ErrLockedIn
+		}
+
+		legs, err := tx.LegsForSlip(ctx, leg.SlipID)
+		if err != nil {
+			return err
+		}
+		count := 0
+		for _, existing := range legs {
+			if existing.UserID == actorID {
+				count++
+			}
+		}
+		if count >= slip.LegsPerMember {
+			return ErrLegLimit
+		}
+		if err := checkKickoff(ctx, tx, slip, leg.GameID, now); err != nil {
+			return err
+		}
+
+		leg.UserID = actorID
+		created, err = tx.CreateLeg(ctx, leg)
+		if err != nil {
+			return err
+		}
+		_, err = tx.AddActivity(ctx, leg.SlipID, &actorID,
+			fmt.Sprintf("%s added %s", actor.User.Name, created.Selection))
+		return err
+	})
+	if err != nil {
+		return db.Leg{}, fmt.Errorf("add leg to slip %d: %w", leg.SlipID, err)
+	}
+	s.notify(leg.SlipID)
+	return created, nil
+}
+
+// UpdateLeg changes a leg's pick fields. Only the owner can edit it, and the
+// leg cannot be locked in or kickoff-locked. The owner, slip, result, and
+// grader stay put.
+func (s *Service) UpdateLeg(ctx context.Context, actorID int64, leg db.Leg) (db.Leg, error) {
+	now := s.now()
+	var updated db.Leg
+	err := s.store.Tx(ctx, func(tx *db.Store) error {
+		existing, err := tx.LegByID(ctx, leg.ID)
+		if err != nil {
+			return err
+		}
+		slip, actor, _, err := loadSlip(ctx, tx, existing.SlipID, actorID)
+		if err != nil {
+			return err
+		}
+		if existing.UserID != actorID {
+			return ErrNotOwner
+		}
+		if actor.LockedAt != nil {
+			return ErrLockedIn
+		}
+		if err := checkKickoff(ctx, tx, slip, existing.GameID, now); err != nil {
+			return err
+		}
+		if err := checkKickoff(ctx, tx, slip, leg.GameID, now); err != nil {
+			return err
+		}
+
+		leg.ID = existing.ID
+		leg.SlipID = existing.SlipID
+		leg.UserID = existing.UserID
+		updated, err = tx.UpdateLeg(ctx, leg)
+		if err != nil {
+			return err
+		}
+		message := fmt.Sprintf("%s edited %s", actor.User.Name, updated.Selection)
+		if updated.Selection != existing.Selection {
+			message = fmt.Sprintf(
+				"%s changed %s to %s", actor.User.Name, existing.Selection, updated.Selection)
+		}
+		_, err = tx.AddActivity(ctx, leg.SlipID, &actorID, message)
+		return err
+	})
+	if err != nil {
+		return db.Leg{}, fmt.Errorf("update leg %d: %w", leg.ID, err)
+	}
+	s.notify(updated.SlipID)
+	return updated, nil
+}
+
+// DeleteLeg removes one of the acting member's legs. A kickoff-locked leg or a
+// locked-in member cannot delete it.
+func (s *Service) DeleteLeg(ctx context.Context, actorID, legID int64) error {
+	now := s.now()
+	var slipID int64
+	err := s.store.Tx(ctx, func(tx *db.Store) error {
+		existing, err := tx.LegByID(ctx, legID)
+		if err != nil {
+			return err
+		}
+		slipID = existing.SlipID
+		slip, actor, _, err := loadSlip(ctx, tx, slipID, actorID)
+		if err != nil {
+			return err
+		}
+		if existing.UserID != actorID {
+			return ErrNotOwner
+		}
+		if actor.LockedAt != nil {
+			return ErrLockedIn
+		}
+		if err := checkKickoff(ctx, tx, slip, existing.GameID, now); err != nil {
+			return err
+		}
+		if err := tx.DeleteLeg(ctx, legID); err != nil {
+			return err
+		}
+		_, err = tx.AddActivity(ctx, slipID, &actorID,
+			fmt.Sprintf("%s deleted %s", actor.User.Name, existing.Selection))
+		return err
+	})
+	if err != nil {
+		return fmt.Errorf("delete leg %d: %w", legID, err)
+	}
+	s.notify(slipID)
+	return nil
+}
+
+// LockIn sets the acting member's locked_at once they have exactly
+// legs_per_member legs. When every member is in, the slip becomes LOCKED.
+// Locking in twice changes nothing.
+func (s *Service) LockIn(ctx context.Context, actorID, slipID int64) error {
+	now := s.now()
+	changed := false
+	err := s.store.Tx(ctx, func(tx *db.Store) error {
+		slip, actor, members, err := loadSlip(ctx, tx, slipID, actorID)
+		if err != nil {
+			return err
+		}
+		if actor.LockedAt != nil {
+			return nil
+		}
+
+		legs, err := tx.LegsForSlip(ctx, slipID)
+		if err != nil {
+			return err
+		}
+		count := 0
+		for _, leg := range legs {
+			if leg.UserID == actorID {
+				count++
+			}
+		}
+		if count != slip.LegsPerMember {
+			return ErrLegsNotReady
+		}
+		if err := tx.SetSlipMemberLock(ctx, slipID, actorID, &now); err != nil {
+			return err
+		}
+		if _, err := tx.AddActivity(ctx, slipID, &actorID,
+			actor.User.Name+" locked in"); err != nil {
+			return err
+		}
+
+		locked := 0
+		for _, member := range members {
+			if member.User.ID == actorID || member.LockedAt != nil {
+				locked++
+			}
+		}
+		if locked == len(members) {
+			if err := tx.SetSlipStatus(ctx, slipID, db.SlipLocked); err != nil {
+				return err
+			}
+		}
+		changed = true
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("lock in on slip %d: %w", slipID, err)
+	}
+	if changed {
+		s.notify(slipID)
+	}
+	return nil
+}
+
+// Unlock is available to any member while the slip is LOCKED or anyone is
+// locked in. It clears every lock, sets the slip OPEN, and records who did it.
+func (s *Service) Unlock(ctx context.Context, actorID, slipID int64) error {
+	err := s.store.Tx(ctx, func(tx *db.Store) error {
+		slip, actor, members, err := loadSlip(ctx, tx, slipID, actorID)
+		if err != nil {
+			return err
+		}
+		locked := slip.Status == db.SlipLocked
+		for _, member := range members {
+			locked = locked || member.LockedAt != nil
+		}
+		if !locked {
+			return ErrNotLocked
+		}
+
+		for _, member := range members {
+			if member.LockedAt == nil {
+				continue
+			}
+			if err := tx.SetSlipMemberLock(ctx, slipID, member.User.ID, nil); err != nil {
+				return err
+			}
+		}
+		if err := tx.SetSlipStatus(ctx, slipID, db.SlipOpen); err != nil {
+			return err
+		}
+		_, err = tx.AddActivity(ctx, slipID, &actorID,
+			"unlocked by "+actor.User.Name)
+		return err
+	})
+	if err != nil {
+		return fmt.Errorf("unlock slip %d: %w", slipID, err)
+	}
+	s.notify(slipID)
+	return nil
+}
+
+// loadSlip reads a slip and its members and finds the acting member.
+func loadSlip(
+	ctx context.Context,
+	store *db.Store,
+	slipID, actorID int64,
+) (db.Slip, db.SlipMember, []db.SlipMember, error) {
+	slip, err := store.SlipByID(ctx, slipID)
+	if err != nil {
+		return db.Slip{}, db.SlipMember{}, nil, err
+	}
+	members, err := store.SlipMembers(ctx, slipID)
+	if err != nil {
+		return db.Slip{}, db.SlipMember{}, nil, err
+	}
+	for _, member := range members {
+		if member.User.ID == actorID {
+			return slip, member, members, nil
+		}
+	}
+	return db.Slip{}, db.SlipMember{}, nil, ErrNotMember
+}
+
+// checkKickoff refuses a game that has kicked off, unless the slip is for a
+// past week, where history can be entered.
+func checkKickoff(
+	ctx context.Context,
+	store *db.Store,
+	slip db.Slip,
+	gameID *string,
+	now time.Time,
+) error {
+	if gameID == nil {
+		return nil
+	}
+	past, err := store.WeekPast(ctx, slip.WeekID, now)
+	if err != nil {
+		return err
+	}
+	if past {
+		return nil
+	}
+
+	kickoff, err := store.GameKickoff(ctx, *gameID)
+	if err != nil {
+		return err
+	}
+	if !now.Before(kickoff) {
+		return ErrKickoffLocked
+	}
+	return nil
+}
+
+// slipChange describes a name or legs-per-member change for the activity feed.
+func slipChange(actor string, before, after db.Slip) string {
+	nameChanged := before.Name != after.Name
+	legsChanged := before.LegsPerMember != after.LegsPerMember
+	switch {
+	case nameChanged && legsChanged:
+		return fmt.Sprintf("%s renamed the slip to %q and set %d legs per member",
+			actor, after.Name, after.LegsPerMember)
+	case nameChanged:
+		return fmt.Sprintf("%s renamed the slip to %q", actor, after.Name)
+	case legsChanged:
+		return fmt.Sprintf("%s set %d legs per member", actor, after.LegsPerMember)
+	default:
+		return ""
+	}
+}
+
+// notify publishes one signal for the slip. The live hub coalesces bursts, so
+// a slow reader cannot block a mutation.
+func (s *Service) notify(slipID int64) {
+	if s.publish == nil {
+		return
+	}
+	s.publish.Publish(fmt.Sprintf("slip:%d", slipID))
+}

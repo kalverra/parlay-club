@@ -57,7 +57,7 @@ an optional game; `slate-and-lines` adds the game picker. Read before starting:
 
 - [x] Add Store methods for weeks, slips, members, legs, and activity, and create-slip defaults copied from the previous
   slip, with tests
-- [ ] Add member and leg mutations, lock in, unlock, and slip status updates with one activity entry each, and table
+- [x] Add member and leg mutations, lock in, unlock, and slip status updates with one activity entry each, and table
   tests for every Editing and locking rule with an injected clock, including past-week slips
 - [ ] Docs: add docs/concepts/slips.md; delete Slips, Legs, and Editing and locking from plan/product.md
 
