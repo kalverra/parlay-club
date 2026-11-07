@@ -1,9 +1,11 @@
 ---
 slug: export-to-sportsbook
-status: proposed
-created: 2026-11-05
+status: designed
+created: "2026-11-05"
+depends_on:
+    - slips-live
+    - slate-and-lines
 effort: medium
-depends_on: [slips-live, slate-and-lines]
 ---
 
 # Export locked slips to DraftKings and FanDuel

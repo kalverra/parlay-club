@@ -10,3 +10,5 @@ data/
 
 # Air build output from `mise run dev`
 tmp/
+
+.env
