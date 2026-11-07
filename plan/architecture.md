@@ -16,7 +16,7 @@
 | Logging  | zerolog, JSON to stdout in prod, console writer in dev                                  |
 
 The live client is a plain `EventSource` in `app.js` instead of the HTMX SSE extension, because the connection policy
-below needs to close and reopen on tab visibility.
+needs to close and reopen on tab visibility. See [live updates](../docs/concepts/live-updates.md).
 
 ## Repo layout
 
@@ -97,35 +97,6 @@ active group or falls back to one the person belongs to.
 Rule violations from `internal/slips` return 422 with a short message rendered in the form. HTMX responses that change
 the slip return the refreshed panel.
 
-## Live updates
-
-### Hub (`internal/live`)
-
-- Topics are strings: `slip:{id}` and `week:{weekID}`.
-- `Subscribe(topic) (<-chan struct{}, func())` returns a channel with buffer 1 and an unsubscribe func.
-- `Publish(topic)` does a non-blocking send to each subscriber; a full buffer means an update is already queued, so
-  bursts coalesce.
-- Events are signals. Clients refetch the partials they show, so no per-user HTML goes through the hub.
-- `internal/slips` publishes `slip:{id}` after every mutation commits. `internal/refresh` publishes `week:{id}` when a
-  sync changes games or odds, and `slip:{id}` for that week's slips (odds and analyzer output depend on games).
-
-### SSE handler (`GET /slips/{id}/events`)
-
-- Subscribes to `slip:{id}` and `week:{weekID}`. Sends `event: slip-updated` or `event: board-updated` with `data: {}`.
-- Sends a `: ping` comment every 25 s.
-- **Deadline:** if any game in the week is live or kicks off within 2 hours, the stream lives up to 55 minutes;
-  otherwise it closes after 10 minutes without an event (each event resets the timer). At the deadline it sends
-  `event: bye` and returns. The clock is injected for tests.
-
-### Client (`web/static/app.js`)
-
-- One `EventSource` per page, opened from the slip page's `data-live-url`.
-- On `slip-updated`: `htmx.trigger(document.body, "slip-updated")`. Same for `board-updated`. Panels declare
-  `hx-get="..." hx-trigger="slip-updated from:body"`.
-- On `bye`: close the stream; reopen on the next `visibilitychange` to visible or `focus`.
-- When the tab becomes hidden: close the stream. When visible again: reopen and trigger both refresh events.
-- After every `htmx:afterSwap`: format `<time>` elements in local time with `Intl.DateTimeFormat`.
-
 ## Refresh
 
 `internal/refresh` owns when outside data is fetched. No cron, no Cloud Scheduler.
@@ -135,7 +106,7 @@ the slip return the refreshed panel.
   `context.WithoutCancel`, a 30 s timeout, and `singleflight` keyed by source so two page loads never double-fetch.
 - Staleness rules are in data-sources.md, next to each source.
 - On failure: log, keep old data, leave `fetched_at` unchanged, and back off that source for 5 minutes (in memory).
-- After a successful sync that changed rows, publish to the hub (see Live updates).
+- After a successful sync that changed rows, publish to the hub (see [live updates](../docs/concepts/live-updates.md)).
 - Grading (`grading-record-book`) is another source: it runs when any game is `FINAL` and has legs still `PENDING`.
 
 ## Database access

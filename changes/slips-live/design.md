@@ -19,9 +19,9 @@ an optional game; `slate-and-lines` adds the game picker. Read before starting:
   method checks the rules from `docs/concepts/slips.md` "Editing and locking", writes in one transaction with an activity
   entry, updates slip status, then publishes `slip:{id}`. It returns typed errors (e.g. `ErrLegLimit`) that handlers map
   to 422 with a short message.
-- `internal/live` holds the hub (topics, buffer-1 channels, non-blocking publish) and the SSE handler. The handler takes
-  a `LiveWindow(weekID) bool` func so the deadline rule is testable before games exist; until `slate-and-lines`, it
-  returns false.
+- `internal/live` holds the hub (string topics, buffer-1 channels, non-blocking publish) and the SSE handler. The stream
+  takes an `IsLive(weekID) bool` func and a `Clock` for its timers, so both deadlines are testable before games exist;
+  until `slate-and-lines` wires a game-aware answer, callers pass a func that returns false.
 - `web/static/app.js` gains the `EventSource` client: refresh triggers, `bye`, and close/reopen on visibility.
 - Handlers in `internal/web` stay thin. Partials refresh on `slip-updated from:body`.
 - Kickoff lock (rule 3) is coded and tested now with games inserted directly in tests.
@@ -68,7 +68,7 @@ an optional game; `slate-and-lines` adds the game picker. Read before starting:
 - [x] Add internal/live hub with topic subscribe, unsubscribe, and coalescing publish; test bursts and unsubscribe
 - [x] Add the SSE handler with pings and deadlines, plus the EventSource client with refresh triggers, bye handling, and
   visibility close/reopen; test slip-updated delivery and bye at both deadlines
-- [ ] Docs: add docs/concepts/live-updates.md; delete Live updates from plan/architecture.md
+- [x] Docs: add docs/concepts/live-updates.md; delete Live updates from plan/architecture.md
 
 ### Phase 4: Slip tab
 
