@@ -57,7 +57,7 @@ Games tab. Props wait for `props-research`. Read before starting:
 ### Phase 2: Weather
 
 - [x] Build the venue coordinates map from this season's scoreboards, international venues included
-- [ ] Add the Open-Meteo client for the 3-hour kickoff window and test max wind, gust, and precipitation
+- [x] Add the Open-Meteo client for the 3-hour kickoff window and test max wind, gust, and precipitation
 - [ ] Docs: add Open-Meteo and venues to docs/reference/data-sources.md; delete them from plan/data-sources.md
 
 ### Phase 3: Game lines
