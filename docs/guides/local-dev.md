@@ -4,8 +4,8 @@ title: Local development
 type: guide
 summary: Start the app with hot reload, set up the git hooks, and fall back to a plain server run when you need it.
 tags: [development, mise, air, tailwind, server]
-sources: [mise.toml, .air.toml, scripts/dev.sh, lefthook.yml, web/*.go, web/tailwind/*.css, web/templates/*.html, cmd/server/main.go, internal/config/config.go, internal/auth/*.go]
-last_verified: 2026-11-05
+sources: [mise.toml, .air.toml, scripts/dev.sh, lefthook.yml, web/*.go, web/tailwind/*.css, web/templates/*.html, cmd/server/main.go, internal/config/config.go, internal/auth/*.go, internal/groups/*.go]
+last_verified: 2026-11-07
 ---
 
 # Local development
@@ -31,8 +31,8 @@ environment variable, for example `PORT=9000 mise run dev`, which opens port 900
 [Configuration](../reference/config.md).
 
 With no Google values set, the app opens on `/login` with a "Sign in without Google (dev)" link. Click it, enter any
-email, and optionally a name, and the tabs load. The dev form calls the same sign-in code as Google, including
-`ALLOWED_EMAILS` and history linking. See [Access](../concepts/access.md) for the session and the gate.
+email, and optionally a name, and the tabs load. The dev form calls the same sign-in code as Google: a new person gets a
+"Just me" group in the same transaction. See [Access](../concepts/access.md) for the session and the cookies.
 
 Dev logs print as readable console lines; prod logs are JSON.
 
@@ -97,22 +97,15 @@ HTMX and `app.js` in `web/static/` are not built. They ship as written.
 
 ## Sign-in
 
-In dev, `SESSION_KEY` has a fixed value and `ALLOWED_EMAILS` is empty, so a fresh checkout starts without secrets and
-the dev form lets any email in. Prod rejects a short session key, an empty allow list, and missing Google values; see
+Sign-up is open. In dev, `SESSION_KEY` has a fixed value, so a fresh checkout starts without secrets and the dev form
+lets any email in. Prod rejects a short session key and missing Google values; see
 [Configuration](../reference/config.md).
 
-To exercise the allow list locally, set it before starting:
+Each sign-in starts a session that lasts 30 days. To start fresh, clear the site's cookies, use a private window, or post
+to `/logout` (the shell has no sign-out link yet). Changing `SESSION_KEY` signs every browser out.
 
-```sh
-ALLOWED_EMAILS="you@example.com,friendo@example.com=Friend" mise run dev
-```
-
-An email with no matching entry gets the friendly 403 page. The `=Friend` form links that email to an unlinked history
-user named `Friend` on first sign-in. This is the one-time hand match for imported history; a linked user keeps the name
-already stored.
-
-The session cookie lasts 30 days. To start fresh, clear the site's cookies, use a private window, or post to `/logout`
-(the shell has no sign-out link yet). Changing `SESSION_KEY` signs every browser out.
+To test invites, sign in as one person, open `/groups`, copy the invite link, then sign in as someone else and open it.
+See [Groups](../concepts/groups.md) for the join, reset, and leave rules.
 
 ### With real Google
 
@@ -122,7 +115,6 @@ To use the real Google flow locally, create a Web client and register the local 
 ```sh
 GOOGLE_CLIENT_ID="..." \
 GOOGLE_CLIENT_SECRET="..." \
-ALLOWED_EMAILS="you@example.com" \
 mise run dev
 ```
 
@@ -133,7 +125,9 @@ mise run dev
 ## Database
 
 The first start creates `./data/parlay.db` and applies the migrations. `data/` is gitignored and excluded from the
-watcher. To start over, stop the server and delete it:
+watcher. Groups added `slips.group_id` by editing `0001_init.sql` in place, so a database created before groups existed
+has the wrong shape. Delete it and let the migrations rebuild. To start over for any reason, stop the server and delete
+it:
 
 ```sh
 rm -rf data

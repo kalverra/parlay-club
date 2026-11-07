@@ -2,18 +2,19 @@
 id: schema
 title: Database schema
 type: reference
-summary: SQLite tables, how migrations are tracked and applied, and the connection settings behind every query.
-tags: [database, sqlite, migrations]
-sources: [internal/db/migrations/*.sql, internal/db/migrate.go, internal/db/db.go]
-last_verified: 2026-11-06
+summary: SQLite tables, including groups and their members, how migrations are tracked and applied, and the connection settings behind every query.
+tags: [database, sqlite, migrations, groups]
+sources: [internal/db/migrations/*.sql, internal/db/migrate.go, internal/db/db.go, internal/db/groups.go]
+last_verified: 2026-11-07
 ---
 
 # Database schema
 
 ## Summary
 
-One SQLite file, opened by `internal/db.Open`, holds every table the app uses. `0001_init.sql` creates the tables, and
-`0002_google_identity.sql` rebuilds `users` to add Google identity columns and drop the unique name rule.
+One SQLite file, opened by `internal/db.Open`, holds every table the app uses. `0001_init.sql` creates the tables,
+including groups, their members, and `slips.group_id`. `0002_google_identity.sql` rebuilds `users` to add Google
+identity columns and drop the unique name rule.
 
 ## Connection settings
 
@@ -38,6 +39,8 @@ connection rules out `SQLITE_BUSY`.
 - Each file runs in its own transaction. The migration's statements and its `user_version` bump commit together, so a
   failed migration leaves neither behind.
 - A fresh database ends at version 2 with every table below.
+- `0001_init.sql` creates `groups`, `group_members`, and `slips.group_id`. A database created before groups existed has
+  the old `slips` shape, so delete it and let the migrations rebuild.
 - `0002_google_identity.sql` rebuilds `users` in its transaction with the SQLite 12-step method and
   `PRAGMA defer_foreign_keys = ON`, so the drop and rename keep every child row valid. Existing rows keep their `id`,
   name, color, home book, active flag, and creation time, and come back with no Google identity.
@@ -48,11 +51,13 @@ connection rules out `SQLITE_BUSY`.
 
 | Table            | Holds                                                        |
 | ---------------- | ------------------------------------------------------------ |
-| `users`          | Group members, their Google identity, avatar color, home book, and active flag. |
+| `groups`         | One club: its name, invite token, and creation time.          |
+| `group_members`  | Which people belong to which group and when they joined.      |
+| `users`          | People, their Google identity, avatar color, home book, and active flag. |
 | `weeks`          | NFL weeks, keyed `season*1000 + season_type*100 + week_num`.  |
 | `games`          | One row per ESPN event: teams, kickoff, venue, weather, scores. |
 | `odds`           | Odds API prices per game, book, market, and selection.        |
-| `slips`          | One shared parlay per week, with status and result.           |
+| `slips`          | One shared parlay per group per week, with status and result.  |
 | `slip_members`   | Who is on a slip and when they locked in.                     |
 | `legs`           | Picks on a slip, with market, selection, line, odds, and result. |
 | `wagers`         | Optional stake, odds, and boost per member per slip.          |
@@ -71,12 +76,25 @@ Three nullable columns hold the Google identity:
 - `email` is the verified Google address, unique and compared without case.
 - `picture_url` is the Google profile picture. It refreshes on every sign-in.
 
-`auth.SignIn` is the only writer of these columns. It links by `google_sub`, then by `email`, then by the gate's
-`email=Name` hand match, and otherwise creates a user. An unlinked row keeps its history when it gains an identity. See
+`auth.SignIn` is the only writer of these columns. It links by `google_sub`, then by `email`, and otherwise creates a
+user and their "Just me" group. An unlinked row keeps its history when it gains an identity. See
 [Access](../concepts/access.md) for the full resolution order.
 
 `active` still turns a person off without deleting their slips and legs. `avatar_color` still comes from the fixed
 palette, and a linked user keeps the color they already have.
+
+## Groups and membership
+
+A group is one club. `groups.name` is not unique; `invite_token` is unique and holds 32 lowercase hex characters, or 128
+random bits. Resetting an invite replaces the token, which kills the old link.
+
+`group_members` pairs a group with a user, with `joined_at` recording the order. Leaving deletes only that row, so the
+person's legs stay on the group's slips. Every signed-in person belongs to at least one group: `auth.SignIn` creates the
+"Just me" group in the same transaction as a new user.
+
+`slips.group_id` is `NOT NULL` and points at `groups`, so a slip always has a home. The unique key is
+`(group_id, week_id, name)`, so two groups can both have "Week 9" in the same week. Weeks, games, odds, player matches,
+and `sync_state` are global: every group reads the same slate and the same cached prices.
 
 ## DDL
 
@@ -95,6 +113,20 @@ CREATE TABLE users (
   picture_url  TEXT                            -- Google profile picture
 );
 CREATE INDEX users_name ON users(name COLLATE NOCASE);
+
+CREATE TABLE groups (
+  id           INTEGER PRIMARY KEY,
+  name         TEXT NOT NULL,                  -- not unique
+  invite_token TEXT NOT NULL UNIQUE,           -- 128-bit random, hex
+  created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+);
+
+CREATE TABLE group_members (
+  group_id  INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+  user_id   INTEGER NOT NULL REFERENCES users(id),
+  joined_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+  PRIMARY KEY (group_id, user_id)
+);
 
 CREATE TABLE weeks (
   id          INTEGER PRIMARY KEY,             -- season*1000 + season_type*100 + week_num, e.g. 2026209
@@ -145,13 +177,14 @@ CREATE TABLE odds (
 
 CREATE TABLE slips (
   id              INTEGER PRIMARY KEY,
+  group_id        INTEGER NOT NULL REFERENCES groups(id),
   week_id         INTEGER NOT NULL REFERENCES weeks(id),
   name            TEXT NOT NULL,
   legs_per_member INTEGER NOT NULL DEFAULT 2 CHECK (legs_per_member BETWEEN 1 AND 5),
   status          TEXT NOT NULL DEFAULT 'OPEN',     -- OPEN, LOCKED, GRADED
   result          TEXT NOT NULL DEFAULT 'PENDING',  -- PENDING, WON, LOST, PUSH
   created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
-  UNIQUE (week_id, name)
+  UNIQUE (group_id, week_id, name)
 );
 
 CREATE TABLE slip_members (
@@ -221,3 +254,6 @@ CREATE TABLE sync_state (
 - A leg's kickoff lock comes from `games.kickoff_utc`; it is not stored.
 - A slip's reference odds are not stored; any view that shows them computes them.
 - `slips.status` and `slips.result` stay in step with lock and leg-result changes.
+- `groups`, `group_members`, `slips`, and the rows that hang off a slip are scoped to one group. Weeks, games, odds,
+  player matches, and `sync_state` are global.
+- An invite token is a bearer secret. Do not log it or echo it in an error.

@@ -25,6 +25,7 @@ cmd/server/              main: config, wiring, HTTP server, graceful shutdown
 internal/config/         env parsing and validation
 internal/db/             Open (pragmas), migrations/*.sql (embedded), Store with all queries
 internal/auth/           session and OAuth cookies, sign-in handlers, middleware
+internal/groups/         membership, the active-group scope, and the invite screens
 internal/slips/          slip, member, leg rules (product.md "Editing and locking"); publishes to live
 internal/parlay/         odds math, payout, units
 internal/live/           hub and SSE handler
@@ -49,19 +50,27 @@ SQL.
 ## Routes
 
 Go 1.22+ method patterns. All routes except `/healthz`, `/static/`, `/login`, `POST /logout`, the Google sign-in routes,
-and the dev sign-in routes need a signed-in user.
+and the dev sign-in routes need a signed-in user. Every authenticated route also runs the group scope, which picks the
+active group or falls back to one the person belongs to.
 
 | Method + path                              | Purpose                                                  | Change |
-| ------------------------------------------ | -------------------------------------------------------- | ----- |
+| ------------------------------------------ | -------------------------------------------------------- | ------ |
 | `GET /healthz`                             | 200 `ok`                                                 | 1     |
 | `GET /static/{path...}`                    | Embedded assets, long cache headers, hashed via query    | 1     |
 | `GET /login`                               | Sign-in page: Google button, plus a dev link when Google is off | 1     |
-| `POST /logout`                             | Clear the session and return to `/login`                 | 1     |
+| `POST /logout`                             | Clear the session and active-group cookies and return to `/login` | 1     |
 | `GET /auth/google/start`                   | Start the Google round trip                              | 1     |
 | `GET /auth/google/callback`                | Finish Google sign-in                                    | 1     |
 | `GET /dev/login`, `POST /dev/login`        | Local sign-in, dev only and only when Google is not configured | 1     |
+| `GET /groups`                              | Group list, create form, invite links, leave             | groups |
+| `POST /groups`                             | Create a group and make it active                        | groups |
+| `POST /groups/switch`                      | Make one of the caller's groups active                   | groups |
+| `POST /groups/{id}/reset-invite`           | Mint a new invite link and kill the old one              | groups |
+| `POST /groups/{id}/leave`                  | Leave a group, keeping the person's legs                 | groups |
+| `GET /join/{token}`                        | Join page naming the group and its members               | groups |
+| `POST /join/{token}`                       | Join the group, idempotently                             | groups |
 | `GET /me`, `POST /me`                      | Profile: home book; `POST /users/{id}/active` toggles    | 2     |
-| `GET /`                                    | Newest slip of current week, else create form            | 2     |
+| `GET /`                                    | Newest slip of the current week in the active group, else create form | 2     |
 | `GET /slips/new`, `POST /slips`            | Create slip                                              | 2     |
 | `GET /slips/{id}`                          | Full page                                                | 2     |
 | `GET /slips/{id}/panel`                    | Slip panel partial (members, legs, odds, banner)         | 2     |
@@ -82,7 +91,7 @@ and the dev sign-in routes need a signed-in user.
 | `PUT /legs/{id}/result`                    | Manual grade                                             | 5     |
 | `GET /research/players/{espnID}?leg_id=`   | Player research partial                                  | 6     |
 | `GET /research/games/{id}`                 | Game research partial                                    | 6     |
-| `GET /record?season=`                      | Record Book                                              | 7     |
+| `GET /record?season=`                      | Record Book for the active group                          | 7     |
 | `PUT /slips/{id}/wagers/me`                | Log own wager                                            | 7     |
 
 Rule violations from `internal/slips` return 422 with a short message rendered in the form. HTMX responses that change
@@ -173,7 +182,7 @@ gcloud run deploy parlay-club --image ... --region us-central1 \
   --timeout 3600 --cpu-boost --allow-unauthenticated \
   --service-account parlay-runtime@PROJECT.iam.gserviceaccount.com \
   --set-env-vars APP_ENV=prod,DB_PATH=/data/parlay.db,LITESTREAM_BUCKET=BUCKET \
-  --set-env-vars BASE_URL=https://SERVICE_URL,ALLOWED_EMAILS=you@example.com \
+  --set-env-vars BASE_URL=https://SERVICE_URL \
   --set-secrets SESSION_KEY=session-key:latest,GOOGLE_CLIENT_ID=google-client-id:latest \
   --set-secrets GOOGLE_CLIENT_SECRET=google-client-secret:latest,ODDS_API_KEY=odds-api-key:latest
 ```
@@ -196,7 +205,7 @@ Idempotent `gcloud` script taking `PROJECT_ID` and `BILLING_ACCOUNT`:
 - print the values to store as GitHub repo variables: `GCP_PROJECT`, `GCP_REGION`, `WIF_PROVIDER`, `DEPLOY_SA`,
   `RUNTIME_SA`, `LITESTREAM_BUCKET`, `AR_REPO`.
 
-The user sets `BASE_URL` and `ALLOWED_EMAILS` as Cloud Run environment variables at deploy time. The Google client
+The user sets `BASE_URL` as a Cloud Run environment variable at deploy time. The Google client
 values come from the Web client in the [Google OAuth setup runbook](../docs/runbooks/google-oauth-setup.md).
 
 `docs/deploy.md` walks the user through running it, adding secret values, and setting the GitHub variables.
