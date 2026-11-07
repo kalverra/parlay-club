@@ -163,7 +163,9 @@ type LegFormView struct {
 	SlipID     int64
 	LegID      int64
 	Action     string
+	Target     string
 	Editing    bool
+	Quick      bool
 	Market     string
 	Selection  string
 	Team       string
@@ -172,6 +174,11 @@ type LegFormView struct {
 	Line       string
 	Odds       string
 	GameID     string
+}
+
+// LegAddedView is the confirmation a quick-add pill swaps in.
+type LegAddedView struct {
+	Selection string
 }
 
 // ProfilePage is the profile screen.
@@ -480,9 +487,14 @@ func (h *slipHandlers) newLegForm(w http.ResponseWriter, r *http.Request) {
 	form := LegFormView{
 		SlipID: slip.ID,
 		Action: fmt.Sprintf("/slips/%d/legs", slip.ID),
+		Target: "#slip-panel",
 		Market: "OTHER",
 		Odds:   strconv.Itoa(db.DefaultLegOdds),
 		GameID: r.URL.Query().Get("game_id"),
+	}
+	if r.URL.Query().Get("quick") != "" && form.GameID != "" {
+		form.Quick = true
+		form.Target = "#quick-add-" + form.GameID
 	}
 	h.renderPartial(w, "leg-form", form)
 }
@@ -507,12 +519,17 @@ func (h *slipHandlers) addLeg(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err := h.deps.Slips.AddLeg(r.Context(), user.ID, leg); err != nil {
+	created, err := h.deps.Slips.AddLeg(r.Context(), user.ID, leg)
+	if err != nil {
 		h.respondError(w, err)
 		return
 	}
 	// Tell the browser the bottom sheet can close now that the leg landed.
 	w.Header().Set("Hx-Trigger", "leg-saved")
+	if r.PostForm.Get("quick") != "" {
+		h.renderPartial(w, "leg-added", LegAddedView{Selection: created.Selection})
+		return
+	}
 	h.renderPanel(w, r, slip)
 }
 
@@ -1005,6 +1022,7 @@ func (h *slipHandlers) slipPageData(ctx context.Context, slip db.Slip) (SlipPage
 		view.LegForm = LegFormView{
 			SlipID: slip.ID,
 			Action: fmt.Sprintf("/slips/%d/legs", slip.ID),
+			Target: "#slip-panel",
 			Market: "OTHER",
 			Odds:   strconv.Itoa(db.DefaultLegOdds),
 		}
@@ -1050,6 +1068,7 @@ func legFormView(leg db.Leg) LegFormView {
 		SlipID:    leg.SlipID,
 		LegID:     leg.ID,
 		Action:    fmt.Sprintf("/legs/%d", leg.ID),
+		Target:    "#slip-panel",
 		Editing:   true,
 		Market:    leg.MarketType,
 		Selection: leg.Selection,

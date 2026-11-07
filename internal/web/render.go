@@ -31,6 +31,7 @@ var partialFiles = map[string]string{
 	"slip-activity": partialsFile,
 	"slip-payout":   partialsFile,
 	"leg-form":      partialsFile,
+	"leg-added":     partialsFile,
 }
 
 // Renderer parses and runs the page templates. It is safe to use from several

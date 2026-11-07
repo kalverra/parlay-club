@@ -206,8 +206,11 @@ func renderPage(t *testing.T, page string, data webui.Page) string {
 	require.NoError(t, err)
 
 	var value any = data
-	if page == "slip" {
+	switch page {
+	case "slip":
 		value = webui.SlipPage{Page: data}
+	case "games":
+		value = webui.GamesPage{Page: data}
 	}
 
 	html, err := renderer.Render(page, value)

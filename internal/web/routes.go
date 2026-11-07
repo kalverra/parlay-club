@@ -48,7 +48,6 @@ type Dependencies struct {
 // pageRoutes are the shell's pages without per-slip data. The slip screen owns
 // "/" and the slip routes because it needs the store.
 var pageRoutes = []pageRoute{
-	{"GET /games", "games", TabGames},
 	{"GET /research", "research", TabResearch},
 	{"GET /record", "record", TabRecord},
 }
@@ -77,6 +76,8 @@ func NewWithDeps(deps Dependencies) http.Handler {
 
 	slipRoutes := &slipHandlers{deps: deps}
 	slipRoutes.Routes(mux)
+	gameRoutes := &gameHandlers{deps: deps}
+	gameRoutes.Routes(mux)
 
 	for _, route := range pageRoutes {
 		mux.Handle(route.pattern, pageHandler(deps.Logger, deps.Renderer, route, deps.UserFrom, deps.GroupsFrom))
