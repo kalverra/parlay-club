@@ -450,6 +450,10 @@ func TestLogoutClearsSession(t *testing.T) {
 	require.NotNil(t, cookie)
 	_, ok := f.cookies.SessionID(requestWithCookie(t, cookie))
 	assert.False(t, ok)
+
+	group := cookieFrom(recorder, auth.GroupCookie)
+	require.NotNil(t, group, "logout forgets the active group too")
+	assert.Empty(t, group.Value)
 }
 
 func TestDevLoginForm(t *testing.T) {

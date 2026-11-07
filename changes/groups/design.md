@@ -126,7 +126,7 @@ Effort: hard (a new scope check on every route, plus open sign-up, across slips,
 
 ### Phase 2: Everything stays inside a group
 
-- [ ] Add `groups.Scope` and the `pc_group` cookie, thread `Actor{UserID, GroupID}` through `internal/slips`, and guard
+- [x] Add `groups.Scope` and the `pc_group` cookie, thread `Actor{UserID, GroupID}` through `internal/slips`, and guard
       slip-by-id routes by the slip's group, with the isolation test over every slip route and the same-name-two-groups
       case
 - [ ] Scope the SSE stream by membership, add the `group:{id}` topic, filter the Record Book and home list by group, and

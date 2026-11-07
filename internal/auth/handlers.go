@@ -96,9 +96,11 @@ func (h *Handlers) loginForm(w http.ResponseWriter, _ *http.Request) {
 	h.renderLogin(w, http.StatusOK, "")
 }
 
-// logout clears the session cookie and returns to the sign-in screen.
+// logout clears the session and active-group cookies and returns to the
+// sign-in screen.
 func (h *Handlers) logout(w http.ResponseWriter, r *http.Request) {
 	h.cookies.ClearSession(w)
+	h.cookies.ClearGroup(w)
 	http.Redirect(w, r, "/login", http.StatusSeeOther)
 }
 

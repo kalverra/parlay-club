@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -17,13 +18,18 @@ import (
 
 	"github.com/kalverra/parlay-club/internal/auth"
 	"github.com/kalverra/parlay-club/internal/config"
+	"github.com/kalverra/parlay-club/internal/db"
+	"github.com/kalverra/parlay-club/internal/groups"
 )
+
+// passthrough stands in for the group scope in tests that do not need one.
+func passthrough(next http.Handler) http.Handler { return next }
 
 func TestHealthz(t *testing.T) {
 	t.Parallel()
 
 	recorder := httptest.NewRecorder()
-	newMux(http.NotFoundHandler(), http.NotFoundHandler(), newTestHandlers()).
+	newMux(http.NotFoundHandler(), http.NotFoundHandler(), newTestHandlers(), passthrough).
 		ServeHTTP(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/healthz", nil))
 
 	assert.Equal(t, http.StatusOK, recorder.Code)
@@ -37,7 +43,7 @@ func TestMuxProtectsShell(t *testing.T) {
 	shell := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	})
-	mux := newMux(shell, http.NotFoundHandler(), newTestHandlers())
+	mux := newMux(shell, http.NotFoundHandler(), newTestHandlers(), passthrough)
 
 	recorder := httptest.NewRecorder()
 	mux.ServeHTTP(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/games", nil))
@@ -52,7 +58,7 @@ func TestMuxServesStaticWithoutAuth(t *testing.T) {
 	static := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	})
-	mux := newMux(http.NotFoundHandler(), static, newTestHandlers())
+	mux := newMux(http.NotFoundHandler(), static, newTestHandlers(), passthrough)
 
 	recorder := httptest.NewRecorder()
 	mux.ServeHTTP(recorder, httptest.NewRequestWithContext(
@@ -69,6 +75,73 @@ func TestMuxServesStaticWithoutAuth(t *testing.T) {
 func newTestHandlers() *auth.Handlers {
 	cookies := auth.NewCookies("test-session-key-long-enough-for-anything", false)
 	return auth.NewHandlers(zerolog.Nop(), nil, cookies, nil, nil, false)
+}
+
+func TestMuxScopesShellToActiveGroup(t *testing.T) {
+	t.Parallel()
+
+	database, err := db.Open(filepath.Join(t.TempDir(), "parlay.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { assert.NoError(t, database.Close()) })
+	require.NoError(t, db.Migrate(t.Context(), database))
+
+	store := db.NewStore(database)
+	user, err := store.CreateUserWithIdentity(
+		t.Context(), "Ada", "ada@example.com", "google-ada", "")
+	require.NoError(t, err)
+	group, err := store.Create(t.Context(), user.ID, "Sunday Parlay Club")
+	require.NoError(t, err)
+
+	cookies := auth.NewCookies("test-session-key-long-enough-for-anything", false)
+	handlers := auth.NewHandlers(zerolog.Nop(), store, cookies, nil, nil, false)
+	scope := groups.Scope(zerolog.Nop(), store, auth.UserFrom, cookies)
+
+	var (
+		got    groups.Group
+		hasGot bool
+	)
+	shell := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got, hasGot = groups.From(r.Context())
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux := newMux(shell, http.NotFoundHandler(), handlers, scope)
+
+	signed := httptest.NewRecorder()
+	cookies.SetSession(signed, user.ID)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/games", nil)
+	request.AddCookie(responseCookie(t, signed, auth.SessionCookie))
+	mux.ServeHTTP(recorder, request)
+
+	assert.Equal(t, http.StatusNoContent, recorder.Code)
+	assert.True(t, hasGot, "the shell runs after the group scope")
+	assert.Equal(t, group, got)
+
+	chosen := responseCookie(t, recorder, auth.GroupCookie)
+	chosenRequest := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
+	chosenRequest.AddCookie(chosen)
+	id, ok := cookies.GroupID(chosenRequest)
+	require.True(t, ok)
+	assert.Equal(t, group.ID, id, "the fallback group sticks in the cookie")
+}
+
+// responseCookie returns the named cookie a recorder set, failing the test when
+// it is absent.
+func responseCookie(
+	t *testing.T,
+	recorder *httptest.ResponseRecorder,
+	name string,
+) *http.Cookie {
+	t.Helper()
+
+	for _, cookie := range recorder.Result().Cookies() {
+		if cookie.Name == name {
+			return cookie
+		}
+	}
+	require.FailNow(t, "response set no cookie", "cookie %q missing", name)
+	return nil
 }
 
 func TestLoggerWritesJSONInProd(t *testing.T) {

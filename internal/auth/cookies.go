@@ -15,6 +15,7 @@ import (
 const (
 	SessionCookie = "pc_session"
 	OAuthCookie   = "pc_oauth"
+	GroupCookie   = "pc_group"
 )
 
 const (
@@ -35,12 +36,14 @@ type OAuthState struct {
 	Verifier string
 }
 
-// Cookies signs and verifies the session and OAuth cookies.
+// Cookies signs and verifies the session, OAuth, and group cookies.
 //
 // The session cookie holds the user ID, an expiry, and an HMAC over
 // "session:{userID}.{expiry}". The OAuth cookie holds state, nonce, the PKCE
-// verifier, and an issue time, with an HMAC over "oauth:{payload}". Both MACs
-// use the session key and are compared in constant time.
+// verifier, and an issue time, with an HMAC over "oauth:{payload}". The group
+// cookie holds the active group ID and an expiry, with an HMAC over
+// "group:{groupID}.{expiry}". Every MAC uses the session key and is compared in
+// constant time.
 //
 // A Cookies is safe for concurrent use once built.
 type Cookies struct {
@@ -65,7 +68,33 @@ func (c *Cookies) SetSession(w http.ResponseWriter, id int64) {
 // SessionID returns the user ID carried by a valid session cookie. A missing,
 // tampered, malformed, or expired cookie reports false.
 func (c *Cookies) SessionID(r *http.Request) (int64, bool) {
-	cookie, err := r.Cookie(SessionCookie)
+	return c.signedID(r, SessionCookie, "session")
+}
+
+// SetGroup writes the cookie that names id as the active group.
+func (c *Cookies) SetGroup(w http.ResponseWriter, id int64) {
+	idText := strconv.FormatInt(id, 10)
+	expiryText := strconv.FormatInt(time.Now().Add(sessionMaxAge).Unix(), 10)
+	payload := idText + "." + expiryText
+	http.SetCookie(w, c.cookie(GroupCookie, payload+"."+c.mac("group:"+payload), sessionMaxAge, "/"))
+}
+
+// GroupID returns the group ID carried by a valid group cookie. A missing,
+// tampered, malformed, or expired cookie reports false, so the caller can fall
+// back to a group the person belongs to.
+func (c *Cookies) GroupID(r *http.Request) (int64, bool) {
+	return c.signedID(r, GroupCookie, "group")
+}
+
+// ClearGroup expires the active-group cookie.
+func (c *Cookies) ClearGroup(w http.ResponseWriter) {
+	http.SetCookie(w, c.expiredCookie(GroupCookie, "/"))
+}
+
+// signedID reads the ID a signed cookie carries. scope separates the MACs of
+// cookies that share this format, so a session value cannot pass as a group.
+func (c *Cookies) signedID(r *http.Request, name, scope string) (int64, bool) {
+	cookie, err := r.Cookie(name)
 	if err != nil {
 		return 0, false
 	}
@@ -76,7 +105,7 @@ func (c *Cookies) SessionID(r *http.Request) (int64, bool) {
 	}
 	idText, expiryText, signature := parts[0], parts[1], parts[2]
 	payload := idText + "." + expiryText
-	if !hmac.Equal([]byte(signature), []byte(c.mac("session:"+payload))) {
+	if !hmac.Equal([]byte(signature), []byte(c.mac(scope+":"+payload))) {
 		return 0, false
 	}
 
