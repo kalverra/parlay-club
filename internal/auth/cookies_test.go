@@ -42,11 +42,12 @@ func sessionValue(t *testing.T, id, expiry int64) string {
 	return payload + "." + signedValue(t, "session:"+payload)
 }
 
-// oauthValue builds a pc_oauth cookie value for one round trip.
+// oauthValue builds a pc_oauth cookie value for one round trip with no return
+// path.
 func oauthValue(t *testing.T, state, nonce, verifier string, issued time.Time) string {
 	t.Helper()
 
-	payload := state + "." + nonce + "." + verifier + "." + strconv.FormatInt(issued.Unix(), 10)
+	payload := state + "." + nonce + "." + verifier + "." + strconv.FormatInt(issued.Unix(), 10) + "."
 	return payload + "." + signedValue(t, "oauth:"+payload)
 }
 
@@ -253,7 +254,7 @@ func TestSetOAuthCookie(t *testing.T) {
 	})
 
 	cookie := responseCookie(t, w, auth.OAuthCookie)
-	assert.Equal(t, "/auth", cookie.Path)
+	assert.Equal(t, "/", cookie.Path)
 	assert.Equal(t, 10*60, cookie.MaxAge)
 	assert.True(t, cookie.HttpOnly)
 	assert.True(t, cookie.Secure)
@@ -310,11 +311,51 @@ func TestClearOAuthCookie(t *testing.T) {
 
 	cookie := responseCookie(t, w, auth.OAuthCookie)
 	assert.Empty(t, cookie.Value)
-	assert.Equal(t, "/auth", cookie.Path)
+	assert.Equal(t, "/", cookie.Path)
 	assert.Negative(t, cookie.MaxAge)
 
 	_, ok := testCookies(false).OAuthState(requestWithCookie(t, cookie))
 	assert.False(t, ok)
+}
+
+func TestSetOAuthCarriesTheReturnPath(t *testing.T) {
+	t.Parallel()
+
+	w := httptest.NewRecorder()
+	testCookies(false).SetOAuth(w, auth.OAuthState{
+		State: "state-1", Nonce: "nonce-1", Verifier: "verifier-1", ReturnTo: "/join/abc123",
+	})
+
+	state, ok := testCookies(false).OAuthState(
+		requestWithCookie(t, responseCookie(t, w, auth.OAuthCookie)))
+	require.True(t, ok)
+	assert.Equal(t, "/join/abc123", state.ReturnTo)
+}
+
+func TestSetReturnToWritesAReturnOnlyCookie(t *testing.T) {
+	t.Parallel()
+
+	w := httptest.NewRecorder()
+	testCookies(false).SetReturnTo(w, "/join/abc123")
+	cookie := responseCookie(t, w, auth.OAuthCookie)
+
+	request := requestWithCookie(t, cookie)
+	assert.Equal(t, "/join/abc123", testCookies(false).ReturnTo(request))
+
+	_, ok := testCookies(false).OAuthState(request)
+	assert.False(t, ok, "a return-only cookie is not a usable round trip")
+}
+
+func TestReturnToRejectsATamperedCookie(t *testing.T) {
+	t.Parallel()
+
+	w := httptest.NewRecorder()
+	testCookies(false).SetReturnTo(w, "/join/abc123")
+	//nolint:gosec // the handler set these attributes; the test tampers with the value.
+	cookie := responseCookie(t, w, auth.OAuthCookie)
+	cookie.Value = tampered(cookie.Value)
+
+	assert.Empty(t, testCookies(false).ReturnTo(requestWithCookie(t, cookie)))
 }
 
 func TestClearGroupCookie(t *testing.T) {

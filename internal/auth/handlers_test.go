@@ -276,7 +276,7 @@ func TestGoogleStartRedirectsAndSetsOAuthCookie(t *testing.T) {
 
 	cookie := cookieFrom(recorder, auth.OAuthCookie)
 	require.NotNil(t, cookie)
-	assert.Equal(t, "/auth", cookie.Path)
+	assert.Equal(t, "/", cookie.Path)
 	assert.True(t, cookie.HttpOnly)
 
 	saved, ok := f.cookies.OAuthState(requestWithCookie(t, cookie))
@@ -312,6 +312,46 @@ func TestGoogleCallbackSignsIn(t *testing.T) {
 	cleared := cookieFrom(recorder, auth.OAuthCookie)
 	require.NotNil(t, cleared)
 	assert.Empty(t, cleared.Value, "the round-trip cookie is cleared")
+}
+
+func TestGoogleCallbackReturnsToTheJoinPath(t *testing.T) {
+	t.Parallel()
+
+	f := newFixture(t)
+	w := httptest.NewRecorder()
+	f.cookies.SetReturnTo(w, "/join/abc123")
+	returnCookie := cookieFrom(w, auth.OAuthCookie)
+	require.NotNil(t, returnCookie)
+
+	start := f.serve(t, getRequest(t, "/auth/google/start"), returnCookie)
+	require.Equal(t, http.StatusFound, start.Code)
+	oauth := cookieFrom(start, auth.OAuthCookie)
+	require.NotNil(t, oauth)
+
+	recorder := f.serve(t, callbackRequest(t, f.provider.state, oauth))
+
+	assert.Equal(t, http.StatusSeeOther, recorder.Code)
+	assert.Equal(t, "/join/abc123", recorder.Header().Get("Location"))
+}
+
+func TestGoogleCallbackDropsANonJoinReturnPath(t *testing.T) {
+	t.Parallel()
+
+	f := newFixture(t)
+	w := httptest.NewRecorder()
+	f.cookies.SetReturnTo(w, "https://example.com/elsewhere")
+	returnCookie := cookieFrom(w, auth.OAuthCookie)
+	require.NotNil(t, returnCookie)
+
+	start := f.serve(t, getRequest(t, "/auth/google/start"), returnCookie)
+	require.Equal(t, http.StatusFound, start.Code)
+	oauth := cookieFrom(start, auth.OAuthCookie)
+	require.NotNil(t, oauth)
+
+	recorder := f.serve(t, callbackRequest(t, f.provider.state, oauth))
+
+	assert.Equal(t, http.StatusSeeOther, recorder.Code)
+	assert.Equal(t, "/", recorder.Header().Get("Location"))
 }
 
 func TestGoogleCallbackCreatesASoloGroupForAStranger(t *testing.T) {
@@ -515,6 +555,38 @@ func TestDevLoginCreatesASoloGroupForAStranger(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, groups, 1)
 	assert.Equal(t, "Just me", groups[0].Name)
+}
+
+func TestDevLoginReturnsToTheJoinPath(t *testing.T) {
+	t.Parallel()
+
+	f := newFixture(t)
+	w := httptest.NewRecorder()
+	f.cookies.SetReturnTo(w, "/join/abc123")
+
+	recorder := f.serve(t, postForm(t, "/dev/login", url.Values{
+		"email": {"new@example.com"},
+		"name":  {"New Person"},
+	}), cookieFrom(w, auth.OAuthCookie))
+
+	assert.Equal(t, http.StatusSeeOther, recorder.Code)
+	assert.Equal(t, "/join/abc123", recorder.Header().Get("Location"))
+}
+
+func TestDevLoginDropsANonJoinReturnPath(t *testing.T) {
+	t.Parallel()
+
+	f := newFixture(t)
+	w := httptest.NewRecorder()
+	f.cookies.SetReturnTo(w, "/games")
+
+	recorder := f.serve(t, postForm(t, "/dev/login", url.Values{
+		"email": {"new@example.com"},
+		"name":  {"New Person"},
+	}), cookieFrom(w, auth.OAuthCookie))
+
+	assert.Equal(t, http.StatusSeeOther, recorder.Code)
+	assert.Equal(t, "/", recorder.Header().Get("Location"))
 }
 
 func TestDevLoginRequiresEmail(t *testing.T) {

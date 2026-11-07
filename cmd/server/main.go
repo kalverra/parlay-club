@@ -80,10 +80,17 @@ func run() error {
 	devLogin := !cfg.IsProd() && cfg.GoogleClientID == ""
 	handlers := auth.NewHandlers(logger, store, cookies, renderer, provider, devLogin)
 	scope := groups.Scope(logger, store, auth.UserFrom, cookies)
+	groupHandlers := groups.NewHandlers(logger, store, auth.UserFrom, cookies, renderer)
 
 	server := &http.Server{
-		Addr:              net.JoinHostPort("", strconv.Itoa(cfg.Port)),
-		Handler:           newMux(web.New(logger, renderer, auth.UserFrom), web.StaticHandler(), handlers, scope),
+		Addr: net.JoinHostPort("", strconv.Itoa(cfg.Port)),
+		Handler: newMux(
+			web.New(logger, renderer, auth.UserFrom),
+			web.StaticHandler(),
+			handlers,
+			groupHandlers,
+			scope,
+		),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	return listenAndServe(ctx, logger, server)
@@ -147,6 +154,7 @@ func newLogger(cfg config.Config, out io.Writer) zerolog.Logger {
 func newMux(
 	shell, static http.Handler,
 	handlers *auth.Handlers,
+	groupHandlers *groups.Handlers,
 	scope func(http.Handler) http.Handler,
 ) http.Handler {
 	mux := http.NewServeMux()
@@ -156,6 +164,9 @@ func newMux(
 
 	app := http.NewServeMux()
 	app.Handle("/", shell)
+	if groupHandlers != nil {
+		groupHandlers.Routes(app)
+	}
 	mux.Handle("/", handlers.RequireUser(scope(app)))
 
 	return handlers.CSRF(mux)

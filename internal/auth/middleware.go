@@ -30,20 +30,20 @@ func (h *Handlers) RequireUser(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		id, ok := h.cookies.SessionID(r)
 		if !ok {
-			redirect(w, r)
+			h.redirect(w, r)
 			return
 		}
 
 		user, err := h.store.UserByID(r.Context(), id)
 		switch {
 		case errors.Is(err, db.ErrUserNotFound):
-			redirect(w, r)
+			h.redirect(w, r)
 			return
 		case err != nil:
 			h.serverError(w, err)
 			return
 		case !user.Active:
-			redirect(w, r)
+			h.redirect(w, r)
 			return
 		}
 
@@ -82,10 +82,15 @@ func UserFrom(ctx context.Context) (db.User, bool) {
 	return user, ok
 }
 
-// redirect sends a browser to the sign-in screen. An HTMX request gets a 200
-// with HX-Redirect instead of a 302, because HTMX would swap a redirect's empty
-// body into the page rather than navigate.
-func redirect(w http.ResponseWriter, r *http.Request) {
+// redirect sends a browser to the sign-in screen. It remembers a join path in
+// the signed pc_oauth cookie so sign-in lands back on the invite. An HTMX
+// request gets a 200 with HX-Redirect instead of a 302, because HTMX would swap
+// a redirect's empty body into the page rather than navigate.
+func (h *Handlers) redirect(w http.ResponseWriter, r *http.Request) {
+	if target := safeReturn(r.URL.Path); target != "" {
+		h.cookies.SetReturnTo(w, target)
+	}
+
 	if strings.EqualFold(r.Header.Get(hxRequest), "true") {
 		w.Header().Set(hxRedirect, "/login")
 		w.WriteHeader(http.StatusOK)
