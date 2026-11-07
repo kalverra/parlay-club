@@ -34,7 +34,7 @@ A leg has: owner, optional game, market, team, optional player, side, optional l
 | `OTHER`      | free-text selection, team opt. | whatever the user typed             |
 
 - Team is the ESPN abbreviation of the team the leg is about. For `TOTAL`, team is empty.
-- Odds default to -110 in the form; quick-add pills prefill the price (see Odds and payout).
+- Odds default to -110 in the form; quick-add pills prefill the price (see [Odds math](../docs/reference/odds-math.md)).
 - A leg needs a game, except on a slip for a past week, where game is optional and `OTHER` is the usual market.
 - `OTHER` legs skip the analyzer and grade by hand.
 
@@ -56,20 +56,6 @@ These rules live in `internal/slips` and are enforced on the server. `now` comes
 8. Slips for past weeks skip rule 3, so history can be entered.
 9. Every mutation writes one activity entry (e.g. "Adam added BUF -3.5", "Sam locked in") and publishes `slip-updated`
    for that slip.
-
-## Odds and payout
-
-Package `internal/parlay`. Work in decimal odds; show American odds.
-
-- American → decimal: `a > 0 → 1 + a/100`; `a < 0 → 1 + 100/|a|`.
-- Decimal → American: `d ≥ 2 → round((d − 1) × 100)`; `d < 2 → round(−100 / (d − 1))`.
-- **Reference price** of a leg: look for `odds` rows with the same game, market, player, side, and exact line, from the
-  home books of the slip's members (each book counted once). If any exist, the reference price is their median decimal
-  (the mean of the middle two for an even count). Otherwise it is the leg's own odds.
-- **Reference odds** of the slip: product of the reference decimals of every leg not `PUSH` or `VOID`.
-- **Payout** for a stake and a profit boost %: `stake + stake × (D − 1) × (1 + boost/100)`.
-- **Units** for a graded slip: `WON → D − 1`, `LOST → −1`, `PUSH → 0`.
-- Quick-add pills prefill the user's home-book price; with no home book or no price there, the median across all books.
 
 ## Grading
 
