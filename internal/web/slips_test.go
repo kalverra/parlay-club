@@ -207,6 +207,8 @@ func TestSlipPageShowsTheSlip(t *testing.T) {
 	assert.Contains(t, body, "BUF ML")
 	assert.Contains(t, body, "-110")
 	assert.Contains(t, body, "PENDING")
+	assert.Contains(t, body, "Reference", "a leg with no odds rows falls back to its own price")
+	assert.Contains(t, body, "1.91x")
 	assert.Contains(t, body, fmt.Sprintf(`hx-get="/slips/%d/legs/new"`, fixture.slip.ID))
 	assert.Contains(t, body, `id="leg-sheet"`)
 	assert.Contains(t, body, `name="stake"`)
@@ -258,6 +260,165 @@ func TestProfileKeepsInactiveMembersVisible(t *testing.T) {
 	assert.Contains(t, body, "Sam")
 	assert.Contains(t, body, "Inactive")
 	assert.Contains(t, body, `name="active" value="1"`, "an inactive person can be turned back on")
+}
+
+func TestLegFormListsOnlyGamesBeforeKickoff(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	upcoming := addGame(t, fixture, gameKickoff())
+
+	started, err := fixture.store.UpsertGame(t.Context(), db.Game{
+		ID:         "401772002",
+		WeekID:     fixture.week.ID,
+		HomeTeam:   "NYJ",
+		AwayTeam:   "NE",
+		HomeName:   "New York Jets",
+		AwayName:   "New England Patriots",
+		HomeESPNID: "20",
+		AwayESPNID: "17",
+		Kickoff:    time.Now().UTC().Add(-time.Hour).Truncate(time.Second),
+		Status:     db.GameScheduled,
+		UpdatedAt:  time.Now().UTC(),
+	})
+	require.NoError(t, err)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodGet,
+		fmt.Sprintf("/slips/%d/legs/new", fixture.slip.ID),
+		nil,
+	)
+	fixture.handler.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	body := recorder.Body.String()
+	assert.Contains(t, body, `name="game_id"`)
+	assert.Contains(t, body, upcoming.ID)
+	assert.Contains(t, body, "MIA @ BUF")
+	assert.NotContains(t, body, started.ID, "a kicked-off game is not offered")
+	assert.Contains(t, body, "required", "a current week asks for a game")
+}
+
+func TestLegFormListsKickedOffGamesForAPastWeek(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	game := addGame(t, fixture, time.Now().UTC().Add(-3*time.Hour).Truncate(time.Second))
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodGet,
+		fmt.Sprintf("/slips/%d/legs/new", fixture.slip.ID),
+		nil,
+	)
+	fixture.handler.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	body := recorder.Body.String()
+	assert.Contains(t, body, game.ID, "a past week can still enter history")
+	assert.Contains(t, body, "No game")
+	assert.NotContains(t, body, "required")
+}
+
+func TestAddLegForAKickedOffGameAnswers422(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	addGame(t, fixture, gameKickoff())
+	started, err := fixture.store.UpsertGame(t.Context(), db.Game{
+		ID:         "401772003",
+		WeekID:     fixture.week.ID,
+		HomeTeam:   "NYJ",
+		AwayTeam:   "NE",
+		HomeName:   "New York Jets",
+		AwayName:   "New England Patriots",
+		HomeESPNID: "20",
+		AwayESPNID: "17",
+		Kickoff:    time.Now().UTC().Add(-time.Hour).Truncate(time.Second),
+		Status:     db.GameScheduled,
+		UpdatedAt:  time.Now().UTC(),
+	})
+	require.NoError(t, err)
+
+	response := postForm(t,
+		fixture.handler,
+		fmt.Sprintf("/slips/%d/legs", fixture.slip.ID),
+		url.Values{
+			"game_id":     {started.ID},
+			"market_type": {"ML"},
+			"team":        {"NE"},
+			"side":        {"TEAM"},
+			"odds":        {"-110"},
+		},
+	)
+
+	assert.Equal(t, http.StatusUnprocessableEntity, response.Code)
+	assert.Contains(t, response.Body.String(), "that game already kicked off")
+}
+
+func TestSlipReferenceOddsUseMemberHomeBooks(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	game := addGame(t, fixture, gameKickoff())
+	addGameOdds(t, fixture.store, game.ID)
+
+	_, err := fixture.store.SetUserHomeBook(t.Context(), fixture.user.ID, new("draftkings"))
+	require.NoError(t, err)
+	sam, err := fixture.store.CreateUserWithIdentity(
+		t.Context(), "Sam", "sam@example.com", "google-sam", "")
+	require.NoError(t, err)
+	require.NoError(t, fixture.store.AddSlipMember(t.Context(), fixture.slip.ID, sam.ID))
+	_, err = fixture.store.SetUserHomeBook(t.Context(), sam.ID, new("fanduel"))
+	require.NoError(t, err)
+
+	form := url.Values{
+		"game_id":     {game.ID},
+		"market_type": {"ML"},
+		"team":        {"BUF"},
+		"side":        {"TEAM"},
+		"odds":        {"-110"},
+	}
+	response := postForm(t, fixture.handler, fmt.Sprintf("/slips/%d/legs", fixture.slip.ID), form)
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodGet,
+		fmt.Sprintf("/slips/%d/payout?stake=10&boost=0", fixture.slip.ID),
+		nil,
+	)
+	fixture.handler.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	body := recorder.Body.String()
+	assert.Contains(t, body, "Combined")
+	assert.Contains(t, body, "1.91x", "the leg's own price still sets the combined odds")
+	assert.Contains(t, body, "Reference")
+	assert.Contains(t, body, "1.68x", "the median of the members' home-book prices")
+	assert.Contains(t, body, "(-147)")
+}
+
+// postForm sends one already-encoded form as the browser's HTMX layer would.
+func postForm(t *testing.T, handler http.Handler, path string, form url.Values) *httptest.ResponseRecorder {
+	t.Helper()
+
+	request := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodPost,
+		path,
+		strings.NewReader(form.Encode()),
+	)
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.Header.Set("Hx-Request", "true")
+
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	return recorder
 }
 
 // addLeg posts one ML leg through the regular handler.
