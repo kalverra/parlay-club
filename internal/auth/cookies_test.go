@@ -317,6 +317,178 @@ func TestClearOAuthCookie(t *testing.T) {
 	assert.False(t, ok)
 }
 
+func TestClearGroupCookie(t *testing.T) {
+	t.Parallel()
+
+	w := httptest.NewRecorder()
+	testCookies(true).ClearGroup(w)
+
+	cookie := responseCookie(t, w, auth.GroupCookie)
+	assert.Empty(t, cookie.Value)
+	assert.Equal(t, "/", cookie.Path)
+	assert.Negative(t, cookie.MaxAge)
+	assert.True(t, cookie.Secure)
+
+	_, ok := testCookies(true).GroupID(requestWithCookie(t, cookie))
+	assert.False(t, ok)
+}
+
+func TestSetGroupCookie(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		secure bool
+		id     int64
+	}{
+		"dev":         {secure: false, id: 42},
+		"prod":        {secure: true, id: 42},
+		"large id":    {secure: true, id: 9007199254740993},
+		"first group": {secure: false, id: 1},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			w := httptest.NewRecorder()
+			testCookies(test.secure).SetGroup(w, test.id)
+
+			cookie := responseCookie(t, w, auth.GroupCookie)
+			assert.Equal(t, "/", cookie.Path)
+			assert.Equal(t, 30*24*60*60, cookie.MaxAge)
+			assert.True(t, cookie.HttpOnly)
+			assert.Equal(t, http.SameSiteLaxMode, cookie.SameSite)
+			assert.Equal(t, test.secure, cookie.Secure)
+
+			parts := splitCookie(t, cookie.Value, 3)
+			assert.Equal(t, strconv.FormatInt(test.id, 10), parts[0])
+			expiry, err := strconv.ParseInt(parts[1], 10, 64)
+			require.NoError(t, err)
+			assert.WithinDuration(t,
+				time.Now().Add(30*24*time.Hour), time.Unix(expiry, 0), time.Minute)
+			assert.Equal(t, signedValue(t, "group:"+parts[0]+"."+parts[1]), parts[2])
+		})
+	}
+}
+
+func TestGroupID(t *testing.T) {
+	t.Parallel()
+
+	for _, id := range []int64{1, 42, 9007199254740993} {
+		w := httptest.NewRecorder()
+		testCookies(false).SetGroup(w, id)
+
+		got, ok := testCookies(false).GroupID(
+			requestWithCookie(t, responseCookie(t, w, auth.GroupCookie)))
+		require.True(t, ok)
+		assert.Equal(t, id, got)
+	}
+}
+
+func TestGroupIDWithoutCookie(t *testing.T) {
+	t.Parallel()
+
+	_, ok := testCookies(false).GroupID(
+		httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil))
+	assert.False(t, ok)
+}
+
+func TestGroupIDRejectsTamperedSignature(t *testing.T) {
+	t.Parallel()
+
+	w := httptest.NewRecorder()
+	testCookies(true).SetGroup(w, 42)
+	//nolint:gosec // the handler set these attributes; the test tampers with the value.
+	cookie := responseCookie(t, w, auth.GroupCookie)
+	cookie.Value = tampered(cookie.Value)
+
+	_, ok := testCookies(true).GroupID(requestWithCookie(t, cookie))
+	assert.False(t, ok)
+}
+
+func TestGroupIDRejectsASessionValue(t *testing.T) {
+	t.Parallel()
+
+	cookie := &http.Cookie{
+		Name:     auth.GroupCookie,
+		Value:    sessionValue(t, 42, time.Now().Add(time.Hour).Unix()),
+		Secure:   true,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	}
+
+	_, ok := testCookies(false).GroupID(requestWithCookie(t, cookie))
+	assert.False(t, ok, "a session MAC must not pass as a group MAC")
+}
+
+func TestGroupIDRejectsExpiredCookie(t *testing.T) {
+	t.Parallel()
+
+	cookie := &http.Cookie{
+		Name:     auth.GroupCookie,
+		Value:    groupValue(t, 42, time.Now().Add(-time.Minute).Unix()),
+		Secure:   true,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	}
+
+	_, ok := testCookies(false).GroupID(requestWithCookie(t, cookie))
+	assert.False(t, ok)
+}
+
+func TestGroupIDRejectsAnotherSessionKey(t *testing.T) {
+	t.Parallel()
+
+	w := httptest.NewRecorder()
+	testCookies(false).SetGroup(w, 42)
+	request := requestWithCookie(t, responseCookie(t, w, auth.GroupCookie))
+
+	_, ok := auth.NewCookies("another-session-key-long-enough", false).GroupID(request)
+	assert.False(t, ok)
+}
+
+func TestGroupIDRejectsMalformedCookie(t *testing.T) {
+	t.Parallel()
+
+	signature := signedValue(t, "group:42.4102444800")
+	tests := map[string]string{
+		"empty":          "",
+		"no dots":        "42",
+		"two parts":      "42.4102444800",
+		"no id":          ".4102444800." + signature,
+		"no expiry":      "42.." + signature,
+		"non-numeric id": "forty-two.4102444800." + signedValue(t, "group:forty-two.4102444800"),
+		"zero id":        "0.4102444800." + signedValue(t, "group:0.4102444800"),
+		"negative id":    "-1.4102444800." + signedValue(t, "group:-1.4102444800"),
+		"leading zero":   "042.4102444800." + signedValue(t, "group:042.4102444800"),
+		"extra dot":      "42.4102444800." + signature + ".extra",
+	}
+
+	for name, value := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			cookie := &http.Cookie{
+				Name:     auth.GroupCookie,
+				Value:    value,
+				Secure:   true,
+				HttpOnly: true,
+				SameSite: http.SameSiteLaxMode,
+			}
+			_, ok := testCookies(false).GroupID(requestWithCookie(t, cookie))
+			assert.False(t, ok)
+		})
+	}
+}
+
+// groupValue builds a pc_group cookie value for id and expiry.
+func groupValue(t *testing.T, id, expiry int64) string {
+	t.Helper()
+
+	payload := strconv.FormatInt(id, 10) + "." + strconv.FormatInt(expiry, 10)
+	return payload + "." + signedValue(t, "group:"+payload)
+}
+
 // splitCookie splits value on dots and fails the test when the part count is
 // wrong.
 func splitCookie(t *testing.T, value string, want int) []string {

@@ -20,6 +20,7 @@ import (
 	"github.com/kalverra/parlay-club/internal/auth"
 	"github.com/kalverra/parlay-club/internal/config"
 	"github.com/kalverra/parlay-club/internal/db"
+	"github.com/kalverra/parlay-club/internal/groups"
 	"github.com/kalverra/parlay-club/internal/web"
 	assets "github.com/kalverra/parlay-club/web"
 )
@@ -78,10 +79,11 @@ func run() error {
 
 	devLogin := !cfg.IsProd() && cfg.GoogleClientID == ""
 	handlers := auth.NewHandlers(logger, store, cookies, renderer, provider, devLogin)
+	scope := groups.Scope(logger, store, auth.UserFrom, cookies)
 
 	server := &http.Server{
 		Addr:              net.JoinHostPort("", strconv.Itoa(cfg.Port)),
-		Handler:           newMux(web.New(logger, renderer, auth.UserFrom), web.StaticHandler(), handlers),
+		Handler:           newMux(web.New(logger, renderer, auth.UserFrom), web.StaticHandler(), handlers, scope),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	return listenAndServe(ctx, logger, server)
@@ -139,9 +141,14 @@ func newLogger(cfg config.Config, out io.Writer) zerolog.Logger {
 }
 
 // newMux builds the routes. Health, static files, and the sign-in screens sit
-// outside the shell's checks. Everything else needs a signed-in user, and every
-// non-GET form must come from HTMX or be one of the plain forms.
-func newMux(shell, static http.Handler, handlers *auth.Handlers) http.Handler {
+// outside the shell's checks. Everything else needs a signed-in user and an
+// active group, and every non-GET form must come from HTMX or be one of the
+// plain forms.
+func newMux(
+	shell, static http.Handler,
+	handlers *auth.Handlers,
+	scope func(http.Handler) http.Handler,
+) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", healthz)
 	mux.Handle("GET /static/{path...}", static)
@@ -149,7 +156,7 @@ func newMux(shell, static http.Handler, handlers *auth.Handlers) http.Handler {
 
 	app := http.NewServeMux()
 	app.Handle("/", shell)
-	mux.Handle("/", handlers.RequireUser(app))
+	mux.Handle("/", handlers.RequireUser(scope(app)))
 
 	return handlers.CSRF(mux)
 }
