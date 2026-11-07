@@ -17,7 +17,7 @@ into `testdata/` and confirm the paths against it; fix this doc where they diffe
 | `espn:scoreboard`     | Current week's games, scores, status   | 10 min while a game is live; 30 min on game days; 6 h otherwise |
 | `espn:summary:{game}` | Injuries for one game                  | 2 h; only for games not yet final                               |
 | `weather:{game}`      | Kickoff-window weather for one game    | 1 h within 48 h of kickoff; skip earlier and after kickoff      |
-| `odds:lines`          | Game lines for the week                | see "Odds API budget"                                           |
+| `odds:lines`          | Game lines for the week                | see the budget in [docs/reference/data-sources.md](../docs/reference/data-sources.md) |
 | `odds:props:{game}`   | Props for one game, on demand          | 2 h; skip after kickoff                                         |
 | `espn:roster:{team}`  | Team roster (`props-research`)                  | 24 h                                                            |
 | `espn:gamelog:{id}`   | Player game log (`props-research`)              | 12 h                                                            |
@@ -53,9 +53,11 @@ uses (product.md "Grading" table names the stat).
 - Cost per call = markets returned × regions. Use `regions=us` and `oddsFormat=american`.
 - After every call, store `x-requests-remaining` in `sync_state.odds_credits_remaining`.
 
+Game lines, event matching, bookmakers, and the credit budget are documented in
+[docs/reference/data-sources.md](../docs/reference/data-sources.md). What remains here belongs to `props-research`.
+
 ### Endpoints
 
-- Game lines: `GET /odds?regions=us&markets=h2h,spreads,totals&oddsFormat=american` (≈ 3 credits).
 - Props for one game: `GET /events/{eventId}/odds?regions=us&markets={prop keys}&oddsFormat=american`.
 - Event list: `GET /events` (free) gives `id`, `home_team`, `away_team`, `commence_time` for matching.
 
@@ -63,9 +65,6 @@ uses (product.md "Grading" table names the stat).
 
 | Odds API key            | Market       |
 | ----------------------- | ------------ |
-| `h2h`                   | `ML`         |
-| `spreads`               | `SPREAD`     |
-| `totals`                | `TOTAL`      |
 | `team_totals`           | `TEAM_TOTAL` |
 | `player_pass_yds`       | `PASS_YDS`   |
 | `player_pass_tds`       | `PASS_TDS`   |
@@ -78,28 +77,6 @@ uses (product.md "Grading" table names the stat).
 
 `team_totals` and the player markets are only on the per-event endpoint, so they load with props. For player markets,
 outcome `description` is the player, `name` is Over/Under/Yes, and `point` is the line.
-
-### Bookmakers
-
-Home-book choices, as Odds API keys: `draftkings`, `fanduel`, `betmgm`, `williamhill_us` (Caesars), `espnbet`,
-`fanatics`, `betrivers`, `hardrockbet`. Confirm against a live `us` response and keep only keys that appear.
-
-### Event matching
-
-An Odds API event matches an ESPN game when `home_team` and `away_team` equal the ESPN `displayName`s and
-`commence_time` is within 12 hours of `kickoff_utc`. Store the match in `games.odds_event_id`. Log unmatched events.
-
-### Budget
-
-Target ≤ 400 credits per month, leaving room for testing.
-
-- `odds:lines` stale after: 24 h Monday–Friday; 12 h Saturday; 45 min on Sunday until the last Sunday kickoff; then only
-  before MNF kickoff, 3 h. Skip when every game of the week has kicked off.
-- `odds:props:{game}` runs only when someone opens that game's quick-add, and only when credits remaining ≥ 150.
-- `odds:lines` runs only when credits remaining ≥ 50.
-- Below a floor, serve cached rows and show "lines paused until the monthly reset".
-- Rough math: lines ≈ 20 calls × 3 = 60/week; props ≈ 6 games × 9 markets = 54/week; ≈ 450/month at the high end. Props
-  stop first, at 150, which protects lines.
 
 ## Player matching (`props-research`)
 
