@@ -62,7 +62,7 @@ Games tab. Props wait for `props-research`. Read before starting:
 
 ### Phase 3: Game lines
 
-- [ ] Save /events and /odds fixtures, add the odds client with credit header parsing, and map h2h, spreads, and totals
+- [x] Save /events and /odds fixtures, add the odds client with credit header parsing, and map h2h, spreads, and totals
   into odds rows per book with fixture tests
 - [ ] Add event matching to ESPN games, test zero misses across a full saved slate, and add a TestLive per source that
   skips under -short
