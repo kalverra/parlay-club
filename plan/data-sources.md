@@ -47,26 +47,6 @@ Athletes with `id`, `fullName`, and `position.abbreviation`, grouped by side of 
 Per-game stat rows for the season, keyed by `labels`/`names`. Extract, most recent first, the values each prop market
 uses (product.md "Grading" table names the stat).
 
-## Open-Meteo (free, no auth)
-
-```text
-GET https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}
-    &hourly=temperature_2m,precipitation,wind_speed_10m,wind_gusts_10m
-    &wind_speed_unit=mph&temperature_unit=fahrenheit&precipitation_unit=inch
-    &timezone=UTC&start_hour={kickoff hour}&end_hour={kickoff hour + 2h}
-```
-
-- Kickoff window: the hour containing kickoff and the 2 after it (3 hourly values).
-- `wind_mph` = max sustained, `wind_gust_mph` = max gust, `precip_in` = max hourly precipitation, `temp_f` = value at
-  the kickoff hour.
-- Only for outdoor venues (`is_indoor = 0`). Forecasts reach 16 days, so skip games further out.
-
-### Venue coordinates
-
-`internal/ingest/weather/venues.go` holds a map from ESPN venue ID to name, lat, and lon. Build it by fetching this
-season's scoreboards and recording every venue, international ones included. An unknown venue ID logs a warning and
-leaves the weather fields NULL; the weather rules then skip that game.
-
 ## The Odds API (free tier: 500 credits/month)
 
 - Base: `https://api.the-odds-api.com/v4/sports/americanfootball_nfl`. Auth: `apiKey` query param.

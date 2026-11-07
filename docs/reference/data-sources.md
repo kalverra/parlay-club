@@ -2,9 +2,9 @@
 id: data-sources
 title: Data sources
 type: reference
-summary: The free sources behind the slate, starting with the ESPN scoreboard endpoint, the fields the app reads, and the Sunday and Monday filter.
-tags: [data, espn, scoreboard, games, sync, fixtures]
-sources: [internal/ingest/espn/client.go, internal/ingest/espn/scoreboard.go, internal/db/weeks.go, internal/db/games.go]
+summary: The free sources behind the slate, the ESPN scoreboard endpoint and its Sunday and Monday filter, and the Open-Meteo forecast behind a game's weather.
+tags: [data, espn, scoreboard, games, sync, fixtures, weather, open-meteo, venues]
+sources: [internal/ingest/espn/client.go, internal/ingest/espn/scoreboard.go, internal/db/weeks.go, internal/db/games.go, internal/ingest/weather/client.go, internal/ingest/weather/forecast.go, internal/ingest/weather/venues.go]
 last_verified: 2026-11-07
 ---
 
@@ -43,3 +43,29 @@ With no params it returns the current week. For a specific week: `?seasontype={2
 - An unknown event state is an error, not a guess.
 - Upsert the week and each game; never delete them, so a flexed game keeps its ID. Rerunning a sync with the same
   response leaves every row, including `updated_at`, unchanged.
+
+## Open-Meteo (free, no auth)
+
+```text
+GET https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}
+    &hourly=temperature_2m,precipitation,wind_speed_10m,wind_gusts_10m
+    &wind_speed_unit=mph&temperature_unit=fahrenheit&precipitation_unit=inch
+    &timezone=UTC&start_hour={kickoff hour}&end_hour={kickoff hour + 2h}
+```
+
+- The kickoff window is the hour containing kickoff and the two after it, three hourly values. `start_hour` is kickoff
+  in UTC rounded down to the hour, and `end_hour` is two hours later.
+- `temp_f` is the temperature at the kickoff hour. `wind_mph` and `wind_gust_mph` are the window's maximum sustained
+  wind and maximum gust. `precip_in` is the window's maximum hourly precipitation.
+- Every hour in the window must be present and set. A missing hour, a null value, or a window the source does not cover
+  is an error, not a zero.
+- `Client.Forecast(ctx, venue, kickoff)` returns the four values above as a `weather.Forecast`.
+
+### Venue coordinates
+
+`internal/ingest/weather/venues.go` maps an ESPN venue ID to its name, latitude, and longitude. Coordinates are for the
+stadium itself, not the city center. The map covers every venue on the 2026 regular-season scoreboards, weeks 1 through
+18, including the international games, because the scoreboard response carries no coordinates.
+
+`VenueByID` returns the venue and `true`. An unknown ID returns `false` and an empty venue, so the caller can log it and
+leave that game's weather NULL. Add a venue when a new stadium appears.
