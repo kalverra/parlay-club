@@ -1,0 +1,382 @@
+{
+  "season": {
+    "year": 2026,
+    "type": 2
+  },
+  "note": "Unique venues from the 2026 regular-season scoreboards, weeks 1-18. Only repeated events were removed; no fields were edited.",
+  "venues": [
+    {
+      "id": "3687",
+      "fullName": "AT&T Stadium",
+      "indoor": true,
+      "address": {
+        "city": "Arlington",
+        "state": "TX",
+        "country": "USA"
+      }
+    },
+    {
+      "id": "3752",
+      "fullName": "Acrisure Stadium",
+      "indoor": false,
+      "address": {
+        "city": "Pittsburgh",
+        "state": "PA",
+        "country": "USA"
+      }
+    },
+    {
+      "id": "6501",
+      "fullName": "Allegiant Stadium",
+      "indoor": true,
+      "address": {
+        "city": "Las Vegas",
+        "state": "NV",
+        "country": "USA"
+      }
+    },
+    {
+      "id": "3622",
+      "fullName": "Arrowhead Stadium",
+      "indoor": false,
+      "address": {
+        "city": "Kansas City",
+        "state": "MO",
+        "country": "USA"
+      }
+    },
+    {
+      "id": "3628",
+      "fullName": "Bank of America Stadium",
+      "indoor": false,
+      "address": {
+        "city": "Charlotte",
+        "state": "NC",
+        "country": "USA"
+      }
+    },
+    {
+      "id": "3493",
+      "fullName": "Caesars Superdome",
+      "indoor": true,
+      "address": {
+        "city": "New Orleans",
+        "state": "LA",
+        "country": "USA"
+      }
+    },
+    {
+      "id": "3937",
+      "fullName": "Empower Field at Mile High",
+      "indoor": false,
+      "address": {
+        "city": "Denver",
+        "state": "CO",
+        "country": "USA"
+      }
+    },
+    {
+      "id": "8219",
+      "fullName": "Estadio Banorte",
+      "indoor": false,
+      "address": {
+        "city": "Mexico City",
+        "country": "Mexico"
+      }
+    },
+    {
+      "id": "3712",
+      "fullName": "EverBank Stadium",
+      "indoor": false,
+      "address": {
+        "city": "Jacksonville",
+        "state": "FL",
+        "country": "USA"
+      }
+    },
+    {
+      "id": "11930",
+      "fullName": "FC Bayern Munich Stadium",
+      "indoor": false,
+      "address": {
+        "city": "Munich",
+        "country": "Germany"
+      }
+    },
+    {
+      "id": "3727",
+      "fullName": "Ford Field",
+      "indoor": true,
+      "address": {
+        "city": "Detroit",
+        "state": "MI",
+        "country": "USA"
+      }
+    },
+    {
+      "id": "3738",
+      "fullName": "Gillette Stadium",
+      "indoor": false,
+      "address": {
+        "city": "Foxborough",
+        "state": "MA",
+        "country": "USA"
+      }
+    },
+    {
+      "id": "3948",
+      "fullName": "Hard Rock Stadium",
+      "indoor": false,
+      "address": {
+        "city": "Miami Gardens",
+        "state": "FL",
+        "country": "USA"
+      }
+    },
+    {
+      "id": "11938",
+      "fullName": "Highmark Stadium",
+      "indoor": false,
+      "address": {
+        "city": "Orchard Park",
+        "state": "NY",
+        "country": "USA"
+      }
+    },
+    {
+      "id": "3679",
+      "fullName": "Huntington Bank Field",
+      "indoor": false,
+      "address": {
+        "city": "Cleveland",
+        "state": "OH",
+        "country": "USA"
+      }
+    },
+    {
+      "id": "3798",
+      "fullName": "Lambeau Field",
+      "indoor": false,
+      "address": {
+        "city": "Green Bay",
+        "state": "WI",
+        "country": "USA"
+      }
+    },
+    {
+      "id": "4738",
+      "fullName": "Levi's Stadium",
+      "indoor": false,
+      "address": {
+        "city": "Santa Clara",
+        "state": "CA",
+        "country": "USA"
+      }
+    },
+    {
+      "id": "3806",
+      "fullName": "Lincoln Financial Field",
+      "indoor": false,
+      "address": {
+        "city": "Philadelphia",
+        "state": "PA",
+        "country": "USA"
+      }
+    },
+    {
+      "id": "3812",
+      "fullName": "Lucas Oil Stadium",
+      "indoor": true,
+      "address": {
+        "city": "Indianapolis",
+        "state": "IN",
+        "country": "USA"
+      }
+    },
+    {
+      "id": "3673",
+      "fullName": "Lumen Field",
+      "indoor": false,
+      "address": {
+        "city": "Seattle",
+        "state": "WA",
+        "country": "USA"
+      }
+    },
+    {
+      "id": "3814",
+      "fullName": "M&T Bank Stadium",
+      "indoor": false,
+      "address": {
+        "city": "Baltimore",
+        "state": "MD",
+        "country": "USA"
+      }
+    },
+    {
+      "id": "11931",
+      "fullName": "Maracanã Stadium",
+      "indoor": false,
+      "address": {
+        "city": "Rio De Janeiro",
+        "country": "Brazil"
+      }
+    },
+    {
+      "id": "9119",
+      "fullName": "Melbourne Cricket Ground",
+      "indoor": false,
+      "address": {
+        "city": "Melbourne",
+        "state": "VIC",
+        "country": "Australia"
+      }
+    },
+    {
+      "id": "5348",
+      "fullName": "Mercedes-Benz Stadium",
+      "indoor": true,
+      "address": {
+        "city": "Atlanta",
+        "state": "GA",
+        "country": "USA"
+      }
+    },
+    {
+      "id": "3839",
+      "fullName": "MetLife Stadium",
+      "indoor": false,
+      "address": {
+        "city": "East Rutherford",
+        "state": "NJ",
+        "country": "USA"
+      }
+    },
+    {
+      "id": "3810",
+      "fullName": "Nissan Stadium",
+      "indoor": false,
+      "address": {
+        "city": "Nashville",
+        "state": "TN",
+        "country": "USA"
+      }
+    },
+    {
+      "id": "3719",
+      "fullName": "Northwest Stadium",
+      "indoor": false,
+      "address": {
+        "city": "Landover",
+        "state": "MD",
+        "country": "USA"
+      }
+    },
+    {
+      "id": "3874",
+      "fullName": "Paycor Stadium",
+      "indoor": false,
+      "address": {
+        "city": "Cincinnati",
+        "state": "OH",
+        "country": "USA"
+      }
+    },
+    {
+      "id": "3886",
+      "fullName": "Raymond James Stadium",
+      "indoor": false,
+      "address": {
+        "city": "Tampa",
+        "state": "FL",
+        "country": "USA"
+      }
+    },
+    {
+      "id": "3891",
+      "fullName": "Reliant Stadium",
+      "indoor": true,
+      "address": {
+        "city": "Houston",
+        "state": "TX",
+        "country": "USA"
+      }
+    },
+    {
+      "id": "1353",
+      "fullName": "Santiago Bernabéu",
+      "indoor": true,
+      "address": {
+        "city": "Madrid",
+        "country": "Spain"
+      }
+    },
+    {
+      "id": "7065",
+      "fullName": "SoFi Stadium",
+      "indoor": false,
+      "address": {
+        "city": "Inglewood",
+        "state": "CA",
+        "country": "USA"
+      }
+    },
+    {
+      "id": "3933",
+      "fullName": "Soldier Field",
+      "indoor": false,
+      "address": {
+        "city": "Chicago",
+        "state": "IL",
+        "country": "USA"
+      }
+    },
+    {
+      "id": "1781",
+      "fullName": "Stade de France",
+      "indoor": false,
+      "address": {
+        "city": "Saint-Denis",
+        "country": "France"
+      }
+    },
+    {
+      "id": "3970",
+      "fullName": "State Farm Stadium",
+      "indoor": true,
+      "address": {
+        "city": "Glendale",
+        "state": "AZ",
+        "country": "USA"
+      }
+    },
+    {
+      "id": "5534",
+      "fullName": "Tottenham Hotspur Stadium",
+      "indoor": false,
+      "address": {
+        "city": "London",
+        "country": "England"
+      }
+    },
+    {
+      "id": "5239",
+      "fullName": "U.S. Bank Stadium",
+      "indoor": true,
+      "address": {
+        "city": "Minneapolis",
+        "state": "MN",
+        "country": "USA"
+      }
+    },
+    {
+      "id": "2455",
+      "fullName": "Wembley Stadium",
+      "indoor": false,
+      "address": {
+        "city": "London",
+        "country": "England"
+      }
+    }
+  ]
+}
