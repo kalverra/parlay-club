@@ -7,6 +7,20 @@ CREATE TABLE users (
   created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
 );
 
+CREATE TABLE groups (
+  id           INTEGER PRIMARY KEY,
+  name         TEXT NOT NULL,                  -- not unique
+  invite_token TEXT NOT NULL UNIQUE,           -- 128-bit random, hex
+  created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+);
+
+CREATE TABLE group_members (
+  group_id  INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+  user_id   INTEGER NOT NULL REFERENCES users(id),
+  joined_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+  PRIMARY KEY (group_id, user_id)
+);
+
 CREATE TABLE weeks (
   id          INTEGER PRIMARY KEY,             -- season*1000 + season_type*100 + week_num, e.g. 2026209
   season      INTEGER NOT NULL,
@@ -56,13 +70,14 @@ CREATE TABLE odds (
 
 CREATE TABLE slips (
   id              INTEGER PRIMARY KEY,
+  group_id        INTEGER NOT NULL REFERENCES groups(id),
   week_id         INTEGER NOT NULL REFERENCES weeks(id),
   name            TEXT NOT NULL,
   legs_per_member INTEGER NOT NULL DEFAULT 2 CHECK (legs_per_member BETWEEN 1 AND 5),
   status          TEXT NOT NULL DEFAULT 'OPEN',     -- OPEN, LOCKED, GRADED
   result          TEXT NOT NULL DEFAULT 'PENDING',  -- PENDING, WON, LOST, PUSH
   created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
-  UNIQUE (week_id, name)
+  UNIQUE (group_id, week_id, name)
 );
 
 CREATE TABLE slip_members (

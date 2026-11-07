@@ -116,7 +116,7 @@ Effort: hard (a new scope check on every route, plus open sign-up, across slips,
 
 ### Phase 1: Groups exist
 
-- [ ] Add the groups tables and `slips.group_id` to `0001_init.sql`, and `internal/groups` `Create`, `ForUser`, and
+- [x] Add the groups tables and `slips.group_id` to `0001_init.sql`, and `internal/groups` `Create`, `ForUser`, and
   `IsMember`, with store tests
 - [ ] Open sign-up: delete `auth.Gate` and `ALLOWED_EMAILS`, and create a "Just me" group when `SignIn` creates a user,
   with tests for strangers and the solo group

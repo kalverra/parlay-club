@@ -1,6 +1,6 @@
 ---
 slug: groups
-status: designed
+status: implementing
 created: "2026-11-05"
 depends_on:
     - google-oauth
