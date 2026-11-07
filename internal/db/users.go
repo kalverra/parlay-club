@@ -182,24 +182,6 @@ func (s *Store) UserByEmail(ctx context.Context, email string) (User, error) {
 	return user, nil
 }
 
-// UnlinkedUserByName returns a user with name who has no Google subject. Names
-// compare ignoring case. A missing row wraps ErrUserNotFound.
-func (s *Store) UnlinkedUserByName(ctx context.Context, name string) (User, error) {
-	user, err := scanUser(s.conn().QueryRowContext(ctx, `
-		SELECT id, name, avatar_color, home_book, active, email, picture_url
-		FROM users
-		WHERE name = ? AND google_sub IS NULL
-		ORDER BY id
-		LIMIT 1`, name))
-	if errors.Is(err, sql.ErrNoRows) {
-		return User{}, fmt.Errorf("unlinked user named %q: %w", name, ErrUserNotFound)
-	}
-	if err != nil {
-		return User{}, fmt.Errorf("unlinked user named %q: %w", name, err)
-	}
-	return user, nil
-}
-
 // LinkGoogle attaches a Google subject, email, and picture to an existing user.
 // A missing row wraps ErrUserNotFound.
 func (s *Store) LinkGoogle(

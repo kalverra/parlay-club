@@ -63,7 +63,8 @@ func pageHandler(
 		page := Page{Title: route.tab.Label(), Tab: route.tab}
 		if userFrom != nil {
 			if user, ok := userFrom(r.Context()); ok {
-				page.User = pageUser(user)
+				view := NewUser(user)
+				page.User = &view
 			}
 		}
 		if groupsFrom != nil {
@@ -82,9 +83,9 @@ func pageHandler(
 	})
 }
 
-// pageUser maps a stored user to the identity the top bar draws.
-func pageUser(user db.User) *User {
-	return &User{
+// NewUser maps a stored user to the identity the top bar draws.
+func NewUser(user db.User) User {
+	return User{
 		Name:        user.Name,
 		Initials:    Initials(user.Name),
 		AvatarClass: user.AvatarColor.Class(),
