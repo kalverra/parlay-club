@@ -344,6 +344,27 @@ func TestMembersListsActivePeopleOldestFirst(t *testing.T) {
 	assert.Equal(t, []db.User{ada, bob}, members, "inactive people drop out of the list")
 }
 
+func TestGroupMembersKeepsInactivePeople(t *testing.T) {
+	t.Parallel()
+
+	store, database := openTestStore(t)
+	ada := createUser(t, store, "Ada")
+	grace := createUser(t, store, "Grace")
+	group, err := store.Create(t.Context(), ada.ID, "Sunday Parlay Club")
+	require.NoError(t, err)
+	_, err = store.JoinByToken(t.Context(), grace.ID, group.InviteToken)
+	require.NoError(t, err)
+	_, err = database.ExecContext(t.Context(), "UPDATE users SET active = 0 WHERE id = ?", grace.ID)
+	require.NoError(t, err)
+
+	members, err := store.GroupMembers(t.Context(), group.ID)
+	require.NoError(t, err)
+	require.Len(t, members, 2)
+	assert.Equal(t, ada.ID, members[0].ID)
+	assert.Equal(t, grace.ID, members[1].ID)
+	assert.False(t, members[1].Active, "the inactive person stays listed so they can be turned back on")
+}
+
 func TestIsMemberIsFalseForOtherPeopleAndUnknownGroups(t *testing.T) {
 	t.Parallel()
 

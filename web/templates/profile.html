@@ -2,18 +2,42 @@
 <section class="space-y-3">
   <h1 class="text-xl font-semibold">Profile</h1>
 
-  <form class="space-y-3 rounded-xl border border-slate-800 bg-slate-900 p-4" hx-post="/me" hx-target="#content" hx-swap="innerHTML">
-    <p class="text-sm font-medium text-slate-200">{{.User.Name}}</p>
+  <div class="flex items-center gap-3 rounded-xl border border-slate-800 bg-slate-900 p-4">
+    {{if .User}}{{template "avatar" .User}}{{end}}
+    <div class="min-w-0">
+      <p class="truncate text-sm font-medium text-slate-200">{{if .User}}{{.User.Name}}{{end}}</p>
+      <p class="text-xs text-slate-500">Home book and club members</p>
+    </div>
+  </div>
+
+  <form
+    class="space-y-3 rounded-xl border border-slate-800 bg-slate-900 p-4"
+    data-profile-form
+    hx-post="/me"
+    hx-target="#content"
+    hx-swap="innerHTML"
+  >
+    <div>
+      <h2 class="text-sm font-semibold text-slate-300">Home book</h2>
+      <p class="mt-1 text-xs text-slate-500">Quick adds use your book's price. Blank falls back to the median.</p>
+    </div>
     <label class="block text-sm text-slate-300">
-      Home book
+      Bookmaker key
       <input
         type="text"
         name="home_book"
         value="{{.HomeBook}}"
         placeholder="draftkings"
+        autocomplete="off"
+        autocapitalize="none"
         class="mt-1 w-full rounded-md border border-slate-700 bg-slate-800 px-3 py-2"
       >
     </label>
+    <p
+      data-form-error
+      class="hidden rounded-lg border border-rose-700 bg-rose-950 px-3 py-2 text-sm text-rose-200"
+      role="alert"
+    ></p>
     <button
       type="submit"
       class="w-full rounded-lg bg-sky-600 px-3 py-2 text-sm font-semibold text-white hover:bg-sky-500"
@@ -23,17 +47,47 @@
   </form>
 
   <section class="rounded-xl border border-slate-800 bg-slate-900 p-4">
-    <h2 class="text-sm font-semibold text-slate-300">Members</h2>
-    <ul class="mt-2 space-y-2">
+    <div class="flex items-center justify-between gap-2">
+      <h2 class="text-sm font-semibold text-slate-300">Members</h2>
+      <span class="text-xs text-slate-500">{{len .Members}} people</span>
+    </div>
+    <p class="mt-1 text-xs text-slate-500">Inactive people keep their history but drop out of pickers and new slips.</p>
+    <ul class="mt-3 space-y-2">
       {{range .Members}}
-        <li class="flex items-center justify-between gap-2 text-sm">
-          <span>{{.Name}}{{if .Self}} (you){{end}}</span>
-          <form hx-post="/users/{{.ID}}/active" hx-target="#content" hx-swap="innerHTML">
-            <input type="hidden" name="active" value="{{if .Active}}0{{else}}1{{end}}">
-            <button type="submit" class="rounded-md border border-slate-700 px-2 py-1 text-xs text-slate-200">
-              {{if .Active}}Active — turn off{{else}}Inactive — turn on{{end}}
-            </button>
-          </form>
+        <li class="flex items-center justify-between gap-3 rounded-lg border border-slate-800 px-3 py-2">
+          <div class="flex min-w-0 items-center gap-2">
+            {{template "avatar" .Avatar}}
+            <div class="min-w-0">
+              <p class="truncate text-sm text-slate-200">{{.Name}}{{if .Self}} <span class="text-xs text-slate-400">(you)</span>{{end}}</p>
+              <p class="text-xs {{if .Active}}text-emerald-400{{else}}text-slate-500{{end}}">
+                {{if .Active}}Active{{else}}Inactive{{end}}
+              </p>
+            </div>
+          </div>
+          {{if .Self}}
+            <span class="shrink-0 rounded-full border border-slate-700 px-2 py-1 text-xs text-slate-400">Always on</span>
+          {{else}}
+            <form
+              class="shrink-0"
+              data-profile-form
+              hx-post="/users/{{.ID}}/active"
+              hx-target="#content"
+              hx-swap="innerHTML"
+            >
+              <input type="hidden" name="active" value="{{if .Active}}0{{else}}1{{end}}">
+              <button
+                type="submit"
+                role="switch"
+                aria-checked="{{.Active}}"
+                class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors {{if .Active}}bg-sky-600{{else}}bg-slate-700{{end}}"
+              >
+                <span class="sr-only">{{if .Active}}Turn {{.Name}} off{{else}}Turn {{.Name}} on{{end}}</span>
+                <span
+                  class="inline-block h-4 w-4 rounded-full bg-white transition-transform {{if .Active}}translate-x-6{{else}}translate-x-1{{end}}"
+                ></span>
+              </button>
+            </form>
+          {{end}}
         </li>
       {{end}}
     </ul>

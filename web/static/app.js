@@ -39,6 +39,9 @@ function formatTimes(root) {
 document.addEventListener("htmx:afterSwap", (event) => {
   const target = (event.detail && event.detail.target) || document;
   formatTimes(target);
+  if (target && target.id === "leg-sheet-body") {
+    openLegSheet();
+  }
 });
 
 document.addEventListener("htmx:oobAfterSwap", (event) => {
@@ -88,7 +91,107 @@ document.addEventListener("click", (event) => {
     copyInvite(copyButton);
     return;
   }
+  if (event.target.closest("[data-close-leg-sheet]")) {
+    closeLegSheet();
+    return;
+  }
   closeGroupSwitcher(event);
+});
+
+// The leg form opens in a bottom sheet. The sheet shell lives on the slip page
+// and HTMX fills its body, so open it only after the fetched form lands.
+const legSheet = document.getElementById("leg-sheet");
+const legSheetBody = document.getElementById("leg-sheet-body");
+
+function openLegSheet() {
+  if (legSheet && !legSheet.open) {
+    legSheet.showModal();
+  }
+}
+
+function closeLegSheet() {
+  if (legSheet && legSheet.open) {
+    legSheet.close();
+  }
+}
+
+function clearLegSheet() {
+  if (legSheetBody) {
+    legSheetBody.replaceChildren();
+  }
+}
+
+if (legSheet) {
+  legSheet.addEventListener("close", clearLegSheet);
+  document.body.addEventListener("leg-saved", closeLegSheet);
+}
+
+// HTMX leaves a 4xx response in place by default. Rule refusals answer 422
+// with a short message, so put that message in the form that sent the request.
+function formForEvent(event) {
+  const source = event.detail && event.detail.elt;
+  return source && source.closest ? source.closest("form") : null;
+}
+
+function showFormError(form, message) {
+  const error = form && form.querySelector("[data-form-error]");
+  if (!error) {
+    return false;
+  }
+
+  error.textContent = message;
+  error.classList.remove("hidden");
+  return true;
+}
+
+document.body.addEventListener("htmx:beforeRequest", (event) => {
+  const error = formForEvent(event)?.querySelector("[data-form-error]");
+  if (error) {
+    error.textContent = "";
+    error.classList.add("hidden");
+  }
+});
+
+document.body.addEventListener("htmx:responseError", (event) => {
+  const xhr = event.detail && event.detail.xhr;
+  if (!xhr || xhr.status !== 422) {
+    return;
+  }
+
+  const message = (xhr.responseText || "").trim() || "That didn't work.";
+  if (!showFormError(formForEvent(event), message)) {
+    showToast(message);
+  }
+});
+
+// A small toast covers refusals that do not happen inside a form with an
+// error slot, like lock in or unlock.
+let toastTimer = null;
+
+function showToast(message) {
+  let toast = document.getElementById("app-toast");
+  if (!toast) {
+    toast = document.createElement("p");
+    toast.id = "app-toast";
+    toast.setAttribute("role", "status");
+    toast.className =
+      "fixed inset-x-3 bottom-20 z-40 mx-auto max-w-sm rounded-lg border border-rose-700 bg-rose-950 px-3 py-2 text-sm text-rose-200 shadow-xl";
+    document.body.append(toast);
+  }
+
+  toast.textContent = message;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toast.remove(), 4000);
+}
+
+// The top bar's slip switcher is a plain select; a choice loads that slip.
+document.addEventListener("change", (event) => {
+  if (event.target && event.target.id === "slip-switcher") {
+    const slipID = event.target.value;
+    if (slipID) {
+      window.location.assign(`/slips/${encodeURIComponent(slipID)}`);
+    }
+  }
 });
 
 // Live updates. The slip page marks its body with data-live-url. One
