@@ -5,11 +5,10 @@
 `google-oauth` gives each person a stable user and a `SignIn` function. Nothing is deployed and there is no data, so
 this is a rebuild: the schema is edited in place and nothing is migrated. This change is landing before `slips-live`,
 `slate-and-lines`, and `history-and-deploy`: this branch has no `internal/slips`, `internal/live`, or `internal/seed`,
-and no slip routes. Their designs leave seams for it: `internal/live` topics are plain strings, `internal/slips`
-methods take the acting user, `internal/seed` resolves people in one function, and games, odds, weather, and
-`sync_state` are global. Phase 2 lands the scope check on the routes that exist; the slip, live, and seed work joins the
-changes that build those packages. Anything designed after this one (`grading-record-book`) must take the group from
-the actor.
+and no slip routes. Their designs leave seams for it: `internal/live` topics are plain strings, `internal/slips` methods
+take the acting user, `internal/seed` resolves people in one function, and games, odds, weather, and `sync_state` are
+global. Phase 2 lands the scope check on the routes that exist; the slip, live, and seed work joins the changes that
+build those packages. Anything designed after this one (`grading-record-book`) must take the group from the actor.
 
 SQLite runs one connection and one Cloud Run instance. The hub is in memory. Read before starting:
 
@@ -109,9 +108,10 @@ URL (rewrites every route in the other designs); roles (not wanted).
   `sync_state` credits after launch.
 - Invite links are bearer secrets. 128-bit tokens, one-click reset, and a join page that shows only names limit the
   harm.
-- `groups` is landing before the three waiting changes, so Phase 2 shrinks to `groups.Scope` and the `pc_group` cookie.
+- `groups` is landing before the three waiting changes, so Phase 2 lands only `groups.Scope` and the `pc_group` cookie.
   The slip, live, and seed work waits for the code those changes build, and their slip code is written group-aware
-  instead of adapted. The route-table isolation test cannot exist until there are slip routes.
+  instead of adapted. The route-table isolation, same-name, live, and credit tests move with that code; they cannot
+  exist until there are slip routes, a hub, and a seed.
 
 ## TODO
 
@@ -129,7 +129,7 @@ Effort: hard (a new scope check on every route, plus open sign-up, across slips,
 - [x] Add `groups.Scope` and the `pc_group` cookie, thread `Actor{UserID, GroupID}` through `internal/slips`, and guard
       slip-by-id routes by the slip's group, with the isolation test over every slip route and the same-name-two-groups
       case
-- [ ] Scope the SSE stream by membership, add the `group:{id}` topic, filter the Record Book and home list by group, and
+- [x] Scope the SSE stream by membership, add the `group:{id}` topic, filter the Record Book and home list by group, and
   point `internal/seed` at the club group, with the live and credit tests
 
 ### Phase 3: Invites and screens
