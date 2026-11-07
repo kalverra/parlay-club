@@ -243,6 +243,35 @@ func (s *Store) Members(ctx context.Context, groupID int64) ([]User, error) {
 	return members, nil
 }
 
+// GroupMembers returns every person in groupID, active or not, oldest
+// membership first. The profile uses it so an inactive person can be turned
+// back on; pickers and new slips still use Members.
+func (s *Store) GroupMembers(ctx context.Context, groupID int64) ([]User, error) {
+	rows, err := s.conn().QueryContext(ctx, `
+		SELECT u.id, u.name, u.avatar_color, u.home_book, u.active, u.email, u.picture_url
+		FROM users u
+		JOIN group_members m ON m.user_id = u.id
+		WHERE m.group_id = ?
+		ORDER BY m.joined_at, u.id`, groupID)
+	if err != nil {
+		return nil, fmt.Errorf("list all members of group %d: %w", groupID, err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	members := make([]User, 0)
+	for rows.Next() {
+		user, err := scanUser(rows)
+		if err != nil {
+			return nil, fmt.Errorf("list all members of group %d: %w", groupID, err)
+		}
+		members = append(members, user)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list all members of group %d: %w", groupID, err)
+	}
+	return members, nil
+}
+
 // newInviteToken makes a 128-bit random token as lowercase hex.
 func newInviteToken() (string, error) {
 	raw := make([]byte, inviteTokenBytes)

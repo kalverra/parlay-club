@@ -149,6 +149,7 @@ type MemberOption struct {
 // PayoutView is the payout calculator's rendered values.
 type PayoutView struct {
 	SlipID           int64
+	HasLegs          bool
 	Stake            string
 	Boost            string
 	Combined         string
@@ -159,17 +160,18 @@ type PayoutView struct {
 
 // LegFormView is the add or edit leg form.
 type LegFormView struct {
-	SlipID    int64
-	LegID     int64
-	Action    string
-	Editing   bool
-	Market    string
-	Selection string
-	Team      string
-	Side      string
-	Line      string
-	Odds      string
-	GameID    string
+	SlipID     int64
+	LegID      int64
+	Action     string
+	Editing    bool
+	Market     string
+	Selection  string
+	Team       string
+	PlayerName string
+	Side       string
+	Line       string
+	Odds       string
+	GameID     string
 }
 
 // ProfilePage is the profile screen.
@@ -183,6 +185,7 @@ type ProfilePage struct {
 type ProfileMember struct {
 	ID     int64
 	Name   string
+	Avatar User
 	Active bool
 	Self   bool
 }
@@ -508,6 +511,8 @@ func (h *slipHandlers) addLeg(w http.ResponseWriter, r *http.Request) {
 		h.respondError(w, err)
 		return
 	}
+	// Tell the browser the bottom sheet can close now that the leg landed.
+	w.Header().Set("Hx-Trigger", "leg-saved")
 	h.renderPanel(w, r, slip)
 }
 
@@ -527,6 +532,7 @@ func (h *slipHandlers) updateLeg(w http.ResponseWriter, r *http.Request) {
 		h.respondError(w, err)
 		return
 	}
+	w.Header().Set("Hx-Trigger", "leg-saved")
 	slip, err := h.deps.Store.SlipByID(r.Context(), existing.SlipID)
 	if err != nil {
 		h.respondError(w, err)
@@ -598,7 +604,7 @@ func (h *slipHandlers) profile(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	members, err := h.deps.Store.Members(r.Context(), group.ID)
+	members, err := h.deps.Store.GroupMembers(r.Context(), group.ID)
 	if err != nil {
 		h.serverError(w, err)
 		return
@@ -610,6 +616,7 @@ func (h *slipHandlers) profile(w http.ResponseWriter, r *http.Request) {
 		memberViews = append(memberViews, ProfileMember{
 			ID:     member.ID,
 			Name:   member.Name,
+			Avatar: NewUser(member),
 			Active: member.Active,
 			Self:   member.ID == user.ID,
 		})
@@ -706,6 +713,7 @@ func (h *slipHandlers) renderSlip(
 	if week, err := h.deps.Store.WeekByID(r.Context(), slip.WeekID); err == nil {
 		page.WeekLabel = weekLabel(week)
 	}
+	page.Slips = h.slipOptions(r.Context(), slip)
 	view, err := h.slipView(r.Context(), slip, stake, boost)
 	if err != nil {
 		h.serverError(w, err)
@@ -714,14 +722,29 @@ func (h *slipHandlers) renderSlip(
 	h.renderPage(w, "slip", SlipPage{Page: page, Slip: &view})
 }
 
-// renderPanel writes the slip panel partial for slip.
+// slipOptions lists the group's slips in the slip's week for the top bar. The
+// current slip is marked so the switcher can show it.
+func (h *slipHandlers) slipOptions(ctx context.Context, slip db.Slip) []SlipOption {
+	groupSlips, err := h.deps.Store.SlipsForWeek(ctx, slip.GroupID, slip.WeekID)
+	if err != nil {
+		return nil
+	}
+	options := make([]SlipOption, 0, len(groupSlips))
+	for _, other := range groupSlips {
+		options = append(options, SlipOption{
+			ID:      other.ID,
+			Name:    other.Name,
+			Current: other.ID == slip.ID,
+		})
+	}
+	return options
+}
+
+// renderPanel writes the slip panel partial for slip. The payout calculator is
+// its own partial, so refreshing the panel does not reset the stake a person
+// typed.
 func (h *slipHandlers) renderPanel(w http.ResponseWriter, r *http.Request, slip db.Slip) {
 	page, err := h.slipPageData(r.Context(), slip)
-	if err != nil {
-		h.serverError(w, err)
-		return
-	}
-	page.Slip.Payout, err = h.payoutView(r.Context(), slip, defaultStake, 0)
 	if err != nil {
 		h.serverError(w, err)
 		return
@@ -1011,6 +1034,7 @@ func (h *slipHandlers) payoutView(
 	total := parlay.Payout(stake, combined, boost)
 	return PayoutView{
 		SlipID:           slip.ID,
+		HasLegs:          len(legs) > 0,
 		Stake:            formatFloat(stake),
 		Boost:            formatFloat(boost),
 		Combined:         fmt.Sprintf("%.2fx", combined),
@@ -1033,6 +1057,9 @@ func legFormView(leg db.Leg) LegFormView {
 	}
 	if leg.Team != nil {
 		view.Team = *leg.Team
+	}
+	if leg.PlayerName != nil {
+		view.PlayerName = *leg.PlayerName
 	}
 	if leg.Side != nil {
 		view.Side = *leg.Side

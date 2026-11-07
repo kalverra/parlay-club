@@ -185,6 +185,81 @@ func TestSlipPageAdvertisesTheLiveStream(t *testing.T) {
 	assert.Contains(t, recorder.Body.String(), fmt.Sprintf(`data-live-url="/slips/%d/events"`, fixture.slip.ID))
 }
 
+func TestSlipPageShowsTheSlip(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	response := addLeg(t, fixture.handler, fixture.slip.ID, "BUF ML")
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodGet,
+		fmt.Sprintf("/slips/%d", fixture.slip.ID),
+		nil,
+	)
+	fixture.handler.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	body := recorder.Body.String()
+	assert.Contains(t, body, "0/1 locked in")
+	assert.Contains(t, body, "BUF ML")
+	assert.Contains(t, body, "-110")
+	assert.Contains(t, body, "PENDING")
+	assert.Contains(t, body, fmt.Sprintf(`hx-get="/slips/%d/legs/new"`, fixture.slip.ID))
+	assert.Contains(t, body, `id="leg-sheet"`)
+	assert.Contains(t, body, `name="stake"`)
+	assert.Contains(t, body, `hx-trigger="input changed delay:300ms, slip-updated from:body"`)
+	assert.Contains(t, body, `<details`)
+	assert.Contains(t, body, "Activity")
+}
+
+func TestLegFormIsReadyForTheBottomSheet(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodGet,
+		fmt.Sprintf("/slips/%d/legs/new", fixture.slip.ID),
+		nil,
+	)
+	fixture.handler.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	body := recorder.Body.String()
+	assert.Contains(t, body, "Add a leg")
+	assert.Contains(t, body, `data-close-leg-sheet`)
+	assert.Contains(t, body, `data-form-error`)
+	assert.Contains(t, body, `name="selection"`)
+	assert.Contains(t, body, `name="game_id"`)
+}
+
+func TestProfileKeepsInactiveMembersVisible(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	other, err := fixture.store.CreateUserWithIdentity(t.Context(), "Sam", "sam@example.com", "google-sam", "")
+	require.NoError(t, err)
+	_, err = fixture.store.JoinByToken(t.Context(), other.ID, fixture.group.InviteToken)
+	require.NoError(t, err)
+	_, err = fixture.store.SetUserActive(t.Context(), other.ID, false)
+	require.NoError(t, err)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/me", nil)
+	fixture.handler.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	body := recorder.Body.String()
+	assert.Contains(t, body, "Sam")
+	assert.Contains(t, body, "Inactive")
+	assert.Contains(t, body, `name="active" value="1"`, "an inactive person can be turned back on")
+}
+
 // addLeg posts one ML leg through the regular handler.
 func addLeg(t *testing.T, handler http.Handler, slipID int64, selection string) *httptest.ResponseRecorder {
 	t.Helper()

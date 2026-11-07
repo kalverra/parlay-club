@@ -74,6 +74,6 @@ an optional game; `slate-and-lines` adds the game picker. Read before starting:
 
 - [x] Add routes and handlers for change 2 rows in the routes table, mapping rule errors to 422, and a handler test that
   drives two SSE subscribers through an add-leg request
-- [ ] Build the Slip tab: header, member sections, leg form bottom sheet, lock and unlock, activity feed, the payout
+- [x] Build the Slip tab: header, member sections, leg form bottom sheet, lock and unlock, activity feed, the payout
   calculator with 300 ms debounce, and the profile page with home book and active toggles
 - [ ] Docs: add docs/reference/routes.md for built routes; delete those rows from plan/architecture.md
