@@ -1,6 +1,8 @@
 package weather_test
 
 import (
+	"errors"
+	"net/url"
 	"testing"
 	"time"
 
@@ -24,6 +26,11 @@ func TestLiveForecast(t *testing.T) {
 
 	kickoff := time.Now().UTC().Add(24 * time.Hour).Truncate(time.Hour)
 	forecast, err := weather.NewClient("", nil).Forecast(t.Context(), venue, kickoff)
+	// A network that blocks Open-Meteo is not a parser regression, so skip
+	// rather than fail. HTTP and parse errors still fail below.
+	if _, ok := errors.AsType[*url.Error](err); ok {
+		t.Skipf("Open-Meteo unreachable: %v", err)
+	}
 	require.NoError(t, err)
 
 	assert.Greater(t, forecast.TempF, -60.0)

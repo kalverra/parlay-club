@@ -13,7 +13,7 @@ Games tab. Props wait for `props-research`. Read before starting:
 ## Approach
 
 - Each client in `internal/ingest/{espn,weather,odds}` takes a base URL and an `*http.Client`, returns plain structs,
-  and never touches the DB. Fixtures are real responses saved while building.
+  and never touches the DB. The odds client also takes an API key. Fixtures are real responses saved while building.
 - `internal/refresh` owns staleness, single-flight, backoff, credit floors, and writing results through the `Store`. It
   takes a `now` func and the three clients as interfaces. `Kick()` is called by middleware on full-page GETs.
 - After a sync changes rows, refresh publishes `week:{id}` and `slip:{id}` for that week's slips.
@@ -41,8 +41,8 @@ Games tab. Props wait for `props-research`. Read before starting:
 ## Risks
 
 - ESPN field paths may differ from `plan/data-sources.md`. Confirm against fixtures first and fix the doc.
-- Odds API team names may not equal ESPN `displayName` for every team. The full-slate match test catches it; add an
-  alias map only if needed.
+- Odds API team names may not equal ESPN `displayName` for every team. The saved full slate matched all 14 games
+  exactly, so no alias map was needed; add one only if a later week misses.
 - Credits: tests never hit the real Odds API except the free `/events` live test.
 
 ## TODO
@@ -66,7 +66,7 @@ Games tab. Props wait for `props-research`. Read before starting:
   into odds rows per book with fixture tests
 - [x] Add event matching to ESPN games, test zero misses across a full saved slate, and add a TestLive per source that
   skips under -short
-- [ ] Docs: add game lines, budget, and bookmakers to docs/reference/data-sources.md; delete them from plan/
+- [x] Docs: add game lines, budget, and bookmakers to docs/reference/data-sources.md; delete them from plan/
 
 ### Phase 4: Refresh
 
