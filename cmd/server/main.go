@@ -21,7 +21,11 @@ import (
 	"github.com/kalverra/parlay-club/internal/config"
 	"github.com/kalverra/parlay-club/internal/db"
 	"github.com/kalverra/parlay-club/internal/groups"
+	"github.com/kalverra/parlay-club/internal/ingest/espn"
+	"github.com/kalverra/parlay-club/internal/ingest/odds"
+	"github.com/kalverra/parlay-club/internal/ingest/weather"
 	"github.com/kalverra/parlay-club/internal/live"
+	"github.com/kalverra/parlay-club/internal/refresh"
 	"github.com/kalverra/parlay-club/internal/slips"
 	"github.com/kalverra/parlay-club/internal/web"
 	assets "github.com/kalverra/parlay-club/web"
@@ -86,7 +90,15 @@ func run() error {
 
 	hub := &live.Hub{}
 	slipService := slips.New(store, hub, nil)
-	stream := live.NewStream(hub, nil)
+	refresher := refresh.New(refresh.Deps{
+		Store:      store,
+		Scoreboard: espn.NewClient("", nil),
+		Forecast:   weather.NewClient("", nil),
+		Lines:      odds.NewClient("", cfg.OddsAPIKey, nil),
+		Publisher:  hub,
+		Logger:     logger,
+	})
+	stream := live.NewStream(hub, refresher.LiveWindow)
 	shell := web.NewWithDeps(web.Dependencies{
 		Logger:     logger,
 		Renderer:   renderer,
@@ -106,6 +118,7 @@ func run() error {
 			handlers,
 			groupHandlers,
 			scope,
+			refresher.Kick,
 		),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
@@ -172,6 +185,7 @@ func newMux(
 	handlers *auth.Handlers,
 	groupHandlers *groups.Handlers,
 	scope func(http.Handler) http.Handler,
+	kick func(),
 ) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", healthz)
@@ -183,9 +197,41 @@ func newMux(
 	if groupHandlers != nil {
 		groupHandlers.Routes(app)
 	}
-	mux.Handle("/", handlers.RequireUser(scope(app)))
+	mux.Handle("/", handlers.RequireUser(scope(kickOnPage(kick)(app))))
 
 	return handlers.CSRF(mux)
+}
+
+// kickOnPage starts a refresh pass for full-page GETs. HTMX partials and SSE
+// streams skip it: the page load that mounted them already kicked, and an open
+// stream must not trigger a sync on every reconnect.
+func kickOnPage(kick func()) func(http.Handler) http.Handler {
+	if kick == nil {
+		return func(next http.Handler) http.Handler { return next }
+	}
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if isFullPageGet(r) {
+				kick()
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// isFullPageGet reports whether a request is a browser page load rather than an
+// HTMX partial or an EventSource stream.
+func isFullPageGet(r *http.Request) bool {
+	if r.Method != http.MethodGet {
+		return false
+	}
+	if r.Header.Get("Hx-Request") == "true" {
+		return false
+	}
+	if strings.Contains(r.Header.Get("Accept"), "text/event-stream") {
+		return false
+	}
+	return !strings.HasSuffix(r.URL.Path, "/events")
 }
 
 // healthz answers Cloud Run's startup and liveness probes.
