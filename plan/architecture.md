@@ -26,7 +26,7 @@ internal/config/         env parsing and validation
 internal/db/             Open (pragmas), migrations/*.sql (embedded), Store with all queries
 internal/auth/           session and OAuth cookies, sign-in handlers, middleware
 internal/groups/         membership, the active-group scope, and the invite screens
-internal/slips/          slip, member, leg rules (product.md "Editing and locking"); publishes to live
+internal/slips/          slip, member, leg rules (docs/concepts/slips.md "Editing and locking"); publishes to live
 internal/parlay/         odds math, payout, units
 internal/live/           hub and SSE handler
 internal/refresh/        staleness rules, single-flight background syncs
@@ -205,8 +205,8 @@ Idempotent `gcloud` script taking `PROJECT_ID` and `BILLING_ACCOUNT`:
 - print the values to store as GitHub repo variables: `GCP_PROJECT`, `GCP_REGION`, `WIF_PROVIDER`, `DEPLOY_SA`,
   `RUNTIME_SA`, `LITESTREAM_BUCKET`, `AR_REPO`.
 
-The user sets `BASE_URL` as a Cloud Run environment variable at deploy time. The Google client
-values come from the Web client in the [Google OAuth setup runbook](../docs/runbooks/google-oauth-setup.md).
+The user sets `BASE_URL` as a Cloud Run environment variable at deploy time. The Google client values come from the Web
+client in the [Google OAuth setup runbook](../docs/runbooks/google-oauth-setup.md).
 
 `docs/deploy.md` walks the user through running it, adding secret values, and setting the GitHub variables.
 

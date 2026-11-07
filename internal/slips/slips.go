@@ -1,6 +1,6 @@
-// Package slips holds the shared-slip rules from product.md "Editing and
-// locking". It reads and writes through a Store, so the rules stay in one place
-// and the database stays a thin query layer.
+// Package slips holds the shared-slip rules from docs/concepts/slips.md
+// "Editing and locking". It reads and writes through a Store, so the rules stay
+// in one place and the database stays a thin query layer.
 package slips
 
 import (

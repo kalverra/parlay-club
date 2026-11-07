@@ -1,0 +1,131 @@
+---
+id: slips
+title: Slips
+type: concept
+summary: How a group builds one shared parlay a week, with members, legs, create-slip defaults, and the editing and locking rules.
+tags: [slips, weeks, legs, members, locking, activity, groups]
+sources: [internal/slips/slips.go, internal/slips/rules.go, internal/db/slips.go, internal/db/legs.go, internal/db/weeks.go, internal/db/games.go]
+last_verified: 2026-11-07
+---
+
+# Slips
+
+## Summary
+
+A group builds one shared parlay at a time. A **week** is an ESPN NFL week: a season, a season type (regular or
+postseason), and a week number. Its id is `season*1000 + season_type*100 + week_num`, so Week 9 of the 2026 regular
+season is `2026209`.
+
+A **slip** is one shared parlay inside a group and a week. A week usually has one slip, but a group can make more, and a
+person can belong to several in the same week. The app tracks the picks. Each person places the bet at their own book
+with their own stake, and no money passes through the app.
+
+## Creating a slip
+
+The home page opens the newest slip of the current week. When the group has none, it shows the create-slip form.
+
+- Week defaults to the current week. Past weeks are allowed, so history can be entered.
+- Name defaults to the week label, `Week 9`, then `Week 9 #2`.
+- `legs_per_member` defaults to 2 and allows 1–5.
+- Members default to the previous slip's members.
+
+`slips.CreateDefaults` copies from the group's previous slip: the latest slip in that week or any earlier week. A second
+slip in the same week copies that week's first. With no previous slip it returns `DefaultLegsPerMember` (2) and no
+members. `db.Store.CreateSlip` trims the name, refuses a blank name, enforces the 1–5 range, requires at least one
+member, and ignores repeat member IDs.
+
+## Members
+
+A slip has **members**: a subset of the group's users, guests included. `slip_members` pairs a slip with a person and
+holds `locked_at` for a lock in.
+
+Members and `legs_per_member` can change only while the slip is `OPEN`. A member with legs cannot be removed until their
+legs are deleted. Adding someone already on the slip changes nothing.
+
+## Legs
+
+A **leg** is one pick. It holds an owner, an optional game, a market, a team, an optional player, a side, an optional
+line, American odds, and a display `selection` generated from those fields.
+
+| Market       | Fields                         | Selection example                   |
+| ------------ | ------------------------------ | ----------------------------------- |
+| `SPREAD`     | team, line                     | `BUF -3.5`                          |
+| `ML`         | team                           | `BUF ML`                            |
+| `TOTAL`      | side (OVER/UNDER), line        | `BUF@MIA Over 47.5`                 |
+| `TEAM_TOTAL` | team, side, line               | `BUF Team Total Over 27.5`          |
+| `PASS_YDS`   | player, team, side, line       | `Josh Allen Over 245.5 Pass Yds`    |
+| `PASS_TDS`   | player, team, side, line       | `Josh Allen Over 1.5 Pass TDs`      |
+| `RUSH_YDS`   | player, team, side, line       | `James Cook Over 64.5 Rush Yds`     |
+| `RUSH_ATT`   | player, team, side, line       | `James Cook Over 14.5 Rush Att`     |
+| `REC_YDS`    | player, team, side, line       | `Khalil Shakir Over 52.5 Rec Yds`   |
+| `RECEPTIONS` | player, team, side, line       | `Khalil Shakir Over 4.5 Receptions` |
+| `ANYTIME_TD` | player, team (side `YES`)      | `James Cook Anytime TD`             |
+| `KICKER_PTS` | player, team, side, line       | `Tyler Bass Over 7.5 Kicking Pts`   |
+| `OTHER`      | free-text selection, team opt. | whatever the user typed             |
+
+- Team is the ESPN abbreviation of the team the leg is about. For `TOTAL`, team is empty.
+- Odds default to -110 in the form. Quick-add pills prefill the price; the formulas are in
+  [Odds math](../reference/odds-math.md).
+- A leg needs a game, except on a slip for a past week, where the game is optional and `OTHER` is the usual market.
+- `OTHER` legs skip the analyzer and grade by hand.
+
+`db.Store.CreateLeg` starts every leg `PENDING` and treats an odds value of 0 as -110.
+
+## Status and result
+
+A slip's status is `OPEN`, `LOCKED`, or `GRADED`, and its result is `PENDING`, `WON`, `LOST`, or `PUSH`.
+
+- New slips are `OPEN`.
+- The status becomes `LOCKED` when every member locks in.
+- The status becomes `GRADED` once the result is no longer `PENDING`.
+
+Grading computes the result from the legs. See [Product](../../plan/product.md) for the grading rules.
+
+## Editing and locking
+
+The rules live in `internal/slips.Service`. Each method checks them, writes the change and one activity entry in one
+transaction, updates the slip's status, then publishes `slip:{id}`. The clock is injected through `now`, so kickoff and
+locking stay testable.
+
+1. Only slip members can add legs. A member can edit or delete only their own legs. A non-member gets `ErrNotMember`,
+   and someone else's leg gets `ErrNotOwner`.
+2. A member can have at most `legs_per_member` legs. Adding past the limit returns `ErrLegLimit`.
+3. A leg is **kickoff-locked** once `now >= game.kickoff_utc`. A kickoff-locked leg cannot be edited or deleted, and no
+   leg can be added for a game that has kicked off. A leg without a game skips this check.
+4. **Lock in** sets the member's `locked_at`. It requires exactly `legs_per_member` legs. Too few or too many returns
+   `ErrLegsNotReady`. Locking in twice changes nothing.
+5. The slip's status becomes `LOCKED` when every member is locked in.
+6. **Unlock** is available to any member while the slip is `LOCKED` or any member is locked in. It clears every member's
+   `locked_at`, sets the status `OPEN`, and writes "unlocked by {name}" to the activity feed. With nobody locked in it
+   returns `ErrNotLocked`. Kickoff locks still apply.
+7. Members, name, and `legs_per_member` can change only while the slip is `OPEN`. A new limit cannot drop below a
+   member's current leg count. A member with legs cannot be removed until their legs are deleted.
+8. Slips for past weeks skip rule 3, so history can be entered.
+9. Every mutation writes one activity entry and publishes `slip:{id}` after it commits. An add reads "Adam added BUF
+   ML", a lock in reads "Sam locked in", and a no-op writes nothing.
+
+The service returns typed errors so handlers can answer with a 422 and a short message.
+
+| Error                    | Trigger                                         | Message                                  |
+| ------------------------ | ----------------------------------------------- | ---------------------------------------- |
+| `ErrNotMember`           | The actor is not on the slip.                   | you're not on this slip                  |
+| `ErrNotOwner`            | The actor touches another member's leg.         | that leg belongs to someone else         |
+| `ErrLegLimit`            | The member already has `legs_per_member` legs.  | you've already added all your legs       |
+| `ErrLegsPerMemberTooLow` | The new limit is below someone's leg count.     | a member already has more legs than that |
+| `ErrKickoffLocked`       | The game has kicked off.                        | that game already kicked off             |
+| `ErrLockedIn`            | A locked-in member changes a leg.               | you've locked in                         |
+| `ErrLegsNotReady`        | Lock in without exactly the limit.              | add all your legs before locking in      |
+| `ErrSlipNotOpen`         | A member, name, or limit change after lock in.  | the slip is locked                       |
+| `ErrNotLocked`           | Unlock with nobody locked in.                   | nobody is locked in                      |
+| `ErrMemberHasLegs`       | Remove a member who still has legs.             | delete their legs first                  |
+
+## Several slips
+
+A person can belong to several slips in a week. The top bar switches between the week's slips.
+
+## Related
+
+- [Odds math](../reference/odds-math.md): conversions, combined odds, reference price, payout, and units.
+- [Database schema](../reference/schema.md): the `weeks`, `slips`, `slip_members`, `legs`, and `activity` tables.
+- [Groups](groups.md): how the active group scopes slips, and how membership works.
+- [Product](../../plan/product.md): grading, the Record Book, and the screens.
