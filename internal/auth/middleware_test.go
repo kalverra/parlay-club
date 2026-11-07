@@ -10,7 +10,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kalverra/parlay-club/internal/auth"
-	"github.com/kalverra/parlay-club/internal/config"
 	"github.com/kalverra/parlay-club/internal/db"
 )
 
@@ -106,39 +105,6 @@ func TestRequireUserRedirects(t *testing.T) {
 			assert.False(t, next.called)
 		})
 	}
-}
-
-func TestRequireUserChecksTheGateEveryRequest(t *testing.T) {
-	t.Parallel()
-
-	f := newFixtureWith(t, newFakeProvider(), auth.NewGate([]config.AllowedEmail{
-		{Email: "ada@example.com"},
-	}), true)
-	ada := f.addUserWithEmail(t, "Ada", "ada@example.com")
-
-	next := &probe{}
-	allowed := serveProbe(
-		f.handlers.RequireUser(next),
-		guardedRequest(t, http.MethodGet, "/", f.sessionCookie(t, ada.ID)),
-	)
-	require.Equal(t, http.StatusNoContent, allowed.Code)
-	require.True(t, next.called)
-
-	// The list loses Ada, and her existing cookie stops working on the next load.
-	f = newFixtureWith(t, newFakeProvider(), auth.NewGate([]config.AllowedEmail{
-		{Email: "friend@example.com"},
-	}), true)
-	ada = f.addUserWithEmail(t, "Ada", "ada@example.com")
-
-	next = &probe{}
-	denied := serveProbe(
-		f.handlers.RequireUser(next),
-		guardedRequest(t, http.MethodGet, "/", f.sessionCookie(t, ada.ID)),
-	)
-
-	assert.Equal(t, http.StatusFound, denied.Code)
-	assert.Equal(t, "/login", denied.Header().Get("Location"))
-	assert.False(t, next.called)
 }
 
 func TestRequireUserAllowsActiveUser(t *testing.T) {

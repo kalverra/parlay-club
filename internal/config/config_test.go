@@ -32,7 +32,6 @@ func TestLoadDevDefaults(t *testing.T) {
 	assert.Empty(t, cfg.GoogleClientSecret)
 	assert.Equal(t, "http://localhost:8080", cfg.BaseURL)
 	assert.Empty(t, cfg.OddsAPIKey)
-	assert.Empty(t, cfg.AllowedEmails)
 	assert.Equal(t, zerolog.DebugLevel, cfg.LogLevel)
 }
 
@@ -72,33 +71,6 @@ func TestLoadOverridesEveryValue(t *testing.T) {
 	assert.Equal(t, zerolog.WarnLevel, cfg.LogLevel)
 }
 
-func TestLoadParsesAllowedEmails(t *testing.T) {
-	t.Parallel()
-
-	cfg, err := config.Load(envFrom(map[string]string{
-		"ALLOWED_EMAILS": " Ada@Example.com , bob@example.com=Bob Smith,,",
-	}))
-	require.NoError(t, err)
-
-	assert.Equal(t, []config.AllowedEmail{
-		{Email: "ada@example.com"},
-		{Email: "bob@example.com", Name: "Bob Smith"},
-	}, cfg.AllowedEmails)
-}
-
-func TestLoadRejectsMalformedAllowedEmails(t *testing.T) {
-	t.Parallel()
-
-	_, err := config.Load(envFrom(map[string]string{
-		"ALLOWED_EMAILS": "ada@example.com,not-an-email,bob=Bob",
-	}))
-	require.Error(t, err)
-
-	assert.Contains(t, err.Error(), `ALLOWED_EMAILS entry "not-an-email"`)
-	assert.Contains(t, err.Error(), `ALLOWED_EMAILS entry "bob=Bob"`)
-	assert.NotContains(t, err.Error(), "ada@example.com")
-}
-
 func TestLoadProdDefaults(t *testing.T) {
 	t.Parallel()
 
@@ -108,7 +80,6 @@ func TestLoadProdDefaults(t *testing.T) {
 		"GOOGLE_CLIENT_ID":     "client-id",
 		"GOOGLE_CLIENT_SECRET": "client-secret",
 		"BASE_URL":             "https://parlay.example.com",
-		"ALLOWED_EMAILS":       "ada@example.com",
 	}))
 	require.NoError(t, err)
 
@@ -120,7 +91,6 @@ func TestLoadProdDefaults(t *testing.T) {
 	assert.Equal(t, "client-id", cfg.GoogleClientID)
 	assert.Equal(t, "client-secret", cfg.GoogleClientSecret)
 	assert.Equal(t, "https://parlay.example.com", cfg.BaseURL)
-	assert.Len(t, cfg.AllowedEmails, 1)
 	assert.Equal(t, zerolog.InfoLevel, cfg.LogLevel)
 }
 
@@ -133,7 +103,6 @@ func TestLoadErrors(t *testing.T) {
 		"GOOGLE_CLIENT_ID":     "client-id",
 		"GOOGLE_CLIENT_SECRET": "client-secret",
 		"BASE_URL":             "https://parlay.example.com",
-		"ALLOWED_EMAILS":       "ada@example.com",
 	}
 
 	tests := map[string]struct {
@@ -156,10 +125,6 @@ func TestLoadErrors(t *testing.T) {
 			overrides: map[string]string{"BASE_URL": "   "},
 			wantErr:   []string{"BASE_URL is required in prod"},
 		},
-		"prod missing allowed emails": {
-			overrides: map[string]string{"ALLOWED_EMAILS": ""},
-			wantErr:   []string{"ALLOWED_EMAILS must list at least one email in prod"},
-		},
 		"prod missing session key": {
 			overrides: map[string]string{"SESSION_KEY": ""},
 			wantErr:   []string{"SESSION_KEY must be at least 32 bytes in prod"},
@@ -173,14 +138,12 @@ func TestLoadErrors(t *testing.T) {
 				"GOOGLE_CLIENT_ID":     "",
 				"GOOGLE_CLIENT_SECRET": "",
 				"BASE_URL":             "",
-				"ALLOWED_EMAILS":       "",
 				"SESSION_KEY":          "",
 			},
 			wantErr: []string{
 				"GOOGLE_CLIENT_ID is required in prod",
 				"GOOGLE_CLIENT_SECRET is required in prod",
 				"BASE_URL is required in prod",
-				"ALLOWED_EMAILS must list at least one email in prod",
 				"SESSION_KEY must be at least 32 bytes in prod",
 			},
 		},
@@ -226,11 +189,10 @@ func TestLoadErrors(t *testing.T) {
 func TestLoadDevStartsWithNoSecrets(t *testing.T) {
 	t.Parallel()
 
-	// An empty list allows everyone and no Google values means the dev login.
+	// No Google values means the dev login, and sign-up is open.
 	cfg, err := config.Load(envFrom(map[string]string{"APP_ENV": config.EnvDev}))
 	require.NoError(t, err)
 
 	assert.Empty(t, cfg.GoogleClientID)
-	assert.Empty(t, cfg.AllowedEmails)
 	assert.Equal(t, "http://localhost:8080", cfg.BaseURL)
 }

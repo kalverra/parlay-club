@@ -2,12 +2,14 @@
 
 ## Context
 
-`google-oauth` gives each person a stable user, a `SignIn` function, and an `auth.Gate`. Nothing is deployed and there
-is no data, so this is a rebuild: the schema is edited in place and nothing is migrated. This change assumes
-`slips-live`, `slate-and-lines`, and `history-and-deploy` have shipped. Their designs left seams for it: `internal/live`
-topics are plain strings, `internal/slips` methods take the acting user, `internal/seed` resolves people in one
-function, and games, odds, weather, and `sync_state` are global. Anything designed after this one
-(`grading-record-book`) must take the group from the actor.
+`google-oauth` gives each person a stable user and a `SignIn` function. Nothing is deployed and there is no data, so
+this is a rebuild: the schema is edited in place and nothing is migrated. This change is landing before `slips-live`,
+`slate-and-lines`, and `history-and-deploy`: this branch has no `internal/slips`, `internal/live`, or `internal/seed`,
+and no slip routes. Their designs leave seams for it: `internal/live` topics are plain strings, `internal/slips`
+methods take the acting user, `internal/seed` resolves people in one function, and games, odds, weather, and
+`sync_state` are global. Phase 2 lands the scope check on the routes that exist; the slip, live, and seed work joins the
+changes that build those packages. Anything designed after this one (`grading-record-book`) must take the group from
+the actor.
 
 SQLite runs one connection and one Cloud Run instance. The hub is in memory. Read before starting:
 
@@ -107,8 +109,9 @@ URL (rewrites every route in the other designs); roles (not wanted).
   `sync_state` credits after launch.
 - Invite links are bearer secrets. 128-bit tokens, one-click reset, and a join page that shows only names limit the
   harm.
-- If `groups` ships before the three waiting changes, their slip code is written group-aware instead of adapted, and
-  Phase 2 shrinks to the middleware and the isolation test.
+- `groups` is landing before the three waiting changes, so Phase 2 shrinks to `groups.Scope` and the `pc_group` cookie.
+  The slip, live, and seed work waits for the code those changes build, and their slip code is written group-aware
+  instead of adapted. The route-table isolation test cannot exist until there are slip routes.
 
 ## TODO
 
@@ -118,7 +121,7 @@ Effort: hard (a new scope check on every route, plus open sign-up, across slips,
 
 - [x] Add the groups tables and `slips.group_id` to `0001_init.sql`, and `internal/groups` `Create`, `ForUser`, and
   `IsMember`, with store tests
-- [ ] Open sign-up: delete `auth.Gate` and `ALLOWED_EMAILS`, and create a "Just me" group when `SignIn` creates a user,
+- [x] Open sign-up: delete `auth.Gate` and `ALLOWED_EMAILS`, and create a "Just me" group when `SignIn` creates a user,
   with tests for strangers and the solo group
 
 ### Phase 2: Everything stays inside a group

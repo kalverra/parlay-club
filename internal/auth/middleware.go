@@ -25,7 +25,7 @@ var csrfExempt = map[string]bool{
 
 // RequireUser sends a browser without a valid session to the sign-in screen,
 // and hands the loaded user to the next handler. It also refuses an inactive
-// user and an email that has left the allow list.
+// user.
 func (h *Handlers) RequireUser(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		id, ok := h.cookies.SessionID(r)
@@ -43,9 +43,6 @@ func (h *Handlers) RequireUser(next http.Handler) http.Handler {
 			h.serverError(w, err)
 			return
 		case !user.Active:
-			redirect(w, r)
-			return
-		case !h.gate.Allows(user.Email):
 			redirect(w, r)
 			return
 		}
