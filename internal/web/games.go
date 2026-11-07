@@ -193,6 +193,7 @@ func cardView(game db.Game, rows []db.Odds, homeBook string) GameCardView {
 			continue
 		}
 		card.Pills = append(card.Pills, line)
+		card.HasLines = true
 	}
 	for _, side := range []string{"OVER", "UNDER"} {
 		line, ok := pickGameLine(rowsFor(rows, "TOTAL", "", side), homeBook)

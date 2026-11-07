@@ -2,9 +2,9 @@
 id: slips
 title: Slips
 type: concept
-summary: How a group builds one shared parlay a week, with members, legs, create-slip defaults, and the editing and locking rules.
-tags: [slips, weeks, legs, members, locking, activity, groups]
-sources: [internal/slips/slips.go, internal/slips/rules.go, internal/db/slips.go, internal/db/legs.go, internal/db/weeks.go, internal/db/games.go]
+summary: How a group builds one shared parlay a week from the slate, with members, legs, quick-add, create-slip defaults, and the editing and locking rules.
+tags: [slips, weeks, legs, members, locking, activity, groups, games, quick-add]
+sources: [internal/slips/slips.go, internal/slips/rules.go, internal/db/slips.go, internal/db/legs.go, internal/db/weeks.go, internal/db/games.go, internal/web/games.go]
 last_verified: 2026-11-07
 ---
 
@@ -22,8 +22,8 @@ with their own stake, and no money passes through the app.
 
 ## Creating a slip
 
-The home page opens the newest slip of the latest week. That is a stand-in for the current week until `slate-and-lines`
-defines one. When the group has none, it shows the create-slip form.
+The home page opens the newest slip of the latest week. The slate sync keeps that week current, so it is normally the
+week being played. When the group has none, it shows the create-slip form.
 
 - Week defaults to the latest week. Past weeks are allowed, so history can be entered.
 - Name defaults to the week label, `Week 9`, then `Week 9 #2`.
@@ -67,10 +67,36 @@ line, American odds, and a display `selection` generated from those fields.
 - Team is the ESPN abbreviation of the team the leg is about. For `TOTAL`, team is empty.
 - Odds default to -110 in the form. Quick-add pills prefill the price; the formulas are in
   [Odds math](../reference/odds-math.md).
+- The game picker lists the week's games that have not kicked off. A current week requires a game; a past week lists
+  every game and allows no game. `?game_id=` preselects one when a card opens the form.
 - A leg needs a game, except on a slip for a past week, where the game is optional and `OTHER` is the usual market.
 - `OTHER` legs skip the analyzer and grade by hand.
 
 `db.Store.CreateLeg` starts every leg `PENDING` and treats an odds value of 0 as -110.
+
+The slip's **reference odds** multiply each leg's reference price: the median of the prices the slip members' home books
+carry for the same game, market, player, side, and line, one price per book. A leg whose members' books do not price it
+keeps its own price. The formulas are in [Odds math](../reference/odds-math.md).
+
+## The Games tab
+
+The Games tab lists the latest week's games, sorted by kickoff. Each card shows the matchup, the kickoff time, the two
+spreads, and the over and under. A live or final game also shows its score and a status chip. Times render as
+`<time datetime="{UTC ISO}">`, and `app.js` formats them in the browser's local zone.
+
+Prices come from the viewer's home book when it carries the selection, and the median across every book otherwise. A row
+left behind by an earlier odds sync is ignored, so a card never mixes old prices with new ones. The "lines as of" note
+under the board is the newest odds fetch time, or the `odds:lines` sync state when that is newer. Refresh owns those
+fetches; see [Data refresh](data-refresh.md).
+
+Weather badges: 🏠 Indoor for a dome, 💨 wind mph (amber from 15, red from 20), and 🌧 at 0.1 in/hr of precipitation or
+more. An indoor game, or one with no forecast yet, shows no weather.
+
+Tapping a card expands quick-add pills: both spreads, both moneylines, Over, Under, and "Custom leg". A pill adds the
+leg in one tap with the game and price set, then shows "Added BUF -3.5" in the card. It posts the normal add-leg route
+with `quick=1`, so every rule below still applies: membership, the per-member limit, the kickoff lock, and the lock in.
+The pills appear when the week's newest slip is `OPEN`. With no slip the card links to the create-slip page, and with a
+locked slip it says picks cannot be added. "Custom leg" opens the leg form with the game already chosen.
 
 ## Status and result
 

@@ -207,6 +207,34 @@ func TestGamesPageIgnoresRowsFromAnOlderSync(t *testing.T) {
 	assert.NotContains(t, body, "+1000", "a price from an older sync is left off the board")
 }
 
+func TestGamesPageCountsMoneylineOnlyBoardsAsHavingLines(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	game := addGame(t, fixture, gameKickoff())
+
+	fetched := time.Date(2026, time.November, 7, 15, 42, 0, 0, time.UTC)
+	_, err := fixture.store.UpsertOdds(t.Context(), []db.Odds{{
+		GameID:     game.ID,
+		Book:       "draftkings",
+		MarketType: "ML",
+		Team:       "BUF",
+		Side:       "TEAM",
+		Price:      -150,
+		FetchedAt:  fetched,
+	}})
+	require.NoError(t, err)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/games", nil)
+	fixture.handler.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	body := html.UnescapeString(recorder.Body.String())
+	assert.Contains(t, body, "BUF ML")
+	assert.NotContains(t, body, "No lines yet.")
+}
+
 func TestGamesPageUsesTheHomeBookFirst(t *testing.T) {
 	t.Parallel()
 

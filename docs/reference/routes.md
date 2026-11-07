@@ -4,7 +4,7 @@ title: Routes
 type: reference
 summary: Every HTTP route the server serves, the middleware in front of them, and the status codes, HTMX headers, and SSE frames handlers return.
 tags: [routes, http, handlers, middleware, htmx, sse]
-sources: [cmd/server/main.go, internal/auth/handlers.go, internal/groups/handlers.go, internal/web/routes.go, internal/web/slips.go, internal/live/stream.go]
+sources: [cmd/server/main.go, internal/auth/handlers.go, internal/groups/handlers.go, internal/web/routes.go, internal/web/games.go, internal/web/slips.go, internal/live/stream.go]
 last_verified: 2026-11-07
 ---
 
@@ -52,12 +52,12 @@ path. A slip or leg outside the active group answers 404, the same as a missing 
 | Method + path     | Purpose                                                                                |
 | ----------------- | -------------------------------------------------------------------------------------- |
 | `GET /{$}`        | Slip tab: the newest slip of the latest week, or the create-slip form when there is none |
-| `GET /games`      | Games tab placeholder until the slate lands                                             |
+| `GET /games`      | Games tab: the latest week's board with quick-add pills                                 |
 | `GET /research`   | Research tab placeholder                                                                |
 | `GET /record`     | Record Book placeholder                                                                 |
 
-The same slip handler file also serves `/me` and the slip and leg routes below. `/games`, `/research`, and `/record`
-currently render their empty state until later changes fill them in.
+The slip handler file also serves `/me` and the slip and leg routes below. `/research` and `/record` render their empty
+state until later changes fill them in. The Games tab is described under [Games](#games).
 
 ### Groups
 
@@ -92,8 +92,8 @@ All slip routes require the slip to belong to the active group.
 | `POST /slips/{id}/members`                 | Add a group member from `user_id`                               | Panel partial. |
 | `DELETE /slips/{id}/members/{userID}`      | Remove a member                                                 | Panel partial. |
 | `PATCH /slips/{id}`                        | Change `name` or `legs_per_member`                              | Panel partial. |
-| `GET /slips/{id}/legs/new`                 | Empty leg form                                                  | Optional `?game_id=`. Leg form partial. |
-| `POST /slips/{id}/legs`                    | Add the signed-in member's leg                                  | Panel partial with `Hx-Trigger: leg-saved`. |
+| `GET /slips/{id}/legs/new`                 | Empty leg form with the game picker                             | Optional `?game_id=` and `?quick=`; leg form partial. |
+| `POST /slips/{id}/legs`                    | Add the signed-in member's leg                                  | Panel partial, or the `leg-added` partial for a quick add; `Hx-Trigger: leg-saved`. |
 | `GET /legs/{id}/edit`                      | Edit form filled from the leg                                   | Leg form partial. |
 | `PUT /legs/{id}`                           | Save the leg's pick fields                                      | Panel partial with `Hx-Trigger: leg-saved`. |
 | `DELETE /legs/{id}`                        | Delete the leg                                                  | Panel partial. |
@@ -102,12 +102,36 @@ All slip routes require the slip to belong to the active group.
 | `GET /slips/{id}/events`                   | Live updates for the slip and its week                          | `text/event-stream`; see below. |
 
 The leg form takes `market_type`, `selection`, `team`, `player_name`, `player_id`, `side`, `line`, `odds`, and
-`game_id`. When `selection` is blank, the handler builds the display text from the market fields. An unreadable number
-is 422 with "Odds need to be a number.", "Line needs to be a number.", or a similar short message.
+`game_id`. The game picker lists the week's games that have not kicked off; a past week lists them all and allows no
+game. When `selection` is blank, the handler builds the display text from the market fields. An unreadable number is 422
+with "Odds need to be a number.", "Line needs to be a number.", or a similar short message.
+
+`?quick=1` turns the form into a quick add: the target becomes the game card's `#quick-add-{gameID}` element, and a
+successful `POST` answers with the `leg-added` partial instead of the slip panel.
 
 `GET /slips/{id}/events` serves one connection for one slip. It subscribes to `slip:{id}` and `week:{weekID}`, sends
 `slip-updated` and `board-updated` signals, pings every 25 seconds, and ends with `bye` at its deadline. The slip page
 sets `data-live-url` so the client opens the stream. See [Live updates](../concepts/live-updates.md).
+
+### Games
+
+`GET /games` renders the latest week's board. It reads the week's games and each game's odds rows. Rows from an older
+sync are dropped, so a card never mixes prices from two fetches.
+
+Each card shows the matchup, the kickoff as a `<time datetime>` the client formats in the browser's zone, the two
+spreads, and the over and under. A selection shows the viewer's home-book price when that book carries it, and the
+median across books otherwise. A live or final game also shows its score and a status chip: Upcoming, Live, or Final.
+Weather badges are 🏠 Indoor, 💨 wind mph (amber from 15, red from 20), and 🌧 at 0.1 in/hr of precipitation or more.
+
+The "lines as of" note under the board uses the newest odds fetch time on the games, or the `odds:lines` row in
+`sync_state` when that is newer. A week with no games shows the empty state. A missing store or week renders the same
+empty page, not an error.
+
+Expanding a card shows the quick-add forms. Each one posts to `POST /slips/{id}/legs` with `quick=1` and the game,
+market, team, side, line, and price prefilled, and swaps the "Added {selection}" partial into that card. The pills
+appear only when the newest slip in the week is `OPEN`. With no slip, the card links to `/slips/new`; with a locked
+slip, it says picks cannot be added. "Custom leg" opens the same leg form with `game_id` set and `quick=1`, so a saved
+custom leg lands in the card too.
 
 ### Profile
 
