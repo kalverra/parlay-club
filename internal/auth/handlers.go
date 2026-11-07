@@ -19,10 +19,8 @@ import (
 const maxFormBytes = 4 << 10
 
 const (
-	googleNotInvited = "That Google account isn't on the list yet. Ask whoever runs the club to add you."
-	devNotInvited    = "That email isn't on the list yet. Ask whoever runs the club to add you."
-	signInFailed     = "Sign-in didn't work. Try again."
-	blankEmail       = "Add an email first."
+	signInFailed = "Sign-in didn't work. Try again."
+	blankEmail   = "Add an email first."
 )
 
 // Renderer renders a full page by name.
@@ -35,7 +33,6 @@ type Handlers struct {
 	logger   zerolog.Logger
 	store    *db.Store
 	cookies  *Cookies
-	gate     Gate
 	renderer Renderer
 	provider Provider
 	dev      bool
@@ -47,7 +44,6 @@ func NewHandlers(
 	logger zerolog.Logger,
 	store *db.Store,
 	cookies *Cookies,
-	gate Gate,
 	renderer Renderer,
 	provider Provider,
 	dev bool,
@@ -56,7 +52,6 @@ func NewHandlers(
 		logger:   logger,
 		store:    store,
 		cookies:  cookies,
-		gate:     gate,
 		renderer: renderer,
 		provider: provider,
 		dev:      dev,
@@ -159,7 +154,7 @@ func (h *Handlers) googleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, ok := h.signIn(w, r, identity, googleNotInvited)
+	user, ok := h.signIn(w, r, identity)
 	if !ok {
 		return
 	}
@@ -193,7 +188,7 @@ func (h *Handlers) devLogin(w http.ResponseWriter, r *http.Request) {
 		Sub:   "dev:" + email,
 		Email: email,
 		Name:  name,
-	}, devNotInvited)
+	})
 	if !ok {
 		return
 	}
@@ -208,13 +203,9 @@ func (h *Handlers) signIn(
 	w http.ResponseWriter,
 	r *http.Request,
 	identity Identity,
-	notInvited string,
 ) (db.User, bool) {
-	user, err := SignIn(r.Context(), h.store, h.gate, identity)
+	user, err := SignIn(r.Context(), h.store, identity)
 	switch {
-	case errors.Is(err, ErrNotInvited):
-		h.renderLogin(w, http.StatusForbidden, notInvited)
-		return db.User{}, false
 	case errors.Is(err, ErrIncompleteIdentity):
 		h.renderLogin(w, http.StatusBadRequest, signInFailed)
 		return db.User{}, false

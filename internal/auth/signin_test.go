@@ -7,15 +7,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kalverra/parlay-club/internal/auth"
-	"github.com/kalverra/parlay-club/internal/config"
 	"github.com/kalverra/parlay-club/internal/db"
 )
-
-// signInGate builds a gate from address/name pairs, where an empty name means
-// the entry has no history-import name.
-func signInGate(entries ...config.AllowedEmail) auth.Gate {
-	return auth.NewGate(entries)
-}
 
 // seedIdentity creates a user and sets the Google identity columns the public
 // store API does not write yet.
@@ -46,6 +39,16 @@ func countUsers(t *testing.T, f *fixture) int {
 	return count
 }
 
+// soloGroup returns the only group user belongs to, failing when they have none.
+func soloGroup(t *testing.T, f *fixture, userID int64) db.Group {
+	t.Helper()
+
+	groups, err := f.store.ForUser(t.Context(), userID)
+	require.NoError(t, err)
+	require.Len(t, groups, 1)
+	return groups[0]
+}
+
 func TestSignInResolution(t *testing.T) {
 	t.Parallel()
 
@@ -55,7 +58,7 @@ func TestSignInResolution(t *testing.T) {
 		f := newFixture(t)
 		ada := seedIdentity(t, f, "Ada", "ada@example.com", "google-ada", "old.png")
 
-		user, err := auth.SignIn(t.Context(), f.store, signInGate(), auth.Identity{
+		user, err := auth.SignIn(t.Context(), f.store, auth.Identity{
 			Sub:     "google-ada",
 			Email:   "ada@example.com",
 			Name:    "Google Ada",
@@ -69,22 +72,17 @@ func TestSignInResolution(t *testing.T) {
 		assert.Equal(t, 1, countUsers(t, f))
 	})
 
-	t.Run("allowed new email creates a user", func(t *testing.T) {
+	t.Run("new email creates a user in a Just me group", func(t *testing.T) {
 		t.Parallel()
 
 		f := newFixture(t)
 
-		user, err := auth.SignIn(
-			t.Context(),
-			f.store,
-			signInGate(config.AllowedEmail{Email: "new@example.com"}),
-			auth.Identity{
-				Sub:     "google-new",
-				Email:   "new@example.com",
-				Name:    "New Person",
-				Picture: "new.png",
-			},
-		)
+		user, err := auth.SignIn(t.Context(), f.store, auth.Identity{
+			Sub:     "google-new",
+			Email:   "new@example.com",
+			Name:    "New Person",
+			Picture: "new.png",
+		})
 		require.NoError(t, err)
 
 		assert.Positive(t, user.ID)
@@ -98,6 +96,52 @@ func TestSignInResolution(t *testing.T) {
 		linked, err := f.store.UserByGoogleSub(t.Context(), "google-new")
 		require.NoError(t, err)
 		assert.Equal(t, user.ID, linked.ID)
+
+		group := soloGroup(t, f, user.ID)
+		assert.Equal(t, "Just me", group.Name)
+		member, err := f.store.IsMember(t.Context(), group.ID, user.ID)
+		require.NoError(t, err)
+		assert.True(t, member, "the new user joins their solo group")
+	})
+
+	t.Run("signing in again keeps one solo group", func(t *testing.T) {
+		t.Parallel()
+
+		f := newFixture(t)
+		identity := auth.Identity{
+			Sub:   "google-new",
+			Email: "new@example.com",
+			Name:  "New Person",
+		}
+
+		first, err := auth.SignIn(t.Context(), f.store, identity)
+		require.NoError(t, err)
+		second, err := auth.SignIn(t.Context(), f.store, identity)
+		require.NoError(t, err)
+
+		assert.Equal(t, first.ID, second.ID)
+		assert.Equal(t, 1, countUsers(t, f))
+		assert.Equal(t, soloGroup(t, f, first.ID).ID, soloGroup(t, f, second.ID).ID)
+	})
+
+	t.Run("a stranger signs in and gets a solo group", func(t *testing.T) {
+		t.Parallel()
+
+		f := newFixture(t)
+
+		user, err := auth.SignIn(t.Context(), f.store, auth.Identity{
+			Sub:   "google-stranger",
+			Email: "stranger@example.com",
+			Name:  "Stranger",
+		})
+		require.NoError(t, err)
+
+		assert.Positive(t, user.ID)
+		assert.Equal(t, "stranger@example.com", user.Email)
+		assert.Equal(t, 1, countUsers(t, f))
+
+		group := soloGroup(t, f, user.ID)
+		assert.Equal(t, "Just me", group.Name)
 	})
 
 	t.Run("matching email links the existing user", func(t *testing.T) {
@@ -106,17 +150,12 @@ func TestSignInResolution(t *testing.T) {
 		f := newFixture(t)
 		ada := seedIdentity(t, f, "Ada", "ada@example.com", "", "")
 
-		user, err := auth.SignIn(
-			t.Context(),
-			f.store,
-			signInGate(config.AllowedEmail{Email: "ada@example.com"}),
-			auth.Identity{
-				Sub:     "google-ada",
-				Email:   "ada@example.com",
-				Name:    "Google Ada",
-				Picture: "ada.png",
-			},
-		)
+		user, err := auth.SignIn(t.Context(), f.store, auth.Identity{
+			Sub:     "google-ada",
+			Email:   "ada@example.com",
+			Name:    "Google Ada",
+			Picture: "ada.png",
+		})
 		require.NoError(t, err)
 
 		assert.Equal(t, ada.ID, user.ID)
@@ -130,102 +169,17 @@ func TestSignInResolution(t *testing.T) {
 		assert.Equal(t, ada.ID, linked.ID)
 	})
 
-	t.Run("gate name links an unlinked history user", func(t *testing.T) {
-		t.Parallel()
-
-		f := newFixture(t)
-		bob := seedIdentity(t, f, "Bob", "", "", "")
-
-		user, err := auth.SignIn(
-			t.Context(),
-			f.store,
-			signInGate(config.AllowedEmail{Email: "bob@example.com", Name: "Bob"}),
-			auth.Identity{
-				Sub:     "google-bob",
-				Email:   "bob@example.com",
-				Name:    "Robert",
-				Picture: "bob.png",
-			},
-		)
-		require.NoError(t, err)
-
-		assert.Equal(t, bob.ID, user.ID)
-		assert.Equal(t, "Bob", user.Name, "the history name wins over Google's")
-		assert.Equal(t, "bob@example.com", user.Email)
-		assert.Equal(t, 1, countUsers(t, f))
-
-		linked, err := f.store.UserByGoogleSub(t.Context(), "google-bob")
-		require.NoError(t, err)
-		assert.Equal(t, bob.ID, linked.ID)
-	})
-
-	t.Run("a linked name is not stolen", func(t *testing.T) {
-		t.Parallel()
-
-		f := newFixture(t)
-		bob := seedIdentity(t, f, "Bob", "old@example.com", "google-old", "old.png")
-
-		user, err := auth.SignIn(
-			t.Context(),
-			f.store,
-			signInGate(config.AllowedEmail{Email: "bob@example.com", Name: "Bob"}),
-			auth.Identity{
-				Sub:     "google-new",
-				Email:   "bob@example.com",
-				Name:    "Bob",
-				Picture: "new.png",
-			},
-		)
-		require.NoError(t, err)
-
-		assert.NotEqual(t, bob.ID, user.ID, "the linked Bob stays with their own account")
-		assert.Equal(t, "Bob", user.Name)
-		assert.Equal(t, 2, countUsers(t, f))
-
-		old, err := f.store.UserByGoogleSub(t.Context(), "google-old")
-		require.NoError(t, err)
-		assert.Equal(t, bob.ID, old.ID)
-		assert.Equal(t, "old@example.com", old.Email)
-	})
-
-	t.Run("a stranger is refused and writes nothing", func(t *testing.T) {
-		t.Parallel()
-
-		f := newFixture(t)
-
-		_, err := auth.SignIn(
-			t.Context(),
-			f.store,
-			signInGate(config.AllowedEmail{Email: "friend@example.com"}),
-			auth.Identity{
-				Sub:   "google-stranger",
-				Email: "stranger@example.com",
-				Name:  "Stranger",
-			},
-		)
-		require.ErrorIs(t, err, auth.ErrNotInvited)
-		assert.Equal(t, 0, countUsers(t, f))
-
-		_, err = f.store.UserByGoogleSub(t.Context(), "google-stranger")
-		require.ErrorIs(t, err, db.ErrUserNotFound)
-	})
-
 	t.Run("email case does not matter", func(t *testing.T) {
 		t.Parallel()
 
 		f := newFixture(t)
 		ada := seedIdentity(t, f, "Ada", "ada@example.com", "", "")
 
-		user, err := auth.SignIn(
-			t.Context(),
-			f.store,
-			signInGate(config.AllowedEmail{Email: "ADA@EXAMPLE.COM"}),
-			auth.Identity{
-				Sub:   "google-ada",
-				Email: "Ada@Example.com",
-				Name:  "Ada",
-			},
-		)
+		user, err := auth.SignIn(t.Context(), f.store, auth.Identity{
+			Sub:   "google-ada",
+			Email: "Ada@Example.com",
+			Name:  "Ada",
+		})
 		require.NoError(t, err)
 
 		assert.Equal(t, ada.ID, user.ID)
@@ -236,16 +190,12 @@ func TestSignInResolution(t *testing.T) {
 		t.Parallel()
 
 		f := newFixture(t)
-		gate := signInGate(
-			config.AllowedEmail{Email: "one@example.com"},
-			config.AllowedEmail{Email: "two@example.com"},
-		)
 
-		first, err := auth.SignIn(t.Context(), f.store, gate, auth.Identity{
+		first, err := auth.SignIn(t.Context(), f.store, auth.Identity{
 			Sub: "google-one", Email: "one@example.com", Name: "Alex",
 		})
 		require.NoError(t, err)
-		second, err := auth.SignIn(t.Context(), f.store, gate, auth.Identity{
+		second, err := auth.SignIn(t.Context(), f.store, auth.Identity{
 			Sub: "google-two", Email: "two@example.com", Name: "Alex",
 		})
 		require.NoError(t, err)
@@ -254,6 +204,7 @@ func TestSignInResolution(t *testing.T) {
 		assert.Equal(t, "Alex", first.Name)
 		assert.Equal(t, "Alex", second.Name)
 		assert.Equal(t, 2, countUsers(t, f))
+		assert.NotEqual(t, soloGroup(t, f, first.ID).ID, soloGroup(t, f, second.ID).ID)
 	})
 }
 
@@ -271,28 +222,9 @@ func TestSignInRequiresSubjectAndEmail(t *testing.T) {
 
 			f := newFixture(t)
 
-			_, err := auth.SignIn(t.Context(), f.store, signInGate(), identity)
+			_, err := auth.SignIn(t.Context(), f.store, identity)
 			require.ErrorIs(t, err, auth.ErrIncompleteIdentity)
 			assert.Equal(t, 0, countUsers(t, f))
 		})
 	}
-}
-
-func TestGate(t *testing.T) {
-	t.Parallel()
-
-	gate := auth.NewGate([]config.AllowedEmail{
-		{Email: "ada@example.com"},
-		{Email: "BOB@example.com", Name: "Bob"},
-	})
-
-	assert.True(t, gate.Allows("ada@example.com"))
-	assert.True(t, gate.Allows("ADA@EXAMPLE.COM"), "emails compare without case")
-	assert.True(t, gate.Allows("bob@example.com"))
-	assert.False(t, gate.Allows("stranger@example.com"))
-	assert.Equal(t, "Bob", gate.LinkName("bob@example.com"))
-	assert.Empty(t, gate.LinkName("ada@example.com"))
-	assert.Empty(t, gate.LinkName("stranger@example.com"))
-
-	assert.True(t, auth.NewGate(nil).Allows("anyone@example.com"), "an empty list allows everyone in dev")
 }

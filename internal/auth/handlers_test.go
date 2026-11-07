@@ -17,7 +17,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kalverra/parlay-club/internal/auth"
-	"github.com/kalverra/parlay-club/internal/config"
 	"github.com/kalverra/parlay-club/internal/db"
 	webui "github.com/kalverra/parlay-club/internal/web"
 	assets "github.com/kalverra/parlay-club/web"
@@ -32,7 +31,6 @@ type fixture struct {
 	database *sql.DB
 	cookies  *auth.Cookies
 	provider *fakeProvider
-	gate     auth.Gate
 }
 
 // fakeProvider stands in for Google, recording what the handlers asked for.
@@ -77,13 +75,12 @@ func (p *fakeProvider) Exchange(
 
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
-	return newFixtureWith(t, newFakeProvider(), auth.NewGate(nil), true)
+	return newFixtureWith(t, newFakeProvider(), true)
 }
 
 func newFixtureWith(
 	t *testing.T,
 	provider auth.Provider,
-	gate auth.Gate,
 	devLogin bool,
 ) *fixture {
 	t.Helper()
@@ -101,13 +98,12 @@ func newFixtureWith(
 		store:    db.NewStore(database),
 		database: database,
 		cookies:  auth.NewCookies(testSessionKey, false),
-		gate:     gate,
 	}
 	if fake, ok := provider.(*fakeProvider); ok {
 		f.provider = fake
 	}
 
-	f.handlers = auth.NewHandlers(zerolog.Nop(), f.store, f.cookies, gate, renderer, provider, devLogin)
+	f.handlers = auth.NewHandlers(zerolog.Nop(), f.store, f.cookies, renderer, provider, devLogin)
 	f.handlers.Routes(f.mux)
 
 	return f
@@ -249,7 +245,7 @@ func TestLoginForm(t *testing.T) {
 func TestLoginFormWithoutGoogleOffersDevOnly(t *testing.T) {
 	t.Parallel()
 
-	f := newFixtureWith(t, nil, auth.NewGate(nil), true)
+	f := newFixtureWith(t, nil, true)
 
 	recorder := f.serve(t, getRequest(t, "/login"))
 
@@ -262,7 +258,7 @@ func TestLoginFormWithoutGoogleOffersDevOnly(t *testing.T) {
 func TestGoogleRoutesNeedAProvider(t *testing.T) {
 	t.Parallel()
 
-	f := newFixtureWith(t, nil, auth.NewGate(nil), false)
+	f := newFixtureWith(t, nil, false)
 
 	recorder := f.serve(t, getRequest(t, "/auth/google/start"))
 	assert.Equal(t, http.StatusNotFound, recorder.Code)
@@ -318,26 +314,31 @@ func TestGoogleCallbackSignsIn(t *testing.T) {
 	assert.Empty(t, cleared.Value, "the round-trip cookie is cleared")
 }
 
-func TestGoogleCallbackNotInvited(t *testing.T) {
+func TestGoogleCallbackCreatesASoloGroupForAStranger(t *testing.T) {
 	t.Parallel()
 
-	provider := newFakeProvider()
-	provider.identity.Email = "stranger@example.com"
-	f := newFixtureWith(t, provider, auth.NewGate([]config.AllowedEmail{
-		{Email: "friend@example.com"},
-	}), true)
+	f := newFixture(t)
+	f.provider.identity = auth.Identity{
+		Sub:     "google-stranger",
+		Email:   "stranger@example.com",
+		Name:    "Stranger",
+		Picture: "stranger.png",
+	}
 	oauth := f.start(t)
 
-	recorder := f.serve(t, callbackRequest(t, provider.state, oauth))
+	recorder := f.serve(t, callbackRequest(t, f.provider.state, oauth))
 
-	assert.Equal(t, http.StatusForbidden, recorder.Code)
-	assert.Contains(t, recorder.Body.String(),
-		"That Google account isn&#39;t on the list yet. Ask whoever runs the club to add you.")
-	assert.Nil(t, cookieFrom(recorder, auth.SessionCookie), "a stranger gets no cookie")
+	assert.Equal(t, http.StatusSeeOther, recorder.Code)
+	assert.Equal(t, "/", recorder.Header().Get("Location"))
 
-	users, err := f.store.ListActiveUsers(t.Context())
+	user, ok := f.sessionUser(t, recorder)
+	require.True(t, ok)
+	assert.Equal(t, "stranger@example.com", user.Email)
+
+	groups, err := f.store.ForUser(t.Context(), user.ID)
 	require.NoError(t, err)
-	assert.Empty(t, users, "nothing is written for a stranger")
+	require.Len(t, groups, 1)
+	assert.Equal(t, "Just me", groups[0].Name)
 }
 
 func TestGoogleCallbackRejectsWrongState(t *testing.T) {
@@ -425,7 +426,7 @@ func TestGoogleCallbackRenderErrorAnswers500(t *testing.T) {
 	f := newFixture(t)
 	mux := http.NewServeMux()
 	f.handlers = auth.NewHandlers(
-		zerolog.Nop(), f.store, f.cookies, f.gate, failingRenderer{}, f.provider, true)
+		zerolog.Nop(), f.store, f.cookies, failingRenderer{}, f.provider, true)
 	f.handlers.Routes(mux)
 
 	recorder := httptest.NewRecorder()
@@ -491,21 +492,25 @@ func TestDevLoginSignsIn(t *testing.T) {
 	assert.Equal(t, user.ID, linked.ID)
 }
 
-func TestDevLoginRejectsStranger(t *testing.T) {
+func TestDevLoginCreatesASoloGroupForAStranger(t *testing.T) {
 	t.Parallel()
 
-	f := newFixtureWith(t, newFakeProvider(), auth.NewGate([]config.AllowedEmail{
-		{Email: "friend@example.com"},
-	}), true)
+	f := newFixture(t)
 
 	recorder := f.serve(t, postForm(t, "/dev/login", url.Values{
 		"email": {"stranger@example.com"},
 		"name":  {"Stranger"},
 	}))
 
-	assert.Equal(t, http.StatusForbidden, recorder.Code)
-	assert.Contains(t, recorder.Body.String(), "isn&#39;t on the list yet")
-	assert.Nil(t, cookieFrom(recorder, auth.SessionCookie))
+	assert.Equal(t, http.StatusSeeOther, recorder.Code)
+
+	user, ok := f.sessionUser(t, recorder)
+	require.True(t, ok)
+
+	groups, err := f.store.ForUser(t.Context(), user.ID)
+	require.NoError(t, err)
+	require.Len(t, groups, 1)
+	assert.Equal(t, "Just me", groups[0].Name)
 }
 
 func TestDevLoginRequiresEmail(t *testing.T) {
@@ -523,9 +528,7 @@ func TestDevLoginRequiresEmail(t *testing.T) {
 func TestDevLoginIsAbsentInProd(t *testing.T) {
 	t.Parallel()
 
-	f := newFixtureWith(t, newFakeProvider(), auth.NewGate([]config.AllowedEmail{
-		{Email: "ada@example.com"},
-	}), false)
+	f := newFixtureWith(t, newFakeProvider(), false)
 
 	assert.Equal(t, http.StatusNotFound, f.serve(t, getRequest(t, "/dev/login")).Code)
 	assert.Equal(t, http.StatusNotFound, f.serve(t, postForm(t, "/dev/login", url.Values{

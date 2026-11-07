@@ -70,7 +70,6 @@ func run() error {
 
 	store := db.NewStore(database)
 	cookies := auth.NewCookies(cfg.SessionKey, cfg.IsProd())
-	gate := auth.NewGate(cfg.AllowedEmails)
 
 	provider, err := newProvider(ctx, cfg)
 	if err != nil {
@@ -78,7 +77,7 @@ func run() error {
 	}
 
 	devLogin := !cfg.IsProd() && cfg.GoogleClientID == ""
-	handlers := auth.NewHandlers(logger, store, cookies, gate, renderer, provider, devLogin)
+	handlers := auth.NewHandlers(logger, store, cookies, renderer, provider, devLogin)
 
 	server := &http.Server{
 		Addr:              net.JoinHostPort("", strconv.Itoa(cfg.Port)),
