@@ -198,6 +198,106 @@ func (s *Store) WeekPast(ctx context.Context, weekID int64, now time.Time) (bool
 	return !now.Before(kickoff), nil
 }
 
+// GamesForWeek returns one week's games in kickoff order.
+func (s *Store) GamesForWeek(ctx context.Context, weekID int64) ([]Game, error) {
+	rows, err := s.conn().QueryContext(ctx, "SELECT"+gameColumns+`
+		FROM games
+		WHERE week_id = ?
+		ORDER BY kickoff_utc, id`, weekID)
+	if err != nil {
+		return nil, fmt.Errorf("list games for week %d: %w", weekID, err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	games := make([]Game, 0)
+	for rows.Next() {
+		game, err := scanGame(rows)
+		if err != nil {
+			return nil, fmt.Errorf("list games for week %d: %w", weekID, err)
+		}
+		games = append(games, game)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list games for week %d: %w", weekID, err)
+	}
+	return games, nil
+}
+
+// SetGameWeather stores a game's kickoff-window forecast and reports whether
+// any value changed. It leaves updated_at alone when every value matches, so a
+// repeated forecast is not a board change. A missing game wraps
+// ErrGameNotFound.
+func (s *Store) SetGameWeather(
+	ctx context.Context,
+	gameID string,
+	tempF, windMPH, windGustMPH, precipIN float64,
+	updatedAt time.Time,
+) (bool, error) {
+	result, err := s.conn().ExecContext(ctx, `
+		UPDATE games SET
+			temp_f = ?,
+			wind_mph = ?,
+			wind_gust_mph = ?,
+			precip_in = ?,
+			updated_at = ?
+		WHERE id = ?
+			AND (
+				temp_f IS NOT ?
+				OR wind_mph IS NOT ?
+				OR wind_gust_mph IS NOT ?
+				OR precip_in IS NOT ?
+			)`,
+		tempF,
+		windMPH,
+		windGustMPH,
+		precipIN,
+		formatTimestamp(updatedAt),
+		gameID,
+		tempF,
+		windMPH,
+		windGustMPH,
+		precipIN,
+	)
+	if err != nil {
+		return false, fmt.Errorf("set game %s weather: %w", gameID, err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("set game %s weather: %w", gameID, err)
+	}
+	if affected > 0 {
+		return true, nil
+	}
+	if _, err := s.GameKickoff(ctx, gameID); err != nil {
+		return false, err
+	}
+	return false, nil
+}
+
+// SetGameOddsEvent records which Odds API event matches a game and reports
+// whether the match changed. A missing game wraps ErrGameNotFound.
+func (s *Store) SetGameOddsEvent(ctx context.Context, gameID, eventID string) (bool, error) {
+	result, err := s.conn().ExecContext(ctx, `
+		UPDATE games
+		SET odds_event_id = ?
+		WHERE id = ? AND odds_event_id IS NOT ?`,
+		eventID, gameID, eventID)
+	if err != nil {
+		return false, fmt.Errorf("set game %s odds event %s: %w", gameID, eventID, err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("set game %s odds event %s: %w", gameID, eventID, err)
+	}
+	if affected > 0 {
+		return true, nil
+	}
+	if _, err := s.GameKickoff(ctx, gameID); err != nil {
+		return false, err
+	}
+	return false, nil
+}
+
 // scanGame reads the columns every game query selects, in order.
 func scanGame(row rowScanner) (Game, error) {
 	var (
