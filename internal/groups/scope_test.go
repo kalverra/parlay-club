@@ -234,6 +234,18 @@ func (failingStore) IsMember(context.Context, int64, int64) (bool, error) {
 	return false, errStore
 }
 
+func (failingStore) JoinByToken(context.Context, int64, string) (groups.Group, error) {
+	return groups.Group{}, errStore
+}
+
+func (failingStore) ResetInvite(context.Context, int64) (string, error) {
+	return "", errStore
+}
+
+func (failingStore) Leave(context.Context, int64, int64) error {
+	return errStore
+}
+
 // stubCookie reports no active group and records writes.
 type stubCookie struct{}
 

@@ -123,7 +123,12 @@ func (h *Handlers) googleStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.cookies.SetOAuth(w, OAuthState{State: state, Nonce: nonce, Verifier: verifier})
+	h.cookies.SetOAuth(w, OAuthState{
+		State:    state,
+		Nonce:    nonce,
+		Verifier: verifier,
+		ReturnTo: h.cookies.ReturnTo(r),
+	})
 	http.Redirect(w, r, h.provider.AuthURL(state, nonce, pkceChallenge(verifier)), http.StatusFound)
 }
 
@@ -163,7 +168,7 @@ func (h *Handlers) googleCallback(w http.ResponseWriter, r *http.Request) {
 
 	h.cookies.ClearOAuth(w)
 	h.cookies.SetSession(w, user.ID)
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+	http.Redirect(w, r, destination(saved.ReturnTo), http.StatusSeeOther)
 }
 
 // devLoginForm shows the local sign-in form.
@@ -195,8 +200,11 @@ func (h *Handlers) devLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	target := destination(h.cookies.ReturnTo(r))
+	h.cookies.ClearOAuth(w)
 	h.cookies.SetSession(w, user.ID)
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+	//nolint:gosec // destination only returns a /join/ path or the home page.
+	http.Redirect(w, r, target, http.StatusSeeOther)
 }
 
 // signIn resolves a verified identity and renders the failure itself. It
@@ -298,4 +306,24 @@ func pkceChallenge(verifier string) string {
 func validEmail(email string) bool {
 	at := strings.LastIndex(email, "@")
 	return at > 0 && at < len(email)-1 && !strings.ContainsAny(email, " \t")
+}
+
+// safeReturn accepts only a join path as a post-sign-in destination, so the
+// return cookie can never send a browser off-site.
+func safeReturn(path string) string {
+	if !strings.HasPrefix(path, "/join/") || strings.HasPrefix(path, "//") {
+		return ""
+	}
+	if strings.ContainsAny(path, "\\\r\n") {
+		return ""
+	}
+	return path
+}
+
+// destination is the saved join path, or the home page when there is none.
+func destination(path string) string {
+	if target := safeReturn(path); target != "" {
+		return target
+	}
+	return "/"
 }

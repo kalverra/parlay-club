@@ -4,6 +4,7 @@ package auth
 import (
 	"crypto/hmac"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"net/http"
 	"strconv"
@@ -23,27 +24,30 @@ const (
 	sessionMaxAge = 30 * 24 * time.Hour
 	// oauthMaxAge is how long a browser may take to finish the Google round trip.
 	oauthMaxAge = 10 * time.Minute
-	// oauthPath scopes the round-trip cookie to the auth routes.
-	oauthPath = "/auth"
+	// oauthPath lets every route read the round-trip cookie, because a join
+	// link sets the return path before sign-in and the dev form needs it too.
+	oauthPath = "/"
 )
 
 // OAuthState is the signed state a browser carries through the Google round
 // trip. The verifier proves this browser started the flow; the state and nonce
-// stop a callback from being replayed or forged.
+// stop a callback from being replayed or forged. ReturnTo is the join path to
+// land on after sign-in, if any.
 type OAuthState struct {
 	State    string
 	Nonce    string
 	Verifier string
+	ReturnTo string
 }
 
 // Cookies signs and verifies the session, OAuth, and group cookies.
 //
 // The session cookie holds the user ID, an expiry, and an HMAC over
 // "session:{userID}.{expiry}". The OAuth cookie holds state, nonce, the PKCE
-// verifier, and an issue time, with an HMAC over "oauth:{payload}". The group
-// cookie holds the active group ID and an expiry, with an HMAC over
-// "group:{groupID}.{expiry}". Every MAC uses the session key and is compared in
-// constant time.
+// verifier, an issue time, and an optional return path, with an HMAC over
+// "oauth:{payload}". The group cookie holds the active group ID and an expiry,
+// with an HMAC over "group:{groupID}.{expiry}". Every MAC uses the session key
+// and is compared in constant time.
 //
 // A Cookies is safe for concurrent use once built.
 type Cookies struct {
@@ -128,35 +132,91 @@ func (c *Cookies) ClearSession(w http.ResponseWriter) {
 // SetOAuth writes the signed cookie that carries one Google round trip.
 func (c *Cookies) SetOAuth(w http.ResponseWriter, state OAuthState) {
 	issued := strconv.FormatInt(time.Now().Unix(), 10)
-	payload := state.State + "." + state.Nonce + "." + state.Verifier + "." + issued
+	payload := strings.Join([]string{
+		state.State,
+		state.Nonce,
+		state.Verifier,
+		issued,
+		encodeReturn(state.ReturnTo),
+	}, ".")
 	http.SetCookie(w, c.cookie(OAuthCookie, payload+"."+c.mac("oauth:"+payload), oauthMaxAge, oauthPath))
 }
 
+// SetReturnTo writes a round-trip cookie that only remembers where to land
+// after sign-in. The next sign-in replaces it with a real round trip.
+func (c *Cookies) SetReturnTo(w http.ResponseWriter, path string) {
+	c.SetOAuth(w, OAuthState{ReturnTo: path})
+}
+
 // OAuthState returns the round trip a browser carried. A missing, tampered,
-// malformed, or expired cookie reports false.
+// malformed, expired, or return-only cookie reports false.
 func (c *Cookies) OAuthState(r *http.Request) (OAuthState, bool) {
-	cookie, err := r.Cookie(OAuthCookie)
-	if err != nil {
-		return OAuthState{}, false
-	}
-
-	parts := strings.Split(cookie.Value, ".")
-	if len(parts) != 5 {
-		return OAuthState{}, false
-	}
-	payload := strings.Join(parts[:4], ".")
-	if !hmac.Equal([]byte(parts[4]), []byte(c.mac("oauth:"+payload))) {
-		return OAuthState{}, false
-	}
-
-	issued, err := strconv.ParseInt(parts[3], 10, 64)
-	if err != nil || time.Now().Unix()-issued > int64(oauthMaxAge.Seconds()) {
+	parts, ok := c.oauthParts(r)
+	if !ok {
 		return OAuthState{}, false
 	}
 	if parts[0] == "" || parts[1] == "" || parts[2] == "" {
 		return OAuthState{}, false
 	}
-	return OAuthState{State: parts[0], Nonce: parts[1], Verifier: parts[2]}, true
+	return OAuthState{
+		State:    parts[0],
+		Nonce:    parts[1],
+		Verifier: parts[2],
+		ReturnTo: decodeReturn(parts[4]),
+	}, true
+}
+
+// ReturnTo returns the join path a round-trip cookie carries, whether or not
+// the cookie carries a usable round trip. A cookie with no join path reports an
+// empty string.
+func (c *Cookies) ReturnTo(r *http.Request) string {
+	parts, ok := c.oauthParts(r)
+	if !ok {
+		return ""
+	}
+	return decodeReturn(parts[4])
+}
+
+// oauthParts verifies the OAuth cookie's signature and age and returns its five
+// payload fields: state, nonce, verifier, issued time, and encoded return path.
+func (c *Cookies) oauthParts(r *http.Request) ([]string, bool) {
+	cookie, err := r.Cookie(OAuthCookie)
+	if err != nil {
+		return nil, false
+	}
+
+	parts := strings.Split(cookie.Value, ".")
+	if len(parts) != 6 {
+		return nil, false
+	}
+	payload := strings.Join(parts[:5], ".")
+	if !hmac.Equal([]byte(parts[5]), []byte(c.mac("oauth:"+payload))) {
+		return nil, false
+	}
+
+	issued, err := strconv.ParseInt(parts[3], 10, 64)
+	if err != nil || time.Now().Unix()-issued > int64(oauthMaxAge.Seconds()) {
+		return nil, false
+	}
+	return parts[:5], true
+}
+
+// encodeReturn makes a return path safe inside a dot-separated cookie value.
+func encodeReturn(path string) string {
+	return base64.RawURLEncoding.EncodeToString([]byte(path))
+}
+
+// decodeReturn reverses encodeReturn. A malformed value reports an empty path,
+// which the caller treats as no return target.
+func decodeReturn(encoded string) string {
+	if encoded == "" {
+		return ""
+	}
+	path, err := base64.RawURLEncoding.DecodeString(encoded)
+	if err != nil {
+		return ""
+	}
+	return string(path)
 }
 
 // ClearOAuth expires the round-trip cookie.

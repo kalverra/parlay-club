@@ -107,6 +107,40 @@ func TestRequireUserRedirects(t *testing.T) {
 	}
 }
 
+func TestRequireUserRemembersAJoinPath(t *testing.T) {
+	t.Parallel()
+
+	f := newFixture(t)
+	next := &probe{}
+
+	recorder := serveProbe(
+		f.handlers.RequireUser(next),
+		guardedRequest(t, http.MethodGet, "/join/abc123"),
+	)
+
+	assert.Equal(t, http.StatusFound, recorder.Code)
+	assert.Equal(t, "/login", recorder.Header().Get("Location"))
+	assert.False(t, next.called)
+
+	cookie := cookieFrom(recorder, auth.OAuthCookie)
+	require.NotNil(t, cookie, "the invite path is kept for after sign-in")
+	assert.Equal(t, "/join/abc123", f.cookies.ReturnTo(requestWithCookie(t, cookie)))
+}
+
+func TestRequireUserDoesNotRememberOtherPaths(t *testing.T) {
+	t.Parallel()
+
+	f := newFixture(t)
+
+	recorder := serveProbe(
+		f.handlers.RequireUser(&probe{}),
+		guardedRequest(t, http.MethodGet, "/games"),
+	)
+
+	assert.Equal(t, http.StatusFound, recorder.Code)
+	assert.Nil(t, cookieFrom(recorder, auth.OAuthCookie))
+}
+
 func TestRequireUserAllowsActiveUser(t *testing.T) {
 	t.Parallel()
 

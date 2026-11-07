@@ -134,7 +134,7 @@ Effort: hard (a new scope check on every route, plus open sign-up, across slips,
 
 ### Phase 3: Invites and screens
 
-- [ ] Add `JoinByToken`, `ResetInvite`, and `Leave`, the join routes, and the login return path through `pc_oauth`, with
+- [x] Add `JoinByToken`, `ResetInvite`, and `Leave`, the join routes, and the login return path through `pc_oauth`, with
   the join-flow tests
 - [ ] Build the `/groups` page, create form, invite copy and reset, leave, and the top-bar switcher at phone width
 - [ ] Docs: add `docs/concepts/groups.md`; update `docs/concepts/access.md`, `docs/concepts/slips.md`,

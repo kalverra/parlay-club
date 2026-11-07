@@ -21,9 +21,22 @@ type Store interface {
 	Create(ctx context.Context, userID int64, name string) (Group, error)
 	ForUser(ctx context.Context, userID int64) ([]Group, error)
 	IsMember(ctx context.Context, groupID, userID int64) (bool, error)
+	JoinByToken(ctx context.Context, userID int64, token string) (Group, error)
+	ResetInvite(ctx context.Context, groupID int64) (string, error)
+	Leave(ctx context.Context, groupID, userID int64) error
 }
 
 var _ Store = (*db.Store)(nil)
+
+// InviteStore is the storage the invite screens need: Store plus reading the
+// group and people an invite names.
+type InviteStore interface {
+	Store
+	ByToken(ctx context.Context, token string) (Group, error)
+	Members(ctx context.Context, groupID int64) ([]db.User, error)
+}
+
+var _ InviteStore = (*db.Store)(nil)
 
 // UserFrom returns the signed-in user for a request. The server passes
 // auth.UserFrom; tests pass a stub.
