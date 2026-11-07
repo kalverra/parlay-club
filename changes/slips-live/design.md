@@ -55,7 +55,7 @@ an optional game; `slate-and-lines` adds the game picker. Read before starting:
 
 ### Phase 2: Slip rules
 
-- [ ] Add Store methods for weeks, slips, members, legs, and activity, and create-slip defaults copied from the previous
+- [x] Add Store methods for weeks, slips, members, legs, and activity, and create-slip defaults copied from the previous
   slip, with tests
 - [ ] Add member and leg mutations, lock in, unlock, and slip status updates with one activity entry each, and table
   tests for every Editing and locking rule with an injected clock, including past-week slips
