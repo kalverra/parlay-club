@@ -5,7 +5,9 @@
 `foundation` gives a server, the full schema, auth, and an empty tab shell. There is no NFL data yet, so legs here have
 an optional game; `slate-and-lines` adds the game picker. Read before starting:
 
-- `plan/product.md`: Slips, Legs, Editing and locking, Odds and payout, Screens (top bar, Slip tab).
+- `docs/concepts/slips.md`: weeks, members, legs, status, and the editing and locking rules.
+- `docs/reference/odds-math.md`: conversions, combined odds, reference price, payout, and units.
+- `plan/product.md`: Grading, Record Book, and Screens (top bar, Slip tab).
 - `plan/architecture.md`: Routes (change 2 rows), Live updates.
 - `docs/reference/schema.md`.
 
@@ -14,9 +16,9 @@ an optional game; `slate-and-lines` adds the game picker. Read before starting:
 - `internal/parlay` is pure math: American/decimal conversion, combined decimal, payout with boost, units. Reference
   price takes the candidate prices as input, so it stays pure.
 - `internal/slips` is the one place slip rules live. It takes a `Store`, a `Publisher` (the hub), and a `now` func. Each
-  method checks the rules from product.md "Editing and locking", writes in one transaction with an activity entry,
-  updates slip status, then publishes `slip:{id}`. It returns typed errors (e.g. `ErrLegLimit`) that handlers map to 422
-  with a short message.
+  method checks the rules from `docs/concepts/slips.md` "Editing and locking", writes in one transaction with an activity
+  entry, updates slip status, then publishes `slip:{id}`. It returns typed errors (e.g. `ErrLegLimit`) that handlers map
+  to 422 with a short message.
 - `internal/live` holds the hub (topics, buffer-1 channels, non-blocking publish) and the SSE handler. The handler takes
   a `LiveWindow(weekID) bool` func so the deadline rule is testable before games exist; until `slate-and-lines`, it
   returns false.
@@ -32,8 +34,8 @@ an optional game; `slate-and-lines` adds the game picker. Read before starting:
 - `go test ./...` and `golangci-lint run ./...` pass.
 - Parlay table tests cover both conversion directions, a 3-leg combo, profit boost, push legs dropped, and an even-count
   median reference price.
-- Every rule in `plan/product.md` "Editing and locking" has a table test with an injected clock, including kickoff locks
-  and a past-week slip.
+- Every rule in `docs/concepts/slips.md` "Editing and locking" has a table test with an injected clock, including kickoff
+  locks and a past-week slip.
 - A handler test drives two SSE subscribers through an add-leg request and both receive the update; the stream sends
   `bye` at both deadlines, and the client reconnects when the tab becomes visible.
 - At phone width the Slip tab shows members, legs, lock state, payout, and activity; a rule violation returns 422 and
@@ -59,7 +61,7 @@ an optional game; `slate-and-lines` adds the game picker. Read before starting:
   slip, with tests
 - [x] Add member and leg mutations, lock in, unlock, and slip status updates with one activity entry each, and table
   tests for every Editing and locking rule with an injected clock, including past-week slips
-- [ ] Docs: add docs/concepts/slips.md; delete Slips, Legs, and Editing and locking from plan/product.md
+- [x] Docs: add docs/concepts/slips.md; delete Slips, Legs, and Editing and locking from plan/product.md
 
 ### Phase 3: Live updates
 

@@ -40,10 +40,10 @@ type Publisher interface {
 	Publish(topic string)
 }
 
-// Service enforces product.md "Editing and locking". Every mutation checks the
-// rules, writes the change and one activity entry in a transaction, updates the
-// slip's status, then publishes slip:{id}. now is injected so the kickoff and
-// locking rules stay testable.
+// Service enforces docs/concepts/slips.md "Editing and locking". Every mutation
+// checks the rules, writes the change and one activity entry in a transaction,
+// updates the slip's status, then publishes slip:{id}. now is injected so the
+// kickoff and locking rules stay testable.
 type Service struct {
 	store   *db.Store
 	publish Publisher

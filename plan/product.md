@@ -1,61 +1,6 @@
 # Product
 
-## Slips
-
-- A **week** is an ESPN NFL week: season, season type (regular or postseason), and week number.
-- A **slip** is one shared parlay inside a week. A week usually has one slip but can have more.
-- A slip has **members**: a subset of users, guests included.
-- A slip has `legs_per_member`, default 2, range 1–5.
-- The home page (`/`) opens the newest slip of the current week. With none, it shows the create-slip form.
-- Create-slip form: week (defaults to current; past weeks allowed), name (default `Week 9`, then `Week 9 #2`), legs per
-  member (default: the previous slip's value), members (default: the previous slip's members).
-- A user can belong to several slips in a week. The Slip tab has a switcher when the week has more than one slip.
-- Everyone places the bet at their own book with their own stake. The app never handles money.
-
-## Legs
-
-A leg has: owner, optional game, market, team, optional player, side, optional line, American odds, and a display
-`selection` string generated from the fields.
-
-| Market       | Fields                         | Selection example                   |
-| ------------ | ------------------------------ | ----------------------------------- |
-| `SPREAD`     | team, line                     | `BUF -3.5`                          |
-| `ML`         | team                           | `BUF ML`                            |
-| `TOTAL`      | side (OVER/UNDER), line        | `BUF@MIA Over 47.5`                 |
-| `TEAM_TOTAL` | team, side, line               | `BUF Team Total Over 27.5`          |
-| `PASS_YDS`   | player, team, side, line       | `Josh Allen Over 245.5 Pass Yds`    |
-| `PASS_TDS`   | player, team, side, line       | `Josh Allen Over 1.5 Pass TDs`      |
-| `RUSH_YDS`   | player, team, side, line       | `James Cook Over 64.5 Rush Yds`     |
-| `RUSH_ATT`   | player, team, side, line       | `James Cook Over 14.5 Rush Att`     |
-| `REC_YDS`    | player, team, side, line       | `Khalil Shakir Over 52.5 Rec Yds`   |
-| `RECEPTIONS` | player, team, side, line       | `Khalil Shakir Over 4.5 Receptions` |
-| `ANYTIME_TD` | player, team (side `YES`)      | `James Cook Anytime TD`             |
-| `KICKER_PTS` | player, team, side, line       | `Tyler Bass Over 7.5 Kicking Pts`   |
-| `OTHER`      | free-text selection, team opt. | whatever the user typed             |
-
-- Team is the ESPN abbreviation of the team the leg is about. For `TOTAL`, team is empty.
-- Odds default to -110 in the form; quick-add pills prefill the price (see [Odds math](../docs/reference/odds-math.md)).
-- A leg needs a game, except on a slip for a past week, where game is optional and `OTHER` is the usual market.
-- `OTHER` legs skip the analyzer and grade by hand.
-
-## Editing and locking
-
-These rules live in `internal/slips` and are enforced on the server. `now` comes from an injected clock.
-
-1. Only slip members can add legs to it. Members can edit or delete only their own legs.
-2. A member can't have more than `legs_per_member` legs.
-3. A leg is **kickoff-locked** once `now ≥ game.kickoff_utc`. A kickoff-locked leg can't be edited or deleted, and no
-   leg can be added for a game that has kicked off.
-4. **Lock in** sets the member's `locked_at`. It requires exactly `legs_per_member` legs. A locked-in member can't add,
-   edit, or delete legs.
-5. The slip's status becomes `LOCKED` when every member is locked in.
-6. **Unlock** is available to any member while the slip is `LOCKED` or any member is locked in. It clears every member's
-   `locked_at`, sets status `OPEN`, and writes "unlocked by {name}" to the activity feed. Kickoff locks still apply.
-7. Members and `legs_per_member` can change only while the slip is `OPEN`. A member with legs can't be removed until
-   their legs are deleted.
-8. Slips for past weeks skip rule 3, so history can be entered.
-9. Every mutation writes one activity entry (e.g. "Adam added BUF -3.5", "Sam locked in") and publishes `slip-updated`
-   for that slip.
+Slips, weeks, members, legs, and the editing and locking rules live in [Slips](../docs/concepts/slips.md).
 
 ## Grading
 
@@ -63,7 +8,8 @@ Leg results: `PENDING`, `NEEDS_GRADING`, `WON`, `LOST`, `PUSH`, `VOID`.
 
 - Until `grading-record-book`, any member sets any leg's result by hand. After `grading-record-book`, the grader sets
   results and any member can override them. `graded_by` records `auto` or the user's name.
-- `PUSH` and `VOID` legs drop out of the slip's odds and count as neither a hit nor a miss.
+- `PUSH` and `VOID` legs drop out of the slip's odds (see [Odds math](../docs/reference/odds-math.md)) and count as
+  neither a hit nor a miss.
 - **Slip result**, recomputed on every leg result change:
   - any leg `LOST` → `LOST` (a slip can bust before all games end);
   - else, any leg `PENDING` or `NEEDS_GRADING` → `PENDING`;
