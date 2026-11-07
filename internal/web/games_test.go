@@ -342,7 +342,8 @@ func TestCustomLegFormTargetsTheGameCard(t *testing.T) {
 	body := recorder.Body.String()
 	assert.Contains(t, body, fmt.Sprintf(`hx-target="#quick-add-%s"`, game.ID))
 	assert.Contains(t, body, `name="quick" value="1"`)
-	assert.Contains(t, body, fmt.Sprintf(`name="game_id" value="%s"`, game.ID))
+	assert.Contains(t, body, fmt.Sprintf(`<option value="%s" selected>`, game.ID))
+	assert.Contains(t, body, `name="game_id"`)
 }
 
 // gamesHandler rebuilds the web routes for a different signed-in user, which

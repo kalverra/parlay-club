@@ -148,32 +148,43 @@ type MemberOption struct {
 
 // PayoutView is the payout calculator's rendered values.
 type PayoutView struct {
-	SlipID           int64
-	HasLegs          bool
-	Stake            string
-	Boost            string
-	Combined         string
-	CombinedAmerican string
-	Return           string
-	Profit           string
+	SlipID            int64
+	HasLegs           bool
+	Stake             string
+	Boost             string
+	Combined          string
+	CombinedAmerican  string
+	Reference         string
+	ReferenceAmerican string
+	Return            string
+	Profit            string
 }
 
 // LegFormView is the add or edit leg form.
 type LegFormView struct {
-	SlipID     int64
-	LegID      int64
-	Action     string
-	Target     string
-	Editing    bool
-	Quick      bool
-	Market     string
-	Selection  string
-	Team       string
-	PlayerName string
-	Side       string
-	Line       string
-	Odds       string
-	GameID     string
+	SlipID       int64
+	LegID        int64
+	Action       string
+	Target       string
+	Editing      bool
+	Quick        bool
+	Market       string
+	Selection    string
+	Team         string
+	PlayerName   string
+	Side         string
+	Line         string
+	Odds         string
+	GameID       string
+	GameOptional bool
+	Games        []GameOption
+}
+
+// GameOption is one choice in the leg form's game picker.
+type GameOption struct {
+	ID       string
+	Label    string
+	Selected bool
 }
 
 // LegAddedView is the confirmation a quick-add pill swaps in.
@@ -496,6 +507,11 @@ func (h *slipHandlers) newLegForm(w http.ResponseWriter, r *http.Request) {
 		form.Quick = true
 		form.Target = "#quick-add-" + form.GameID
 	}
+	form, err := h.withGames(r.Context(), form, slip)
+	if err != nil {
+		h.serverError(w, err)
+		return
+	}
 	h.renderPartial(w, "leg-form", form)
 }
 
@@ -505,7 +521,74 @@ func (h *slipHandlers) editLegForm(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	h.renderPartial(w, "leg-form", legFormView(leg))
+	slip, err := h.deps.Store.SlipByID(r.Context(), leg.SlipID)
+	if err != nil {
+		h.respondError(w, err)
+		return
+	}
+	form, err := h.withGames(r.Context(), legFormView(leg), slip)
+	if err != nil {
+		h.serverError(w, err)
+		return
+	}
+	h.renderPartial(w, "leg-form", form)
+}
+
+// withGames fills the leg form's game picker. Games that already kicked off
+// stay off a current week's list; a past week lists them all so history can be
+// entered. The game stays optional on a past week, on an edit that had none, or
+// when the week has no game to pick.
+func (h *slipHandlers) withGames(
+	ctx context.Context,
+	form LegFormView,
+	slip db.Slip,
+) (LegFormView, error) {
+	now := time.Now()
+	past, err := h.deps.Store.WeekPast(ctx, slip.WeekID, now)
+	if err != nil {
+		return LegFormView{}, err
+	}
+	games, err := h.deps.Store.GamesForWeek(ctx, slip.WeekID)
+	if err != nil {
+		return LegFormView{}, err
+	}
+
+	selected := false
+	for _, game := range games {
+		if !past && !now.Before(game.Kickoff) {
+			continue
+		}
+		option := GameOption{
+			ID:    game.ID,
+			Label: gameOptionLabel(game),
+		}
+		if game.ID == form.GameID {
+			option.Selected = true
+			selected = true
+		}
+		form.Games = append(form.Games, option)
+	}
+	form.GameOptional = past || len(form.Games) == 0 ||
+		(form.Editing && form.GameID == "")
+	if !selected && form.GameID != "" {
+		form.Games = append(
+			[]GameOption{{Label: "Pick a game", Selected: true}},
+			form.Games...,
+		)
+		form.GameOptional = false
+	}
+	return form, nil
+}
+
+// gameOptionLabel is one game's line in the leg form's picker.
+func gameOptionLabel(game db.Game) string {
+	kickoff := game.Kickoff.UTC()
+	return fmt.Sprintf(
+		"%s @ %s · %s",
+		game.AwayTeam,
+		game.HomeTeam,
+		kickoff.Format("Mon 3:04 PM")+" UTC",
+	)
 }
 
 // addLeg adds one leg for the signed-in member.
@@ -1049,17 +1132,123 @@ func (h *slipHandlers) payoutView(
 		})
 	}
 	combined := parlay.CombinedOdds(combinedLegs)
+	reference, err := h.referenceOdds(ctx, slip, legs)
+	if err != nil {
+		return PayoutView{}, err
+	}
 	total := parlay.Payout(stake, combined, boost)
 	return PayoutView{
-		SlipID:           slip.ID,
-		HasLegs:          len(legs) > 0,
-		Stake:            formatFloat(stake),
-		Boost:            formatFloat(boost),
-		Combined:         fmt.Sprintf("%.2fx", combined),
-		CombinedAmerican: formatOdds(parlay.DecimalToAmerican(combined)),
-		Return:           money(total),
-		Profit:           money(total - stake),
+		SlipID:            slip.ID,
+		HasLegs:           len(legs) > 0,
+		Stake:             formatFloat(stake),
+		Boost:             formatFloat(boost),
+		Combined:          fmt.Sprintf("%.2fx", combined),
+		CombinedAmerican:  formatOdds(parlay.DecimalToAmerican(combined)),
+		Reference:         fmt.Sprintf("%.2fx", reference),
+		ReferenceAmerican: formatOdds(parlay.DecimalToAmerican(reference)),
+		Return:            money(total),
+		Profit:            money(total - stake),
 	}, nil
+}
+
+// referenceOdds is the product of each counting leg's reference decimal. A
+// leg's reference price comes from the prices its slip members' home books
+// carry for the same game, market, player, side, and line, and falls back to
+// the leg's own price when none of them do.
+func (h *slipHandlers) referenceOdds(
+	ctx context.Context,
+	slip db.Slip,
+	legs []db.Leg,
+) (float64, error) {
+	members, err := h.deps.Store.SlipMembers(ctx, slip.ID)
+	if err != nil {
+		return 0, err
+	}
+	books := memberBooks(members)
+
+	byGame := make(map[string][]db.Odds, len(legs))
+	referenceLegs := make([]parlay.Leg, 0, len(legs))
+	for _, leg := range legs {
+		own := parlay.AmericanToDecimal(leg.Odds)
+		var candidates []float64
+		if leg.GameID != nil && len(books) > 0 {
+			rows, seen := byGame[*leg.GameID]
+			if !seen {
+				rows, err = h.deps.Store.OddsForGame(ctx, *leg.GameID)
+				if err != nil {
+					return 0, err
+				}
+				rows = currentOdds(rows)
+				byGame[*leg.GameID] = rows
+			}
+			candidates = candidatePrices(rows, leg, books)
+		}
+		referenceLegs = append(referenceLegs, parlay.Leg{
+			Decimal: parlay.ReferencePrice(candidates, own),
+			Result:  leg.Result,
+		})
+	}
+	return parlay.CombinedOdds(referenceLegs), nil
+}
+
+// memberBooks is the set of home books on a slip, keyed the way the odds rows
+// spell a book. A book shared by two members counts once.
+func memberBooks(members []db.SlipMember) map[string]bool {
+	books := make(map[string]bool, len(members))
+	for _, member := range members {
+		if member.User.HomeBook == nil {
+			continue
+		}
+		book := strings.ToLower(strings.TrimSpace(*member.User.HomeBook))
+		if book != "" {
+			books[book] = true
+		}
+	}
+	return books
+}
+
+// candidatePrices collects one decimal price per member home book for the
+// selection a leg picked. Rows from an older sync are already dropped.
+func candidatePrices(rows []db.Odds, leg db.Leg, books map[string]bool) []float64 {
+	team := ""
+	if leg.Team != nil {
+		team = *leg.Team
+	}
+	player := ""
+	if leg.PlayerName != nil {
+		player = *leg.PlayerName
+	}
+	side := ""
+	if leg.Side != nil {
+		side = *leg.Side
+	}
+
+	seen := make(map[string]bool, len(books))
+	prices := make([]float64, 0, len(books))
+	for _, row := range rows {
+		book := strings.ToLower(strings.TrimSpace(row.Book))
+		if !books[book] || seen[book] {
+			continue
+		}
+		if row.MarketType != leg.MarketType ||
+			row.Team != team ||
+			row.PlayerName != player ||
+			row.Side != side ||
+			!sameLine(row.Line, leg.Line) {
+			continue
+		}
+		seen[book] = true
+		prices = append(prices, parlay.AmericanToDecimal(row.Price))
+	}
+	return prices
+}
+
+// sameLine compares two optional lines for an exact match.
+func sameLine(left, right *float64) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return *left == *right
 }
 
 // legFormView maps a stored leg to the edit form.

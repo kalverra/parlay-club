@@ -190,6 +190,10 @@
         <dd class="font-medium">{{.Combined}} <span class="text-slate-400">({{.CombinedAmerican}})</span></dd>
       </div>
       <div>
+        <dt class="text-xs text-slate-400">Reference</dt>
+        <dd class="font-medium">{{.Reference}} <span class="text-slate-400">({{.ReferenceAmerican}})</span></dd>
+      </div>
+      <div>
         <dt class="text-xs text-slate-400">Return</dt>
         <dd class="font-medium">{{.Return}}</dd>
       </div>
@@ -243,7 +247,19 @@
     class="hidden rounded-lg border border-rose-700 bg-rose-950 px-3 py-2 text-sm text-rose-200"
     role="alert"
   ></p>
-  <input type="hidden" name="game_id" value="{{.GameID}}">
+  <label class="block text-xs text-slate-400">
+    Game
+    <select
+      name="game_id"
+      {{if not .GameOptional}}required{{end}}
+      class="mt-1 w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1 text-sm"
+    >
+      {{if .GameOptional}}<option value=""{{if not .GameID}} selected{{end}}>No game</option>{{end}}
+      {{range .Games}}
+        <option value="{{.ID}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>
+      {{end}}
+    </select>
+  </label>
   <label class="block text-xs text-slate-400">
     Market
     <select name="market_type" class="mt-1 w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1 text-sm">
