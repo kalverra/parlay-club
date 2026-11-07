@@ -234,10 +234,14 @@ func (h *Handlers) memberGroupID(
 
 // renderGroups writes the group list for user.
 func (h *Handlers) renderGroups(w http.ResponseWriter, r *http.Request, user db.User, status int) {
-	memberships, err := h.store.ForUser(r.Context(), user.ID)
-	if err != nil {
-		h.serverError(w, err)
-		return
+	memberships, ok := membershipsFrom(r.Context())
+	if !ok {
+		var err error
+		memberships, err = h.store.ForUser(r.Context(), user.ID)
+		if err != nil {
+			h.serverError(w, err)
+			return
+		}
 	}
 
 	active, _ := From(r.Context())
@@ -253,11 +257,12 @@ func (h *Handlers) renderGroups(w http.ResponseWriter, r *http.Request, user db.
 		})
 	}
 
+	view := webui.NewUser(user)
 	//nolint:modernize // naming the embedded layout field keeps the data readable.
 	page := Page{
 		Page: webui.Page{
 			Title:  "Groups",
-			User:   userViewPtr(user),
+			User:   &view,
 			Groups: Options(r.Context()),
 		},
 		Cards: cards,
@@ -303,9 +308,14 @@ func (h *Handlers) joinForm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	view := webui.NewUser(user)
 	page := JoinPage{
 		//nolint:modernize // naming the embedded layout field keeps the data readable.
-		Page:      webui.Page{Title: "Join " + group.Name},
+		Page: webui.Page{
+			Title:  "Join " + group.Name,
+			User:   &view,
+			Groups: Options(r.Context()),
+		},
 		GroupName: group.Name,
 		Members:   memberViews(members),
 		Token:     group.InviteToken,
@@ -341,25 +351,9 @@ func (h *Handlers) join(w http.ResponseWriter, r *http.Request) {
 func memberViews(members []db.User) []webui.User {
 	views := make([]webui.User, 0, len(members))
 	for _, member := range members {
-		views = append(views, userView(member))
+		views = append(views, webui.NewUser(member))
 	}
 	return views
-}
-
-// userView maps a stored user to the identity the top bar draws.
-func userView(user db.User) webui.User {
-	return webui.User{
-		Name:        user.Name,
-		Initials:    webui.Initials(user.Name),
-		AvatarClass: user.AvatarColor.Class(),
-		PictureURL:  user.PictureURL,
-	}
-}
-
-// userViewPtr is userView for the layout's optional user field.
-func userViewPtr(user db.User) *webui.User {
-	view := userView(user)
-	return &view
 }
 
 // inviteURL builds the absolute link a person can paste into a message.
