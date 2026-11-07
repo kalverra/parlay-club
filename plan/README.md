@@ -46,8 +46,8 @@ Server, database with the full schema, passcode and user picker, phone-first pag
 
 ### 2. `slips-live`
 
-Shared slips, members, hand-entered legs, locking, odds math, payout, live updates over SSE. Design:
-[changes/slips-live/design.md](../changes/slips-live/design.md).
+Shared slips, members, hand-entered legs, locking, odds math, payout, live updates over SSE. Done; decision:
+[docs/decisions/slips-live.md](../docs/decisions/slips-live.md).
 
 ### 3. `slate-and-lines`
 
