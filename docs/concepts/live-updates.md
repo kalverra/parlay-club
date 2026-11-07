@@ -4,7 +4,7 @@ title: Live updates
 type: concept
 summary: How a slip page hears about changes through one SSE stream, and how the hub, deadlines, and client reconnect keep that stream cheap.
 tags: [live, sse, hub, eventsource, deadlines, hub-topics]
-sources: [internal/live/hub.go, internal/live/stream.go, internal/slips/rules.go, web/static/app.js]
+sources: [internal/live/hub.go, internal/live/stream.go, internal/refresh/live.go, internal/slips/rules.go, web/static/app.js]
 last_verified: 2026-11-07
 ---
 
@@ -70,8 +70,9 @@ An open stream keeps the instance billed, so every stream ends itself.
 At either deadline the server sends `event: bye` and returns. The `bye` tells the client this was planned, not a
 failure, so it waits for the tab to become visible instead of reconnecting at once.
 
-`live.IsLive(weekID)` supplies the live-window answer. Until the slate lands it returns false. The stream takes its
-timers from a `Clock` interface, so tests can fire deadlines by hand.
+The `IsLive` func passed to `live.NewStream` is `refresh.Service.LiveWindow`: a week is live when a game is live or a
+scheduled game kicks off within 30 minutes. A read error falls back to the idle deadline. The stream takes its timers
+from a `Clock` interface, so tests can fire deadlines by hand. See [Data refresh](data-refresh.md).
 
 ## Client (`web/static/app.js`)
 
