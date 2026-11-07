@@ -23,6 +23,8 @@ func TestMigrateFreshDatabase(t *testing.T) {
 	assert.ElementsMatch(t, []string{
 		"activity",
 		"games",
+		"group_members",
+		"groups",
 		"legs",
 		"odds",
 		"player_matches",

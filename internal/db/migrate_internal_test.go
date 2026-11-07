@@ -98,14 +98,16 @@ func TestMigration0002PreservesData(t *testing.T) {
 
 	assert.Equal(t, 2, userVersionOf(t, database))
 	counts := map[string]int{
-		"SELECT count(*) FROM users":        2,
-		"SELECT count(*) FROM weeks":        1,
-		"SELECT count(*) FROM games":        1,
-		"SELECT count(*) FROM slips":        1,
-		"SELECT count(*) FROM slip_members": 2,
-		"SELECT count(*) FROM legs":         2,
-		"SELECT count(*) FROM wagers":       2,
-		"SELECT count(*) FROM activity":     2,
+		"SELECT count(*) FROM users":         2,
+		"SELECT count(*) FROM groups":        1,
+		"SELECT count(*) FROM group_members": 2,
+		"SELECT count(*) FROM weeks":         1,
+		"SELECT count(*) FROM games":         1,
+		"SELECT count(*) FROM slips":         1,
+		"SELECT count(*) FROM slip_members":  2,
+		"SELECT count(*) FROM legs":          2,
+		"SELECT count(*) FROM wagers":        2,
+		"SELECT count(*) FROM activity":      2,
 	}
 	for query, want := range counts {
 		assert.Equal(t, want, countRows(t, database, query), query)
@@ -178,6 +180,11 @@ INSERT INTO users (id, name, avatar_color, home_book, active, created_at) VALUES
   (1, 'Ada', 'sky', NULL, 1, '2026-01-02T03:04:05Z'),
   (2, 'Bob', 'rose', 'draftkings', 0, '2026-01-03T04:05:06Z');
 
+INSERT INTO groups (id, name, invite_token) VALUES
+  (1, 'Sunday Parlay Club', '00112233445566778899aabbccddeeff');
+
+INSERT INTO group_members (group_id, user_id) VALUES (1, 1), (1, 2);
+
 INSERT INTO weeks (id, season, season_type, week_num) VALUES (2026001, 2026, 2, 1);
 
 INSERT INTO games (
@@ -188,7 +195,7 @@ INSERT INTO games (
   '2026-09-10T17:00:00Z', 'SCHEDULED', 1, '2026-09-01T00:00:00Z'
 );
 
-INSERT INTO slips (id, week_id, name) VALUES (1, 2026001, 'Sunday Six');
+INSERT INTO slips (id, group_id, week_id, name) VALUES (1, 1, 2026001, 'Sunday Six');
 
 INSERT INTO slip_members (slip_id, user_id, locked_at) VALUES
   (1, 1, '2026-09-10T16:00:00Z'),
