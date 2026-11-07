@@ -7,9 +7,11 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/kalverra/parlay-club/internal/db"
+	"github.com/kalverra/parlay-club/internal/live"
+	"github.com/kalverra/parlay-club/internal/slips"
 )
 
-// pageRoute is one full page the shell serves.
+// pageRoute is one full page the shell serves without slip data.
 type pageRoute struct {
 	pattern string
 	page    string
@@ -25,27 +27,59 @@ type UserFrom func(context.Context) (db.User, bool)
 // group scope put on the context; tests may pass nil.
 type GroupsFrom func(context.Context) []GroupOption
 
-// pageRoutes are the shell's pages, in tab order. Later changes replace the
-// placeholders with real screens.
+// GroupFrom returns the active group for a request. The server passes
+// groups.From; tests pass a stub.
+type GroupFrom func(context.Context) (db.Group, bool)
+
+// Dependencies are the services the app's routes need. A nil store or slip
+// service leaves the slip screen in its placeholder state, which keeps the
+// shell's own tests small.
+type Dependencies struct {
+	Logger     zerolog.Logger
+	Renderer   *Renderer
+	UserFrom   UserFrom
+	GroupsFrom GroupsFrom
+	GroupFrom  GroupFrom
+	Store      *db.Store
+	Slips      *slips.Service
+	Stream     *live.Stream
+}
+
+// pageRoutes are the shell's pages without per-slip data. The slip screen owns
+// "/" and the slip routes because it needs the store.
 var pageRoutes = []pageRoute{
-	{"GET /{$}", "slip", TabSlip},
 	{"GET /games", "games", TabGames},
 	{"GET /research", "research", TabResearch},
 	{"GET /record", "record", TabRecord},
 }
 
-// New returns the shell's routes: the four tab pages and /static.
+// New returns the shell's routes with no slip data. It is the small constructor
+// the shell tests use; the server calls NewWithDeps.
 func New(
 	logger zerolog.Logger,
 	renderer *Renderer,
 	userFrom UserFrom,
 	groupsFrom GroupsFrom,
 ) http.Handler {
+	return NewWithDeps(Dependencies{
+		Logger:     logger,
+		Renderer:   renderer,
+		UserFrom:   userFrom,
+		GroupsFrom: groupsFrom,
+	})
+}
+
+// NewWithDeps returns the app's routes: the tab pages, the slip screen, and
+// /static. Handlers stay thin; rules live in internal/slips.
+func NewWithDeps(deps Dependencies) http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("GET /static/{path...}", StaticHandler())
 
+	slipRoutes := &slipHandlers{deps: deps}
+	slipRoutes.Routes(mux)
+
 	for _, route := range pageRoutes {
-		mux.Handle(route.pattern, pageHandler(logger, renderer, route, userFrom, groupsFrom))
+		mux.Handle(route.pattern, pageHandler(deps.Logger, deps.Renderer, route, deps.UserFrom, deps.GroupsFrom))
 	}
 
 	return mux

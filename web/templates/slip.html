@@ -1,8 +1,75 @@
 {{define "content"}}
-<section class="space-y-3">
-  <h1 class="text-xl font-semibold">Slip</h1>
-  <p class="rounded-xl border border-dashed border-slate-700 bg-slate-900 p-4 text-sm text-slate-400">
-    Slip contents show up here once the season starts.
-  </p>
+<section class="space-y-3"{{if .Slip}} data-live-url="/slips/{{.Slip.ID}}/events"{{end}}>
+  <div class="flex items-center justify-between gap-3">
+    <h1 class="text-xl font-semibold">Slip</h1>
+    {{if .Slip}}
+      <span class="rounded-full border border-slate-700 px-2 py-1 text-xs text-slate-300">{{.Slip.Status}}</span>
+    {{end}}
+  </div>
+
+  {{if .Creating}}
+    <form
+      class="space-y-4 rounded-xl border border-slate-800 bg-slate-900 p-4"
+      hx-post="/slips"
+      hx-target="#content"
+      hx-swap="innerHTML"
+    >
+      {{if .Create.Error}}
+        <p class="rounded-lg border border-rose-700 bg-rose-950 px-3 py-2 text-sm text-rose-200">
+          {{.Create.Error}}
+        </p>
+      {{end}}
+      <label class="block text-sm text-slate-300">
+        Week
+        <select name="week_id" class="mt-1 w-full rounded-md border border-slate-700 bg-slate-800 px-3 py-2">
+          {{range .Create.Weeks}}
+            <option value="{{.ID}}"{{if eq .ID $.Create.WeekID}} selected{{end}}>{{.Label}}</option>
+          {{end}}
+        </select>
+      </label>
+      <label class="block text-sm text-slate-300">
+        Name
+        <input
+          type="text"
+          name="name"
+          value="{{.Create.Name}}"
+          class="mt-1 w-full rounded-md border border-slate-700 bg-slate-800 px-3 py-2"
+        >
+      </label>
+      <label class="block text-sm text-slate-300">
+        Legs per member
+        <input
+          type="number"
+          name="legs_per_member"
+          min="1"
+          max="5"
+          value="{{.Create.LegsPerMember}}"
+          class="mt-1 w-full rounded-md border border-slate-700 bg-slate-800 px-3 py-2"
+        >
+      </label>
+      <fieldset class="space-y-2">
+        <legend class="text-sm text-slate-300">Members</legend>
+        {{range .Create.Members}}
+          <label class="flex items-center gap-2 text-sm text-slate-200">
+            <input type="checkbox" name="member_id" value="{{.ID}}"{{if .Selected}} checked{{end}}>
+            {{.Name}}
+          </label>
+        {{end}}
+      </fieldset>
+      <button
+        type="submit"
+        class="w-full rounded-lg bg-sky-600 px-3 py-2 text-sm font-semibold text-white hover:bg-sky-500"
+      >
+        Create slip
+      </button>
+    </form>
+  {{else if .Slip}}
+    {{template "slip-panel" .}}
+    {{template "slip-activity" .}}
+  {{else}}
+    <p class="rounded-xl border border-dashed border-slate-700 bg-slate-900 p-4 text-sm text-slate-400">
+      Slip contents show up here once the season starts.
+    </p>
+  {{end}}
 </section>
 {{end}}

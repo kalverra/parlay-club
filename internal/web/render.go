@@ -18,6 +18,19 @@ var pageFiles = map[string]string{
 	"dev-login": "templates/dev-login.html",
 	"join":      "templates/join.html",
 	"groups":    "templates/groups.html",
+	"profile":   "templates/profile.html",
+}
+
+// partialsFile holds the fragments HTMX swaps into a page. Each fragment is a
+// named template in the file.
+const partialsFile = "templates/partials.html"
+
+// partialFiles names the fragments the slip screen can render on its own.
+var partialFiles = map[string]string{
+	"slip-panel":    partialsFile,
+	"slip-activity": partialsFile,
+	"slip-payout":   partialsFile,
+	"leg-form":      partialsFile,
 }
 
 // Renderer parses and runs the page templates. It is safe to use from several
@@ -68,6 +81,28 @@ func (r *Renderer) Render(name string, data any) ([]byte, error) {
 	return out.Bytes(), nil
 }
 
+// RenderPartial returns one HTMX fragment for data. It buffers, so a failed
+// render writes nothing.
+func (r *Renderer) RenderPartial(name string, data any) ([]byte, error) {
+	file, ok := partialFiles[name]
+	if !ok {
+		return nil, fmt.Errorf("unknown partial %q", name)
+	}
+
+	tmpl, err := template.New("root").
+		Funcs(templateFuncs()).
+		ParseFS(r.fsys, "templates/avatar.html", file)
+	if err != nil {
+		return nil, fmt.Errorf("parse partial %s: %w", name, err)
+	}
+
+	var out bytes.Buffer
+	if err := tmpl.ExecuteTemplate(&out, name, data); err != nil {
+		return nil, fmt.Errorf("render partial %s: %w", name, err)
+	}
+	return out.Bytes(), nil
+}
+
 // template returns the parsed page, reloading it from the file system in dev.
 func (r *Renderer) template(name string) (*template.Template, error) {
 	file, ok := pageFiles[name]
@@ -81,11 +116,19 @@ func (r *Renderer) template(name string) (*template.Template, error) {
 	return r.parse(file)
 }
 
+// templateFuncs are the helpers every template set shares.
+func templateFuncs() template.FuncMap {
+	return template.FuncMap{
+		"asset": AssetURL,
+		"list":  func(values ...string) []string { return values },
+	}
+}
+
 // parse builds one template set from the layout and a page.
 func (r *Renderer) parse(file string) (*template.Template, error) {
 	tmpl, err := template.New("root").
-		Funcs(template.FuncMap{"asset": AssetURL}).
-		ParseFS(r.fsys, "templates/layout.html", "templates/avatar.html", file)
+		Funcs(templateFuncs()).
+		ParseFS(r.fsys, "templates/layout.html", "templates/avatar.html", partialsFile, file)
 	if err != nil {
 		return nil, fmt.Errorf("parse templates: %w", err)
 	}

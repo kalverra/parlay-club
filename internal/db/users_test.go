@@ -130,6 +130,44 @@ func TestUserByIDReturnsHomeBookAndActiveFlag(t *testing.T) {
 	assert.False(t, stored.Active)
 }
 
+func TestSetUserHomeBookSetsAndClears(t *testing.T) {
+	t.Parallel()
+
+	store, _ := openTestStore(t)
+	user := createUser(t, store, "Ada")
+
+	book := "draftkings"
+	updated, err := store.SetUserHomeBook(t.Context(), user.ID, &book)
+	require.NoError(t, err)
+	require.NotNil(t, updated.HomeBook)
+	assert.Equal(t, book, *updated.HomeBook)
+
+	cleared, err := store.SetUserHomeBook(t.Context(), user.ID, nil)
+	require.NoError(t, err)
+	assert.Nil(t, cleared.HomeBook)
+
+	_, err = store.SetUserHomeBook(t.Context(), 404, &book)
+	require.ErrorIs(t, err, db.ErrUserNotFound)
+}
+
+func TestSetUserActiveSetsAndReportsAMissingUser(t *testing.T) {
+	t.Parallel()
+
+	store, _ := openTestStore(t)
+	user := createUser(t, store, "Ada")
+
+	updated, err := store.SetUserActive(t.Context(), user.ID, false)
+	require.NoError(t, err)
+	assert.False(t, updated.Active)
+
+	updated, err = store.SetUserActive(t.Context(), user.ID, true)
+	require.NoError(t, err)
+	assert.True(t, updated.Active)
+
+	_, err = store.SetUserActive(t.Context(), 404, true)
+	require.ErrorIs(t, err, db.ErrUserNotFound)
+}
+
 func TestUserByIDNotFound(t *testing.T) {
 	t.Parallel()
 
