@@ -21,7 +21,7 @@ an optional game; `slate-and-lines` adds the game picker. Read before starting:
   to 422 with a short message.
 - `internal/live` holds the hub (string topics, buffer-1 channels, non-blocking publish) and the SSE handler. The stream
   takes an `IsLive(weekID) bool` func and a `Clock` for its timers, so both deadlines are testable before games exist;
-  until `slate-and-lines` wires a game-aware answer, callers pass a func that returns false.
+  until `slate-and-lines` wires a game-aware answer, the server passes nil, which the stream treats as false.
 - `web/static/app.js` gains the `EventSource` client: refresh triggers, `bye`, and close/reopen on visibility.
 - Handlers in `internal/web` stay thin. Partials refresh on `slip-updated from:body`.
 - Kickoff lock (rule 3) is coded and tested now with games inserted directly in tests.
@@ -76,4 +76,4 @@ an optional game; `slate-and-lines` adds the game picker. Read before starting:
   drives two SSE subscribers through an add-leg request
 - [x] Build the Slip tab: header, member sections, leg form bottom sheet, lock and unlock, activity feed, the payout
   calculator with 300 ms debounce, and the profile page with home book and active toggles
-- [ ] Docs: add docs/reference/routes.md for built routes; delete those rows from plan/architecture.md
+- [x] Docs: add docs/reference/routes.md for built routes; delete those rows from plan/architecture.md
