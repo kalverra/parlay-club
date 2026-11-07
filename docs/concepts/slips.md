@@ -22,9 +22,10 @@ with their own stake, and no money passes through the app.
 
 ## Creating a slip
 
-The home page opens the newest slip of the current week. When the group has none, it shows the create-slip form.
+The home page opens the newest slip of the latest week. That is a stand-in for the current week until `slate-and-lines`
+defines one. When the group has none, it shows the create-slip form.
 
-- Week defaults to the current week. Past weeks are allowed, so history can be entered.
+- Week defaults to the latest week. Past weeks are allowed, so history can be entered.
 - Name defaults to the week label, `Week 9`, then `Week 9 #2`.
 - `legs_per_member` defaults to 2 and allows 1–5.
 - Members default to the previous slip's members.
@@ -100,7 +101,8 @@ locking stay testable.
    returns `ErrNotLocked`. Kickoff locks still apply.
 7. Members, name, and `legs_per_member` can change only while the slip is `OPEN`. A new limit cannot drop below a
    member's current leg count. A member with legs cannot be removed until their legs are deleted.
-8. Slips for past weeks skip rule 3, so history can be entered.
+8. Slips for past weeks skip rule 3, so history can be entered. A week counts as past once every game in it has kicked
+   off (`db.WeekPast`), so a current week becomes history when its last game starts.
 9. Every mutation writes one activity entry and publishes `slip:{id}` after it commits. An add reads "Adam added BUF
    ML", a lock in reads "Sam locked in", and a no-op writes nothing.
 
