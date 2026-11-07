@@ -78,7 +78,7 @@ Games tab. Props wait for `props-research`. Read before starting:
 
 ### Phase 5: Games tab
 
-- [ ] Build game cards with local kickoff, lines (home book else median), weather badges, status, and the lines-as-of
+- [x] Build game cards with local kickoff, lines (home book else median), weather badges, status, and the lines-as-of
   note, plus quick-add pills for both spreads, both moneylines, over, under, and Custom leg
 - [ ] Add the game picker and kickoff lock to the leg form, and reference odds on the slip
 - [ ] Docs: update docs/reference/routes.md and docs/concepts/slips.md; delete Games tab from plan/product.md

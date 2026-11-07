@@ -215,14 +215,19 @@
 </dialog>
 {{end}}
 
+{{define "leg-added"}}
+<p class="text-xs font-medium text-emerald-300" role="status">Added {{.Selection}}</p>
+{{end}}
+
 {{define "leg-form"}}
 <form
   class="space-y-3"
   data-leg-form
   {{if .Editing}}hx-put="{{.Action}}"{{else}}hx-post="{{.Action}}"{{end}}
-  hx-target="#slip-panel"
-  hx-swap="outerHTML"
+  hx-target="{{.Target}}"
+  hx-swap="{{if .Quick}}innerHTML{{else}}outerHTML{{end}}"
 >
+  {{if .Quick}}<input type="hidden" name="quick" value="1">{{end}}
   <div class="flex items-center justify-between gap-3">
     <h2 class="text-lg font-semibold">{{if .Editing}}Edit leg{{else}}Add a leg{{end}}</h2>
     <button
