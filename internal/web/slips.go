@@ -1,0 +1,1472 @@
+package web
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/kalverra/parlay-club/internal/db"
+	"github.com/kalverra/parlay-club/internal/parlay"
+	"github.com/kalverra/parlay-club/internal/slips"
+)
+
+// maxFormBytes caps a submitted slip form.
+const maxFormBytes = 16 << 10
+
+// defaultStake is the payout calculator's starting stake.
+const defaultStake = 10
+
+// ruleErrors are the refusals a person can fix, so they answer 422 with the
+// service's short message. Anything else is a 500.
+var ruleErrors = []error{
+	slips.ErrNotMember,
+	slips.ErrNotOwner,
+	slips.ErrLegLimit,
+	slips.ErrLegsPerMemberTooLow,
+	slips.ErrKickoffLocked,
+	slips.ErrLockedIn,
+	slips.ErrLegsNotReady,
+	slips.ErrSlipNotOpen,
+	slips.ErrNotLocked,
+	slips.ErrMemberHasLegs,
+	db.ErrSlipNameRequired,
+	db.ErrLegsPerMemberRange,
+	db.ErrSlipMembersRequired,
+	db.ErrGameNotFound,
+}
+
+// slipHandlers serves the Slip tab and the profile screen.
+type slipHandlers struct {
+	deps Dependencies
+}
+
+// Routes mounts every slip route. They sit inside RequireUser and the group
+// scope, so the signed-in person and active group are already on the context.
+func (h *slipHandlers) Routes(mux *http.ServeMux) {
+	mux.HandleFunc("GET /{$}", h.home)
+	mux.HandleFunc("GET /me", h.profile)
+	mux.HandleFunc("POST /me", h.updateProfile)
+	mux.HandleFunc("POST /users/{id}/active", h.toggleActive)
+
+	mux.HandleFunc("GET /slips/new", h.newSlipForm)
+	mux.HandleFunc("POST /slips", h.createSlip)
+	mux.HandleFunc("GET /slips/{id}", h.slipPage)
+	mux.HandleFunc("GET /slips/{id}/panel", h.panel)
+	mux.HandleFunc("GET /slips/{id}/payout", h.payout)
+	mux.HandleFunc("GET /slips/{id}/activity", h.activity)
+	mux.HandleFunc("POST /slips/{id}/members", h.addMember)
+	mux.HandleFunc("DELETE /slips/{id}/members/{userID}", h.removeMember)
+	mux.HandleFunc("PATCH /slips/{id}", h.updateSlip)
+	mux.HandleFunc("GET /slips/{id}/legs/new", h.newLegForm)
+	mux.HandleFunc("POST /slips/{id}/legs", h.addLeg)
+	mux.HandleFunc("GET /legs/{id}/edit", h.editLegForm)
+	mux.HandleFunc("PUT /legs/{id}", h.updateLeg)
+	mux.HandleFunc("DELETE /legs/{id}", h.deleteLeg)
+	mux.HandleFunc("POST /slips/{id}/lock", h.lockIn)
+	mux.HandleFunc("POST /slips/{id}/unlock", h.unlock)
+	mux.HandleFunc("GET /slips/{id}/events", h.events)
+}
+
+// SlipPage is the full Slip tab. Slip is nil when the group has no slip yet,
+// and Creating turns the page into the create form.
+type SlipPage struct {
+	Page
+	Slip     *SlipView
+	Creating bool
+	Create   SlipCreateView
+}
+
+// SlipView is everything the slip panel draws.
+type SlipView struct {
+	ID            int64
+	Name          string
+	Status        string
+	LegsPerMember int
+	Open          bool
+	LockedIn      int
+	MemberCount   int
+	Members       []SlipMemberView
+	Payout        PayoutView
+	Activity      []ActivityView
+	LegForm       LegFormView
+}
+
+// SlipMemberView is one member's section of the panel.
+type SlipMemberView struct {
+	User      User
+	Locked    bool
+	IsCurrent bool
+	CanAddLeg bool
+	CanLockIn bool
+	Legs      []LegView
+	LegCount  int
+}
+
+// LegView is one leg row.
+type LegView struct {
+	ID        int64
+	Selection string
+	Odds      string
+	Result    string
+	OwnerName string
+	CanEdit   bool
+}
+
+// ActivityView is one activity line.
+type ActivityView struct {
+	Message string
+	When    string
+}
+
+// SlipCreateView is the create-slip form.
+type SlipCreateView struct {
+	Weeks         []WeekOption
+	WeekID        int64
+	Name          string
+	LegsPerMember int
+	Members       []MemberOption
+	Selected      []int64
+	Error         string
+}
+
+// WeekOption is one week in the create form.
+type WeekOption struct {
+	ID    int64
+	Label string
+}
+
+// MemberOption is one checklist entry in the create form.
+type MemberOption struct {
+	ID       int64
+	Name     string
+	Selected bool
+}
+
+// PayoutView is the payout calculator's rendered values.
+type PayoutView struct {
+	SlipID           int64
+	Stake            string
+	Boost            string
+	Combined         string
+	CombinedAmerican string
+	Return           string
+	Profit           string
+}
+
+// LegFormView is the add or edit leg form.
+type LegFormView struct {
+	SlipID    int64
+	LegID     int64
+	Action    string
+	Editing   bool
+	Market    string
+	Selection string
+	Team      string
+	Side      string
+	Line      string
+	Odds      string
+	GameID    string
+}
+
+// ProfilePage is the profile screen.
+type ProfilePage struct {
+	Page
+	HomeBook string
+	Members  []ProfileMember
+}
+
+// ProfileMember is one person in the profile's member list.
+type ProfileMember struct {
+	ID     int64
+	Name   string
+	Active bool
+	Self   bool
+}
+
+// home opens the newest slip of the latest week, or the create form when the
+// group has none. Until the slate sync names a current week, the latest week on
+// record stands in.
+func (h *slipHandlers) home(w http.ResponseWriter, r *http.Request) {
+	page := h.page(r, "Slip")
+	if h.deps.Store == nil {
+		h.renderPage(w, "slip", SlipPage{Page: page})
+		return
+	}
+
+	user, ok := h.user(r.Context())
+	if !ok {
+		h.renderPage(w, "slip", SlipPage{Page: page})
+		return
+	}
+	group, ok := h.group(r.Context())
+	if !ok {
+		h.renderPage(w, "slip", SlipPage{Page: page})
+		return
+	}
+
+	week, err := h.deps.Store.LatestWeek(r.Context())
+	if errors.Is(err, db.ErrWeekNotFound) {
+		h.renderCreate(w, r, page, user, group, nil, nil)
+		return
+	}
+	if err != nil {
+		h.serverError(w, err)
+		return
+	}
+
+	groupSlips, err := h.deps.Store.SlipsForWeek(r.Context(), group.ID, week.ID)
+	if err != nil {
+		h.serverError(w, err)
+		return
+	}
+	if len(groupSlips) == 0 {
+		h.renderCreate(w, r, page, user, group, &week, nil)
+		return
+	}
+
+	h.renderSlip(w, r, page, groupSlips[0], defaultStake, 0)
+}
+
+// newSlipForm shows the create form for a chosen or latest week.
+func (h *slipHandlers) newSlipForm(w http.ResponseWriter, r *http.Request) {
+	user, group, ok := h.requireActor(w, r)
+	if !ok {
+		return
+	}
+
+	page := h.page(r, "New slip")
+	var week *db.Week
+	if raw := r.URL.Query().Get("week"); raw != "" {
+		id, valid := parseID(raw)
+		if !valid {
+			http.NotFound(w, r)
+			return
+		}
+		found, err := h.deps.Store.WeekByID(r.Context(), id)
+		if errors.Is(err, db.ErrWeekNotFound) {
+			http.NotFound(w, r)
+			return
+		}
+		if err != nil {
+			h.serverError(w, err)
+			return
+		}
+		week = &found
+	} else {
+		found, err := h.deps.Store.LatestWeek(r.Context())
+		switch {
+		case errors.Is(err, db.ErrWeekNotFound):
+		case err != nil:
+			h.serverError(w, err)
+			return
+		default:
+			week = &found
+		}
+	}
+
+	h.renderCreate(w, r, page, user, group, week, nil)
+}
+
+// createSlip writes a new slip and sends the browser to it.
+func (h *slipHandlers) createSlip(w http.ResponseWriter, r *http.Request) {
+	user, group, ok := h.requireActor(w, r)
+	if !ok {
+		return
+	}
+	if err := readForm(w, r); err != nil {
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+
+	weekID, valid := parseID(r.PostForm.Get("week_id"))
+	if !valid {
+		h.renderCreateError(w, r, user, group, "Pick a week.")
+		return
+	}
+	if _, err := h.deps.Store.WeekByID(r.Context(), weekID); errors.Is(err, db.ErrWeekNotFound) {
+		http.NotFound(w, r)
+		return
+	} else if err != nil {
+		h.serverError(w, err)
+		return
+	}
+
+	legsPerMember := slips.DefaultLegsPerMember
+	if raw := strings.TrimSpace(r.PostForm.Get("legs_per_member")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil {
+			h.renderCreateError(w, r, user, group, "Legs per member must be a number.")
+			return
+		}
+		legsPerMember = parsed
+	}
+
+	memberIDs := make([]int64, 0, len(r.PostForm["member_id"]))
+	for _, raw := range r.PostForm["member_id"] {
+		id, valid := parseID(raw)
+		if !valid {
+			continue
+		}
+		member, err := h.deps.Store.IsMember(r.Context(), group.ID, id)
+		if err != nil {
+			h.serverError(w, err)
+			return
+		}
+		if member {
+			memberIDs = append(memberIDs, id)
+		}
+	}
+
+	created, err := h.deps.Store.CreateSlip(
+		r.Context(),
+		group.ID,
+		weekID,
+		r.PostForm.Get("name"),
+		legsPerMember,
+		memberIDs,
+	)
+	if err != nil {
+		if message, ok := fixableMessage(err); ok {
+			h.renderCreateError(w, r, user, group, message)
+			return
+		}
+		h.serverError(w, err)
+		return
+	}
+
+	h.redirect(w, r, fmt.Sprintf("/slips/%d", created.ID))
+}
+
+// slipPage shows one slip in full.
+func (h *slipHandlers) slipPage(w http.ResponseWriter, r *http.Request) {
+	slip, _, _, ok := h.loadSlip(w, r, r.PathValue("id"))
+	if !ok {
+		return
+	}
+	page := h.page(r, slip.Name)
+	h.renderSlip(w, r, page, slip, defaultStake, 0)
+}
+
+// panel returns the slip panel partial for HTMX refreshes.
+func (h *slipHandlers) panel(w http.ResponseWriter, r *http.Request) {
+	slip, _, _, ok := h.loadSlip(w, r, r.PathValue("id"))
+	if !ok {
+		return
+	}
+	h.renderPanel(w, r, slip)
+}
+
+// payout returns the payout calculator partial.
+func (h *slipHandlers) payout(w http.ResponseWriter, r *http.Request) {
+	slip, _, _, ok := h.loadSlip(w, r, r.PathValue("id"))
+	if !ok {
+		return
+	}
+	stake := parseFloatDefault(r.URL.Query().Get("stake"), defaultStake)
+	boost := parseFloatDefault(r.URL.Query().Get("boost"), 0)
+	payout, err := h.payoutView(r.Context(), slip, stake, boost)
+	if err != nil {
+		h.serverError(w, err)
+		return
+	}
+	h.renderPartial(w, "slip-payout", payout)
+}
+
+// activity returns the activity feed partial.
+func (h *slipHandlers) activity(w http.ResponseWriter, r *http.Request) {
+	slip, _, _, ok := h.loadSlip(w, r, r.PathValue("id"))
+	if !ok {
+		return
+	}
+	page, err := h.slipPageData(r.Context(), slip)
+	if err != nil {
+		h.serverError(w, err)
+		return
+	}
+	h.renderPartial(w, "slip-activity", page)
+}
+
+// addMember puts another group member on the slip.
+func (h *slipHandlers) addMember(w http.ResponseWriter, r *http.Request) {
+	slip, user, group, ok := h.loadSlip(w, r, r.PathValue("id"))
+	if !ok {
+		return
+	}
+	if err := readForm(w, r); err != nil {
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+	userID, valid := parseID(r.PostForm.Get("user_id"))
+	if !valid {
+		http.NotFound(w, r)
+		return
+	}
+	member, err := h.deps.Store.IsMember(r.Context(), group.ID, userID)
+	if err != nil {
+		h.serverError(w, err)
+		return
+	}
+	if !member {
+		http.NotFound(w, r)
+		return
+	}
+
+	if err := h.deps.Slips.AddMember(r.Context(), user.ID, slip.ID, userID); err != nil {
+		h.respondError(w, err)
+		return
+	}
+	h.renderPanel(w, r, slip)
+}
+
+// removeMember takes a member off the slip.
+func (h *slipHandlers) removeMember(w http.ResponseWriter, r *http.Request) {
+	slip, user, _, ok := h.loadSlip(w, r, r.PathValue("id"))
+	if !ok {
+		return
+	}
+	userID, valid := parseID(r.PathValue("userID"))
+	if !valid {
+		http.NotFound(w, r)
+		return
+	}
+	if err := h.deps.Slips.RemoveMember(r.Context(), user.ID, slip.ID, userID); err != nil {
+		h.respondError(w, err)
+		return
+	}
+	h.renderPanel(w, r, slip)
+}
+
+// updateSlip changes the name or legs per member.
+func (h *slipHandlers) updateSlip(w http.ResponseWriter, r *http.Request) {
+	slip, user, _, ok := h.loadSlip(w, r, r.PathValue("id"))
+	if !ok {
+		return
+	}
+	if err := readForm(w, r); err != nil {
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+
+	legsPerMember, valid := parseID(r.PostForm.Get("legs_per_member"))
+	if !valid {
+		h.writeFormError(w, "Legs per member must be a number.")
+		return
+	}
+	name := r.PostForm.Get("name")
+	if name == "" {
+		name = slip.Name
+	}
+	updated, err := h.deps.Slips.UpdateSlip(r.Context(), user.ID, slip.ID, name, int(legsPerMember))
+	if err != nil {
+		h.respondError(w, err)
+		return
+	}
+	h.renderPanel(w, r, updated)
+}
+
+// newLegForm shows the leg form for one slip.
+func (h *slipHandlers) newLegForm(w http.ResponseWriter, r *http.Request) {
+	slip, _, _, ok := h.loadSlip(w, r, r.PathValue("id"))
+	if !ok {
+		return
+	}
+	form := LegFormView{
+		SlipID: slip.ID,
+		Action: fmt.Sprintf("/slips/%d/legs", slip.ID),
+		Market: "OTHER",
+		Odds:   strconv.Itoa(db.DefaultLegOdds),
+		GameID: r.URL.Query().Get("game_id"),
+	}
+	h.renderPartial(w, "leg-form", form)
+}
+
+// editLegForm shows the leg form filled from an existing leg.
+func (h *slipHandlers) editLegForm(w http.ResponseWriter, r *http.Request) {
+	leg, _, ok := h.loadLeg(w, r, r.PathValue("id"))
+	if !ok {
+		return
+	}
+	h.renderPartial(w, "leg-form", legFormView(leg))
+}
+
+// addLeg adds one leg for the signed-in member.
+func (h *slipHandlers) addLeg(w http.ResponseWriter, r *http.Request) {
+	slip, user, _, ok := h.loadSlip(w, r, r.PathValue("id"))
+	if !ok {
+		return
+	}
+	leg, valid := h.legFromForm(w, r, slip.ID)
+	if !valid {
+		return
+	}
+
+	if _, err := h.deps.Slips.AddLeg(r.Context(), user.ID, leg); err != nil {
+		h.respondError(w, err)
+		return
+	}
+	h.renderPanel(w, r, slip)
+}
+
+// updateLeg saves the pick fields of an existing leg.
+func (h *slipHandlers) updateLeg(w http.ResponseWriter, r *http.Request) {
+	existing, user, ok := h.loadLeg(w, r, r.PathValue("id"))
+	if !ok {
+		return
+	}
+	leg, valid := h.legFromForm(w, r, existing.SlipID)
+	if !valid {
+		return
+	}
+	leg.ID = existing.ID
+
+	if _, err := h.deps.Slips.UpdateLeg(r.Context(), user.ID, leg); err != nil {
+		h.respondError(w, err)
+		return
+	}
+	slip, err := h.deps.Store.SlipByID(r.Context(), existing.SlipID)
+	if err != nil {
+		h.respondError(w, err)
+		return
+	}
+	h.renderPanel(w, r, slip)
+}
+
+// deleteLeg removes one leg.
+func (h *slipHandlers) deleteLeg(w http.ResponseWriter, r *http.Request) {
+	leg, user, ok := h.loadLeg(w, r, r.PathValue("id"))
+	if !ok {
+		return
+	}
+	if err := h.deps.Slips.DeleteLeg(r.Context(), user.ID, leg.ID); err != nil {
+		h.respondError(w, err)
+		return
+	}
+	slip, err := h.deps.Store.SlipByID(r.Context(), leg.SlipID)
+	if err != nil {
+		h.respondError(w, err)
+		return
+	}
+	h.renderPanel(w, r, slip)
+}
+
+// lockIn records the signed-in member's lock.
+func (h *slipHandlers) lockIn(w http.ResponseWriter, r *http.Request) {
+	slip, user, _, ok := h.loadSlip(w, r, r.PathValue("id"))
+	if !ok {
+		return
+	}
+	if err := h.deps.Slips.LockIn(r.Context(), user.ID, slip.ID); err != nil {
+		h.respondError(w, err)
+		return
+	}
+	h.renderPanel(w, r, slip)
+}
+
+// unlock clears every member's lock.
+func (h *slipHandlers) unlock(w http.ResponseWriter, r *http.Request) {
+	slip, user, _, ok := h.loadSlip(w, r, r.PathValue("id"))
+	if !ok {
+		return
+	}
+	if err := h.deps.Slips.Unlock(r.Context(), user.ID, slip.ID); err != nil {
+		h.respondError(w, err)
+		return
+	}
+	h.renderPanel(w, r, slip)
+}
+
+// events serves the slip's SSE stream.
+func (h *slipHandlers) events(w http.ResponseWriter, r *http.Request) {
+	slip, _, _, ok := h.loadSlip(w, r, r.PathValue("id"))
+	if !ok {
+		return
+	}
+	if h.deps.Stream == nil {
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+	h.deps.Stream.ServeSlip(w, r, slip.ID, slip.WeekID)
+}
+
+// profile shows the signed-in person's home book and group members.
+func (h *slipHandlers) profile(w http.ResponseWriter, r *http.Request) {
+	user, group, ok := h.requireActor(w, r)
+	if !ok {
+		return
+	}
+	members, err := h.deps.Store.Members(r.Context(), group.ID)
+	if err != nil {
+		h.serverError(w, err)
+		return
+	}
+
+	page := h.page(r, "Profile")
+	memberViews := make([]ProfileMember, 0, len(members))
+	for _, member := range members {
+		memberViews = append(memberViews, ProfileMember{
+			ID:     member.ID,
+			Name:   member.Name,
+			Active: member.Active,
+			Self:   member.ID == user.ID,
+		})
+	}
+
+	homeBook := ""
+	if user.HomeBook != nil {
+		homeBook = *user.HomeBook
+	}
+	h.renderPage(w, "profile", ProfilePage{
+		Page:     page,
+		HomeBook: homeBook,
+		Members:  memberViews,
+	})
+}
+
+// updateProfile saves the home book.
+func (h *slipHandlers) updateProfile(w http.ResponseWriter, r *http.Request) {
+	user, _, ok := h.requireActor(w, r)
+	if !ok {
+		return
+	}
+	if err := readForm(w, r); err != nil {
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+
+	homeBook := strings.TrimSpace(r.PostForm.Get("home_book"))
+	var book *string
+	if homeBook != "" {
+		book = &homeBook
+	}
+	if _, err := h.deps.Store.SetUserHomeBook(r.Context(), user.ID, book); err != nil {
+		h.serverError(w, err)
+		return
+	}
+	h.redirect(w, r, "/me")
+}
+
+// toggleActive turns a group member on or off. An empty value toggles.
+func (h *slipHandlers) toggleActive(w http.ResponseWriter, r *http.Request) {
+	user, group, ok := h.requireActor(w, r)
+	if !ok {
+		return
+	}
+	targetID, valid := parseID(r.PathValue("id"))
+	if !valid {
+		http.NotFound(w, r)
+		return
+	}
+	member, err := h.deps.Store.IsMember(r.Context(), group.ID, targetID)
+	if err != nil {
+		h.serverError(w, err)
+		return
+	}
+	if !member {
+		http.NotFound(w, r)
+		return
+	}
+	if err := readForm(w, r); err != nil {
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+
+	target, err := h.deps.Store.UserByID(r.Context(), targetID)
+	if err != nil {
+		h.respondError(w, err)
+		return
+	}
+	active, valid := parseActive(r.PostForm.Get("active"), target.Active)
+	if !valid {
+		h.writeFormError(w, "Active must be on or off.")
+		return
+	}
+	if target.ID == user.ID && !active {
+		h.writeFormError(w, "You can't turn yourself off.")
+		return
+	}
+	if _, err := h.deps.Store.SetUserActive(r.Context(), target.ID, active); err != nil {
+		h.serverError(w, err)
+		return
+	}
+	h.redirect(w, r, "/me")
+}
+
+// renderSlip writes the full Slip tab for slip.
+func (h *slipHandlers) renderSlip(
+	w http.ResponseWriter,
+	r *http.Request,
+	page Page,
+	slip db.Slip,
+	stake, boost float64,
+) {
+	if week, err := h.deps.Store.WeekByID(r.Context(), slip.WeekID); err == nil {
+		page.WeekLabel = weekLabel(week)
+	}
+	view, err := h.slipView(r.Context(), slip, stake, boost)
+	if err != nil {
+		h.serverError(w, err)
+		return
+	}
+	h.renderPage(w, "slip", SlipPage{Page: page, Slip: &view})
+}
+
+// renderPanel writes the slip panel partial for slip.
+func (h *slipHandlers) renderPanel(w http.ResponseWriter, r *http.Request, slip db.Slip) {
+	page, err := h.slipPageData(r.Context(), slip)
+	if err != nil {
+		h.serverError(w, err)
+		return
+	}
+	page.Slip.Payout, err = h.payoutView(r.Context(), slip, defaultStake, 0)
+	if err != nil {
+		h.serverError(w, err)
+		return
+	}
+	h.renderPartial(w, "slip-panel", page)
+}
+
+// renderCreate shows the create form, filling defaults from the previous slip.
+func (h *slipHandlers) renderCreate(
+	w http.ResponseWriter,
+	r *http.Request,
+	page Page,
+	user db.User,
+	group db.Group,
+	week *db.Week,
+	form *SlipCreateView,
+) {
+	create, err := h.createView(r.Context(), user, group, week)
+	if err != nil {
+		h.serverError(w, err)
+		return
+	}
+	if week != nil {
+		page.WeekLabel = weekLabel(*week)
+	}
+	if form != nil {
+		create.WeekID = form.WeekID
+		create.Name = form.Name
+		create.LegsPerMember = form.LegsPerMember
+		create.Error = form.Error
+		if form.Selected != nil {
+			chosen := make(map[int64]bool, len(form.Selected))
+			for _, id := range form.Selected {
+				chosen[id] = true
+			}
+			for i := range create.Members {
+				create.Members[i].Selected = chosen[create.Members[i].ID]
+			}
+		}
+	}
+	h.renderPage(w, "slip", SlipPage{Page: page, Creating: true, Create: create})
+}
+
+// createView builds the create form's weeks, defaults, and member checklist.
+func (h *slipHandlers) createView(
+	ctx context.Context,
+	user db.User,
+	group db.Group,
+	week *db.Week,
+) (SlipCreateView, error) {
+	weeks, err := h.deps.Store.Weeks(ctx)
+	if err != nil {
+		return SlipCreateView{}, err
+	}
+	options := make([]WeekOption, 0, len(weeks))
+	for _, known := range weeks {
+		options = append(options, WeekOption{ID: known.ID, Label: weekLabel(known)})
+	}
+
+	members, err := h.deps.Store.Members(ctx, group.ID)
+	if err != nil {
+		return SlipCreateView{}, err
+	}
+	memberOptions := make([]MemberOption, 0, len(members))
+	for _, member := range members {
+		memberOptions = append(memberOptions, MemberOption{
+			ID:       member.ID,
+			Name:     member.Name,
+			Selected: member.ID == user.ID,
+		})
+	}
+
+	view := SlipCreateView{
+		Weeks:         options,
+		LegsPerMember: slips.DefaultLegsPerMember,
+		Members:       memberOptions,
+	}
+	if week == nil {
+		return view, nil
+	}
+
+	view.WeekID = week.ID
+	view.Name = weekLabel(*week)
+	defaults, err := slips.CreateDefaults(ctx, h.deps.Store, group.ID, week.ID)
+	if err != nil {
+		return SlipCreateView{}, err
+	}
+	view.LegsPerMember = defaults.LegsPerMember
+	if len(defaults.MemberIDs) > 0 {
+		selected := make(map[int64]bool, len(defaults.MemberIDs))
+		for _, id := range defaults.MemberIDs {
+			selected[id] = true
+		}
+		for i := range view.Members {
+			view.Members[i].Selected = selected[view.Members[i].ID]
+		}
+	}
+	view.Name = h.nextSlipName(ctx, group.ID, week.ID, view.Name)
+	return view, nil
+}
+
+// nextSlipName appends " #2", " #3" until the name is free in the week.
+func (h *slipHandlers) nextSlipName(
+	ctx context.Context,
+	groupID, weekID int64,
+	base string,
+) string {
+	groupSlips, err := h.deps.Store.SlipsForWeek(ctx, groupID, weekID)
+	if err != nil {
+		return base
+	}
+	used := make(map[string]bool, len(groupSlips))
+	for _, slip := range groupSlips {
+		used[slip.Name] = true
+	}
+	if !used[base] {
+		return base
+	}
+	for n := 2; ; n++ {
+		candidate := fmt.Sprintf("%s #%d", base, n)
+		if !used[candidate] {
+			return candidate
+		}
+	}
+}
+
+// renderCreateError re-renders the form with a short message and the values
+// the person already typed.
+func (h *slipHandlers) renderCreateError(
+	w http.ResponseWriter,
+	r *http.Request,
+	user db.User,
+	group db.Group,
+	message string,
+) {
+	page := h.page(r, "New slip")
+	var week *db.Week
+	if id, ok := parseID(r.PostForm.Get("week_id")); ok {
+		found, err := h.deps.Store.WeekByID(r.Context(), id)
+		if err == nil {
+			week = &found
+		}
+	}
+	form := &SlipCreateView{
+		WeekID:        weekIDFromForm(r),
+		Name:          r.PostForm.Get("name"),
+		LegsPerMember: slips.DefaultLegsPerMember,
+		Error:         message,
+	}
+	if raw := r.PostForm.Get("legs_per_member"); raw != "" {
+		if legs, err := strconv.Atoi(raw); err == nil {
+			form.LegsPerMember = legs
+		}
+	}
+	for _, raw := range r.PostForm["member_id"] {
+		if id, ok := parseID(raw); ok {
+			form.Selected = append(form.Selected, id)
+		}
+	}
+	h.renderCreate(w, r, page, user, group, week, form)
+}
+
+// slipView loads and shapes one slip for the panel.
+func (h *slipHandlers) slipView(
+	ctx context.Context,
+	slip db.Slip,
+	stake, boost float64,
+) (SlipView, error) {
+	page, err := h.slipPageData(ctx, slip)
+	if err != nil {
+		return SlipView{}, err
+	}
+	payout, err := h.payoutView(ctx, slip, stake, boost)
+	if err != nil {
+		return SlipView{}, err
+	}
+	page.Slip.Payout = payout
+	return *page.Slip, nil
+}
+
+// slipPageData loads the slip's members, legs, and activity.
+func (h *slipHandlers) slipPageData(ctx context.Context, slip db.Slip) (SlipPage, error) {
+	user, hasUser := h.user(ctx)
+	members, err := h.deps.Store.SlipMembers(ctx, slip.ID)
+	if err != nil {
+		return SlipPage{}, err
+	}
+	legs, err := h.deps.Store.LegsForSlip(ctx, slip.ID)
+	if err != nil {
+		return SlipPage{}, err
+	}
+	entries, err := h.deps.Store.ActivityForSlip(ctx, slip.ID)
+	if err != nil {
+		return SlipPage{}, err
+	}
+
+	names := make(map[int64]string, len(members))
+	for _, member := range members {
+		names[member.User.ID] = member.User.Name
+	}
+
+	legsByUser := make(map[int64][]LegView, len(members))
+	locked := 0
+	for _, member := range members {
+		if member.LockedAt != nil {
+			locked++
+		}
+	}
+
+	open := slip.Status == db.SlipOpen
+	for _, leg := range legs {
+		owner := names[leg.UserID]
+		legsByUser[leg.UserID] = append(legsByUser[leg.UserID], LegView{
+			ID:        leg.ID,
+			Selection: leg.Selection,
+			Odds:      formatOdds(leg.Odds),
+			Result:    string(leg.Result),
+			OwnerName: owner,
+			CanEdit:   open && hasUser && leg.UserID == user.ID,
+		})
+	}
+
+	memberViews := make([]SlipMemberView, 0, len(members))
+	for _, member := range members {
+		own := legsByUser[member.User.ID]
+		isCurrent := hasUser && member.User.ID == user.ID
+		memberViews = append(memberViews, SlipMemberView{
+			User:      NewUser(member.User),
+			Locked:    member.LockedAt != nil,
+			IsCurrent: isCurrent,
+			CanAddLeg: open && isCurrent && member.LockedAt == nil && len(own) < slip.LegsPerMember,
+			CanLockIn: open && isCurrent && member.LockedAt == nil && len(own) == slip.LegsPerMember,
+			Legs:      own,
+			LegCount:  len(own),
+		})
+	}
+
+	activity := make([]ActivityView, 0, len(entries))
+	for _, entry := range entries {
+		activity = append(activity, ActivityView{
+			Message: entry.Message,
+			When:    entry.CreatedAt.Format(time.RFC3339),
+		})
+	}
+
+	view := &SlipView{
+		ID:            slip.ID,
+		Name:          slip.Name,
+		Status:        string(slip.Status),
+		LegsPerMember: slip.LegsPerMember,
+		Open:          open,
+		LockedIn:      locked,
+		MemberCount:   len(members),
+		Members:       memberViews,
+		Activity:      activity,
+	}
+	if hasUser {
+		view.LegForm = LegFormView{
+			SlipID: slip.ID,
+			Action: fmt.Sprintf("/slips/%d/legs", slip.ID),
+			Market: "OTHER",
+			Odds:   strconv.Itoa(db.DefaultLegOdds),
+		}
+	}
+
+	return SlipPage{Page: h.page(nil, slip.Name), Slip: view}, nil
+}
+
+// payoutView computes the combined odds and return for the calculator.
+func (h *slipHandlers) payoutView(
+	ctx context.Context,
+	slip db.Slip,
+	stake, boost float64,
+) (PayoutView, error) {
+	legs, err := h.deps.Store.LegsForSlip(ctx, slip.ID)
+	if err != nil {
+		return PayoutView{}, err
+	}
+	combinedLegs := make([]parlay.Leg, 0, len(legs))
+	for _, leg := range legs {
+		combinedLegs = append(combinedLegs, parlay.Leg{
+			Decimal: parlay.AmericanToDecimal(leg.Odds),
+			Result:  leg.Result,
+		})
+	}
+	combined := parlay.CombinedOdds(combinedLegs)
+	total := parlay.Payout(stake, combined, boost)
+	return PayoutView{
+		SlipID:           slip.ID,
+		Stake:            formatFloat(stake),
+		Boost:            formatFloat(boost),
+		Combined:         fmt.Sprintf("%.2fx", combined),
+		CombinedAmerican: formatOdds(parlay.DecimalToAmerican(combined)),
+		Return:           money(total),
+		Profit:           money(total - stake),
+	}, nil
+}
+
+// legFormView maps a stored leg to the edit form.
+func legFormView(leg db.Leg) LegFormView {
+	view := LegFormView{
+		SlipID:    leg.SlipID,
+		LegID:     leg.ID,
+		Action:    fmt.Sprintf("/legs/%d", leg.ID),
+		Editing:   true,
+		Market:    leg.MarketType,
+		Selection: leg.Selection,
+		Odds:      strconv.Itoa(leg.Odds),
+	}
+	if leg.Team != nil {
+		view.Team = *leg.Team
+	}
+	if leg.Side != nil {
+		view.Side = *leg.Side
+	}
+	if leg.GameID != nil {
+		view.GameID = *leg.GameID
+	}
+	if leg.Line != nil {
+		view.Line = formatFloat(*leg.Line)
+	}
+	return view
+}
+
+// legFromForm reads the leg form or writes a 422 and returns false.
+func (h *slipHandlers) legFromForm(w http.ResponseWriter, r *http.Request, slipID int64) (db.Leg, bool) {
+	if err := readForm(w, r); err != nil {
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return db.Leg{}, false
+	}
+
+	market := strings.ToUpper(strings.TrimSpace(r.PostForm.Get("market_type")))
+	if market == "" {
+		market = "OTHER"
+	}
+	odds := 0
+	if raw := strings.TrimSpace(r.PostForm.Get("odds")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil {
+			h.writeFormError(w, "Odds need to be a number.")
+			return db.Leg{}, false
+		}
+		odds = parsed
+	}
+	line, ok := optionalFloat(w, r.PostForm.Get("line"))
+	if !ok {
+		return db.Leg{}, false
+	}
+
+	selection := strings.TrimSpace(r.PostForm.Get("selection"))
+	if selection == "" {
+		selection = buildSelection(market, r.PostForm, line)
+	}
+	if selection == "" {
+		h.writeFormError(w, "Add a selection.")
+		return db.Leg{}, false
+	}
+
+	leg := db.Leg{
+		SlipID:     slipID,
+		MarketType: market,
+		Selection:  selection,
+		Odds:       odds,
+		Team:       optionalString(r.PostForm.Get("team")),
+		PlayerName: optionalString(r.PostForm.Get("player_name")),
+		PlayerID:   optionalString(r.PostForm.Get("player_id")),
+		Side:       optionalString(strings.ToUpper(strings.TrimSpace(r.PostForm.Get("side")))),
+		Line:       line,
+		GameID:     optionalString(r.PostForm.Get("game_id")),
+	}
+	if market == "ANYTIME_TD" && leg.Side == nil {
+		side := "YES"
+		leg.Side = &side
+	}
+	return leg, true
+}
+
+// buildSelection writes the display text the docs table shows.
+func buildSelection(market string, form map[string][]string, line *float64) string {
+	field := func(name string) string {
+		if values := form[name]; len(values) > 0 {
+			return strings.TrimSpace(values[0])
+		}
+		return ""
+	}
+	team := field("team")
+	player := field("player_name")
+	side := titleSide(field("side"))
+	lineText := ""
+	if line != nil {
+		lineText = formatFloat(*line)
+	}
+
+	switch market {
+	case "SPREAD":
+		if team == "" || lineText == "" {
+			return ""
+		}
+		return team + " " + signedLine(*line)
+	case "ML":
+		if team == "" {
+			return ""
+		}
+		return team + " ML"
+	case "TOTAL":
+		if side == "" || lineText == "" {
+			return ""
+		}
+		return side + " " + lineText
+	case "TEAM_TOTAL":
+		if team == "" || side == "" || lineText == "" {
+			return ""
+		}
+		return team + " Team Total " + side + " " + lineText
+	case "ANYTIME_TD":
+		if player == "" {
+			return ""
+		}
+		return player + " Anytime TD"
+	case "OTHER":
+		return ""
+	default:
+		label := marketLabels[market]
+		if player == "" || side == "" || lineText == "" {
+			return ""
+		}
+		return player + " " + side + " " + lineText + " " + label
+	}
+}
+
+// marketLabels are the stat names the selection text uses.
+var marketLabels = map[string]string{
+	"PASS_YDS":   "Pass Yds",
+	"PASS_TDS":   "Pass TDs",
+	"RUSH_YDS":   "Rush Yds",
+	"RUSH_ATT":   "Rush Att",
+	"REC_YDS":    "Rec Yds",
+	"RECEPTIONS": "Receptions",
+	"KICKER_PTS": "Kicking Pts",
+}
+
+// loadSlip parses the path id and refuses a slip outside the active group.
+func (h *slipHandlers) loadSlip(
+	w http.ResponseWriter,
+	r *http.Request,
+	rawID string,
+) (db.Slip, db.User, db.Group, bool) {
+	if h.deps.Store == nil {
+		http.NotFound(w, r)
+		return db.Slip{}, db.User{}, db.Group{}, false
+	}
+	user, group, ok := h.requireActor(w, r)
+	if !ok {
+		return db.Slip{}, db.User{}, db.Group{}, false
+	}
+	id, valid := parseID(rawID)
+	if !valid {
+		http.NotFound(w, r)
+		return db.Slip{}, db.User{}, db.Group{}, false
+	}
+
+	slip, err := h.deps.Store.SlipByID(r.Context(), id)
+	if errors.Is(err, db.ErrSlipNotFound) {
+		http.NotFound(w, r)
+		return db.Slip{}, db.User{}, db.Group{}, false
+	}
+	if err != nil {
+		h.serverError(w, err)
+		return db.Slip{}, db.User{}, db.Group{}, false
+	}
+	if slip.GroupID != group.ID {
+		http.NotFound(w, r)
+		return db.Slip{}, db.User{}, db.Group{}, false
+	}
+	return slip, user, group, true
+}
+
+// loadLeg parses the path id, then guards the leg's slip by active group.
+func (h *slipHandlers) loadLeg(w http.ResponseWriter, r *http.Request, rawID string) (db.Leg, db.User, bool) {
+	if h.deps.Store == nil {
+		http.NotFound(w, r)
+		return db.Leg{}, db.User{}, false
+	}
+	id, valid := parseID(rawID)
+	if !valid {
+		http.NotFound(w, r)
+		return db.Leg{}, db.User{}, false
+	}
+	leg, err := h.deps.Store.LegByID(r.Context(), id)
+	if errors.Is(err, db.ErrLegNotFound) {
+		http.NotFound(w, r)
+		return db.Leg{}, db.User{}, false
+	}
+	if err != nil {
+		h.serverError(w, err)
+		return db.Leg{}, db.User{}, false
+	}
+	slip, user, _, ok := h.loadSlip(w, r, strconv.FormatInt(leg.SlipID, 10))
+	if !ok {
+		return db.Leg{}, db.User{}, false
+	}
+	if slip.ID != leg.SlipID {
+		http.NotFound(w, r)
+		return db.Leg{}, db.User{}, false
+	}
+	return leg, user, true
+}
+
+// requireActor returns the signed-in person and active group.
+func (h *slipHandlers) requireActor(w http.ResponseWriter, r *http.Request) (db.User, db.Group, bool) {
+	if h.deps.Store == nil || h.deps.Slips == nil {
+		http.NotFound(w, r)
+		return db.User{}, db.Group{}, false
+	}
+	user, ok := h.user(r.Context())
+	if !ok {
+		h.redirect(w, r, "/login")
+		return db.User{}, db.Group{}, false
+	}
+	group, ok := h.group(r.Context())
+	if !ok {
+		http.NotFound(w, r)
+		return db.User{}, db.Group{}, false
+	}
+	return user, group, true
+}
+
+// user returns the signed-in person.
+func (h *slipHandlers) user(ctx context.Context) (db.User, bool) {
+	if h.deps.UserFrom == nil {
+		return db.User{}, false
+	}
+	return h.deps.UserFrom(ctx)
+}
+
+// group returns the active group.
+func (h *slipHandlers) group(ctx context.Context) (db.Group, bool) {
+	if h.deps.GroupFrom == nil {
+		return db.Group{}, false
+	}
+	return h.deps.GroupFrom(ctx)
+}
+
+// page builds the shell's data for a slip screen.
+func (h *slipHandlers) page(r *http.Request, title string) Page {
+	page := Page{Title: title, Tab: TabSlip}
+	if r == nil {
+		return page
+	}
+	if user, ok := h.user(r.Context()); ok {
+		view := NewUser(user)
+		page.User = &view
+	}
+	if h.deps.GroupsFrom != nil {
+		page.Groups = h.deps.GroupsFrom(r.Context())
+	}
+	return page
+}
+
+// renderPage writes a full page.
+func (h *slipHandlers) renderPage(w http.ResponseWriter, name string, data any) {
+	html, err := h.deps.Renderer.Render(name, data)
+	if err != nil {
+		h.deps.Logger.Error().Err(err).Str("page", name).Msg("render page")
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = w.Write(html)
+}
+
+// renderPartial writes one HTMX fragment.
+func (h *slipHandlers) renderPartial(w http.ResponseWriter, name string, data any) {
+	html, err := h.deps.Renderer.RenderPartial(name, data)
+	if err != nil {
+		h.deps.Logger.Error().Err(err).Str("partial", name).Msg("render partial")
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = w.Write(html)
+}
+
+// respondError maps a service refusal to 422 and a missing row to 404.
+func (h *slipHandlers) respondError(w http.ResponseWriter, err error) {
+	if message, ok := fixableMessage(err); ok {
+		http.Error(w, message, http.StatusUnprocessableEntity)
+		return
+	}
+	switch {
+	case errors.Is(err, db.ErrSlipNotFound),
+		errors.Is(err, db.ErrLegNotFound),
+		errors.Is(err, db.ErrSlipMemberNotFound),
+		errors.Is(err, db.ErrUserNotFound):
+		http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
+	default:
+		h.serverError(w, err)
+	}
+}
+
+// fixableMessage returns the short message a 422 shows.
+func fixableMessage(err error) (string, bool) {
+	for _, target := range ruleErrors {
+		if errors.Is(err, target) {
+			return target.Error(), true
+		}
+	}
+	return "", false
+}
+
+// serverError logs err and answers 500.
+func (h *slipHandlers) serverError(w http.ResponseWriter, err error) {
+	h.deps.Logger.Error().Err(err).Msg("slip request")
+	http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+}
+
+// writeFormError answers 422 with a message.
+func (h *slipHandlers) writeFormError(w http.ResponseWriter, message string) {
+	http.Error(w, message, http.StatusUnprocessableEntity)
+}
+
+// redirect sends the browser to target, or HTMX if the request came from it.
+func (h *slipHandlers) redirect(w http.ResponseWriter, r *http.Request, target string) {
+	if strings.EqualFold(r.Header.Get("Hx-Request"), "true") {
+		w.Header().Set("Hx-Redirect", target)
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	http.Redirect(w, r, target, http.StatusSeeOther)
+}
+
+// readForm parses a small submitted form.
+func readForm(w http.ResponseWriter, r *http.Request) error {
+	r.Body = http.MaxBytesReader(w, r.Body, maxFormBytes)
+	return r.ParseForm()
+}
+
+// parseID reads a positive integer.
+func parseID(raw string) (int64, bool) {
+	id, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
+	if err != nil || id <= 0 {
+		return 0, false
+	}
+	return id, true
+}
+
+// optionalString trims a form value, returning nil when it is blank.
+func optionalString(raw string) *string {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return nil
+	}
+	return &value
+}
+
+// optionalFloat parses a blank-able line.
+func optionalFloat(w http.ResponseWriter, raw string) (*float64, bool) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return nil, true
+	}
+	parsed, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		http.Error(w, "Line needs to be a number.", http.StatusUnprocessableEntity)
+		return nil, false
+	}
+	return &parsed, true
+}
+
+// parseFloatDefault parses a query value, falling back to fallback.
+func parseFloatDefault(raw string, fallback float64) float64 {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseFloat(value, 64)
+	if err != nil || parsed < 0 {
+		return fallback
+	}
+	return parsed
+}
+
+// parseActive reads a toggle form value. An empty value flips current.
+func parseActive(raw string, current bool) (bool, bool) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "":
+		return !current, true
+	case "1", "true", "on", "yes":
+		return true, true
+	case "0", "false", "off", "no":
+		return false, true
+	default:
+		return false, false
+	}
+}
+
+// weekIDFromForm reads the create form's week.
+func weekIDFromForm(r *http.Request) int64 {
+	id, _ := parseID(r.PostForm.Get("week_id"))
+	return id
+}
+
+// weekLabel is the display name and default slip name for a week.
+func weekLabel(week db.Week) string {
+	return fmt.Sprintf("Week %d", week.WeekNum)
+}
+
+// titleSide capitalizes a side for display.
+func titleSide(raw string) string {
+	switch strings.ToUpper(strings.TrimSpace(raw)) {
+	case "OVER":
+		return "Over"
+	case "UNDER":
+		return "Under"
+	case "YES":
+		return "Yes"
+	default:
+		return ""
+	}
+}
+
+// signedLine formats a spread line with its sign.
+func signedLine(line float64) string {
+	if line > 0 {
+		return "+" + formatFloat(line)
+	}
+	return formatFloat(line)
+}
+
+// formatFloat prints a float without a trailing zero tail.
+func formatFloat(value float64) string {
+	return strconv.FormatFloat(value, 'f', -1, 64)
+}
+
+// formatOdds prints an American price with a plus sign when positive.
+func formatOdds(odds int) string {
+	if odds > 0 {
+		return fmt.Sprintf("+%d", odds)
+	}
+	return strconv.Itoa(odds)
+}
+
+// money prints a dollar amount with two decimals.
+func money(value float64) string {
+	return fmt.Sprintf("$%.2f", value)
+}

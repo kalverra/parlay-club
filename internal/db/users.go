@@ -208,6 +208,42 @@ func (s *Store) LinkGoogle(
 	return s.UserByID(ctx, id)
 }
 
+// SetUserHomeBook sets or clears one user's home book. A nil book means no
+// preference, so reference odds use the median. A missing row wraps
+// ErrUserNotFound.
+func (s *Store) SetUserHomeBook(ctx context.Context, id int64, book *string) (User, error) {
+	result, err := s.conn().ExecContext(ctx,
+		"UPDATE users SET home_book = ? WHERE id = ?", nullableString(book), id)
+	if err != nil {
+		return User{}, fmt.Errorf("set home book for user %d: %w", id, err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return User{}, fmt.Errorf("set home book for user %d: %w", id, err)
+	}
+	if affected == 0 {
+		return User{}, fmt.Errorf("set home book for user %d: %w", id, ErrUserNotFound)
+	}
+	return s.UserByID(ctx, id)
+}
+
+// SetUserActive turns one user on or off. A missing row wraps ErrUserNotFound.
+func (s *Store) SetUserActive(ctx context.Context, id int64, active bool) (User, error) {
+	result, err := s.conn().ExecContext(ctx,
+		"UPDATE users SET active = ? WHERE id = ?", active, id)
+	if err != nil {
+		return User{}, fmt.Errorf("set active for user %d: %w", id, err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return User{}, fmt.Errorf("set active for user %d: %w", id, err)
+	}
+	if affected == 0 {
+		return User{}, fmt.Errorf("set active for user %d: %w", id, ErrUserNotFound)
+	}
+	return s.UserByID(ctx, id)
+}
+
 // SetUserPicture refreshes one user's picture. An empty picture clears it. A
 // missing row wraps ErrUserNotFound.
 func (s *Store) SetUserPicture(ctx context.Context, id int64, picture string) (User, error) {

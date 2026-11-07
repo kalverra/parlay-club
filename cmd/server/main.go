@@ -21,6 +21,8 @@ import (
 	"github.com/kalverra/parlay-club/internal/config"
 	"github.com/kalverra/parlay-club/internal/db"
 	"github.com/kalverra/parlay-club/internal/groups"
+	"github.com/kalverra/parlay-club/internal/live"
+	"github.com/kalverra/parlay-club/internal/slips"
 	"github.com/kalverra/parlay-club/internal/web"
 	assets "github.com/kalverra/parlay-club/web"
 )
@@ -82,10 +84,24 @@ func run() error {
 	scope := groups.Scope(logger, store, auth.UserFrom, cookies)
 	groupHandlers := groups.NewHandlers(logger, store, auth.UserFrom, cookies, renderer)
 
+	hub := &live.Hub{}
+	slipService := slips.New(store, hub, nil)
+	stream := live.NewStream(hub, nil)
+	shell := web.NewWithDeps(web.Dependencies{
+		Logger:     logger,
+		Renderer:   renderer,
+		UserFrom:   auth.UserFrom,
+		GroupsFrom: groups.Options,
+		GroupFrom:  groups.From,
+		Store:      store,
+		Slips:      slipService,
+		Stream:     stream,
+	})
+
 	server := &http.Server{
 		Addr: net.JoinHostPort("", strconv.Itoa(cfg.Port)),
 		Handler: newMux(
-			web.New(logger, renderer, auth.UserFrom, groups.Options),
+			shell,
 			web.StaticHandler(),
 			handlers,
 			groupHandlers,

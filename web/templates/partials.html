@@ -1,0 +1,238 @@
+{{define "slip-panel"}}
+<div
+  id="slip-panel"
+  class="space-y-3"
+  hx-get="/slips/{{.Slip.ID}}/panel"
+  hx-trigger="slip-updated from:body"
+  hx-swap="outerHTML"
+>
+  <div class="rounded-xl border border-slate-800 bg-slate-900 p-4">
+    <div class="flex items-center justify-between gap-2">
+      <h2 class="text-lg font-semibold">{{.Slip.Name}}</h2>
+      <span class="text-sm text-slate-400">{{.Slip.LockedIn}}/{{.Slip.MemberCount}} locked in</span>
+    </div>
+    <p class="mt-1 text-sm text-slate-400">
+      {{.Slip.LegsPerMember}} leg{{if ne .Slip.LegsPerMember 1}}s{{end}} per member
+    </p>
+  </div>
+
+  {{range .Slip.Members}}
+    <section class="rounded-xl border border-slate-800 bg-slate-900 p-4">
+      <div class="flex items-center justify-between gap-2">
+        <div class="flex items-center gap-2">
+          {{template "avatar" .User}}
+          <span class="font-medium">{{.User.Name}}{{if .IsCurrent}} (you){{end}}</span>
+        </div>
+        <span class="text-xs text-slate-400">
+          {{if .Locked}}Locked in{{else}}{{.LegCount}}/{{$.Slip.LegsPerMember}} legs{{end}}
+        </span>
+      </div>
+
+      <ul class="mt-3 space-y-2">
+        {{range .Legs}}
+          <li class="flex items-center justify-between gap-3 rounded-lg border border-slate-800 px-3 py-2">
+            <span class="min-w-0 text-sm">
+              <span class="block truncate">{{.Selection}}</span>
+              <span class="text-xs text-slate-400">{{.Odds}} · {{.Result}}</span>
+            </span>
+            {{if .CanEdit}}
+              <span class="flex shrink-0 gap-2 text-xs">
+                <a class="text-sky-400 hover:underline" href="/legs/{{.ID}}/edit">Edit</a>
+                <form hx-delete="/legs/{{.ID}}" hx-target="#slip-panel" hx-swap="outerHTML">
+                  <button type="submit" class="text-rose-400 hover:underline">Delete</button>
+                </form>
+              </span>
+            {{end}}
+          </li>
+        {{else}}
+          <li class="text-sm text-slate-500">No legs yet.</li>
+        {{end}}
+      </ul>
+
+      {{if .CanLockIn}}
+        <form class="mt-3" hx-post="/slips/{{$.Slip.ID}}/lock" hx-target="#slip-panel" hx-swap="outerHTML">
+          <button
+            type="submit"
+            class="w-full rounded-lg bg-sky-600 px-3 py-2 text-sm font-semibold text-white hover:bg-sky-500"
+          >
+            Lock in
+          </button>
+        </form>
+      {{end}}
+    </section>
+  {{end}}
+
+  {{if .Slip.Open}}
+    <details class="rounded-xl border border-slate-800 bg-slate-900 p-4">
+      <summary class="cursor-pointer text-sm font-medium text-sky-400">Add a leg</summary>
+      <div class="mt-3">{{template "leg-form" .Slip.LegForm}}</div>
+    </details>
+  {{end}}
+
+  {{if gt .Slip.LockedIn 0}}
+    <form hx-post="/slips/{{.Slip.ID}}/unlock" hx-target="#slip-panel" hx-swap="outerHTML">
+      <button
+        type="submit"
+        class="w-full rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-200 hover:bg-slate-800"
+      >
+        Unlock slip
+      </button>
+    </form>
+  {{end}}
+
+  {{template "slip-payout" .Slip.Payout}}
+</div>
+{{end}}
+
+{{define "slip-activity"}}
+<section
+  id="slip-activity"
+  class="rounded-xl border border-slate-800 bg-slate-900 p-4"
+  hx-get="/slips/{{.Slip.ID}}/activity"
+  hx-trigger="slip-updated from:body"
+  hx-swap="outerHTML"
+>
+  <h2 class="text-sm font-semibold text-slate-300">Activity</h2>
+  <ul class="mt-2 space-y-1 text-sm text-slate-400">
+    {{range .Slip.Activity}}
+      <li>{{.Message}}</li>
+    {{else}}
+      <li>Nothing yet.</li>
+    {{end}}
+  </ul>
+</section>
+{{end}}
+
+{{define "slip-payout"}}
+<form
+  id="slip-payout"
+  class="space-y-3 rounded-xl border border-slate-800 bg-slate-900 p-4"
+  hx-get="/slips/{{.SlipID}}/payout"
+  hx-trigger="input changed delay:300ms, slip-updated from:body"
+  hx-target="#slip-payout"
+  hx-swap="outerHTML"
+>
+  <h2 class="text-sm font-semibold text-slate-300">Payout</h2>
+  <div class="grid grid-cols-2 gap-3">
+    <label class="block text-xs text-slate-400">
+      Stake
+      <input
+        type="number"
+        name="stake"
+        min="0"
+        step="0.01"
+        value="{{.Stake}}"
+        class="mt-1 w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1 text-sm text-slate-100"
+      >
+    </label>
+    <label class="block text-xs text-slate-400">
+      Boost %
+      <input
+        type="number"
+        name="boost"
+        min="0"
+        step="1"
+        value="{{.Boost}}"
+        class="mt-1 w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1 text-sm text-slate-100"
+      >
+    </label>
+  </div>
+  <dl class="grid grid-cols-2 gap-2 text-sm">
+    <div>
+      <dt class="text-xs text-slate-400">Combined</dt>
+      <dd class="font-medium">{{.Combined}} <span class="text-slate-400">({{.CombinedAmerican}})</span></dd>
+    </div>
+    <div>
+      <dt class="text-xs text-slate-400">Return</dt>
+      <dd class="font-medium">{{.Return}}</dd>
+    </div>
+    <div>
+      <dt class="text-xs text-slate-400">Profit</dt>
+      <dd class="font-medium">{{.Profit}}</dd>
+    </div>
+  </dl>
+</form>
+{{end}}
+
+{{define "leg-form"}}
+<form
+  class="space-y-3"
+  {{if .Editing}}hx-put="{{.Action}}"{{else}}hx-post="{{.Action}}"{{end}}
+  hx-target="#slip-panel"
+  hx-swap="outerHTML"
+>
+  <input type="hidden" name="game_id" value="{{.GameID}}">
+  <label class="block text-xs text-slate-400">
+    Market
+    <select name="market_type" class="mt-1 w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1 text-sm">
+      {{range list "SPREAD" "ML" "TOTAL" "TEAM_TOTAL" "PASS_YDS" "PASS_TDS" "RUSH_YDS" "RUSH_ATT" "REC_YDS" "RECEPTIONS" "ANYTIME_TD" "KICKER_PTS" "OTHER"}}
+        <option value="{{.}}"{{if eq . $.Market}} selected{{end}}>{{.}}</option>
+      {{end}}
+    </select>
+  </label>
+  <label class="block text-xs text-slate-400">
+    Selection
+    <input
+      type="text"
+      name="selection"
+      value="{{.Selection}}"
+      placeholder="BUF -3.5"
+      class="mt-1 w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1 text-sm text-slate-100"
+    >
+  </label>
+  <div class="grid grid-cols-2 gap-2">
+    <label class="block text-xs text-slate-400">
+      Team
+      <input
+        type="text"
+        name="team"
+        value="{{.Team}}"
+        class="mt-1 w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1 text-sm text-slate-100"
+      >
+    </label>
+    <label class="block text-xs text-slate-400">
+      Side
+      <input
+        type="text"
+        name="side"
+        value="{{.Side}}"
+        placeholder="OVER"
+        class="mt-1 w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1 text-sm text-slate-100"
+      >
+    </label>
+    <label class="block text-xs text-slate-400">
+      Line
+      <input
+        type="number"
+        name="line"
+        step="0.5"
+        value="{{.Line}}"
+        class="mt-1 w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1 text-sm text-slate-100"
+      >
+    </label>
+    <label class="block text-xs text-slate-400">
+      Odds
+      <input
+        type="number"
+        name="odds"
+        value="{{.Odds}}"
+        class="mt-1 w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1 text-sm text-slate-100"
+      >
+    </label>
+  </div>
+  <label class="block text-xs text-slate-400">
+    Player
+    <input
+      type="text"
+      name="player_name"
+      class="mt-1 w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1 text-sm text-slate-100"
+    >
+  </label>
+  <button
+    type="submit"
+    class="w-full rounded-lg bg-sky-600 px-3 py-2 text-sm font-semibold text-white hover:bg-sky-500"
+  >
+    {{if .Editing}}Save leg{{else}}Add leg{{end}}
+  </button>
+</form>
+{{end}}

@@ -50,3 +50,31 @@ func TestWeekByIDReportsAMissingWeek(t *testing.T) {
 	_, err := store.WeekByID(t.Context(), 2026209)
 	require.ErrorIs(t, err, db.ErrWeekNotFound)
 }
+
+func TestWeeksListsNewestFirstAndLatestWeekPicksTheFirst(t *testing.T) {
+	t.Parallel()
+
+	store, _ := openTestStore(t)
+
+	earlier, err := store.UpsertWeek(t.Context(), 2025, 3, 4)
+	require.NoError(t, err)
+	later, err := store.UpsertWeek(t.Context(), 2026, 2, 9)
+	require.NoError(t, err)
+
+	weeks, err := store.Weeks(t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, []db.Week{later, earlier}, weeks)
+
+	latest, err := store.LatestWeek(t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, later, latest)
+}
+
+func TestLatestWeekReportsAnEmptyTable(t *testing.T) {
+	t.Parallel()
+
+	store, _ := openTestStore(t)
+
+	_, err := store.LatestWeek(t.Context())
+	require.ErrorIs(t, err, db.ErrWeekNotFound)
+}

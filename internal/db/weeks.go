@@ -39,6 +39,51 @@ func (s *Store) UpsertWeek(ctx context.Context, season, seasonType, weekNum int)
 	return s.WeekByID(ctx, id)
 }
 
+// Weeks returns every known week, newest first.
+func (s *Store) Weeks(ctx context.Context) ([]Week, error) {
+	rows, err := s.conn().QueryContext(ctx, `
+		SELECT id, season, season_type, week_num
+		FROM weeks
+		ORDER BY season DESC, season_type DESC, week_num DESC`)
+	if err != nil {
+		return nil, fmt.Errorf("list weeks: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	weeks := make([]Week, 0)
+	for rows.Next() {
+		var week Week
+		if err := rows.Scan(&week.ID, &week.Season, &week.SeasonType, &week.WeekNum); err != nil {
+			return nil, fmt.Errorf("list weeks: %w", err)
+		}
+		weeks = append(weeks, week)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list weeks: %w", err)
+	}
+	return weeks, nil
+}
+
+// LatestWeek returns the newest week on record. Until the slate sync names a
+// current week, the home page opens the latest one. A missing row wraps
+// ErrWeekNotFound.
+func (s *Store) LatestWeek(ctx context.Context) (Week, error) {
+	var week Week
+	err := s.conn().QueryRowContext(ctx, `
+		SELECT id, season, season_type, week_num
+		FROM weeks
+		ORDER BY season DESC, season_type DESC, week_num DESC
+		LIMIT 1`).
+		Scan(&week.ID, &week.Season, &week.SeasonType, &week.WeekNum)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Week{}, fmt.Errorf("latest week: %w", ErrWeekNotFound)
+	}
+	if err != nil {
+		return Week{}, fmt.Errorf("latest week: %w", err)
+	}
+	return week, nil
+}
+
 // WeekByID returns the week with the given ID. A missing row wraps
 // ErrWeekNotFound.
 func (s *Store) WeekByID(ctx context.Context, id int64) (Week, error) {

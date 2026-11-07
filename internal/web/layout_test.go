@@ -205,7 +205,12 @@ func renderPage(t *testing.T, page string, data webui.Page) string {
 	renderer, err := webui.NewRenderer(assets.Templates, false)
 	require.NoError(t, err)
 
-	html, err := renderer.Render(page, data)
+	var value any = data
+	if page == "slip" {
+		value = webui.SlipPage{Page: data}
+	}
+
+	html, err := renderer.Render(page, value)
 	require.NoError(t, err)
 
 	return string(html)
