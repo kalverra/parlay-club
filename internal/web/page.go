@@ -24,6 +24,13 @@ type SlipOption struct {
 	Current bool
 }
 
+// GroupOption is one choice in the top bar's group switcher.
+type GroupOption struct {
+	ID      int64
+	Name    string
+	Current bool
+}
+
 // User is the person shown in the top bar.
 type User struct {
 	Name        string
@@ -38,7 +45,19 @@ type Page struct {
 	Tab       Tab
 	WeekLabel string
 	Slips     []SlipOption
+	Groups    []GroupOption
 	User      *User
+}
+
+// CurrentGroup returns the name of the active group, or "" when the page has
+// no group choices. The layout shows it in the top bar's group switcher.
+func (p Page) CurrentGroup() string {
+	for _, group := range p.Groups {
+		if group.Current {
+			return group.Name
+		}
+	}
+	return ""
 }
 
 // The four bottom-bar destinations.

@@ -136,7 +136,7 @@ Effort: hard (a new scope check on every route, plus open sign-up, across slips,
 
 - [x] Add `JoinByToken`, `ResetInvite`, and `Leave`, the join routes, and the login return path through `pc_oauth`, with
   the join-flow tests
-- [ ] Build the `/groups` page, create form, invite copy and reset, leave, and the top-bar switcher at phone width
+- [x] Build the `/groups` page, create form, invite copy and reset, leave, and the top-bar switcher at phone width
 - [ ] Docs: add `docs/concepts/groups.md`; update `docs/concepts/access.md`, `docs/concepts/slips.md`,
   `docs/concepts/live-updates.md`, `docs/reference/schema.md`, and `docs/reference/config.md`; fix Routes in
   `plan/architecture.md` and delete the Record Book group notes that this change moves into the docs

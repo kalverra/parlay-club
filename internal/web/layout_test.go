@@ -121,6 +121,45 @@ func TestLayoutHidesSwitcherForOneSlip(t *testing.T) {
 	assert.NotContains(t, out, `id="slip-switcher"`)
 }
 
+func TestLayoutGroupSwitcher(t *testing.T) {
+	t.Parallel()
+
+	out := renderPage(t, "slip", webui.Page{
+		Title: "Slip",
+		Tab:   webui.TabSlip,
+		User:  &webui.User{Name: "Adam Hamrick", Initials: "AH", AvatarClass: "bg-sky-500"},
+		Groups: []webui.GroupOption{
+			{ID: 1, Name: "Just me"},
+			{ID: 2, Name: "Sunday Parlay Club", Current: true},
+		},
+	})
+
+	assert.Contains(t, out, `data-group-switcher`)
+	assert.Contains(t, out, ">Sunday Parlay Club</span>")
+	assert.Contains(t, out, "Your groups")
+	assert.Contains(t, out, `hx-post="/groups/switch"`)
+	assert.Contains(t, out, `name="group_id" value="1"`)
+	assert.Contains(t, out, `name="group_id" value="2"`)
+	assert.Contains(t, out, `href="/groups"`)
+}
+
+func TestLayoutHidesGroupSwitcherForOneGroup(t *testing.T) {
+	t.Parallel()
+
+	out := renderPage(t, "slip", webui.Page{
+		Title:  "Slip",
+		Tab:    webui.TabSlip,
+		User:   &webui.User{Name: "Adam Hamrick", Initials: "AH", AvatarClass: "bg-sky-500"},
+		Groups: []webui.GroupOption{{ID: 1, Name: "Just me", Current: true}},
+	})
+
+	assert.NotContains(t, out, `data-group-switcher`)
+	assert.NotContains(t, out, "Your groups")
+	assert.Contains(t, out, `href="/groups"`, "a solo player still reaches the groups page")
+	assert.Contains(t, out, `title="Just me"`)
+	assert.Contains(t, out, ">Just me</a")
+}
+
 func TestLayoutWithoutUser(t *testing.T) {
 	t.Parallel()
 

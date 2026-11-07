@@ -153,5 +153,5 @@ func newShellWithUser(t *testing.T, userFrom webui.UserFrom) http.Handler {
 	renderer, err := webui.NewRenderer(assets.Templates, false)
 	require.NoError(t, err)
 
-	return webui.New(zerolog.Nop(), renderer, userFrom)
+	return webui.New(zerolog.Nop(), renderer, userFrom, nil)
 }

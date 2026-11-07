@@ -17,6 +17,7 @@ var pageFiles = map[string]string{
 	"login":     "templates/login.html",
 	"dev-login": "templates/dev-login.html",
 	"join":      "templates/join.html",
+	"groups":    "templates/groups.html",
 }
 
 // Renderer parses and runs the page templates. It is safe to use from several
