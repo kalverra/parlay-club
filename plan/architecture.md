@@ -62,18 +62,6 @@ come. They use Go 1.22+ method patterns and inherit the same sign-in and group s
 | `GET /record?season=`                      | Record Book for the active group                          | 7     |
 | `PUT /slips/{id}/wagers/me`                | Log own wager                                            | 7     |
 
-## Refresh
-
-`internal/refresh` owns when outside data is fetched. No cron, no Cloud Scheduler.
-
-- `Kick()` runs from middleware on full-page `GET` loads (not partials, not SSE). It returns at once.
-- For each source it reads `sync_state.fetched_at` and runs stale ones in a background goroutine with
-  `context.WithoutCancel`, a 30 s timeout, and `singleflight` keyed by source so two page loads never double-fetch.
-- Staleness rules are in data-sources.md, next to each source.
-- On failure: log, keep old data, leave `fetched_at` unchanged, and back off that source for 5 minutes (in memory).
-- After a successful sync that changed rows, publish to the hub (see [live updates](../docs/concepts/live-updates.md)).
-- Grading (`grading-record-book`) is another source: it runs when any game is `FINAL` and has legs still `PENDING`.
-
 ## Database access
 
 - `db.Open(path)` uses DSN pragmas: `journal_mode(WAL)`, `busy_timeout(5000)`, `foreign_keys(1)`, `synchronous(NORMAL)`,

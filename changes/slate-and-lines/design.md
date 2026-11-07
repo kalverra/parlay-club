@@ -74,7 +74,7 @@ Games tab. Props wait for `props-research`. Read before starting:
   fake-clock tests for each rule
 - [x] Wire Kick into full-page GET middleware, publish week and slip topics after changed syncs, and replace the SSE
   LiveWindow stub with the real game-window check and its test
-- [ ] Docs: add docs/concepts/data-refresh.md; delete Refresh from plan/architecture.md
+- [x] Docs: add docs/concepts/data-refresh.md; delete Refresh from plan/architecture.md
 
 ### Phase 5: Games tab
 
