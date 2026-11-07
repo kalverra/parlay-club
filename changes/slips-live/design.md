@@ -49,7 +49,7 @@ an optional game; `slate-and-lines` adds the game picker. Read before starting:
 
 ### Phase 1: Parlay math
 
-- [ ] Add internal/parlay conversions, combined odds, payout with boost, units, and median reference price, with table
+- [x] Add internal/parlay conversions, combined odds, payout with boost, units, and median reference price, with table
   tests for both conversion directions, a 3-leg combo, boost, push legs dropped, and an even-count median
 - [ ] Docs: add docs/reference/odds-math.md; delete the Odds and payout section from plan/product.md
 
