@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Generate, lint, test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v5
+
+      # Installs Go, golangci-lint, and the pinned Tailwind CLI from mise.toml.
+      - uses: jdx/mise-action@v3
+
+      # app.css is generated and committed; a diff means a template changed
+      # without regenerating the stylesheet.
+      - name: Generate
+        run: go generate ./...
+
+      - name: Check generated files are committed
+        run: git diff --exit-code
+
+      - name: Lint
+        run: golangci-lint run ./...
+
+      - name: Test
+        run: go test -short -race ./...
