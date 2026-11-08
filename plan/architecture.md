@@ -67,26 +67,6 @@ come. They use Go 1.22+ method patterns and inherit the same sign-in and group s
 - Hand-written SQL in `internal/db` methods on a `Store`. Multi-statement changes run in one transaction.
 - Tests open a fresh DB file under `t.TempDir()` with migrations applied.
 
-## Persistence
-
-- The container's entrypoint (`deploy/entrypoint.sh`):
-
-  ```sh
-  litestream restore -if-db-not-exists -if-replica-exists -config /etc/litestream.yml "$DB_PATH"
-  exec litestream replicate -config /etc/litestream.yml -exec /app/server
-  ```
-
-- `deploy/litestream.yml` replicates `$DB_PATH` to `gcs://$LITESTREAM_BUCKET/parlay.db`. Pin one Litestream release in
-  the Dockerfile and check the config syntax against that release's docs; it changed between 0.3 and 0.5.
-- On SIGTERM, Litestream forwards the signal, the server shuts down within 8 s (`http.Server.Shutdown`), and Litestream
-  does a final sync. Cloud Run allows 10 s.
-- Cloud Run throttles CPU between requests, so replication can lag until the next request or shutdown. That is
-  acceptable at this traffic.
-- **Two-writer risk:** during a deploy, the new instance restores before the old one stops, so writes made in those
-  seconds can be lost. The startup lease from the planning session is dropped: Cloud Run waits for the new instance to
-  become ready before stopping the old one, so a lease would block every deploy. The deploy blackout below covers the
-  risk instead.
-
 ## Deploy
 
 ### Image

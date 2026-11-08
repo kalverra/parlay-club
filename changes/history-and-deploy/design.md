@@ -22,7 +22,8 @@ Sunday, Nov 8. It runs interactively: the user runs the GCP setup and the first 
   transaction, then each leg and result goes through `internal/slips` so results and statuses are computed the normal
   way. The whole file is validated before the first write.
 - Container: multi-stage `Dockerfile` (Go build, then alpine with a pinned Litestream). `deploy/entrypoint.sh` restores
-  then runs `litestream replicate -exec`. A `LITESTREAM_REPLICA_URL` override lets local runs use a `file` replica.
+  then runs `litestream replicate -exec`. A `LITESTREAM_REPLICA_URL` override lets local runs use a local replica
+  directory.
 - `deploy/setup.sh` is idempotent `gcloud` and prints the GitHub variables. The agent writes it; the user runs it.
 - Workflows: `ci.yml` and `deploy.yml` per `plan/architecture.md` CI, with `deploy/blackout.sh` gating deploys.
 - Groups and `google-oauth` later: `internal/seed` resolves each person through one function. Today it creates a user by
@@ -44,7 +45,8 @@ Sunday, Nov 8. It runs interactively: the user runs the GCP setup and the first 
 
 ## Risks
 
-- Litestream config syntax differs by version: pin one release and confirm against its docs.
+- Litestream config syntax differs by version: 0.5.18 is pinned, and the local smoke test confirmed its config, restore,
+  and replicate paths. Treat a version bump as a config change.
 - Two writers during a deploy: covered by the blackout; documented in the persistence concept doc.
 - Free-tier drift: the $5 budget alert is the backstop. The deploy runbook says how to check spend.
 - The agent can't run GCP or GitHub setup; the runbook must let the user finish alone.
@@ -68,7 +70,7 @@ Sunday, Nov 8. It runs interactively: the user runs the GCP setup and the first 
 
 - [x] Add the Dockerfile, deploy/litestream.yml, and deploy/entrypoint.sh with a pinned Litestream release, and smoke
   test locally: build, run with a file replica, write a slip, restart, and confirm it restored
-- [ ] Docs: add docs/concepts/persistence.md; delete Persistence from plan/architecture.md
+- [x] Docs: add docs/concepts/persistence.md; delete Persistence from plan/architecture.md
 
 ### Phase 4: CI and deploy
 
