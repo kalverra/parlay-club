@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -407,6 +408,95 @@ func TestRefreshArchivesEveryIngestCall(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, oddsState.OddsCreditsRemaining)
 	assert.Equal(t, 489, *oddsState.OddsCreditsRemaining)
+}
+
+// TestGoogleSignInLeavesTheArchiveEmpty guards the invariant that Google
+// sign-in keeps its own HTTP client. The ingest client proves the archive is
+// live first, so an OAuth request reaching it would show up as a second row.
+func TestGoogleSignInLeavesTheArchiveEmpty(t *testing.T) {
+	t.Parallel()
+
+	database, err := db.Open(filepath.Join(t.TempDir(), "parlay.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { assert.NoError(t, database.Close()) })
+	require.NoError(t, db.Migrate(t.Context(), database))
+	store := db.NewStore(database)
+
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"events":[]}`))
+	}))
+	t.Cleanup(source.Close)
+
+	client := newIngestClient(store)
+	request, err := http.NewRequestWithContext(
+		archive.WithKey(t.Context(), refresh.ScoreboardSource),
+		http.MethodGet,
+		source.URL+"/scoreboard",
+		nil,
+	)
+	require.NoError(t, err)
+	response, err := client.Do(request)
+	require.NoError(t, err)
+	_, err = io.Copy(io.Discard, response.Body)
+	require.NoError(t, err)
+	require.NoError(t, response.Body.Close())
+
+	rows, err := store.ListAPIResponses(t.Context(), db.APIResponseFilter{})
+	require.NoError(t, err)
+	require.Len(t, rows, 1, "the ingest client's archive is live")
+	require.Equal(t, refresh.ScoreboardSource, rows[0].Key)
+
+	server := fakeOIDC(t)
+	provider, err := newProviderForIssuer(t.Context(), config.Config{
+		GoogleClientID:     "client-id",
+		GoogleClientSecret: "secret",
+		BaseURL:            "http://localhost:8080",
+	}, server.URL)
+	require.NoError(t, err)
+
+	_, err = provider.Exchange(t.Context(), "code-1", "verifier-1", "nonce-1")
+	require.Error(t, err, "the fake issuer returns an invalid ID token")
+
+	rows, err = store.ListAPIResponses(t.Context(), db.APIResponseFilter{})
+	require.NoError(t, err)
+	require.Len(t, rows, 1, "OAuth traffic must never reach the archive")
+	assert.Equal(t, refresh.ScoreboardSource, rows[0].Key)
+}
+
+// fakeOIDC serves the discovery document, an empty key set, and a token
+// response whose ID token cannot verify. The calls still cross the network,
+// which is what the archive guard needs.
+func fakeOIDC(t *testing.T) *httptest.Server {
+	t.Helper()
+
+	var server *httptest.Server
+	mux := http.NewServeMux()
+	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"issuer":                                server.URL,
+			"authorization_endpoint":                server.URL + "/auth",
+			"token_endpoint":                        server.URL + "/token",
+			"jwks_uri":                              server.URL + "/keys",
+			"id_token_signing_alg_values_supported": []string{"RS256"},
+		})
+	})
+	mux.HandleFunc("/keys", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"keys": []any{}})
+	})
+	mux.HandleFunc("/token", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token": "access-token",
+			"token_type":   "Bearer",
+			"expires_in":   3600,
+			"id_token":     "not-a-signed-token",
+		})
+	})
+	server = httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	return server
 }
 
 // waitForSyncStates blocks until every source has recorded a fetch. Refresh

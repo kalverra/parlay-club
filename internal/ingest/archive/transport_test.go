@@ -121,6 +121,14 @@ func bodyCount(t *testing.T, database *sql.DB) int {
 	return count
 }
 
+func TestNewTransportRejectsNilSink(t *testing.T) {
+	t.Parallel()
+
+	assert.PanicsWithValue(t, "archive: nil Sink", func() {
+		archive.NewTransport(nil, nil, nil)
+	})
+}
+
 func TestTransportArchivesSuccessfulResponse(t *testing.T) {
 	t.Parallel()
 

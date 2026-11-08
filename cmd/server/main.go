@@ -145,6 +145,16 @@ func newIngestClient(store *db.Store) *http.Client {
 // newProvider builds the Google sign-in provider, or returns nil when Google is
 // not configured in dev.
 func newProvider(ctx context.Context, cfg config.Config) (auth.Provider, error) {
+	return newProviderForIssuer(ctx, cfg, "")
+}
+
+// newProviderForIssuer is newProvider with a testable issuer. An empty issuer
+// means Google.
+func newProviderForIssuer(
+	ctx context.Context,
+	cfg config.Config,
+	issuer string,
+) (auth.Provider, error) {
 	if cfg.GoogleClientID == "" {
 		return nil, nil //nolint:nilnil // no provider is the dev-only case.
 	}
@@ -154,7 +164,7 @@ func newProvider(ctx context.Context, cfg config.Config) (auth.Provider, error) 
 		cfg.GoogleClientID,
 		cfg.GoogleClientSecret,
 		strings.TrimRight(cfg.BaseURL, "/")+"/auth/google/callback",
-		"",
+		issuer,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("google sign-in: %w", err)
