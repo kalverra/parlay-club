@@ -2,8 +2,8 @@
 id: slips
 title: Slips
 type: concept
-summary: How a group builds one shared parlay a week from the slate, with members, legs, quick-add, create-slip defaults, and the editing and locking rules.
-tags: [slips, weeks, legs, members, locking, activity, groups, games, quick-add]
+summary: How a group builds one shared parlay a week from the slate, with members, legs, quick-add, create-slip defaults, grading, and the editing and locking rules.
+tags: [slips, weeks, legs, members, locking, grading, results, activity, groups, games, quick-add]
 sources: [internal/slips/slips.go, internal/slips/rules.go, internal/db/slips.go, internal/db/legs.go, internal/db/weeks.go, internal/db/games.go, internal/web/games.go]
 last_verified: 2026-11-08
 ---
@@ -100,15 +100,41 @@ with `quick=1`, so every rule below still applies: membership, the per-member li
 The pills appear when the week's newest slip is `OPEN`. With no slip the card links to the create-slip page, and with a
 locked slip it says picks cannot be added. "Custom leg" opens the leg form with the game already chosen.
 
+## Grading
+
+Every leg carries a result: `PENDING`, `NEEDS_GRADING`, `WON`, `LOST`, `PUSH`, or `VOID`. New legs are `PENDING`.
+
+Any slip member can grade any leg, not just their own, at any time; locking in or a kickoff does not stop a grade. The
+result chip on each leg opens a menu of `PENDING`, `WON`, `LOST`, `PUSH`, and `VOID`. Each choice sends
+`PUT /legs/{id}/result` with the upper-case result, and the refreshed panel shows the recomputed slip. Someone who is
+not on the slip sees a plain chip and cannot grade.
+
+`internal/slips.Service.SetLegResult` records the member's name in `graded_by`, writes "{name} set {selection} to
+{result}" to the activity feed, and publishes `slip:{id}`. Grading a leg the same way again by the same member changes
+nothing, so it writes no activity entry and publishes nothing. A later grade by any member overrides the earlier one.
+
+The slip result recomputes from every leg after each change:
+
+- any leg `LOST` → `LOST` (a slip can bust before all its games end);
+- else, any leg `PENDING` or `NEEDS_GRADING` → `PENDING`;
+- else, every leg `PUSH` or `VOID` → `PUSH`;
+- else → `WON`.
+
+`PUSH` and `VOID` legs drop out of the slip's odds (see [Odds math](../reference/odds-math.md)) and count as neither a
+hit nor a miss.
+
+`OTHER` legs and any leg on a past-week slip normally grade by hand. The auto-grader (`grading-record-book`) will fill
+in the other markets from the ESPN final box score and leave `NEEDS_GRADING` where it cannot decide; any member can then
+override its result the same way. The per-market rules are in [Product](../../plan/product.md).
+
 ## Status and result
 
 A slip's status is `OPEN`, `LOCKED`, or `GRADED`, and its result is `PENDING`, `WON`, `LOST`, or `PUSH`.
 
 - New slips are `OPEN`.
 - The status becomes `LOCKED` when every member locks in.
-- The status becomes `GRADED` once the result is no longer `PENDING`.
-
-Grading computes the result from the legs. See [Product](../../plan/product.md) for the grading rules.
+- The status becomes `GRADED` once the result is no longer `PENDING`. Until then it follows the locks: `LOCKED` when
+  every member has locked in, otherwise `OPEN`.
 
 ## Editing and locking
 
@@ -158,4 +184,4 @@ A person can belong to several slips in a week. The top bar switches between the
 - [Odds math](../reference/odds-math.md): conversions, combined odds, reference price, payout, and units.
 - [Database schema](../reference/schema.md): the `weeks`, `slips`, `slip_members`, `legs`, and `activity` tables.
 - [Groups](groups.md): how the active group scopes slips, and how membership works.
-- [Product](../../plan/product.md): grading, the Record Book, and the screens.
+- [Product](../../plan/product.md): the auto-grading rules, the Record Book, and the screens.

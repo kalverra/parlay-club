@@ -1,22 +1,11 @@
 # Product
 
-Slips, weeks, members, legs, and the editing and locking rules live in [Slips](../docs/concepts/slips.md), which also
-covers the Games tab.
+Slips, weeks, members, legs, manual grading, and the editing and locking rules live in
+[Slips](../docs/concepts/slips.md), which also covers the Games tab.
 
 ## Grading
 
 Leg results: `PENDING`, `NEEDS_GRADING`, `WON`, `LOST`, `PUSH`, `VOID`.
-
-- Until `grading-record-book`, any member sets any leg's result by hand. After `grading-record-book`, the grader sets
-  results and any member can override them. `graded_by` records `auto` or the user's name.
-- `PUSH` and `VOID` legs drop out of the slip's odds (see [Odds math](../docs/reference/odds-math.md)) and count as
-  neither a hit nor a miss.
-- **Slip result**, recomputed on every leg result change:
-  - any leg `LOST` → `LOST` (a slip can bust before all games end);
-  - else, any leg `PENDING` or `NEEDS_GRADING` → `PENDING`;
-  - else, every leg `PUSH` or `VOID` → `PUSH`;
-  - else → `WON`.
-- The slip's status becomes `GRADED` once its result is not `PENDING`.
 
 Auto-grading rules per market (`grading-record-book`), from the ESPN final box score:
 
@@ -39,6 +28,9 @@ Auto-grading rules per market (`grading-record-book`), from the ESPN final box s
 - For OVER/UNDER: stat above the line wins OVER, below wins UNDER, equal is `PUSH`.
 - A player prop whose player is absent from the box score is `VOID`.
 - A prop with no `player_id` is `NEEDS_GRADING`.
+
+The grader writes leg results the normal way, so the slip result and status recompute as described in
+[Slips](../docs/concepts/slips.md).
 
 ## Record Book
 

@@ -12,8 +12,11 @@ Sunday, Nov 8. It runs interactively: the user runs the GCP setup and the first 
 ## Approach
 
 - Leg results and slip results live in `internal/slips`: `SetLegResult` enforces membership, records `graded_by`,
-  recomputes the slip result and status, writes activity, and publishes.
-- The create-slip form accepts any past season and week; `internal/slips` already skips kickoff rules for past weeks.
+  recomputes the slip result and status, writes activity, and publishes. Re-setting the same result by the same
+  member is a no-op.
+- The create-slip form lists stored weeks with their season and takes a typed season, season type, and week number for
+  a past week the slate never stored, upserting that week. A typed week later than the latest stored week is refused,
+  and `internal/slips` already skips kickoff rules for past weeks.
 - `internal/seed` reads `seed/history.yaml` at boot after migrations. Each slip is keyed by week and name; existing
   slips are skipped. It goes through `internal/slips` so results and statuses are computed the normal way.
 - Container: multi-stage `Dockerfile` (Go build, then alpine with a pinned Litestream). `deploy/entrypoint.sh` restores
@@ -51,7 +54,7 @@ Sunday, Nov 8. It runs interactively: the user runs the GCP setup and the first 
 - [x] Add SetLegResult with slip result and status recompute, its table tests for every Grading case, and the result
   chip menu on each leg with PUT /legs/{id}/result
 - [x] Allow past weeks in the create-slip form and test a past-week slip with free-text OTHER legs
-- [ ] Docs: add grading to docs/concepts/slips.md; delete the manual grading parts from plan/product.md
+- [x] Docs: add grading to docs/concepts/slips.md; delete the manual grading parts from plan/product.md
 
 ### Phase 2: History file
 
