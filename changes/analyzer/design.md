@@ -12,13 +12,14 @@ slip. `median_trap` waits for `props-research`, which brings player stats. Read 
 ## Approach
 
 - `internal/analyzer` is pure: `AnalyzeSlip(legs, games, stats) []Warning` with the types in `plan/analyzer.md`. One
-  unexported function per rule, each `func(ctx) []Warning`, run in a fixed order, then sorted by severity and first leg
-  position.
+  unexported function per rule, each `func(*analysis) []Warning` over a shared filtered view, run in a fixed order, then
+  sorted by severity and first leg position.
 - A small shared helper set covers "same game", "same team", "opponent", "favorite", "underdog", and "passing/receiving
   over", so rules read like their spec.
 - Messages are built with `fmt.Sprintf` from the model messages, naming owners when legs belong to different people.
 - `internal/web` maps slip legs and games into analyzer inputs when rendering the slip panel. The banner is part of the
-  panel, so it refreshes on `slip-updated` and `board-updated` (weather changes) with no new wiring.
+  panel, and the panel's `hx-trigger` includes `board-updated` beside `slip-updated`, so weather changes re-render the
+  slip without a new SSE handler.
 - `stats` is passed through but unread until `props-research` adds player numbers; a nil map is fine.
 
 ## Verification
@@ -35,7 +36,7 @@ slip. `median_trap` waits for `props-research`, which brings player stats. Read 
 ## Risks
 
 - Rules that read odds or lines from legs depend on hand-entered data being sane. Validate line and odds ranges in the
-  leg form (in `internal/slips`), not in the analyzer.
+  leg form handler, not in the analyzer.
 - Tone drift: review every message against the Tone section before closing.
 
 ## TODO
@@ -58,4 +59,4 @@ slip. `median_trap` waits for `props-research`, which brings player stats. Read 
 - [x] Map slip legs and games into analyzer inputs and render the banner: Looks clean, or cards sorted by severity with
   message, legs, and owners, with a handler test where BUF -7.5 (one user) and Josh Allen Over 245.5 (another) shows
   blowout_passing and hook to both
-- [ ] Docs: add docs/concepts/analyzer.md (purpose, tone, inputs); delete the banner text from plan/product.md
+- [x] Docs: add docs/concepts/analyzer.md (purpose, tone, inputs); delete the banner text from plan/product.md
