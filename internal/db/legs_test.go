@@ -184,6 +184,34 @@ func TestUpdateLegChangesOnlyThePick(t *testing.T) {
 	require.ErrorIs(t, err, db.ErrLegNotFound)
 }
 
+func TestSetLegResult(t *testing.T) {
+	t.Parallel()
+
+	store, _ := openTestStore(t)
+	ada := createUser(t, store, "Ada")
+	group := createTestGroup(t, store, ada)
+	week := createTestWeek(t, store, 9)
+	slip := createTestSlip(t, store, group, week, "Week 9", 2, ada)
+
+	leg, err := store.CreateLeg(t.Context(), db.Leg{
+		SlipID: slip.ID, UserID: ada.ID, MarketType: "ML", Selection: "BUF ML",
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, store.SetLegResult(t.Context(), leg.ID, parlay.Won, "Ada"))
+	stored, err := store.LegByID(t.Context(), leg.ID)
+	require.NoError(t, err)
+	assert.Equal(t, parlay.Won, stored.Result)
+	require.NotNil(t, stored.GradedBy)
+	assert.Equal(t, "Ada", *stored.GradedBy)
+
+	require.ErrorIs(t,
+		store.SetLegResult(t.Context(), leg.ID, parlay.Result("MAYBE"), "Ada"),
+		db.ErrLegResultInvalid)
+	require.ErrorIs(t,
+		store.SetLegResult(t.Context(), 404, parlay.Won, "Ada"), db.ErrLegNotFound)
+}
+
 func TestDeleteLeg(t *testing.T) {
 	t.Parallel()
 

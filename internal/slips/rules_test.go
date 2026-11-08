@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kalverra/parlay-club/internal/db"
+	"github.com/kalverra/parlay-club/internal/parlay"
 	"github.com/kalverra/parlay-club/internal/slips"
 )
 
@@ -178,6 +179,39 @@ func addLeg(
 	})
 	require.NoError(t, err)
 	return leg
+}
+
+// addSpreadLeg writes a spread leg with a line, bypassing the rules under test.
+func addSpreadLeg(
+	t *testing.T,
+	store *db.Store,
+	slip db.Slip,
+	owner db.User,
+	selection string,
+	line float64,
+) db.Leg {
+	t.Helper()
+
+	leg, err := store.CreateLeg(t.Context(), db.Leg{
+		SlipID:     slip.ID,
+		UserID:     owner.ID,
+		MarketType: "SPREAD",
+		Selection:  selection,
+		Team:       new("BUF"),
+		Line:       &line,
+	})
+	require.NoError(t, err)
+	return leg
+}
+
+// gradeLeg sets one leg's result through the service, then forgets the
+// activity and publish it made so the next call's traces stand alone.
+func gradeLeg(t *testing.T, f *fixture, actorID, legID int64, result parlay.Result) {
+	t.Helper()
+
+	_, err := f.service.SetLegResult(t.Context(), actorID, legID, result)
+	require.NoError(t, err)
+	f.clearHistory(t)
 }
 
 // activity returns a slip's feed, newest first.
@@ -856,6 +890,250 @@ func TestRefusedMutationWritesNothing(t *testing.T) {
 	assertRefused(t, f, err, slips.ErrNotMember)
 	assert.Empty(t, activity(t, f.store, f.slip.ID))
 	assert.Empty(t, f.published.topics)
+}
+
+// TestSetLegResultRecomputesTheSlip covers every case in plan/product.md
+// "Grading": a lost leg busts the slip, a waiting leg holds it, pushed and
+// voided legs drop out, and a graded slip follows its legs back to pending.
+func TestSetLegResultRecomputesTheSlip(t *testing.T) {
+	t.Parallel()
+
+	type testCase struct {
+		// arrange leaves the other legs as the case needs and returns the leg
+		// to grade. It clears the setup's activity before returning.
+		arrange func(t *testing.T, f *fixture) int64
+		result  parlay.Result
+		want    parlay.Result
+		status  db.SlipStatus
+	}
+
+	tests := map[string]testCase{
+		"every leg won is a won slip": {
+			arrange: func(t *testing.T, f *fixture) int64 {
+				t.Helper()
+				leg := addLeg(t, f.store, f.slip, f.ada, nil, "BUF -3.5")
+				other := addLeg(t, f.store, f.slip, f.sam, nil, "MIA ML")
+				gradeLeg(t, f, f.sam.ID, other.ID, parlay.Won)
+				return leg.ID
+			},
+			result: parlay.Won,
+			want:   parlay.Won,
+			status: db.SlipGraded,
+		},
+		"a lost leg busts the slip before the others finish": {
+			arrange: func(t *testing.T, f *fixture) int64 {
+				t.Helper()
+				leg := addLeg(t, f.store, f.slip, f.ada, nil, "BUF -3.5")
+				addLeg(t, f.store, f.slip, f.sam, nil, "MIA ML")
+				return leg.ID
+			},
+			result: parlay.Lost,
+			want:   parlay.Lost,
+			status: db.SlipGraded,
+		},
+		"a pending leg holds the slip pending": {
+			arrange: func(t *testing.T, f *fixture) int64 {
+				t.Helper()
+				leg := addLeg(t, f.store, f.slip, f.ada, nil, "BUF -3.5")
+				other := addLeg(t, f.store, f.slip, f.sam, nil, "MIA ML")
+				gradeLeg(t, f, f.sam.ID, other.ID, parlay.Won)
+				addLeg(t, f.store, f.slip, f.sam, nil, "BUF@MIA Over 47.5")
+				return leg.ID
+			},
+			result: parlay.Won,
+			want:   parlay.Pending,
+			status: db.SlipOpen,
+		},
+		"a needs-grading leg holds the slip pending": {
+			arrange: func(t *testing.T, f *fixture) int64 {
+				t.Helper()
+				leg := addLeg(t, f.store, f.slip, f.ada, nil, "BUF -3.5")
+				other := addLeg(t, f.store, f.slip, f.sam, nil, "Josh Allen Anytime TD")
+				gradeLeg(t, f, f.sam.ID, other.ID, parlay.NeedsGrading)
+				return leg.ID
+			},
+			result: parlay.Won,
+			want:   parlay.Pending,
+			status: db.SlipOpen,
+		},
+		"a push on an exact line drops out": {
+			arrange: func(t *testing.T, f *fixture) int64 {
+				t.Helper()
+				leg := addSpreadLeg(t, f.store, f.slip, f.ada, "BUF -3", -3)
+				other := addLeg(t, f.store, f.slip, f.sam, nil, "MIA ML")
+				gradeLeg(t, f, f.sam.ID, other.ID, parlay.Won)
+				return leg.ID
+			},
+			result: parlay.Push,
+			want:   parlay.Won,
+			status: db.SlipGraded,
+		},
+		"a void leg drops out": {
+			arrange: func(t *testing.T, f *fixture) int64 {
+				t.Helper()
+				leg := addLeg(t, f.store, f.slip, f.ada, nil, "BUF -3.5")
+				other := addLeg(t, f.store, f.slip, f.sam, nil, "MIA ML")
+				gradeLeg(t, f, f.sam.ID, other.ID, parlay.Won)
+				return leg.ID
+			},
+			result: parlay.Void,
+			want:   parlay.Won,
+			status: db.SlipGraded,
+		},
+		"every leg push or void is a push": {
+			arrange: func(t *testing.T, f *fixture) int64 {
+				t.Helper()
+				leg := addSpreadLeg(t, f.store, f.slip, f.ada, "BUF -3", -3)
+				other := addLeg(t, f.store, f.slip, f.sam, nil, "MIA ML")
+				gradeLeg(t, f, f.sam.ID, other.ID, parlay.Void)
+				return leg.ID
+			},
+			result: parlay.Push,
+			want:   parlay.Push,
+			status: db.SlipGraded,
+		},
+		"a graded slip reopens when a leg goes back to pending": {
+			arrange: func(t *testing.T, f *fixture) int64 {
+				t.Helper()
+				leg := addLeg(t, f.store, f.slip, f.ada, nil, "BUF -3.5")
+				other := addLeg(t, f.store, f.slip, f.sam, nil, "MIA ML")
+				gradeLeg(t, f, f.ada.ID, leg.ID, parlay.Won)
+				gradeLeg(t, f, f.sam.ID, other.ID, parlay.Won)
+				return leg.ID
+			},
+			result: parlay.Pending,
+			want:   parlay.Pending,
+			status: db.SlipOpen,
+		},
+		"a graded slip relocks when every member is locked in": {
+			arrange: func(t *testing.T, f *fixture) int64 {
+				t.Helper()
+				require.NoError(t,
+					f.store.SetSlipMemberLock(t.Context(), f.slip.ID, f.ada.ID, &testNow))
+				require.NoError(t,
+					f.store.SetSlipMemberLock(t.Context(), f.slip.ID, f.sam.ID, &testNow))
+				leg := addLeg(t, f.store, f.slip, f.ada, nil, "BUF -3.5")
+				other := addLeg(t, f.store, f.slip, f.sam, nil, "MIA ML")
+				gradeLeg(t, f, f.ada.ID, leg.ID, parlay.Won)
+				gradeLeg(t, f, f.sam.ID, other.ID, parlay.Won)
+				return leg.ID
+			},
+			result: parlay.Pending,
+			want:   parlay.Pending,
+			status: db.SlipLocked,
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			f := newFixture(t)
+			legID := test.arrange(t, f)
+
+			updated, err := f.service.SetLegResult(t.Context(), f.ada.ID, legID, test.result)
+
+			assertAccepted(t, f, err)
+			assert.Equal(t, test.want, updated.Result)
+			assert.Equal(t, test.status, updated.Status)
+			assert.Equal(t, updated, reload(t, f.store, f.slip.ID))
+
+			leg, err := f.store.LegByID(t.Context(), legID)
+			require.NoError(t, err)
+			assert.Equal(t, test.result, leg.Result)
+			require.NotNil(t, leg.GradedBy)
+			assert.Equal(t, f.ada.Name, *leg.GradedBy)
+			assert.Equal(t,
+				fmt.Sprintf("%s set %s to %s", f.ada.Name, leg.Selection, test.result),
+				activity(t, f.store, f.slip.ID)[0].Message)
+		})
+	}
+}
+
+// TestSetLegResultLetsAnyMemberGradeAnyLeg keeps grading open to the group.
+func TestSetLegResultLetsAnyMemberGradeAnyLeg(t *testing.T) {
+	t.Parallel()
+
+	f := newFixture(t)
+	leg := addLeg(t, f.store, f.slip, f.ada, nil, "BUF -3.5")
+
+	_, err := f.service.SetLegResult(t.Context(), f.sam.ID, leg.ID, parlay.Won)
+
+	assertAccepted(t, f, err)
+	stored, err := f.store.LegByID(t.Context(), leg.ID)
+	require.NoError(t, err)
+	require.NotNil(t, stored.GradedBy)
+	assert.Equal(t, f.sam.Name, *stored.GradedBy)
+	assert.Equal(t, "Sam set BUF -3.5 to WON", activity(t, f.store, f.slip.ID)[0].Message)
+}
+
+// TestSetLegResultRefusesANonMember keeps grading inside the slip.
+func TestSetLegResultRefusesANonMember(t *testing.T) {
+	t.Parallel()
+
+	f := newFixture(t)
+	leg := addLeg(t, f.store, f.slip, f.ada, nil, "BUF -3.5")
+
+	_, err := f.service.SetLegResult(t.Context(), f.kim.ID, leg.ID, parlay.Won)
+
+	assertRefused(t, f, err, slips.ErrNotMember)
+	stored, err := f.store.LegByID(t.Context(), leg.ID)
+	require.NoError(t, err)
+	assert.Equal(t, parlay.Pending, stored.Result)
+	assert.Nil(t, stored.GradedBy)
+}
+
+// TestSetLegResultRefusesAnUnknownResult keeps a typo out of the table.
+func TestSetLegResultRefusesAnUnknownResult(t *testing.T) {
+	t.Parallel()
+
+	f := newFixture(t)
+	leg := addLeg(t, f.store, f.slip, f.ada, nil, "BUF -3.5")
+
+	_, err := f.service.SetLegResult(t.Context(), f.ada.ID, leg.ID, parlay.Result("MAYBE"))
+
+	assertRefused(t, f, err, db.ErrLegResultInvalid)
+	stored, err := f.store.LegByID(t.Context(), leg.ID)
+	require.NoError(t, err)
+	assert.Equal(t, parlay.Pending, stored.Result)
+}
+
+// TestSetLegResultAgainChangesNothing keeps a repeated grade quiet.
+func TestSetLegResultAgainChangesNothing(t *testing.T) {
+	t.Parallel()
+
+	f := newFixture(t)
+	leg := addLeg(t, f.store, f.slip, f.ada, nil, "BUF -3.5")
+	gradeLeg(t, f, f.ada.ID, leg.ID, parlay.Won)
+
+	updated, err := f.service.SetLegResult(t.Context(), f.ada.ID, leg.ID, parlay.Won)
+
+	require.NoError(t, err)
+	assert.Equal(t, parlay.Won, updated.Result, "the slip comes back unchanged")
+	assert.Empty(t, activity(t, f.store, f.slip.ID), "a repeated grade writes nothing")
+	assert.Empty(t, f.published.topics, "a repeated grade publishes nothing")
+}
+
+// TestSetLegResultOverridesAnEarlierGrade proves any member can change a grade
+// and the slip follows.
+func TestSetLegResultOverridesAnEarlierGrade(t *testing.T) {
+	t.Parallel()
+
+	f := newFixture(t)
+	leg := addLeg(t, f.store, f.slip, f.ada, nil, "BUF -3.5")
+	other := addLeg(t, f.store, f.slip, f.sam, nil, "MIA ML")
+	gradeLeg(t, f, f.sam.ID, other.ID, parlay.Won)
+	gradeLeg(t, f, f.ada.ID, leg.ID, parlay.Lost)
+
+	updated, err := f.service.SetLegResult(t.Context(), f.sam.ID, leg.ID, parlay.Won)
+
+	assertAccepted(t, f, err)
+	assert.Equal(t, parlay.Won, updated.Result)
+	stored, err := f.store.LegByID(t.Context(), leg.ID)
+	require.NoError(t, err)
+	require.NotNil(t, stored.GradedBy)
+	assert.Equal(t, f.sam.Name, *stored.GradedBy, "the latest grader owns the grade")
+	assert.Equal(t, "Sam set BUF -3.5 to WON", activity(t, f.store, f.slip.ID)[0].Message)
 }
 
 // TestServiceErrorsKeepTheirIdentity proves handlers can map the sentinels even

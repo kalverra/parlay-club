@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/kalverra/parlay-club/internal/db"
+	"github.com/kalverra/parlay-club/internal/parlay"
 )
 
 // Errors a handler can map to a 422 with a short message.
@@ -252,6 +253,103 @@ func (s *Service) AddLeg(ctx context.Context, actorID int64, leg db.Leg) (db.Leg
 	}
 	s.notify(leg.SlipID)
 	return created, nil
+}
+
+// SetLegResult records one leg's result by hand. Any slip member can grade any
+// leg, including one that was already graded. The leg records the acting member
+// as its grader, the slip's result and status are recomputed from every leg,
+// and one activity entry says what changed.
+func (s *Service) SetLegResult(
+	ctx context.Context,
+	actorID, legID int64,
+	result parlay.Result,
+) (db.Slip, error) {
+	var (
+		updated db.Slip
+		slipID  int64
+		changed bool
+	)
+	err := s.store.Tx(ctx, func(tx *db.Store) error {
+		leg, err := tx.LegByID(ctx, legID)
+		if err != nil {
+			return err
+		}
+		slipID = leg.SlipID
+		slip, actor, members, err := loadSlip(ctx, tx, slipID, actorID)
+		if err != nil {
+			return err
+		}
+
+		already := leg.Result == result && leg.GradedBy != nil && *leg.GradedBy == actor.User.Name
+		if already {
+			updated = slip
+			return nil
+		}
+		if err := tx.SetLegResult(ctx, leg.ID, result, actor.User.Name); err != nil {
+			return err
+		}
+
+		legs, err := tx.LegsForSlip(ctx, slipID)
+		if err != nil {
+			return err
+		}
+		slipResult, status := gradeSlip(legs, members)
+		message := fmt.Sprintf("%s set %s to %s", actor.User.Name, leg.Selection, result)
+		if _, err := tx.AddActivity(ctx, slipID, &actorID, message); err != nil {
+			return err
+		}
+		if err := tx.SetSlipGrade(ctx, slipID, slipResult, status); err != nil {
+			return err
+		}
+		updated, err = tx.SlipByID(ctx, slipID)
+		changed = true
+		return err
+	})
+	if err != nil {
+		return db.Slip{}, fmt.Errorf("set result on leg %d: %w", legID, err)
+	}
+	if changed {
+		s.notify(slipID)
+	}
+	return updated, nil
+}
+
+// gradeSlip recomputes a slip's result and status from its legs and members.
+func gradeSlip(legs []db.Leg, members []db.SlipMember) (parlay.Result, db.SlipStatus) {
+	result := slipResult(legs)
+	if result != parlay.Pending {
+		return result, db.SlipGraded
+	}
+	for _, member := range members {
+		if member.LockedAt == nil {
+			return result, db.SlipOpen
+		}
+	}
+	return result, db.SlipLocked
+}
+
+// slipResult grades a slip from its legs: any LOST busts it, a PENDING or
+// NEEDS_GRADING leg holds it open, all PUSH or VOID legs make it a push, and
+// anything else wins.
+func slipResult(legs []db.Leg) parlay.Result {
+	pending := false
+	counted := false
+	for _, leg := range legs {
+		switch leg.Result {
+		case parlay.Lost:
+			return parlay.Lost
+		case parlay.Pending, parlay.NeedsGrading:
+			pending = true
+		}
+		counted = counted || leg.Result.Counts()
+	}
+	if pending {
+		return parlay.Pending
+	}
+	if !counted {
+		return parlay.Push
+	}
+	return parlay.Won
 }
 
 // UpdateLeg changes a leg's pick fields. Only the owner can edit it, and the

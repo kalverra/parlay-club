@@ -20,6 +20,7 @@ import (
 
 	"github.com/kalverra/parlay-club/internal/db"
 	"github.com/kalverra/parlay-club/internal/live"
+	"github.com/kalverra/parlay-club/internal/parlay"
 	"github.com/kalverra/parlay-club/internal/slips"
 	webui "github.com/kalverra/parlay-club/internal/web"
 	assets "github.com/kalverra/parlay-club/web"
@@ -403,13 +404,100 @@ func TestSlipReferenceOddsUseMemberHomeBooks(t *testing.T) {
 	assert.Contains(t, body, "(-147)")
 }
 
+// TestLegResultMenuGradesALeg covers the chip menu on a leg and the PUT behind
+// it.
+func TestLegResultMenuGradesALeg(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	response := addLeg(t, fixture.handler, fixture.slip.ID, "BUF ML")
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	legs, err := fixture.store.LegsForSlip(t.Context(), fixture.slip.ID)
+	require.NoError(t, err)
+	require.Len(t, legs, 1)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodGet,
+		fmt.Sprintf("/slips/%d/panel", fixture.slip.ID),
+		nil,
+	)
+	fixture.handler.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	body := recorder.Body.String()
+	assert.Contains(t, body, fmt.Sprintf(`hx-put="/legs/%d/result"`, legs[0].ID))
+	for _, result := range []string{"PENDING", "WON", "LOST", "PUSH", "VOID"} {
+		assert.Contains(t, body, fmt.Sprintf(`name="result" value="%s"`, result))
+	}
+
+	graded := putForm(t,
+		fixture.handler,
+		fmt.Sprintf("/legs/%d/result", legs[0].ID),
+		url.Values{"result": {"WON"}},
+	)
+
+	require.Equal(t, http.StatusOK, graded.Code, graded.Body.String())
+	assert.Contains(t, graded.Body.String(), "GRADED")
+	stored, err := fixture.store.LegByID(t.Context(), legs[0].ID)
+	require.NoError(t, err)
+	assert.Equal(t, parlay.Won, stored.Result)
+	require.NotNil(t, stored.GradedBy)
+	assert.Equal(t, fixture.user.Name, *stored.GradedBy)
+
+	slip, err := fixture.store.SlipByID(t.Context(), fixture.slip.ID)
+	require.NoError(t, err)
+	assert.Equal(t, parlay.Won, slip.Result)
+	assert.Equal(t, db.SlipGraded, slip.Status)
+}
+
+// TestLegResultRefusesAnUnknownResult answers 422 with the short message.
+func TestLegResultRefusesAnUnknownResult(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	require.Equal(t, http.StatusOK, addLeg(t, fixture.handler, fixture.slip.ID, "BUF ML").Code)
+	legs, err := fixture.store.LegsForSlip(t.Context(), fixture.slip.ID)
+	require.NoError(t, err)
+	require.Len(t, legs, 1)
+
+	response := putForm(t,
+		fixture.handler,
+		fmt.Sprintf("/legs/%d/result", legs[0].ID),
+		url.Values{"result": {"MAYBE"}},
+	)
+
+	assert.Equal(t, http.StatusUnprocessableEntity, response.Code)
+	assert.Contains(t, response.Body.String(), "that result isn't valid")
+}
+
 // postForm sends one already-encoded form as the browser's HTMX layer would.
 func postForm(t *testing.T, handler http.Handler, path string, form url.Values) *httptest.ResponseRecorder {
 	t.Helper()
 
+	return sendForm(t, handler, http.MethodPost, path, form)
+}
+
+// putForm sends one already-encoded form as HTMX sends a grade.
+func putForm(t *testing.T, handler http.Handler, path string, form url.Values) *httptest.ResponseRecorder {
+	t.Helper()
+
+	return sendForm(t, handler, http.MethodPut, path, form)
+}
+
+// sendForm sends one form with the HTMX headers the CSRF layer wants.
+func sendForm(
+	t *testing.T,
+	handler http.Handler,
+	method, path string,
+	form url.Values,
+) *httptest.ResponseRecorder {
+	t.Helper()
+
 	request := httptest.NewRequestWithContext(
 		t.Context(),
-		http.MethodPost,
+		method,
 		path,
 		strings.NewReader(form.Encode()),
 	)

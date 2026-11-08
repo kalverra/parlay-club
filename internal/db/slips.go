@@ -25,6 +25,8 @@ var (
 	ErrSlipMemberNotFound = errors.New("slip member not found")
 	// ErrSlipStatusInvalid is returned when a status is not one the schema allows.
 	ErrSlipStatusInvalid = errors.New("invalid slip status")
+	// ErrSlipResultInvalid is returned when a result is not one a slip can carry.
+	ErrSlipResultInvalid = errors.New("invalid slip result")
 )
 
 // SlipStatus is where a slip sits between open editing and grading.
@@ -403,6 +405,37 @@ func (s *Store) SetSlipStatus(ctx context.Context, slipID int64, status SlipStat
 	}
 	if affected == 0 {
 		return fmt.Errorf("set status on slip %d: %w", slipID, ErrSlipNotFound)
+	}
+	return nil
+}
+
+// SetSlipGrade writes a slip's result and status together. Grading always
+// recomputes both from the legs, so they belong in one write. An unknown result
+// or status is refused, and a missing slip wraps ErrSlipNotFound.
+func (s *Store) SetSlipGrade(
+	ctx context.Context,
+	slipID int64,
+	result parlay.Result,
+	status SlipStatus,
+) error {
+	if !result.IsSlipResult() {
+		return fmt.Errorf("set grade on slip %d: %w", slipID, ErrSlipResultInvalid)
+	}
+	if !status.Valid() {
+		return fmt.Errorf("set grade on slip %d: %w", slipID, ErrSlipStatusInvalid)
+	}
+
+	exec, err := s.conn().ExecContext(ctx,
+		"UPDATE slips SET result = ?, status = ? WHERE id = ?", string(result), string(status), slipID)
+	if err != nil {
+		return fmt.Errorf("set grade on slip %d: %w", slipID, err)
+	}
+	affected, err := exec.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("set grade on slip %d: %w", slipID, err)
+	}
+	if affected == 0 {
+		return fmt.Errorf("set grade on slip %d: %w", slipID, ErrSlipNotFound)
 	}
 	return nil
 }

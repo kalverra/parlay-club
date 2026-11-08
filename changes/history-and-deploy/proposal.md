@@ -1,8 +1,9 @@
 ---
 slug: history-and-deploy
-status: designed
+status: implementing
 created: "2026-11-01"
-depends_on: [analyzer]
+depends_on:
+    - analyzer
 ---
 
 # History, manual grading, and deploy

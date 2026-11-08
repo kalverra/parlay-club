@@ -121,9 +121,10 @@ func (r *Renderer) template(name string) (*template.Template, error) {
 // templateFuncs are the helpers every template set shares.
 func templateFuncs() template.FuncMap {
 	return template.FuncMap{
-		"asset": AssetURL,
-		"list":  func(values ...string) []string { return values },
-		"inc":   func(value int) int { return value + 1 },
+		"asset":       AssetURL,
+		"list":        func(values ...string) []string { return values },
+		"inc":         func(value int) int { return value + 1 },
+		"resultClass": resultClass,
 	}
 }
 
