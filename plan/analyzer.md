@@ -69,31 +69,7 @@ Over 245.5"). Each rule below gives a model message; keep the content and adjust
 
 ## Rules
 
-### B: Weather (outdoor games with known weather only)
-
-**`wind`.** Danger when sustained ≥ 20 mph; else Warn when sustained ≥ 15 mph or gusts ≥ 25 mph. Flags every leg in that
-game that is a `PASS_YDS`, `PASS_TDS`, `REC_YDS`, `RECEPTIONS`, `KICKER_PTS`, or `TOTAL` OVER. One warning per game.
-> Heads up: 22 mph winds in Buffalo today. Passing and kicking overs take a real hit in that (field goals drop to about
-> 77%).
-
-**`fake_weather` (Info).** Precipitation > 0 and < 0.1 in/hr, wind < 10 mph, and a `TOTAL` UNDER in that game.
-> FYI: light rain without wind doesn't actually lower NFL scoring.
-
-### C: Key numbers
-
-**`hook` (Warn).** A `SPREAD` leg at exactly −3.5, −7.5, +2.5, or +6.5.
-> BUF -3.5 is on the hook. About 15% of games land on exactly 3, and that's a loss here. Buying to -3 or switching to
-> the ML is worth a look.
-
-For +2.5 / +6.5, say that landing on 3 or 7 loses by the hook and suggest buying to +3 / +7.
-
-**`total_key_number` (Info).** A `TOTAL` leg whose line is within 0.5 of 37, 41, 43, 44, 47, or 51.
-> 43.5 sits right between 43 and 44, two of the most common NFL final totals. The half point matters here.
-
 ### D: Parlay math and props
-
-**`chalk` (Warn).** Any leg with odds ≤ −230. Multiplier = `1 + 100/|odds|`; bust chance = `1 − |odds|/(|odds| + 100)`.
-> This -300 leg only bumps the payout 1.33× but still busts the slip about 1 in 4 times.
 
 **`median_trap` (Warn, `props-research`).** A yardage OVER (`PASS_YDS`, `RUSH_YDS`, `REC_YDS`) with a matched player who
 has ≥ 3 games, where line > median of the last 5 games. When line < season mean, add the mean to the message.
@@ -108,11 +84,6 @@ Table-driven, one table per rule. Every threshold is tested on both sides:
 | `blowout_passing`     | −7.0, −10.5                     | −6.5; opposing team's WR; other game  |
 | `trailing_rb`         | +4.5, +6.5, ML +150             | +4.0; favorite; other team's RB       |
 | `total_contradiction` | under + 2 overs/TDs             | under + 1; legs in another game       |
-| `wind`                | 15.0 Warn, 19.9 Warn, gust 25 Warn, 20.0 Danger | 14.9 with gust 24.9; indoor; nil weather |
-| `fake_weather`        | 0.05 in + 9 mph + under         | 0.1 in; 10 mph; over                  |
-| `hook`                | −3.5, −7.5, +2.5, +6.5          | −3, −4, +3.5, −6.5                    |
-| `total_key_number`    | 43, 43.5, 36.5, 51.5            | 45.5, 49                              |
-| `chalk`               | −230, −500                      | −229, +150                            |
 | `median_trap`         | line > L5 median                | line ≤ median; < 3 games; unmatched   |
 
 Plus: `OTHER` legs never warn; output order is stable; an empty slip returns no warnings.
