@@ -53,8 +53,13 @@ type Transport struct {
 }
 
 // NewTransport wraps base with an archive sink. A nil base means
-// http.DefaultTransport, and a nil clock means time.Now.
+// http.DefaultTransport, and a nil clock means time.Now. A nil sink is a
+// wiring mistake: the transport exists to save responses, so reject it at
+// construction rather than panicking on the first successful call.
 func NewTransport(base http.RoundTripper, sink Sink, now func() time.Time) *Transport {
+	if sink == nil {
+		panic("archive: nil Sink")
+	}
 	if base == nil {
 		base = http.DefaultTransport
 	}
@@ -87,7 +92,9 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 			Reader: io.MultiReader(bytes.NewReader(body), resp.Body),
 			Closer: resp.Body,
 		}
-		t.warn(req.Context(), "read API response body", readErr)
+		zerolog.Ctx(req.Context()).Warn().
+			Err(readErr).
+			Msg("read API response body")
 		return resp, nil
 	}
 	if over {
@@ -139,14 +146,6 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 		Str("key", record.Key).
 		Msg("archived API response")
 	return resp, nil
-}
-
-// warn logs an error when there is one.
-func (t *Transport) warn(ctx context.Context, message string, err error) {
-	if err == nil {
-		return
-	}
-	zerolog.Ctx(ctx).Warn().Err(err).Msg(message)
 }
 
 // readCapped reads at most limit+1 bytes and reports whether the body was

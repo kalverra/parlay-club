@@ -143,6 +143,60 @@ func TestAPIResponseBodyRoundTripsBytes(t *testing.T) {
 	assert.Equal(t, body, got, "the body must come back byte-for-byte")
 }
 
+func TestListAPIResponsesMatchesPrefixLiterally(t *testing.T) {
+	t.Parallel()
+
+	store, _ := openTestStore(t)
+	keys := []string{"odds", "odds:lines", "odds_extra", "odds%wild", "oddsy", "oddt"}
+	for i, key := range keys {
+		require.NoError(t, store.SaveAPIResponse(t.Context(), archive.Record{
+			Source:    "odds",
+			Key:       key,
+			Method:    http.MethodGet,
+			URL:       "https://api.the-odds-api.com/v4/odds",
+			Status:    http.StatusOK,
+			FetchedAt: time.Date(2026, time.November, 7, 13, i, 0, 0, time.UTC),
+			Body:      []byte(`{"key":"` + key + `"}`),
+		}))
+	}
+
+	tests := map[string]struct {
+		prefix string
+		want   []string
+	}{
+		"shared start excludes the next byte": {
+			prefix: "odds",
+			want:   []string{"odds", "odds:lines", "odds_extra", "odds%wild", "oddsy"},
+		},
+		"colon stays literal": {
+			prefix: "odds:",
+			want:   []string{"odds:lines"},
+		},
+		"underscore stays literal": {
+			prefix: "odds_",
+			want:   []string{"odds_extra"},
+		},
+		"percent stays literal": {
+			prefix: "odds%",
+			want:   []string{"odds%wild"},
+		},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			list, err := store.ListAPIResponses(t.Context(), db.APIResponseFilter{KeyPrefix: test.prefix})
+			require.NoError(t, err)
+
+			got := make([]string, len(list))
+			for i, response := range list {
+				got[i] = response.Key
+			}
+			assert.Equal(t, test.want, got)
+		})
+	}
+}
+
 func TestAPIResponseBodyReportsMissingHash(t *testing.T) {
 	t.Parallel()
 

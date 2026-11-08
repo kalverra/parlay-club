@@ -48,10 +48,15 @@ func (s *Store) ListAPIResponses(ctx context.Context, filter APIResponseFilter) 
 	conditions := make([]string, 0, 3)
 	args := make([]any, 0, 4)
 	if filter.KeyPrefix != "" {
-		// substr compares the prefix literally, so '%' and '_' in a key stay
-		// literal instead of acting as LIKE wildcards.
-		conditions = append(conditions, "substr(key, 1, length(?)) = ?")
-		args = append(args, filter.KeyPrefix, filter.KeyPrefix)
+		// A half-open range keeps the prefix comparison on the key index. A
+		// function such as substr would force a scan of the whole archive.
+		if upper, ok := prefixUpperBound(filter.KeyPrefix); ok {
+			conditions = append(conditions, "key >= ? AND key < ?")
+			args = append(args, filter.KeyPrefix, upper)
+		} else {
+			conditions = append(conditions, "key >= ?")
+			args = append(args, filter.KeyPrefix)
+		}
 	}
 	if !filter.Since.IsZero() {
 		conditions = append(conditions, "fetched_at >= ?")
@@ -110,6 +115,21 @@ func (s *Store) ListAPIResponses(ctx context.Context, filter APIResponseFilter) 
 		return nil, fmt.Errorf("list API responses: %w", err)
 	}
 	return list, nil
+}
+
+// prefixUpperBound returns the smallest string that sorts after every string
+// starting with prefix. Comparing key against that half-open bound lets SQLite
+// use the key index. It reports false when no bound exists, which happens only
+// for a prefix made entirely of 0xff bytes.
+func prefixUpperBound(prefix string) (string, bool) {
+	bytes := []byte(prefix)
+	for i := len(bytes) - 1; i >= 0; i-- {
+		if bytes[i] < 0xff {
+			bytes[i]++
+			return string(bytes[:i+1]), true
+		}
+	}
+	return "", false
 }
 
 // APIResponseBody returns one archived body, decompressed, by its SHA-256 hex

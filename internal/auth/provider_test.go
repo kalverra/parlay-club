@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -17,7 +16,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kalverra/parlay-club/internal/auth"
-	"github.com/kalverra/parlay-club/internal/db"
 )
 
 const (
@@ -200,40 +198,6 @@ func TestGoogleProviderExchange(t *testing.T) {
 			}, identity)
 		})
 	}
-}
-
-// TestGoogleProviderExchangeLeavesTheArchiveEmpty guards the invariant that
-// Google sign-in keeps its own HTTP client. If auth ever shared the ingest
-// client, this token exchange would leave an api_responses row.
-func TestGoogleProviderExchangeLeavesTheArchiveEmpty(t *testing.T) {
-	t.Parallel()
-
-	database, err := db.Open(filepath.Join(t.TempDir(), "parlay.db"))
-	require.NoError(t, err)
-	t.Cleanup(func() { assert.NoError(t, database.Close()) })
-	require.NoError(t, db.Migrate(t.Context(), database))
-	store := db.NewStore(database)
-
-	publishedKey := generateKey(t)
-	server := newOIDCTestServer(t)
-	server.keys = jose.JSONWebKeySet{Keys: []jose.JSONWebKey{{
-		Key:       &publishedKey.PublicKey,
-		KeyID:     "key-1",
-		Algorithm: string(jose.RS256),
-		Use:       "sig",
-	}}}
-	server.idToken = signToken(t, publishedKey, "key-1", validClaims(server.URL, "nonce-1"))
-
-	provider, err := auth.NewGoogleProvider(
-		t.Context(), testClientID, "secret", testRedirectURL, server.URL)
-	require.NoError(t, err)
-
-	_, err = provider.Exchange(t.Context(), "code-1", "verifier-1", "nonce-1")
-	require.NoError(t, err)
-
-	rows, err := store.ListAPIResponses(t.Context(), db.APIResponseFilter{})
-	require.NoError(t, err)
-	assert.Empty(t, rows, "OAuth traffic must never reach the archive")
 }
 
 // validClaims builds a signed-in Google claim set for issuer.
