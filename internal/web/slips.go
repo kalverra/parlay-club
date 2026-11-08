@@ -37,6 +37,7 @@ var ruleErrors = []error{
 	db.ErrLegsPerMemberRange,
 	db.ErrSlipMembersRequired,
 	db.ErrGameNotFound,
+	db.ErrLegResultInvalid,
 }
 
 // slipHandlers serves the Slip tab and the profile screen.
@@ -66,6 +67,7 @@ func (h *slipHandlers) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /slips/{id}/legs", h.addLeg)
 	mux.HandleFunc("GET /legs/{id}/edit", h.editLegForm)
 	mux.HandleFunc("PUT /legs/{id}", h.updateLeg)
+	mux.HandleFunc("PUT /legs/{id}/result", h.setLegResult)
 	mux.HandleFunc("DELETE /legs/{id}", h.deleteLeg)
 	mux.HandleFunc("POST /slips/{id}/lock", h.lockIn)
 	mux.HandleFunc("POST /slips/{id}/unlock", h.unlock)
@@ -117,6 +119,7 @@ type LegView struct {
 	Result    string
 	OwnerName string
 	CanEdit   bool
+	CanGrade  bool
 }
 
 // ActivityView is one activity line.
@@ -644,6 +647,27 @@ func (h *slipHandlers) updateLeg(w http.ResponseWriter, r *http.Request) {
 	h.renderPanel(w, r, slip)
 }
 
+// setLegResult grades one leg by hand. Any slip member can set any leg's
+// result, and the refreshed panel shows the recomputed slip.
+func (h *slipHandlers) setLegResult(w http.ResponseWriter, r *http.Request) {
+	leg, user, ok := h.loadLeg(w, r, r.PathValue("id"))
+	if !ok {
+		return
+	}
+	if err := readForm(w, r); err != nil {
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+
+	result := parlay.Result(strings.ToUpper(strings.TrimSpace(r.PostForm.Get("result"))))
+	slip, err := h.deps.Slips.SetLegResult(r.Context(), user.ID, leg.ID, result)
+	if err != nil {
+		h.respondError(w, err)
+		return
+	}
+	h.renderPanel(w, r, slip)
+}
+
 // deleteLeg removes one leg.
 func (h *slipHandlers) deleteLeg(w http.ResponseWriter, r *http.Request) {
 	leg, user, ok := h.loadLeg(w, r, r.PathValue("id"))
@@ -1059,8 +1083,12 @@ func (h *slipHandlers) slipPageData(ctx context.Context, slip db.Slip) (SlipPage
 	}
 
 	names := make(map[int64]string, len(members))
-	for _, member := range members {
-		names[member.User.ID] = member.User.Name
+	viewerIsMember := false
+	for _, person := range members {
+		names[person.User.ID] = person.User.Name
+		if hasUser && person.User.ID == user.ID {
+			viewerIsMember = true
+		}
 	}
 
 	legsByUser := make(map[int64][]LegView, len(members))
@@ -1081,6 +1109,7 @@ func (h *slipHandlers) slipPageData(ctx context.Context, slip db.Slip) (SlipPage
 			Result:    string(leg.Result),
 			OwnerName: owner,
 			CanEdit:   open && hasUser && leg.UserID == user.ID,
+			CanGrade:  viewerIsMember,
 		})
 	}
 
@@ -1688,4 +1717,19 @@ func formatOdds(odds int) string {
 // money prints a dollar amount with two decimals.
 func money(value float64) string {
 	return fmt.Sprintf("$%.2f", value)
+}
+
+// resultClass colors a leg's result chip: green for a win, rose for a loss,
+// muted for a push or void, and slate while it waits.
+func resultClass(result string) string {
+	switch result {
+	case "WON":
+		return "border-emerald-800 bg-emerald-950 text-emerald-300"
+	case "LOST":
+		return "border-rose-800 bg-rose-950 text-rose-300"
+	case "PUSH", "VOID":
+		return "border-slate-700 bg-slate-800 text-slate-300"
+	default:
+		return "border-slate-700 bg-slate-800 text-slate-400"
+	}
 }

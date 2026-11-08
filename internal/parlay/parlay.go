@@ -27,6 +27,27 @@ func (r Result) Counts() bool {
 	return r != Push && r != Void
 }
 
+// IsLegResult reports whether r is a result a leg can carry.
+func (r Result) IsLegResult() bool {
+	switch r {
+	case Pending, NeedsGrading, Won, Lost, Push, Void:
+		return true
+	default:
+		return false
+	}
+}
+
+// IsSlipResult reports whether r is a result a slip can carry. A slip settles
+// to won, lost, or push; needs-grading is only for its legs.
+func (r Result) IsSlipResult() bool {
+	switch r {
+	case Pending, Won, Lost, Push:
+		return true
+	default:
+		return false
+	}
+}
+
 // Leg is one leg's contribution to a slip's combined odds.
 type Leg struct {
 	Decimal float64

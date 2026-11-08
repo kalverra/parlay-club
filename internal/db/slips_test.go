@@ -321,6 +321,32 @@ func TestUpdateSlipChangesNameAndLegCount(t *testing.T) {
 	require.ErrorIs(t, err, db.ErrSlipNotFound)
 }
 
+func TestSetSlipGrade(t *testing.T) {
+	t.Parallel()
+
+	store, _ := openTestStore(t)
+	ada := createUser(t, store, "Ada")
+	group := createTestGroup(t, store, ada)
+	week := createTestWeek(t, store, 9)
+	slip := createTestSlip(t, store, group, week, "Week 9", 2, ada)
+
+	require.NoError(t,
+		store.SetSlipGrade(t.Context(), slip.ID, parlay.Lost, db.SlipGraded))
+	stored, err := store.SlipByID(t.Context(), slip.ID)
+	require.NoError(t, err)
+	assert.Equal(t, parlay.Lost, stored.Result)
+	assert.Equal(t, db.SlipGraded, stored.Status)
+
+	require.ErrorIs(t,
+		store.SetSlipGrade(t.Context(), slip.ID, parlay.NeedsGrading, db.SlipGraded),
+		db.ErrSlipResultInvalid)
+	require.ErrorIs(t,
+		store.SetSlipGrade(t.Context(), slip.ID, parlay.Won, db.SlipStatus("nope")),
+		db.ErrSlipStatusInvalid)
+	require.ErrorIs(t,
+		store.SetSlipGrade(t.Context(), 404, parlay.Won, db.SlipGraded), db.ErrSlipNotFound)
+}
+
 func TestSetSlipStatus(t *testing.T) {
 	t.Parallel()
 

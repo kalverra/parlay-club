@@ -47,16 +47,47 @@
 
       <ul class="mt-3 space-y-2">
         {{range .Legs}}
+          {{$leg := .}}
           <li class="flex items-start justify-between gap-3 rounded-lg border border-slate-800 px-3 py-2">
             <div class="min-w-0">
               <p class="truncate text-sm font-medium">{{.Selection}}</p>
               <div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-400">
                 <span>{{.Odds}}</span>
-                <span
-                  class="rounded-full border px-1.5 py-0.5 {{if eq .Result "WON"}}border-emerald-800 bg-emerald-950 text-emerald-300{{else if eq .Result "LOST"}}border-rose-800 bg-rose-950 text-rose-300{{else if or (eq .Result "PUSH") (eq .Result "VOID")}}border-slate-700 bg-slate-800 text-slate-300{{else}}border-slate-700 bg-slate-800 text-slate-400{{end}}"
-                >
-                  {{.Result}}
-                </span>
+                {{if .CanGrade}}
+                  <details class="relative">
+                    <summary
+                      class="cursor-pointer list-none rounded-full border px-1.5 py-0.5 {{resultClass .Result}}"
+                      title="Grade this leg"
+                    >
+                      {{.Result}}
+                    </summary>
+                    <ul
+                      class="absolute right-0 z-20 mt-1 w-32 overflow-hidden rounded-lg border border-slate-700 bg-slate-900 py-1 shadow-xl"
+                    >
+                      {{range list "PENDING" "WON" "LOST" "PUSH" "VOID"}}
+                        <li>
+                          <form
+                            hx-put="/legs/{{$leg.ID}}/result"
+                            hx-target="#slip-panel"
+                            hx-swap="outerHTML"
+                          >
+                            <input type="hidden" name="result" value="{{.}}">
+                            <button
+                              type="submit"
+                              class="block w-full px-3 py-1.5 text-left text-xs {{if eq . $leg.Result}}font-semibold text-sky-300{{else}}text-slate-200{{end}} hover:bg-slate-800"
+                            >
+                              {{.}}
+                            </button>
+                          </form>
+                        </li>
+                      {{end}}
+                    </ul>
+                  </details>
+                {{else}}
+                  <span class="rounded-full border px-1.5 py-0.5 {{resultClass .Result}}">
+                    {{.Result}}
+                  </span>
+                {{end}}
               </div>
             </div>
             {{if .CanEdit}}

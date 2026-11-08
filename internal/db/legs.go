@@ -13,6 +13,10 @@ import (
 // ErrLegNotFound is returned when a leg lookup matches no row.
 var ErrLegNotFound = errors.New("leg not found")
 
+// ErrLegResultInvalid is returned when a leg result is not one the schema
+// allows.
+var ErrLegResultInvalid = errors.New("that result isn't valid")
+
 // DefaultLegOdds is the American price the leg form starts with.
 const DefaultLegOdds = -110
 
@@ -143,6 +147,34 @@ func (s *Store) UpdateLeg(ctx context.Context, leg Leg) (Leg, error) {
 		return Leg{}, fmt.Errorf("update leg %d: %w", leg.ID, ErrLegNotFound)
 	}
 	return s.LegByID(ctx, leg.ID)
+}
+
+// SetLegResult writes one leg's result and the name of who graded it. A
+// result the schema does not allow returns ErrLegResultInvalid, and a missing
+// leg wraps ErrLegNotFound.
+func (s *Store) SetLegResult(
+	ctx context.Context,
+	legID int64,
+	result parlay.Result,
+	gradedBy string,
+) error {
+	if !result.IsLegResult() {
+		return fmt.Errorf("set result on leg %d: %w", legID, ErrLegResultInvalid)
+	}
+
+	exec, err := s.conn().ExecContext(ctx,
+		"UPDATE legs SET result = ?, graded_by = ? WHERE id = ?", string(result), gradedBy, legID)
+	if err != nil {
+		return fmt.Errorf("set result on leg %d: %w", legID, err)
+	}
+	affected, err := exec.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("set result on leg %d: %w", legID, err)
+	}
+	if affected == 0 {
+		return fmt.Errorf("set result on leg %d: %w", legID, ErrLegNotFound)
+	}
+	return nil
 }
 
 // DeleteLeg removes one leg. A missing leg wraps ErrLegNotFound.

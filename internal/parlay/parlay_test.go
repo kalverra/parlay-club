@@ -236,3 +236,31 @@ func TestResultCounts(t *testing.T) {
 		})
 	}
 }
+
+func TestResultValidity(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		result parlay.Result
+		leg    bool
+		slip   bool
+	}{
+		{result: parlay.Pending, leg: true, slip: true},
+		{result: parlay.NeedsGrading, leg: true, slip: false},
+		{result: parlay.Won, leg: true, slip: true},
+		{result: parlay.Lost, leg: true, slip: true},
+		{result: parlay.Push, leg: true, slip: true},
+		{result: parlay.Void, leg: true, slip: false},
+		{result: parlay.Result("MAYBE"), leg: false, slip: false},
+		{result: parlay.Result(""), leg: false, slip: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(string(tt.result), func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tt.leg, tt.result.IsLegResult())
+			assert.Equal(t, tt.slip, tt.result.IsSlipResult())
+		})
+	}
+}
