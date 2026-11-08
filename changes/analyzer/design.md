@@ -19,7 +19,7 @@ slip. `median_trap` waits for `props-research`, which brings player stats. Read 
 - Messages are built with `fmt.Sprintf` from the model messages, naming owners when legs belong to different people.
 - `internal/web` maps slip legs and games into analyzer inputs when rendering the slip panel. The banner is part of the
   panel, so it refreshes on `slip-updated` and `board-updated` (weather changes) with no new wiring.
-- `stats` is passed as an empty map until `props-research`.
+- `stats` is passed through but unread until `props-research` adds player numbers; a nil map is fine.
 
 ## Verification
 
@@ -45,7 +45,7 @@ slip. `median_trap` waits for `props-research`, which brings player stats. Read 
 - [x] Add analyzer types, the rule runner, stable sorting, the shared leg and game helpers, and blowout_passing,
       trailing_rb, total_contradiction, stack_clock_drain, and stack_shootout with table tests covering every threshold
       row in plan/analyzer.md
-- [ ] Docs: add docs/reference/analyzer-rules.md with Rule Set A; delete it from plan/analyzer.md
+- [x] Docs: add docs/reference/analyzer-rules.md with Rule Set A; delete it from plan/analyzer.md
 
 ### Phase 2: Weather, key numbers, chalk
 
