@@ -461,8 +461,8 @@ func TestPlanUsesAVerifiedCombiner(t *testing.T) {
 }
 
 // TestPlanCombinesDraftKingsSelections checks the verified DraftKings format
-// against the sids from the saved probe: two selections share one outcomes
-// parameter, comma-separated.
+// against the sids from the saved probe: two selections share one event page,
+// with their sids comma-separated in the outcomes parameter.
 func TestPlanCombinesDraftKingsSelections(t *testing.T) {
 	t.Parallel()
 
@@ -496,12 +496,16 @@ func TestPlanCombinesDraftKingsSelections(t *testing.T) {
 		),
 	}
 
+	odds[0].EventSid = new("34118128")
+	odds[1].EventSid = new("34118128")
+
 	plan := export.Plan(lockedSlip(), []export.Leg{ml, under}, odds, export.DraftKings, testNow)
 
 	require.Empty(t, plan.Manual)
 	require.Len(t, plan.Linked, 2, "per-leg links stay available")
 	assert.Equal(t,
-		"https://sportsbook.draftkings.com/?outcomes=0ML84695561_1,0OU84695561U5250_3",
+		"https://sportsbook.draftkings.com/event/34118128"+
+			"?outcomes=0ML84695561_1,0OU84695561U5250_3",
 		plan.Combined)
 }
 
@@ -540,16 +544,20 @@ func TestPlanCombinesDraftKingsPropSids(t *testing.T) {
 		),
 	}
 
+	odds[0].EventSid = new("34118128")
+	odds[1].EventSid = new("34118128")
+
 	plan := export.Plan(lockedSlip(), []export.Leg{ml, prop}, odds, export.DraftKings, testNow)
 
 	assert.Equal(t,
-		"https://sportsbook.draftkings.com/?outcomes=0ML84695561_1,"+
+		"https://sportsbook.draftkings.com/event/34118128?outcomes=0ML84695561_1,"+
 			"0QA385017402%232346593166_13L88808Q1466938236Q20",
 		plan.Combined)
 }
 
 // TestPlanKeepsDraftKingsPerLegWhenACombinedLinkCannotBeBuilt checks the
-// DraftKings fallback for a missing sid and a single linked leg.
+// DraftKings fallback for a missing sid, a missing event id, legs from
+// different events, and a single linked leg.
 func TestPlanKeepsDraftKingsPerLegWhenACombinedLinkCannotBeBuilt(t *testing.T) {
 	t.Parallel()
 
@@ -583,11 +591,36 @@ func TestPlanKeepsDraftKingsPerLegWhenACombinedLinkCannotBeBuilt(t *testing.T) {
 		),
 	}
 
+	base[0].EventSid = new("34118128")
+	base[1].EventSid = new("34118128")
+
 	t.Run("a missing sid", func(t *testing.T) {
 		t.Parallel()
 
 		odds := append([]db.Odds(nil), base...)
 		odds[1].Sid = nil
+		plan := export.Plan(lockedSlip(), []export.Leg{ml, under}, odds, export.DraftKings, testNow)
+
+		assert.Empty(t, plan.Combined)
+		require.Len(t, plan.Linked, 2)
+	})
+
+	t.Run("a missing event id", func(t *testing.T) {
+		t.Parallel()
+
+		odds := append([]db.Odds(nil), base...)
+		odds[1].EventSid = nil
+		plan := export.Plan(lockedSlip(), []export.Leg{ml, under}, odds, export.DraftKings, testNow)
+
+		assert.Empty(t, plan.Combined)
+		require.Len(t, plan.Linked, 2)
+	})
+
+	t.Run("legs from different events", func(t *testing.T) {
+		t.Parallel()
+
+		odds := append([]db.Odds(nil), base...)
+		odds[1].EventSid = new("other-event")
 		plan := export.Plan(lockedSlip(), []export.Leg{ml, under}, odds, export.DraftKings, testNow)
 
 		assert.Empty(t, plan.Combined)

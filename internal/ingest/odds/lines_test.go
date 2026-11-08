@@ -112,14 +112,16 @@ func TestLinesMapsDeepLinksFromTheSavedEvent(t *testing.T) {
 	require.NoError(t, err)
 
 	const eventID = "dc56d980f527ffeef89940133b211b13"
-	want := map[string]struct{ link, sid string }{
+	want := map[string]struct{ link, sid, eventSid string }{
 		"draftkings": {
-			link: "https://sportsbook.draftkings.com/?outcomes=0ML84695561_1",
-			sid:  "0ML84695561_1",
+			link:     "https://sportsbook.draftkings.com/?outcomes=0ML84695561_1",
+			sid:      "0ML84695561_1",
+			eventSid: "34118128",
 		},
 		"fanduel": {
-			link: "https://sportsbook.fanduel.com/addToBetslip?marketId=42.578189645&selectionId=50199",
-			sid:  "50199",
+			link:     "https://sportsbook.fanduel.com/addToBetslip?marketId=42.578189645&selectionId=50199",
+			sid:      "50199",
+			eventSid: "35603243",
 		},
 	}
 	for book, expected := range want {
@@ -132,6 +134,7 @@ func TestLinesMapsDeepLinksFromTheSavedEvent(t *testing.T) {
 			found = true
 			assert.Equal(t, expected.link, line.Link)
 			assert.Equal(t, expected.sid, line.Sid)
+			assert.Equal(t, expected.eventSid, line.EventSid)
 		}
 		assert.True(t, found, "no %s moneyline row for Atlanta", book)
 	}

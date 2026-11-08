@@ -11,7 +11,8 @@ import (
 // Odds is one book's price for one selection, shaped like a row of the odds
 // table. PlayerName is empty for game markets, and Team is empty for a total.
 // Link and Sid are the book's deep link and selection ID for this outcome, and
-// are nil when the book supplied none.
+// are nil when the book supplied none. EventSid is the book's own ID for the
+// event, used by books whose combined link needs an event page.
 type Odds struct {
 	GameID     string
 	Book       string
@@ -23,6 +24,7 @@ type Odds struct {
 	Price      int
 	Link       *string
 	Sid        *string
+	EventSid   *string
 	FetchedAt  time.Time
 }
 
@@ -76,7 +78,7 @@ func StringValue(value *string) string {
 // oddsColumns is the column list every odds query scans, in scanOdds order.
 const oddsColumns = `
 	game_id, book, market_type, team, player_name, side, line, price, link,
-	sid, fetched_at`
+	sid, event_sid, fetched_at`
 
 // UpsertOdds writes each row and reports whether any row changed. A row whose
 // values are identical apart from nothing is left alone; a new fetch time is a
@@ -88,19 +90,21 @@ func (s *Store) UpsertOdds(ctx context.Context, rows []Odds) (bool, error) {
 			result, err := tx.conn().ExecContext(ctx, `
 				INSERT INTO odds (
 					game_id, book, market_type, team, player_name, side,
-					line, price, link, sid, fetched_at
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+					line, price, link, sid, event_sid, fetched_at
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 				ON CONFLICT (game_id, book, market_type, team, player_name, side)
 				DO UPDATE SET
 					line = excluded.line,
 					price = excluded.price,
 					link = excluded.link,
 					sid = excluded.sid,
+					event_sid = excluded.event_sid,
 					fetched_at = excluded.fetched_at
 				WHERE odds.line IS NOT excluded.line
 					OR odds.price IS NOT excluded.price
 					OR odds.link IS NOT excluded.link
 					OR odds.sid IS NOT excluded.sid
+					OR odds.event_sid IS NOT excluded.event_sid
 					OR odds.fetched_at IS NOT excluded.fetched_at`,
 				row.GameID,
 				row.Book,
@@ -112,6 +116,7 @@ func (s *Store) UpsertOdds(ctx context.Context, rows []Odds) (bool, error) {
 				row.Price,
 				nullableString(row.Link),
 				nullableString(row.Sid),
+				nullableString(row.EventSid),
 				formatTimestamp(row.FetchedAt),
 			)
 			if err != nil {
@@ -169,6 +174,7 @@ func scanOdds(row rowScanner) (Odds, error) {
 		line      sql.NullFloat64
 		link      sql.NullString
 		sid       sql.NullString
+		eventSid  sql.NullString
 		fetchedAt string
 	)
 	if err := row.Scan(
@@ -182,6 +188,7 @@ func scanOdds(row rowScanner) (Odds, error) {
 		&odds.Price,
 		&link,
 		&sid,
+		&eventSid,
 		&fetchedAt,
 	); err != nil {
 		return Odds{}, err
@@ -194,6 +201,7 @@ func scanOdds(row rowScanner) (Odds, error) {
 	odds.Line = nullableFloatPtr(line)
 	odds.Link = nullableStringPtr(link)
 	odds.Sid = nullableStringPtr(sid)
+	odds.EventSid = nullableStringPtr(eventSid)
 	odds.FetchedAt = parsed
 	return odds, nil
 }

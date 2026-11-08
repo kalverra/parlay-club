@@ -41,13 +41,15 @@ type Leg struct {
 }
 
 // LegLink is a leg the book can open from a link, with the line, price, and
-// selection ID the book quoted for the same selection.
+// selection ID the book quoted for the same selection. EventSid is the book's
+// own ID for the game, which some combined links need.
 type LegLink struct {
-	Leg   Leg
-	URL   string
-	Line  *float64
-	Price int
-	Sid   *string
+	Leg      Leg
+	URL      string
+	Line     *float64
+	Price    int
+	Sid      *string
+	EventSid *string
 }
 
 // ManualLeg is a leg the person has to add by hand. Line is the book's current
@@ -123,22 +125,28 @@ func PlanWithCombiner(
 	return plan
 }
 
-// draftKingsBetslip is the endpoint the phone check confirmed. DraftKings puts
-// several selection IDs in one outcomes parameter, comma-separated.
-const draftKingsBetslip = "https://sportsbook.draftkings.com/?outcomes="
+// draftKingsEvent is the event-page prefix the phone check confirmed. The root
+// ?outcomes= link only ever opened one selection; the event page takes them all.
+const draftKingsEvent = "https://sportsbook.draftkings.com/event/"
 
 // draftKingsCombiner builds one betslip URL for two or more DraftKings
-// selections from their stored sids. Each sid is escaped on its own so the
-// comma stays the separator and a prop sid's # becomes %23.
+// selections from their stored sids. Every leg must belong to the same
+// DraftKings event, because the verified format is an event page. Each sid is
+// escaped on its own so the comma stays the separator and a prop sid's # becomes
+// %23.
 type draftKingsCombiner struct{}
 
-// Combine returns DraftKings' comma-separated outcomes URL, or false when every
-// linked leg cannot take part.
+// Combine returns DraftKings' event-page URL, or false when every linked leg
+// cannot take part.
 func (draftKingsCombiner) Combine(linked []LegLink) (string, bool) {
 	if len(linked) < 2 {
 		return "", false
 	}
 
+	eventSid, ok := sharedEventSid(linked)
+	if !ok {
+		return "", false
+	}
 	sids := make([]string, 0, len(linked))
 	for _, leg := range linked {
 		if leg.Sid == nil || strings.TrimSpace(*leg.Sid) == "" {
@@ -146,7 +154,25 @@ func (draftKingsCombiner) Combine(linked []LegLink) (string, bool) {
 		}
 		sids = append(sids, url.QueryEscape(strings.TrimSpace(*leg.Sid)))
 	}
-	return draftKingsBetslip + strings.Join(sids, ","), true
+	return draftKingsEvent + url.PathEscape(eventSid) + "?outcomes=" + strings.Join(sids, ","), true
+}
+
+// sharedEventSid returns the one event ID every linked leg belongs to. A slip
+// that spans events cannot use the event-page form, so it keeps per-leg taps.
+func sharedEventSid(linked []LegLink) (string, bool) {
+	if len(linked) == 0 || linked[0].EventSid == nil {
+		return "", false
+	}
+	eventSid := strings.TrimSpace(*linked[0].EventSid)
+	if eventSid == "" {
+		return "", false
+	}
+	for _, leg := range linked[1:] {
+		if leg.EventSid == nil || strings.TrimSpace(*leg.EventSid) != eventSid {
+			return "", false
+		}
+	}
+	return eventSid, true
 }
 
 // fanDuelBetslip is the endpoint the phone check confirmed. FanDuel names each
@@ -229,11 +255,12 @@ func planLeg(leg Leg, odds []db.Odds, book string, now time.Time) (LegLink, Manu
 	}
 
 	return LegLink{
-		Leg:   leg,
-		URL:   *row.Link,
-		Line:  row.Line,
-		Price: row.Price,
-		Sid:   row.Sid,
+		Leg:      leg,
+		URL:      *row.Link,
+		Line:     row.Line,
+		Price:    row.Price,
+		Sid:      row.Sid,
+		EventSid: row.EventSid,
 	}, ManualLeg{}, true
 }
 

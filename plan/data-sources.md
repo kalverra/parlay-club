@@ -87,8 +87,9 @@ each with and without `includeLinks=true&includeSids=true`.
   `https://sportsbook.fanduel.com/addToBetslip?marketId={marketId}&selectionId={sid}`, where the sid is the numeric
   selection ID. Book-level links point at the event page, not a betslip: DraftKings uses
   `https://sportsbook.draftkings.com/event/{bookSid}` and FanDuel uses its game page. A 2026-11-07 phone check confirmed
-  that both books take several selections in one URL: DraftKings uses comma-separated sids in one `outcomes` parameter,
-  and FanDuel uses indexed `marketId`/`selectionId` pairs. The exact shapes are in `docs/concepts/export.md`.
+  that both books take several selections in one URL: DraftKings uses its event page with comma-separated sids in one
+  `outcomes` parameter, and FanDuel uses indexed `marketId`/`selectionId` pairs. The exact shapes are in
+  `docs/concepts/export.md`.
 
 Saved fixtures: `internal/ingest/odds/testdata/odds_game_links.json` and
 `internal/ingest/odds/testdata/odds_prop_links.json`, both fetched with the flags on the same probe.

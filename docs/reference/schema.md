@@ -16,7 +16,7 @@ One SQLite file, opened by `internal/db.Open`, holds every table the app uses. `
 including groups, their members, and `slips.group_id`. `0002_google_identity.sql` rebuilds `users` to add Google
 identity columns and drop the unique name rule. `0003_api_archive.sql` adds the raw response archive, `api_bodies` and
 `api_responses`; see [Archive](../concepts/archive.md). `0004_odds_links.sql` adds each book's deep link and selection
-ID to `odds`.
+ID to `odds`, and `0005_odds_event_sid.sql` adds the book's own event ID.
 
 ## Connection settings
 
@@ -40,7 +40,7 @@ connection rules out `SQLITE_BUSY`.
 - `db.Migrate` applies every file whose number is greater than `PRAGMA user_version`, in number order.
 - Each file runs in its own transaction. The migration's statements and its `user_version` bump commit together, so a
   failed migration leaves neither behind.
-- A fresh database ends at version 4 with every table below.
+- A fresh database ends at version 5 with every table below.
 - `0001_init.sql` creates `groups`, `group_members`, and `slips.group_id`. A database created before groups existed has
   the old `slips` shape, so delete it and let the migrations rebuild.
 - `0002_google_identity.sql` rebuilds `users` in its transaction with the SQLite 12-step method and
@@ -49,7 +49,9 @@ connection rules out `SQLITE_BUSY`.
 - `0003_api_archive.sql` creates the two archive tables and their two indexes. It changes no existing table.
 - `0004_odds_links.sql` adds nullable `link` and `sid` columns to `odds`. On an existing database every stored price
   keeps its row and gets NULL links until the next sync fills them.
-- Never edit an applied file. Add `0005_name.sql` and up.
+- `0005_odds_event_sid.sql` adds a nullable `event_sid` column to `odds`. It holds the bookmaker block's `sid`, the
+  book's own ID for the event. Existing rows get NULL until the next sync.
+- Never edit an applied file. Add `0006_name.sql` and up.
 - `PRAGMA user_version` on the database file is the only record of what ran.
 
 ## Tables
@@ -181,6 +183,7 @@ CREATE TABLE odds (
   fetched_at  TEXT NOT NULL,
   link        TEXT,                            -- book's deep link for this outcome; NULL when none
   sid         TEXT,                            -- book's selection ID for this outcome; NULL when none
+  event_sid   TEXT,                            -- book's own event ID; NULL when none
   PRIMARY KEY (game_id, book, market_type, team, player_name, side)
 );
 
@@ -297,8 +300,9 @@ how to read it.
 - Booleans are `INTEGER` 0/1.
 - `api_bodies.body` is gzipped unless `encoding` says otherwise. Decompress it before treating it as JSON.
 - A leg's kickoff lock comes from `games.kickoff_utc`; it is not stored.
-- `odds.link` and `odds.sid` belong to the outcome row, so they refresh in the same upsert as `price`. Both stay NULL
-  when the book returned no deep link; a missing link is normal.
+- `odds.link`, `odds.sid`, and `odds.event_sid` belong to the outcome row, so they refresh in the same upsert as
+  `price`. All stay NULL when the book returned no deep link or event ID; a missing link is normal. `event_sid` is the
+  bookmaker block's own ID for the event, used by DraftKings' combined event-page link.
 - A slip's reference odds are not stored; any view that shows them computes them.
 - `slips.status` and `slips.result` stay in step with lock and leg-result changes.
 - `groups`, `group_members`, `slips`, and the rows that hang off a slip are scoped to one group. Weeks, games, odds,

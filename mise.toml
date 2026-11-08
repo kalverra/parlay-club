@@ -13,6 +13,9 @@ rumdl = "latest"
 # Hot-reload runner for `mise run dev`; see .air.toml.
 air = "1.67.4"
 
+[env]
+_.file = ".env"
+
 [tasks.dev]
 description = "Run the server with hot reload and open it in Chrome"
 run = "./scripts/dev.sh"
