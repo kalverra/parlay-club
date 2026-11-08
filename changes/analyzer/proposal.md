@@ -1,8 +1,9 @@
 ---
 slug: analyzer
-status: designed
+status: implementing
 created: "2026-11-01"
-depends_on: [slate-and-lines]
+depends_on:
+    - slate-and-lines
 ---
 
 # Sharp-friend analyzer
