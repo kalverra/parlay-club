@@ -3,7 +3,7 @@
   id="slip-panel"
   class="space-y-3"
   hx-get="/slips/{{.Slip.ID}}/panel"
-  hx-trigger="slip-updated from:body"
+  hx-trigger="slip-updated from:body, board-updated from:body"
   hx-swap="outerHTML"
 >
   <header class="rounded-xl border border-slate-800 bg-slate-900 p-4">
@@ -116,6 +116,33 @@
       </button>
     </form>
   {{end}}
+
+  <section class="rounded-xl border border-slate-800 bg-slate-900 p-4">
+    <h2 class="text-sm font-semibold text-slate-300">Analyzer</h2>
+    {{if .Slip.Analyzer.Clean}}
+      <p class="mt-2 rounded-lg border border-emerald-800 bg-emerald-950 px-3 py-2 text-sm text-emerald-300">
+        Looks clean
+      </p>
+    {{else}}
+      <ul class="mt-2 space-y-2">
+        {{range .Slip.Analyzer.Warnings}}
+          <li class="rounded-lg border px-3 py-2 {{.Class}}" data-rule="{{.Rule}}">
+            <p class="text-xs font-semibold uppercase tracking-wide">{{.Severity}}</p>
+            <p class="mt-1 text-sm font-medium">{{.Message}}</p>
+            {{if .Legs}}
+              <ul class="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-400">
+                {{range .Legs}}
+                  <li class="rounded-full border border-slate-700 bg-slate-800 px-2 py-0.5">
+                    {{if .Owner}}{{.Owner}} · {{end}}{{.Selection}}
+                  </li>
+                {{end}}
+              </ul>
+            {{end}}
+          </li>
+        {{end}}
+      </ul>
+    {{end}}
+  </section>
 </div>
 {{end}}
 

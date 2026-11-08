@@ -94,6 +94,7 @@ type SlipView struct {
 	Members       []SlipMemberView
 	Payout        PayoutView
 	Activity      []ActivityView
+	Analyzer      AnalyzerView
 	LegForm       LegFormView
 }
 
@@ -1048,6 +1049,10 @@ func (h *slipHandlers) slipPageData(ctx context.Context, slip db.Slip) (SlipPage
 	if err != nil {
 		return SlipPage{}, err
 	}
+	games, err := h.deps.Store.GamesForWeek(ctx, slip.WeekID)
+	if err != nil {
+		return SlipPage{}, err
+	}
 	entries, err := h.deps.Store.ActivityForSlip(ctx, slip.ID)
 	if err != nil {
 		return SlipPage{}, err
@@ -1112,6 +1117,7 @@ func (h *slipHandlers) slipPageData(ctx context.Context, slip db.Slip) (SlipPage
 		MemberCount:   len(members),
 		Members:       memberViews,
 		Activity:      activity,
+		Analyzer:      analyzerView(legs, games, names),
 	}
 	if hasUser {
 		view.LegForm = LegFormView{

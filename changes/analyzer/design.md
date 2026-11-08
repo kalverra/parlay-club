@@ -55,7 +55,7 @@ slip. `median_trap` waits for `props-research`, which brings player stats. Read 
 
 ### Phase 3: Banner
 
-- [ ] Map slip legs and games into analyzer inputs and render the banner: Looks clean, or cards sorted by severity with
+- [x] Map slip legs and games into analyzer inputs and render the banner: Looks clean, or cards sorted by severity with
   message, legs, and owners, with a handler test where BUF -7.5 (one user) and Josh Allen Over 245.5 (another) shows
   blowout_passing and hook to both
 - [ ] Docs: add docs/concepts/analyzer.md (purpose, tone, inputs); delete the banner text from plan/product.md
