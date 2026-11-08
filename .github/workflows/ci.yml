@@ -37,3 +37,8 @@ jobs:
 
       - name: Test
         run: go test -short -race ./...
+
+      # Guards a deploy gate, so it runs on every push rather than only on the
+      # machine that touches deploy/.
+      - name: Test the deploy blackout
+        run: deploy/blackout_test.sh
