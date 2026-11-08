@@ -68,8 +68,8 @@ type fileLeg struct {
 
 // Load reads the history file at path and imports its slips into groupID. A
 // missing slip is created with its week, people, and legs; an existing slip is
-// skipped before any legs are added. A bad file imports only the slips before
-// the problem and reports it.
+// skipped before any legs are added. The whole file is validated before the
+// first write, so a file with any problem imports nothing and reports it.
 func Load(ctx context.Context, store *db.Store, groupID int64, path string) (Report, error) {
 	history, err := read(path)
 	if err != nil {
@@ -312,13 +312,13 @@ func legFrom(slipID int64, leg fileLeg) db.Leg {
 	market := marketName(leg)
 	stored := db.Leg{
 		SlipID:     slipID,
-		GameID:     optional(leg.GameID),
+		GameID:     db.OptionalString(leg.GameID),
 		MarketType: market,
 		Selection:  strings.TrimSpace(leg.Selection),
-		Team:       optional(leg.Team),
-		PlayerName: optional(leg.Player),
-		PlayerID:   optional(leg.PlayerID),
-		Side:       optional(strings.ToUpper(strings.TrimSpace(leg.Side))),
+		Team:       db.OptionalString(leg.Team),
+		PlayerName: db.OptionalString(leg.Player),
+		PlayerID:   db.OptionalString(leg.PlayerID),
+		Side:       db.OptionalString(strings.ToUpper(strings.TrimSpace(leg.Side))),
 		Line:       leg.Line,
 		Odds:       leg.Odds,
 	}
@@ -370,13 +370,4 @@ func knownMarket(leg fileLeg) bool {
 // the same way the users table does.
 func userKey(name string) string {
 	return strings.ToLower(strings.TrimSpace(name))
-}
-
-// optional returns a trimmed value, or nil when it is empty.
-func optional(value string) *string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return nil
-	}
-	return &value
 }
