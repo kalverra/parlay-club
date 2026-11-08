@@ -113,6 +113,11 @@ var rules = []rule{
 	totalContradiction,
 	stackClockDrain,
 	stackShootout,
+	wind,
+	fakeWeather,
+	hook,
+	totalKeyNumber,
+	chalk,
 }
 
 // analysis is the filtered input shared by every rule.
