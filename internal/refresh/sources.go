@@ -316,6 +316,7 @@ func oddsRow(game db.Game, line odds.Line, now time.Time) (db.Odds, error) {
 		Price:      line.Price,
 		Link:       db.OptionalString(line.Link),
 		Sid:        db.OptionalString(line.Sid),
+		EventSid:   db.OptionalString(line.EventSid),
 		FetchedAt:  now,
 	}, nil
 }

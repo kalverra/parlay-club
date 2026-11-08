@@ -34,7 +34,8 @@ const (
 // The Odds API's display name; the caller maps it to an ESPN abbreviation. Line
 // is nil for a moneyline and set for a spread or total. Price is American odds.
 // Link and Sid are the book's deep link and selection ID for this outcome, and
-// are empty when the book supplied none.
+// are empty when the book supplied none. EventSid is the book's own ID for the
+// event, used by books whose combined link needs an event page.
 type Line struct {
 	EventID    string
 	Book       string
@@ -45,6 +46,7 @@ type Line struct {
 	Price      int
 	Link       string
 	Sid        string
+	EventSid   string
 }
 
 // Lines fetches every book's moneyline, spread, and total for the events The
@@ -78,7 +80,7 @@ func parseLines(raw []eventResponse) ([]Line, error) {
 	for _, event := range raw {
 		for _, book := range event.Bookmakers {
 			for _, market := range book.Markets {
-				mapped, err := mapMarket(event.ID, book.Key, market)
+				mapped, err := mapMarket(event.ID, book.Key, book.Sid, market)
 				if err != nil {
 					return nil, fmt.Errorf("event %s book %s market %s: %w",
 						event.ID, book.Key, market.Key, err)
@@ -92,14 +94,14 @@ func parseLines(raw []eventResponse) ([]Line, error) {
 
 // mapMarket turns one market's outcomes into rows, or nil for a market this
 // client does not read.
-func mapMarket(eventID, book string, market marketResponse) ([]Line, error) {
+func mapMarket(eventID, book, eventSid string, market marketResponse) ([]Line, error) {
 	switch market.Key {
 	case marketH2H:
-		return mapTeamMarket(eventID, book, market, MarketML, false)
+		return mapTeamMarket(eventID, book, eventSid, market, MarketML, false)
 	case marketSpreads:
-		return mapTeamMarket(eventID, book, market, MarketSpread, true)
+		return mapTeamMarket(eventID, book, eventSid, market, MarketSpread, true)
 	case marketTotals:
-		return mapTotalMarket(eventID, book, market)
+		return mapTotalMarket(eventID, book, eventSid, market)
 	default:
 		return nil, nil
 	}
@@ -108,7 +110,7 @@ func mapMarket(eventID, book string, market marketResponse) ([]Line, error) {
 // mapTeamMarket maps a moneyline or spread. Both outcomes name teams; a spread
 // must carry a point.
 func mapTeamMarket(
-	eventID, book string,
+	eventID, book, eventSid string,
 	market marketResponse,
 	marketType string,
 	needsPoint bool,
@@ -137,6 +139,7 @@ func mapTeamMarket(
 			Price:      price,
 			Link:       outcome.Link,
 			Sid:        outcome.Sid,
+			EventSid:   eventSid,
 		})
 	}
 	return lines, nil
@@ -144,7 +147,7 @@ func mapTeamMarket(
 
 // mapTotalMarket maps a total's Over and Under. Each outcome carries the point
 // it prices, and the team column stays empty.
-func mapTotalMarket(eventID, book string, market marketResponse) ([]Line, error) {
+func mapTotalMarket(eventID, book, eventSid string, market marketResponse) ([]Line, error) {
 	lines := make([]Line, 0, len(market.Outcomes))
 	for _, outcome := range market.Outcomes {
 		price, err := outcomePrice(outcome)
@@ -169,6 +172,7 @@ func mapTotalMarket(eventID, book string, market marketResponse) ([]Line, error)
 			Price:      price,
 			Link:       outcome.Link,
 			Sid:        outcome.Sid,
+			EventSid:   eventSid,
 		})
 	}
 	return lines, nil

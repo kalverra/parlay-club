@@ -118,10 +118,12 @@ selection, shaped like an `odds` row:
 | `Price`      | `price`, American                                                |
 | `Link`       | The outcome's `link`, the book's deep link; empty when absent    |
 | `Sid`        | The outcome's `sid`, the book's selection ID; empty when absent  |
+| `EventSid`   | `bookmakers[].sid`, the book's own event ID; empty when absent   |
 
 - The two deep-link flags cost no extra credits. A 2026-11-07 probe measured `x-requests-last` at 3 with and without
-  them for the three game markets, and at 1 with and without them for one prop market. The fields land on each outcome,
-  not on the market or book. A book may omit either one, so a missing link is normal and the row stores NULL.
+  them for the three game markets, and at 1 with and without them for one prop market. The outcome fields land on each
+  outcome, not on the market or book; `event_sid` comes from the bookmaker block. A book may omit either, so a missing
+  link is normal and the row stores NULL.
 - A market key the client does not read produces no rows, so the same client can serve later prop requests.
 - A book that omits a market produces no rows for it. Some books omit the moneyline on future games.
 - A missing price, a spread or total with no point, an empty team name, or a non-Over/Under total outcome is an error,

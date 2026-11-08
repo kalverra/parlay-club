@@ -58,17 +58,18 @@ A fully locked slip now opens DraftKings or FanDuel with the agreed picks alread
 linked legs, one tap opens the whole book; otherwise each linked leg gets its own tap. Every leg the book cannot take is
 named with a short reason, and the whole slip copies as text, so the export never blocks and never fails silently.
 
-The app stores each book's own outcome link and selection ID on the same `odds` row as the price. Refresh writes all
-three together, so links are as fresh as prices, and the card spends no extra Odds API credits. The card reads stored
-rows only and never fetches or writes.
+The app stores each book's own outcome link, selection ID, and event ID on the same `odds` row as the price. Refresh
+writes all four together, so links are as fresh as prices, and the card spends no extra Odds API credits. The card reads
+stored rows only and never fetches or writes.
 
 "The same selection" now has one definition, `db.Odds.MatchesSelection`, shared by the Games tab, the slip's reference
 prices, and export. The same `currentOdds` filter drops rows from an older sync everywhere, so a market a book stopped
 quoting becomes `no line` instead of offering a dead link.
 
 It gets harder when a book stops returning links: those legs fall back to the manual list. FanDuel's combined link also
-depends on the `marketId` inside the stored per-leg URL, so a link-shape change affects both paths. Existing odds rows
-have no backfill, so a slip locked right after deploy can show manual legs until the next lines sync.
+depends on the `marketId` inside the stored per-leg URL, and DraftKings' depends on the book's stored event ID and only
+covers legs from one event, so a slip that spans games keeps per-leg taps. A link-shape change affects both paths.
+Existing odds rows have no backfill, so a slip locked right after deploy can show manual legs until the next lines sync.
 
 The main thing to revisit is the Odds API terms for storing and showing bookmaker links. After that, whether other books
 deserve a `Combiner`, and how props behave once they have odds rows.

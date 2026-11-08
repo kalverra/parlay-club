@@ -20,9 +20,10 @@ book. Nothing here places a bet or moves money.
 ## Where the links come from
 
 The Odds API game-lines call sends `includeLinks=true&includeSids=true`. Each outcome then arrives with a `link` and a
-`sid`, and the odds client maps them onto `odds.link` and `odds.sid`. Refresh writes both in the same upsert as `price`,
-so a link is as fresh as the price beside it. A book that returns no link stores NULL, which is normal. See
-[Data sources](../reference/data-sources.md) and [Database schema](../reference/schema.md).
+`sid`, and each bookmaker block carries its own event `sid`. The odds client maps them onto `odds.link`, `odds.sid`, and
+`odds.event_sid`. Refresh writes all three in the same upsert as `price`, so a link is as fresh as the price beside it.
+A book that returns no link stores NULL, which is normal. See [Data sources](../reference/data-sources.md) and
+[Database schema](../reference/schema.md).
 
 The export card reads those stored rows. It never calls The Odds API and never writes to the database, so rendering it,
 tapping a link, and copying the slip spend no credits.
@@ -34,7 +35,7 @@ tapping a link, and copying the slip spend no credits.
 | Field      | Meaning                                                                     |
 | ---------- | --------------------------------------------------------------------------- |
 | `Book`     | The Odds API book key, `draftkings` or `fanduel`.                           |
-| `Linked`   | Legs the book can open from a link, with the book's line, price, and `sid`. |
+| `Linked`   | Legs the book can open from a link, with the book's line, price, and sids.  |
 | `Manual`   | Legs to add by hand, each with one reason and the book's current line.      |
 | `Combined` | One URL for all linked legs, set only for a verified format; else empty.    |
 
@@ -69,8 +70,9 @@ one, so a slip with two or more linked legs at a book gets a single "Open in ...
 keep the per-leg list, because one tap is already one tap.
 
 A `Combiner` returns `ok = false` when it cannot build the whole URL, which leaves `Combined` empty and the per-leg
-links in place. That happens when a linked leg has no stored `sid`, or, for FanDuel, its stored link has no `marketId`.
-The card never drops a pick to make a combined link work.
+links in place. That happens when a linked leg has no stored `sid`, or, for FanDuel, its stored link has no `marketId`,
+or, for DraftKings, the legs do not all share one stored event ID. The card never drops a pick to make a combined link
+work.
 
 ### Verified formats
 
@@ -79,11 +81,13 @@ applies its own parlay rules. FanDuel, for example, rejects a moneyline and a sp
 
 | Book       | Combined URL shape                                                                                                                                                       |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| DraftKings | `https://sportsbook.draftkings.com/?outcomes={sid1},{sid2}`                                                                                                              |
+| DraftKings | `https://sportsbook.draftkings.com/event/{eventSid}?outcomes={sid1},{sid2}`                                                                                              |
 | FanDuel    | `https://sportsbook.fanduel.com/addToBetslip?marketId%5B0%5D={marketId1}&selectionId%5B0%5D={sid1}&marketId%5B1%5D={marketId2}&selectionId%5B1%5D={sid2}` |
 
-DraftKings puts every sid in one `outcomes` parameter, comma-separated. Each sid is URL-encoded on its own, so a prop
-sid's `#` becomes `%23` and the comma stays the separator.
+DraftKings uses the event page, not the root `?outcomes=` link, which only ever opened one selection in the phone check.
+Every linked leg must belong to the same DraftKings event, so a slip that spans games keeps per-leg taps. The event ID
+comes from the bookmaker block and is stored as `odds.event_sid`; the selection IDs are the outcome `sid`s,
+comma-separated and each URL-encoded on its own. A prop sid's `#` becomes `%23`.
 
 FanDuel indexes each `marketId` and `selectionId` pair from zero, and the brackets are percent-encoded (`%5B` and `%5D`)
 so a share sheet keeps the whole URL together. The market ID lives only in the stored per-leg link, so the FanDuel

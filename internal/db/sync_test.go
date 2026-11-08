@@ -214,7 +214,7 @@ func TestUpsertOddsStoresAndRefreshesLinksWithPrices(t *testing.T) {
 			GameID: game.ID, Book: "draftkings", MarketType: "SPREAD", Team: "BUF",
 			Side: "TEAM", Line: new(-2.5), Price: -110,
 			Link: new("https://sportsbook.draftkings.com/?outcomes=0HC1P250_1"), Sid: new("0HC1P250_1"),
-			FetchedAt: fetchedAt,
+			EventSid: new("34118128"), FetchedAt: fetchedAt,
 		},
 		{
 			GameID: game.ID, Book: "betmgm", MarketType: "ML", Team: "BUF",
@@ -234,8 +234,10 @@ func TestUpsertOddsStoresAndRefreshesLinksWithPrices(t *testing.T) {
 	}
 	assert.Equal(t, new("https://sportsbook.draftkings.com/?outcomes=0HC1P250_1"), byBook["draftkings"].Link)
 	assert.Equal(t, new("0HC1P250_1"), byBook["draftkings"].Sid)
+	assert.Equal(t, new("34118128"), byBook["draftkings"].EventSid)
 	assert.Nil(t, byBook["betmgm"].Link, "a book without a link stores NULL")
 	assert.Nil(t, byBook["betmgm"].Sid, "a book without a sid stores NULL")
+	assert.Nil(t, byBook["betmgm"].EventSid, "a book without an event id stores NULL")
 
 	changed, err = store.UpsertOdds(t.Context(), rows)
 	require.NoError(t, err)
@@ -244,6 +246,7 @@ func TestUpsertOddsStoresAndRefreshesLinksWithPrices(t *testing.T) {
 	rows[0].Price = -115
 	rows[0].Link = new("https://sportsbook.draftkings.com/?outcomes=0HC1P250_2")
 	rows[0].Sid = new("0HC1P250_2")
+	rows[0].EventSid = new("34118129")
 	changed, err = store.UpsertOdds(t.Context(), rows)
 	require.NoError(t, err)
 	assert.True(t, changed)
@@ -256,6 +259,7 @@ func TestUpsertOddsStoresAndRefreshesLinksWithPrices(t *testing.T) {
 			assert.Equal(t, -115, row.Price)
 			assert.Equal(t, new("https://sportsbook.draftkings.com/?outcomes=0HC1P250_2"), row.Link)
 			assert.Equal(t, new("0HC1P250_2"), row.Sid)
+			assert.Equal(t, new("34118129"), row.EventSid)
 		}
 		if row.Book == "betmgm" {
 			assert.Equal(t, -155, row.Price, "another book's row is untouched")
@@ -265,6 +269,7 @@ func TestUpsertOddsStoresAndRefreshesLinksWithPrices(t *testing.T) {
 
 	rows[0].Link = nil
 	rows[0].Sid = nil
+	rows[0].EventSid = nil
 	changed, err = store.UpsertOdds(t.Context(), rows)
 	require.NoError(t, err)
 	assert.True(t, changed, "losing a link is a change")
@@ -275,6 +280,7 @@ func TestUpsertOddsStoresAndRefreshesLinksWithPrices(t *testing.T) {
 		if row.Book == "draftkings" {
 			assert.Nil(t, row.Link, "a vanished link becomes NULL")
 			assert.Nil(t, row.Sid)
+			assert.Nil(t, row.EventSid, "a vanished event id becomes NULL")
 		}
 	}
 }

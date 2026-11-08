@@ -50,9 +50,11 @@ type eventResponse struct {
 	Bookmakers   []bookmakerResponse `json:"bookmakers"`
 }
 
-// bookmakerResponse is one book's markets for an event.
+// bookmakerResponse is one book's markets for an event. Sid is the book's own
+// ID for the event, used by books whose combined link needs an event page.
 type bookmakerResponse struct {
 	Key     string           `json:"key"`
+	Sid     string           `json:"sid"`
 	Markets []marketResponse `json:"markets"`
 }
 

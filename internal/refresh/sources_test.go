@@ -232,18 +232,22 @@ func TestSyncOddsWritesOnlyMatchedGamesAndRecordsCredits(t *testing.T) {
 				EventID: "evt-1", Book: "draftkings", MarketType: odds.MarketML,
 				Team: "Buffalo Bills", Side: odds.SideTeam, Price: -155,
 				Link: "https://sportsbook.draftkings.com/?outcomes=0ML1_1", Sid: "0ML1_1",
+				EventSid: "34118128",
 			},
 			{
 				EventID: "evt-1", Book: "draftkings", MarketType: odds.MarketSpread,
 				Team: "Miami Dolphins", Side: odds.SideTeam, Line: new(2.5), Price: -110,
+				EventSid: "34118128",
 			},
 			{
 				EventID: "evt-1", Book: "draftkings", MarketType: odds.MarketTotal,
 				Side: odds.SideOver, Line: new(45.5), Price: -108,
+				EventSid: "34118128",
 			},
 			{
 				EventID: "evt-next", Book: "draftkings", MarketType: odds.MarketML,
 				Team: "Dallas Cowboys", Side: odds.SideTeam, Price: 120,
+				EventSid: "99",
 			},
 		},
 		lineCredits: odds.Credits{Remaining: 487},
@@ -275,6 +279,7 @@ func TestSyncOddsWritesOnlyMatchedGamesAndRecordsCredits(t *testing.T) {
 		Price:      -155,
 		Link:       new("https://sportsbook.draftkings.com/?outcomes=0ML1_1"),
 		Sid:        new("0ML1_1"),
+		EventSid:   new("34118128"),
 		FetchedAt:  now,
 	}, bySelection["ML|BUF|TEAM"])
 	assert.Equal(t, db.Odds{
@@ -285,6 +290,7 @@ func TestSyncOddsWritesOnlyMatchedGamesAndRecordsCredits(t *testing.T) {
 		Side:       odds.SideTeam,
 		Line:       new(2.5),
 		Price:      -110,
+		EventSid:   new("34118128"),
 		FetchedAt:  now,
 	}, bySelection["SPREAD|MIA|TEAM"])
 	assert.Equal(t, db.Odds{
@@ -294,6 +300,7 @@ func TestSyncOddsWritesOnlyMatchedGamesAndRecordsCredits(t *testing.T) {
 		Side:       odds.SideOver,
 		Line:       new(45.5),
 		Price:      -108,
+		EventSid:   new("34118128"),
 		FetchedAt:  now,
 	}, bySelection["TOTAL||OVER"])
 
