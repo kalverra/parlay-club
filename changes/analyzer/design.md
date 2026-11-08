@@ -42,7 +42,7 @@ slip. `median_trap` waits for `props-research`, which brings player stats. Read 
 
 ### Phase 1: Engine and correlation rules
 
-- [ ] Add analyzer types, the rule runner, stable sorting, the shared leg and game helpers, and blowout_passing,
+- [x] Add analyzer types, the rule runner, stable sorting, the shared leg and game helpers, and blowout_passing,
       trailing_rb, total_contradiction, stack_clock_drain, and stack_shootout with table tests covering every threshold
       row in plan/analyzer.md
 - [ ] Docs: add docs/reference/analyzer-rules.md with Rule Set A; delete it from plan/analyzer.md
