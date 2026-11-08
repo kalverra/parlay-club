@@ -2,7 +2,7 @@
 id: analyzer-rules
 title: Analyzer rules
 type: reference
-summary: The stable IDs, severities, triggers, and example messages for the correlation rules in internal/analyzer's Rule Set A.
+summary: The stable IDs, severities, triggers, and example messages for the correlation, weather, key-number, and chalk rules in internal/analyzer.
 tags: [analyzer, rules, warnings, correlation, severity, slips]
 sources: [internal/analyzer/analyzer.go, internal/analyzer/rules.go, internal/analyzer/analyzer_test.go]
 last_verified: 2026-11-07
@@ -24,8 +24,8 @@ Rule IDs are stable across releases. A warning's severity is `Info`, `Warn`, or 
 - Output is sorted by severity, `Danger` first, then by the first involved leg's position in the slip. Stable sorting
   keeps the same input in the same order.
 - **Same team** means an equal `Team`. **Opponent** is the other team in the leg's game.
-- **Favorite**: a `SPREAD` with a line below 0, or an `ML` with negative odds. **Underdog**: a `SPREAD` with a line above
-  0, or an `ML` with positive odds.
+- **Favorite**: a `SPREAD` with a line below 0, or an `ML` with negative odds. **Underdog**: a `SPREAD` with a line
+  above 0, or an `ML` with positive odds.
 - **Passing/receiving over**: an `OVER` on `PASS_YDS`, `PASS_TDS`, `REC_YDS`, or `RECEPTIONS`.
 - When a rule's legs belong to more than one person, the message names each owner.
 
@@ -79,3 +79,75 @@ the same game. One warning per passing over, using the first matching receiver a
 
 > Shootout stack: Josh Allen Over 245.5 Pass Yds, Khalil Shakir Over 54.5 Rec Yds, game Over 47.5. If it's a track meet,
 > all three hit.
+
+## Rule Set B: Weather
+
+These rules read only outdoor games with a known forecast. Indoor games, games with a nil `Weather`, and legs whose game
+is missing from the map are skipped.
+
+| Rule           | Severity                                                                                         | Fires when                                                                              |
+| -------------- | ------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------- |
+| `wind`         | `Danger` at sustained wind ≥ 20 mph; otherwise `Warn` at sustained wind ≥ 15 mph or gusts ≥ 25 mph | A passing, receiving, kicking, or game-total `OVER` in that game.                       |
+| `fake_weather` | `Info`                                                                                           | Precipitation > 0 and < 0.1 in/hr, wind < 10 mph, and a `TOTAL` `UNDER` in that game.   |
+
+### `wind` — Danger or Warn
+
+A windy forecast flags every `OVER` leg in the game on `PASS_YDS`, `PASS_TDS`, `REC_YDS`, `RECEPTIONS`, `KICKER_PTS`, or
+`TOTAL`. One warning per game, listing every flagged leg. Gusts only raise the level to `Warn`; the message names the
+sustained wind when it meets the 15 mph bar, otherwise the gusts.
+
+> Heads up: 22 mph winds in Buffalo today. Passing and kicking overs take a real hit in that, so Josh Allen Over 245.5
+> Pass Yds gets tougher. Field goals drop to about 77%.
+
+### `fake_weather` — Info
+
+Light rain without wind is not the scoring brake the slip might expect. Fires when precipitation is above 0 and below
+0.1 in/hr, sustained wind is below 10 mph, and the game has at least one `TOTAL` `UNDER`. One warning per game, listing
+every under.
+
+> FYI: light rain without wind doesn't actually lower NFL scoring. Under 45.5 gets no extra help here.
+
+## Rule Set C: Key numbers
+
+| Rule                | Severity | Fires when                                                              |
+| ------------------- | -------- | ----------------------------------------------------------------------- |
+| `hook`              | `Warn`   | A `SPREAD` leg at exactly −3.5, −7.5, +2.5, or +6.5.                     |
+| `total_key_number`  | `Info`   | A `TOTAL` leg whose line is within 0.5 of 37, 41, 43, 44, 47, or 51.     |
+
+### `hook` — Warn
+
+A spread sitting on the hook loses when the game lands on the key number. One warning per spread leg. At −3.5 the
+message notes that about 15% of games land on exactly 3 and suggests buying to −3 or switching to the ML. At −7.5 it
+suggests buying to −7 or switching to the ML. At +2.5 and +6.5 it says landing on 3 or 7 loses by the hook and suggests
+buying to +3 or +7.
+
+> BUF -3.5 is on the hook. About 15% of games land on exactly 3, and that's a loss here. Buying to -3 or switching to
+> the ML is worth a look.
+
+For a plus spread on the hook:
+
+> MIA +2.5 is on the hook. Landing on exactly 3 loses by the hook. Buying to +3 is worth a look.
+
+### `total_key_number` — Info
+
+A game total within half a point of a common NFL final total: 37, 41, 43, 44, 47, or 51. One warning per total leg. A
+line exactly on a key number gets a different message than a line half a point away or between two keys.
+
+> 43 is one of the most common NFL final totals. A half point either way decides it.
+
+Between two key numbers:
+
+> 43.5 sits right between 43 and 44, two of the most common NFL final totals. The half point matters here.
+
+## Chalk
+
+| Rule    | Severity | Fires when                             |
+| ------- | -------- | -------------------------------------- |
+| `chalk` | `Warn`   | Any leg with American odds of −230 or lower. |
+
+### `chalk` — Warn
+
+A heavy favorite adds little to the payout while still losing the slip often. One warning per qualifying leg. The payout
+multiplier is `1 + 100/|odds|`, and the bust chance is `1 − |odds|/(|odds| + 100)`.
+
+> This -300 leg only bumps the payout 1.33× but still busts the slip about 25% of the time.

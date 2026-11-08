@@ -29,7 +29,7 @@
 
 ## Reference
 
-- [Analyzer rules](reference/analyzer-rules.md): The stable IDs, severities, triggers, and example messages for the correlation rules in internal/analyzer's Rule Set A.
+- [Analyzer rules](reference/analyzer-rules.md): The stable IDs, severities, triggers, and example messages for the correlation, weather, key-number, and chalk rules in internal/analyzer.
 - [Configuration](reference/config.md): Environment variables the server reads, their dev defaults, and the values it rejects in prod.
 - [Data sources](reference/data-sources.md): The free sources behind the slate, the ESPN scoreboard endpoint and its Sunday and Monday filter, the Open-Meteo forecast behind a game's weather, The Odds API game lines, bookmakers, deep links, and credit budget, and the raw response archive every successful call leaves.
 - [Odds math](reference/odds-math.md): The formulas in internal/parlay for converting American and decimal odds, combining legs, picking a reference price, and computing payout and units.
