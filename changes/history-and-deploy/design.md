@@ -17,8 +17,10 @@ Sunday, Nov 8. It runs interactively: the user runs the GCP setup and the first 
 - The create-slip form lists stored weeks with their season and takes a typed season, season type, and week number for
   a past week the slate never stored, upserting that week. A typed week later than the latest stored week is refused,
   and `internal/slips` already skips kickoff rules for past weeks.
-- `internal/seed` reads `seed/history.yaml` at boot after migrations. Each slip is keyed by week and name; existing
-  slips are skipped. It goes through `internal/slips` so results and statuses are computed the normal way.
+- `internal/seed` reads `seed/history.yaml` at boot after migrations and imports into the first group. Each slip is
+  keyed by week and name; existing slips are skipped. The week and slip are inserted through the store in one
+  transaction, then each leg and result goes through `internal/slips` so results and statuses are computed the normal
+  way. The whole file is validated before the first write.
 - Container: multi-stage `Dockerfile` (Go build, then alpine with a pinned Litestream). `deploy/entrypoint.sh` restores
   then runs `litestream replicate -exec`. A `LITESTREAM_REPLICA_URL` override lets local runs use a `file` replica.
 - `deploy/setup.sh` is idempotent `gcloud` and prints the GitHub variables. The agent writes it; the user runs it.
@@ -60,7 +62,7 @@ Sunday, Nov 8. It runs interactively: the user runs the GCP setup and the first 
 
 - [x] Add internal/seed and an empty seed/history.yaml with a commented example, load it at boot, and test that loading
   twice creates each slip once, unknown users are created, and results compute slip result
-- [ ] Docs: add docs/reference/history-file.md; delete History from plan/product.md
+- [x] Docs: add docs/reference/history-file.md; delete History from plan/product.md
 
 ### Phase 3: Container and persistence
 
