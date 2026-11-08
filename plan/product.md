@@ -45,29 +45,6 @@ Scoped to one NFL season (selector at the top). Only graded slips count.
 - **Dollar P/L**, per user, only from slips where they logged a wager: `WON → stake × (D − 1) × (1 + boost/100)` using
   their logged odds; `LOST → −stake`; `PUSH → 0`.
 
-## History
-
-- `seed/history.yaml` loads on every boot; a slip already present (same week and name) is skipped.
-- Unknown user names in the file are created as active users.
-- Historical legs are usually `OTHER` with free text; game and player links are optional.
-
-```yaml
-slips:
-  - season: 2026
-    season_type: 2 # 2 regular, 3 postseason
-    week: 7
-    name: Week 7
-    legs_per_member: 2
-    legs:
-      - user: Adam
-        selection: BUF -3.5
-        market: OTHER # optional, default OTHER
-        odds: -110
-        result: WON
-```
-
-The slip result is computed from leg results, not stored in the file.
-
 ## Screens
 
 Phone first: one column with a bottom tab bar. At `lg` width and up, Slip, Games, and Research sit side by side as 3
