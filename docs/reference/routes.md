@@ -84,7 +84,7 @@ All slip routes require the slip to belong to the active group.
 | Method + path                              | Purpose                                                         | Request and response |
 | ------------------------------------------ | --------------------------------------------------------------- | -------------------- |
 | `GET /slips/new`                           | Create-slip page                                                | Optional `?week=`; unknown week 404. Full page. |
-| `POST /slips`                              | Create the slip from `week_id`, `name`, `legs_per_member`, and `member_id` | 303 to `/slips/{id}`; a fixable error is 422. |
+| `POST /slips`                              | Create the slip from `week_id` (or a typed `season`, `season_type`, and `week`), `name`, `legs_per_member`, and `member_id` | 303 to `/slips/{id}`; a fixable error re-renders the form. |
 | `GET /slips/{id}`                          | Full slip page                                                  | Full page, with the payout form at the default stake. |
 | `GET /slips/{id}/panel`                    | Members, legs, odds, lock state, and banner                     | Panel partial. Refreshes on `slip-updated`. |
 | `GET /slips/{id}/export`                   | Export card for a `LOCKED` slip                                 | Export partial. Refreshes on `slip-updated`. |

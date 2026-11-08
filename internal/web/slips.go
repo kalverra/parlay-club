@@ -128,10 +128,14 @@ type ActivityView struct {
 	When    string
 }
 
-// SlipCreateView is the create-slip form.
+// SlipCreateView is the create-slip form. Season, SeasonType, and WeekNum hold
+// a past week the slate sync never stored; filling them overrides WeekID.
 type SlipCreateView struct {
 	Weeks         []WeekOption
 	WeekID        int64
+	Season        int
+	SeasonType    int
+	WeekNum       int
 	Name          string
 	LegsPerMember int
 	Members       []MemberOption
@@ -309,16 +313,8 @@ func (h *slipHandlers) createSlip(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	weekID, valid := parseID(r.PostForm.Get("week_id"))
-	if !valid {
-		h.renderCreateError(w, r, user, group, "Pick a week.")
-		return
-	}
-	if _, err := h.deps.Store.WeekByID(r.Context(), weekID); errors.Is(err, db.ErrWeekNotFound) {
-		http.NotFound(w, r)
-		return
-	} else if err != nil {
-		h.serverError(w, err)
+	weekID, ok := h.weekFromCreateForm(w, r, user, group)
+	if !ok {
 		return
 	}
 
@@ -366,6 +362,84 @@ func (h *slipHandlers) createSlip(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.redirect(w, r, fmt.Sprintf("/slips/%d", created.ID))
+}
+
+// weekFromCreateForm resolves the create form's week and writes the refusal. A
+// filled season and week number make a week the slate sync never stored;
+// otherwise the chosen week_id is used.
+func (h *slipHandlers) weekFromCreateForm(
+	w http.ResponseWriter,
+	r *http.Request,
+	user db.User,
+	group db.Group,
+) (int64, bool) {
+	seasonRaw := strings.TrimSpace(r.PostForm.Get("season"))
+	weekRaw := strings.TrimSpace(r.PostForm.Get("week"))
+	if seasonRaw != "" || weekRaw != "" {
+		season, err := strconv.Atoi(seasonRaw)
+		if err != nil || season < 1900 || season > 2100 {
+			h.renderCreateError(w, r, user, group, "Season must be a year.")
+			return 0, false
+		}
+		weekNum, err := strconv.Atoi(weekRaw)
+		if err != nil || weekNum < 1 || weekNum > 22 {
+			h.renderCreateError(w, r, user, group, "Week must be a number from 1 to 22.")
+			return 0, false
+		}
+		seasonType, ok := parseSeasonType(r.PostForm.Get("season_type"))
+		if !ok {
+			h.renderCreateError(w, r, user, group, "Pick a season type.")
+			return 0, false
+		}
+		weekID := db.WeekID(season, seasonType, weekNum)
+		if !h.weekIDIsPast(w, r, user, group, weekID) {
+			return 0, false
+		}
+		week, err := h.deps.Store.UpsertWeek(r.Context(), season, seasonType, weekNum)
+		if err != nil {
+			h.serverError(w, err)
+			return 0, false
+		}
+		return week.ID, true
+	}
+
+	weekID, valid := parseID(r.PostForm.Get("week_id"))
+	if !valid {
+		h.renderCreateError(w, r, user, group, "Pick a week.")
+		return 0, false
+	}
+	if _, err := h.deps.Store.WeekByID(r.Context(), weekID); errors.Is(err, db.ErrWeekNotFound) {
+		http.NotFound(w, r)
+		return 0, false
+	} else if err != nil {
+		h.serverError(w, err)
+		return 0, false
+	}
+	return weekID, true
+}
+
+// weekIDIsPast refuses a typed week later than the latest known one. With no
+// weeks on record there is nothing to compare against, so any week is allowed.
+func (h *slipHandlers) weekIDIsPast(
+	w http.ResponseWriter,
+	r *http.Request,
+	user db.User,
+	group db.Group,
+	weekID int64,
+) bool {
+	latest, err := h.deps.Store.LatestWeek(r.Context())
+	if errors.Is(err, db.ErrWeekNotFound) {
+		return true
+	}
+	if err != nil {
+		h.serverError(w, err)
+		return false
+	}
+	if weekID > latest.ID {
+		h.renderCreateError(w, r, user, group, "That week hasn't started yet.")
+		return false
+	}
+	return true
 }
 
 // slipPage shows one slip in full.
@@ -938,7 +1012,7 @@ func (h *slipHandlers) createView(
 	}
 	options := make([]WeekOption, 0, len(weeks))
 	for _, known := range weeks {
-		options = append(options, WeekOption{ID: known.ID, Label: weekLabel(known)})
+		options = append(options, WeekOption{ID: known.ID, Label: weekOptionLabel(known)})
 	}
 
 	members, err := h.deps.Store.Members(ctx, group.ID)
@@ -956,6 +1030,7 @@ func (h *slipHandlers) createView(
 
 	view := SlipCreateView{
 		Weeks:         options,
+		SeasonType:    2,
 		LegsPerMember: slips.DefaultLegsPerMember,
 		Members:       memberOptions,
 	}
@@ -1027,6 +1102,9 @@ func (h *slipHandlers) renderCreateError(
 	}
 	form := &SlipCreateView{
 		WeekID:        weekIDFromForm(r),
+		Season:        intFromForm(r, "season"),
+		SeasonType:    seasonTypeFromForm(r),
+		WeekNum:       intFromForm(r, "week"),
 		Name:          r.PostForm.Get("name"),
 		LegsPerMember: slips.DefaultLegsPerMember,
 		Error:         message,
@@ -1668,6 +1746,37 @@ func parseActive(raw string, current bool) (bool, bool) {
 	}
 }
 
+// parseSeasonType reads a create-form season type. ESPN uses 2 for the regular
+// season and 3 for the postseason.
+func parseSeasonType(raw string) (int, bool) {
+	switch strings.TrimSpace(raw) {
+	case "", "2":
+		return 2, true
+	case "3":
+		return 3, true
+	default:
+		return 0, false
+	}
+}
+
+// seasonTypeFromForm reads the create form's season type, defaulting to regular.
+func seasonTypeFromForm(r *http.Request) int {
+	seasonType, ok := parseSeasonType(r.PostForm.Get("season_type"))
+	if !ok {
+		return 2
+	}
+	return seasonType
+}
+
+// intFromForm reads a whole number from the submitted form, or 0.
+func intFromForm(r *http.Request, name string) int {
+	value, err := strconv.Atoi(strings.TrimSpace(r.PostForm.Get(name)))
+	if err != nil {
+		return 0
+	}
+	return value
+}
+
 // weekIDFromForm reads the create form's week.
 func weekIDFromForm(r *http.Request) int64 {
 	id, _ := parseID(r.PostForm.Get("week_id"))
@@ -1677,6 +1786,14 @@ func weekIDFromForm(r *http.Request) int64 {
 // weekLabel is the display name and default slip name for a week.
 func weekLabel(week db.Week) string {
 	return fmt.Sprintf("Week %d", week.WeekNum)
+}
+
+// weekOptionLabel tells weeks from different seasons apart in the create form.
+func weekOptionLabel(week db.Week) string {
+	if week.SeasonType == 3 {
+		return fmt.Sprintf("%d Postseason %s", week.Season, weekLabel(week))
+	}
+	return fmt.Sprintf("%d %s", week.Season, weekLabel(week))
 }
 
 // titleSide capitalizes a side for display.

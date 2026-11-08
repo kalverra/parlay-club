@@ -5,7 +5,7 @@ type: concept
 summary: How a group builds one shared parlay a week from the slate, with members, legs, quick-add, create-slip defaults, and the editing and locking rules.
 tags: [slips, weeks, legs, members, locking, activity, groups, games, quick-add]
 sources: [internal/slips/slips.go, internal/slips/rules.go, internal/db/slips.go, internal/db/legs.go, internal/db/weeks.go, internal/db/games.go, internal/web/games.go]
-last_verified: 2026-11-07
+last_verified: 2026-11-08
 ---
 
 # Slips
@@ -25,7 +25,9 @@ with their own stake, and no money passes through the app.
 The home page opens the newest slip of the latest week. The slate sync keeps that week current, so it is normally the
 week being played. When the group has none, it shows the create-slip form.
 
-- Week defaults to the latest week. Past weeks are allowed, so history can be entered.
+- Week defaults to the latest week. The picker lists every stored week with its season. A past week the slate never
+  stored can be typed in by season, season type, and week number, and the form creates the week. A typed week later than
+  the latest stored week is refused.
 - Name defaults to the week label, `Week 9`, then `Week 9 #2`.
 - `legs_per_member` defaults to 2 and allows 1–5.
 - Members default to the previous slip's members.

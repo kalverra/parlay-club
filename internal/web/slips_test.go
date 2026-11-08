@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -470,6 +471,90 @@ func TestLegResultRefusesAnUnknownResult(t *testing.T) {
 
 	assert.Equal(t, http.StatusUnprocessableEntity, response.Code)
 	assert.Contains(t, response.Body.String(), "that result isn't valid")
+}
+
+// TestCreateFormListsPastWeeks checks the week picker offers earlier weeks and
+// tells seasons apart.
+func TestCreateFormListsPastWeeks(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	past, err := fixture.store.UpsertWeek(t.Context(), 2025, 2, 7)
+	require.NoError(t, err)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/slips/new", nil)
+	fixture.handler.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	body := recorder.Body.String()
+	assert.Contains(t, body, fmt.Sprintf(`<option value="%d"`, past.ID))
+	assert.Contains(t, body, "2025 Week 7")
+	assert.Contains(t, body, "Or add a past week")
+}
+
+// TestCreateSlipAcceptsAPastWeekWithFreeTextOtherLegs creates a slip for a week
+// the slate never stored, then adds a free-text OTHER leg with no game.
+func TestCreateSlipAcceptsAPastWeekWithFreeTextOtherLegs(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 1)
+	response := postForm(t, fixture.handler, "/slips", url.Values{
+		"week_id":         {strconv.FormatInt(fixture.week.ID, 10)},
+		"season":          {"2025"},
+		"season_type":     {"2"},
+		"week":            {"7"},
+		"name":            {"Week 7"},
+		"legs_per_member": {"1"},
+		"member_id":       {strconv.FormatInt(fixture.user.ID, 10)},
+	})
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+
+	location := response.Header().Get("Hx-Redirect")
+	require.NotEmpty(t, location)
+	slipID, err := strconv.ParseInt(strings.TrimPrefix(location, "/slips/"), 10, 64)
+	require.NoError(t, err)
+
+	slip, err := fixture.store.SlipByID(t.Context(), slipID)
+	require.NoError(t, err)
+	assert.Equal(t, db.WeekID(2025, 2, 7), slip.WeekID, "the typed week wins over the picker")
+
+	leg := postForm(t, fixture.handler, fmt.Sprintf("/slips/%d/legs", slipID), url.Values{
+		"market_type": {"OTHER"},
+		"selection":   {"BUF -3.5"},
+		"odds":        {"-110"},
+	})
+	require.Equal(t, http.StatusOK, leg.Code, leg.Body.String())
+	assert.Contains(t, leg.Body.String(), "BUF -3.5")
+
+	legs, err := fixture.store.LegsForSlip(t.Context(), slipID)
+	require.NoError(t, err)
+	require.Len(t, legs, 1)
+	assert.Equal(t, "OTHER", legs[0].MarketType)
+	assert.Equal(t, "BUF -3.5", legs[0].Selection)
+	assert.Nil(t, legs[0].GameID, "a past-week OTHER leg needs no game")
+}
+
+// TestCreateFormRefusesAFutureWeek keeps a typed week from running ahead of the
+// slate.
+func TestCreateFormRefusesAFutureWeek(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	response := postForm(t, fixture.handler, "/slips", url.Values{
+		"week_id":         {strconv.FormatInt(fixture.week.ID, 10)},
+		"season":          {"2026"},
+		"season_type":     {"2"},
+		"week":            {"10"},
+		"name":            {"Week 10"},
+		"legs_per_member": {"2"},
+		"member_id":       {strconv.FormatInt(fixture.user.ID, 10)},
+	})
+
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	assert.Contains(t, response.Body.String(), "started yet")
+	_, err := fixture.store.WeekByID(t.Context(), db.WeekID(2026, 2, 10))
+	require.ErrorIs(t, err, db.ErrWeekNotFound, "a refused week is not stored")
 }
 
 // postForm sends one already-encoded form as the browser's HTMX layer would.

@@ -21,6 +21,45 @@
           {{end}}
         </select>
       </label>
+      <fieldset class="space-y-2 rounded-lg border border-slate-800 p-3">
+        <legend class="px-1 text-sm text-slate-300">Or add a past week</legend>
+        <p class="text-xs text-slate-500">
+          Use this for a week the slate never stored. Filling both overrides the week above.
+        </p>
+        <div class="grid grid-cols-2 gap-2">
+          <label class="block text-sm text-slate-300">
+            Season
+            <input
+              type="number"
+              name="season"
+              min="1900"
+              max="2100"
+              placeholder="2026"
+              value="{{if .Create.Season}}{{.Create.Season}}{{end}}"
+              class="mt-1 w-full rounded-md border border-slate-700 bg-slate-800 px-3 py-2"
+            >
+          </label>
+          <label class="block text-sm text-slate-300">
+            Week number
+            <input
+              type="number"
+              name="week"
+              min="1"
+              max="22"
+              placeholder="9"
+              value="{{if .Create.WeekNum}}{{.Create.WeekNum}}{{end}}"
+              class="mt-1 w-full rounded-md border border-slate-700 bg-slate-800 px-3 py-2"
+            >
+          </label>
+        </div>
+        <label class="block text-sm text-slate-300">
+          Season type
+          <select name="season_type" class="mt-1 w-full rounded-md border border-slate-700 bg-slate-800 px-3 py-2">
+            <option value="2"{{if ne .Create.SeasonType 3}} selected{{end}}>Regular season</option>
+            <option value="3"{{if eq .Create.SeasonType 3}} selected{{end}}>Postseason</option>
+          </select>
+        </label>
+      </fieldset>
       <label class="block text-sm text-slate-300">
         Name
         <input
