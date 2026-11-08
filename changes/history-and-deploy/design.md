@@ -50,7 +50,7 @@ Sunday, Nov 8. It runs interactively: the user runs the GCP setup and the first 
 
 - [x] Add SetLegResult with slip result and status recompute, its table tests for every Grading case, and the result
   chip menu on each leg with PUT /legs/{id}/result
-- [ ] Allow past weeks in the create-slip form and test a past-week slip with free-text OTHER legs
+- [x] Allow past weeks in the create-slip form and test a past-week slip with free-text OTHER legs
 - [ ] Docs: add grading to docs/concepts/slips.md; delete the manual grading parts from plan/product.md
 
 ### Phase 2: History file
