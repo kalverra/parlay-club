@@ -69,30 +69,6 @@ Over 245.5"). Each rule below gives a model message; keep the content and adjust
 
 ## Rules
 
-### A: Correlation
-
-**`blowout_passing` (Warn).** A `SPREAD` leg with line ≤ −7.0 and a `PASS_YDS` or `REC_YDS` OVER on the same team, same
-game. One warning per spread leg, listing every matching prop.
-> If BUF covers -7.5 they'll likely run the clock in Q4. Passing overs pair better with a closer spread, or try the
-> other team's WR for garbage time.
-
-**`trailing_rb` (Danger).** An underdog leg (a `SPREAD` with line ≥ +4.5, or any underdog `ML`) and a `RUSH_YDS` or
-`RUSH_ATT` OVER on the same team, same game.
-> MIA +6.5 means they're probably trailing, and trailing teams stop running. De'Von Achane's rush over fights that
-> script.
-
-**`total_contradiction` (Danger).** A `TOTAL` UNDER and, in the same game, 2 or more legs that are `ANYTIME_TD` or a
-passing/receiving over (any team).
-> Under 44.5 needs a quiet game, but 2 other legs here need points. One of these sides is going to lose.
-
-**`stack_clock_drain` (Info).** A favorite `SPREAD` leg, a `RUSH_YDS` or `RUSH_ATT` OVER on the same team, and a
-`TEAM_TOTAL` UNDER on the opponent, same game.
-> Nice stack: BUF covers, Cook grinds the clock, MIA stays quiet. These all win together.
-
-**`stack_shootout` (Info).** A `PASS_YDS` OVER, a `REC_YDS` or `RECEPTIONS` OVER on the same team (different player),
-and a `TOTAL` OVER, same game.
-> Shootout stack: Allen over, Shakir over, game over. If it's a track meet, all three hit.
-
 ### B: Weather (outdoor games with known weather only)
 
 **`wind`.** Danger when sustained ≥ 20 mph; else Warn when sustained ≥ 15 mph or gusts ≥ 25 mph. Flags every leg in that
