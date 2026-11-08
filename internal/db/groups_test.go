@@ -35,6 +35,31 @@ func TestCreateGroupMakesCreatorItsFirstMember(t *testing.T) {
 	assert.Equal(t, []db.Group{group}, groups)
 }
 
+func TestFirstGroupReturnsTheOldest(t *testing.T) {
+	t.Parallel()
+
+	store, _ := openTestStore(t)
+	ada := createUser(t, store, "Ada")
+
+	first, err := store.Create(t.Context(), ada.ID, "First")
+	require.NoError(t, err)
+	_, err = store.Create(t.Context(), ada.ID, "Second")
+	require.NoError(t, err)
+
+	found, err := store.FirstGroup(t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, first, found)
+}
+
+func TestFirstGroupReportsNoGroups(t *testing.T) {
+	t.Parallel()
+
+	store, _ := openTestStore(t)
+
+	_, err := store.FirstGroup(t.Context())
+	require.ErrorIs(t, err, db.ErrGroupNotFound)
+}
+
 func TestCreateGroupMintsAUniqueToken(t *testing.T) {
 	t.Parallel()
 

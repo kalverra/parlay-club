@@ -1,0 +1,21 @@
+# Past slips load on every boot into the app's first group. A slip already
+# present with the same week and name is skipped, so correcting this file later
+# does not rewrite a slip that already loaded.
+#
+# A leg's market defaults to OTHER, its odds to -110, and its result to PENDING.
+# The slip result is computed from the legs, not stored here.
+#
+# Example:
+#
+# slips:
+#   - season: 2026
+#     season_type: 2 # 2 regular, 3 postseason
+#     week: 7
+#     name: Week 7
+#     legs_per_member: 2
+#     legs:
+#       - user: Adam
+#         selection: BUF -3.5
+#         market: OTHER
+#         odds: -110
+#         result: WON
