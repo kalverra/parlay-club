@@ -4,7 +4,7 @@ title: Routes
 type: reference
 summary: Every HTTP route the server serves, the middleware in front of them, and the status codes, HTMX headers, and SSE frames handlers return.
 tags: [routes, http, handlers, middleware, htmx, sse]
-sources: [cmd/server/main.go, internal/auth/handlers.go, internal/groups/handlers.go, internal/web/routes.go, internal/web/games.go, internal/web/slips.go, internal/live/stream.go]
+sources: [cmd/server/main.go, internal/auth/handlers.go, internal/groups/handlers.go, internal/web/routes.go, internal/web/games.go, internal/web/slips.go, internal/web/export.go, internal/live/stream.go]
 last_verified: 2026-11-07
 ---
 
@@ -87,6 +87,7 @@ All slip routes require the slip to belong to the active group.
 | `POST /slips`                              | Create the slip from `week_id`, `name`, `legs_per_member`, and `member_id` | 303 to `/slips/{id}`; a fixable error is 422. |
 | `GET /slips/{id}`                          | Full slip page                                                  | Full page, with the payout form at the default stake. |
 | `GET /slips/{id}/panel`                    | Members, legs, odds, lock state, and banner                     | Panel partial. Refreshes on `slip-updated`. |
+| `GET /slips/{id}/export`                   | Export card for a `LOCKED` slip                                 | Export partial. Refreshes on `slip-updated`. |
 | `GET /slips/{id}/payout`                   | Payout calculator                                               | Optional `?stake=` and `?boost=`; defaults 10 and 0. Payout partial. |
 | `GET /slips/{id}/activity`                 | Activity feed                                                   | Activity partial. Refreshes on `slip-updated`. |
 | `POST /slips/{id}/members`                 | Add a group member from `user_id`                               | Panel partial. |
@@ -97,8 +98,8 @@ All slip routes require the slip to belong to the active group.
 | `GET /legs/{id}/edit`                      | Edit form filled from the leg                                   | Leg form partial. |
 | `PUT /legs/{id}`                           | Save the leg's pick fields                                      | Panel partial with `Hx-Trigger: leg-saved`. |
 | `DELETE /legs/{id}`                        | Delete the leg                                                  | Panel partial. |
-| `POST /slips/{id}/lock`                    | Record the signed-in member's lock in                           | Panel partial. |
-| `POST /slips/{id}/unlock`                  | Clear every member's lock                                       | Panel partial. |
+| `POST /slips/{id}/lock`                    | Record the signed-in member's lock in                           | Panel partial with `Hx-Trigger: slip-updated`. |
+| `POST /slips/{id}/unlock`                  | Clear every member's lock                                       | Panel partial with `Hx-Trigger: slip-updated`. |
 | `GET /slips/{id}/events`                   | Live updates for the slip and its week                          | `text/event-stream`; see below. |
 
 The leg form takes `market_type`, `selection`, `team`, `player_name`, `player_id`, `side`, `line`, `odds`, and
@@ -112,6 +113,12 @@ successful `POST` answers with the `leg-added` partial instead of the slip panel
 `GET /slips/{id}/events` serves one connection for one slip. It subscribes to `slip:{id}` and `week:{weekID}`, sends
 `slip-updated` and `board-updated` signals, pings every 25 seconds, and ends with `bye` at its deadline. The slip page
 sets `data-live-url` so the client opens the stream. See [Live updates](../concepts/live-updates.md).
+
+`GET /slips/{id}/export` renders the export card on a `LOCKED` slip: a one-tap combined DraftKings or FanDuel link when
+the book can take several picks, per-leg taps otherwise, the manual list, and the copy text. It reads stored odds only
+and never fetches or writes. The slip page includes it, and the wrapper refreshes on `slip-updated`, so an unlock hides
+the card. The lock and unlock responses carry `Hx-Trigger: slip-updated`, so the person who acts sees the card change
+without waiting for the SSE stream. See [Export](../concepts/export.md).
 
 ### Games
 

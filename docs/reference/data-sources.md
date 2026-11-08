@@ -2,8 +2,8 @@
 id: data-sources
 title: Data sources
 type: reference
-summary: The free sources behind the slate, the ESPN scoreboard endpoint and its Sunday and Monday filter, the Open-Meteo forecast behind a game's weather, The Odds API game lines, bookmakers, and credit budget, and the raw response archive every successful call leaves.
-tags: [data, espn, scoreboard, games, sync, fixtures, weather, open-meteo, venues, odds, lines, bookmakers, credits, budget, archive, raw-responses, sqlite]
+summary: The free sources behind the slate, the ESPN scoreboard endpoint and its Sunday and Monday filter, the Open-Meteo forecast behind a game's weather, The Odds API game lines, bookmakers, deep links, and credit budget, and the raw response archive every successful call leaves.
+tags: [data, espn, scoreboard, games, sync, fixtures, weather, open-meteo, venues, odds, lines, bookmakers, links, credits, budget, archive, raw-responses, sqlite]
 sources: [internal/ingest/espn/client.go, internal/ingest/espn/scoreboard.go, internal/db/weeks.go, internal/db/games.go, internal/ingest/weather/client.go, internal/ingest/weather/forecast.go, internal/ingest/weather/venues.go, internal/ingest/odds/client.go, internal/ingest/odds/events.go, internal/ingest/odds/lines.go, internal/ingest/odds/match.go, internal/ingest/archive/transport.go, internal/db/archive.go, cmd/server/main.go, internal/refresh/refresh.go]
 last_verified: 2026-11-07
 ---
@@ -55,8 +55,8 @@ With no params it returns the current week. For a specific week: `?seasontype={2
 | `events[].competitions[0].venue`                                 | `venue_id`, `venue_name`, `is_indoor` from `id`, `fullName`, `indoor`    |
 | `events[].status.type.state`                                     | `pre` → `SCHEDULED`, `in` → `LIVE`, `post` → `FINAL`                     |
 
-- Keep only events whose kickoff in `America/New_York` falls on Sunday or Monday. A 9:30 a.m. ET London kickoff stays
-  on the slate, and a Monday night game stored in UTC on Tuesday stays too.
+- Keep only events whose kickoff in `America/New_York` falls on Sunday or Monday. A 9:30 a.m. ET London kickoff stays on
+  the slate, and a Monday night game stored in UTC on Tuesday stays too.
 - A scheduled game has no score, even when ESPN sends a placeholder zero.
 - An unknown event state is an error, not a guess.
 - Upsert the week and each game; never delete them, so a flexed game keeps its ID. Rerunning a sync with the same
@@ -91,19 +91,21 @@ leave that game's weather NULL. Add a venue when a new stadium appears.
 ## The Odds API (free tier: 500 credits/month)
 
 Base: `https://api.the-odds-api.com/v4/sports/americanfootball_nfl`. Every call carries the key as the `apiKey` query
-param and sends `User-Agent: parlay-club`. `odds.NewClient(baseURL, apiKey, httpClient)` defaults an empty base URL to the
-root above and a nil client to a 10 second timeout. An empty key is an error before any request goes out.
+param and sends `User-Agent: parlay-club`. `odds.NewClient(baseURL, apiKey, httpClient)` defaults an empty base URL to
+the root above and a nil client to a 10 second timeout. An empty key is an error before any request goes out.
 
 ### Credits
 
 Every response, the free event list included, carries `x-requests-remaining`, `x-requests-used`, and `x-requests-last`.
-The client returns them as `Credits{Remaining, Used, Last}`. A missing or unreadable remaining count is an error, because
-the caller cannot enforce a credit floor without it. The used and last counts are informational and default to zero.
+The client returns them as `Credits{Remaining, Used, Last}`. A missing or unreadable remaining count is an error,
+because the caller cannot enforce a credit floor without it. The used and last counts are informational and default to
+zero.
 
 ### Game lines
 
-`GET /odds?regions=us&markets=h2h,spreads,totals&oddsFormat=american` costs about 3 credits and returns every book's
-three game markets. `Client.Lines(ctx)` maps them into one `Line` per book and selection, shaped like an `odds` row:
+`GET /odds?regions=us&markets=h2h,spreads,totals&oddsFormat=american&includeLinks=true&includeSids=true` costs about 3
+credits and returns every book's three game markets. `Client.Lines(ctx)` maps them into one `Line` per book and
+selection, shaped like an `odds` row:
 
 | `Line` field | Source                                                           |
 | ------------ | ---------------------------------------------------------------- |
@@ -114,7 +116,12 @@ three game markets. `Client.Lines(ctx)` maps them into one `Line` per book and s
 | `Side`       | `TEAM` for a moneyline or spread; `OVER` or `UNDER` for a total  |
 | `Line`       | NULL for a moneyline; the point for a spread or total            |
 | `Price`      | `price`, American                                                |
+| `Link`       | The outcome's `link`, the book's deep link; empty when absent    |
+| `Sid`        | The outcome's `sid`, the book's selection ID; empty when absent  |
 
+- The two deep-link flags cost no extra credits. A 2026-11-07 probe measured `x-requests-last` at 3 with and without
+  them for the three game markets, and at 1 with and without them for one prop market. The fields land on each outcome,
+  not on the market or book. A book may omit either one, so a missing link is normal and the row stores NULL.
 - A market key the client does not read produces no rows, so the same client can serve later prop requests.
 - A book that omits a market produces no rows for it. Some books omit the moneyline on future games.
 - A missing price, a spread or total with no point, an empty team name, or a non-Over/Under total outcome is an error,
@@ -127,9 +134,9 @@ three game markets. `Client.Lines(ctx)` maps them into one `Line` per book and s
 `commence_time` as RFC 3339 and stores it in UTC.
 
 `MatchEvents` pairs each event with one game when `home_team` and `away_team` equal the game's ESPN `displayName`s and
-`commence_time` is within 12 hours of `kickoff_utc`, in either direction. The result maps game ID to event ID. Each event
-and each game is used at most once, so input order decides a rare tie. Unmatched events come back in input order for
-logging.
+`commence_time` is within 12 hours of `kickoff_utc`, in either direction. The result maps game ID to event ID. Each
+event and each game is used at most once, so input order decides a rare tie. Unmatched events come back in input order
+for logging.
 
 ### Bookmakers
 

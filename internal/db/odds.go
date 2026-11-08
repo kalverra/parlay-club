@@ -4,11 +4,14 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 )
 
 // Odds is one book's price for one selection, shaped like a row of the odds
 // table. PlayerName is empty for game markets, and Team is empty for a total.
+// Link and Sid are the book's deep link and selection ID for this outcome, and
+// are nil when the book supplied none.
 type Odds struct {
 	GameID     string
 	Book       string
@@ -18,12 +21,62 @@ type Odds struct {
 	Side       string
 	Line       *float64
 	Price      int
+	Link       *string
+	Sid        *string
 	FetchedAt  time.Time
+}
+
+// MatchesSelection reports whether o prices the same selection as leg, ignoring
+// book, line, price, and link. It is the one definition of "the same
+// selection" shared by the games board, the slip reference prices, and export.
+func (o Odds) MatchesSelection(leg Leg) bool {
+	if leg.GameID == nil || o.GameID != *leg.GameID {
+		return false
+	}
+	return o.MarketType == leg.MarketType &&
+		o.Team == StringValue(leg.Team) &&
+		o.PlayerName == StringValue(leg.PlayerName) &&
+		o.Side == StringValue(leg.Side)
+}
+
+// SameLine compares two optional lines for an exact match. Two nil lines are
+// the same selection, such as a moneyline.
+func SameLine(left, right *float64) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return *left == *right
+}
+
+// NormalizeBook trims and lowercases a book key so a display value still finds
+// the stored odds rows.
+func NormalizeBook(book string) string {
+	return strings.ToLower(strings.TrimSpace(book))
+}
+
+// OptionalString trims a blank-able value, returning nil when it is blank so
+// the database stores NULL.
+func OptionalString(value string) *string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	return &value
+}
+
+// StringValue reads an optional field as the empty string the odds table stores
+// for an absent team, player, or side.
+func StringValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }
 
 // oddsColumns is the column list every odds query scans, in scanOdds order.
 const oddsColumns = `
-	game_id, book, market_type, team, player_name, side, line, price, fetched_at`
+	game_id, book, market_type, team, player_name, side, line, price, link,
+	sid, fetched_at`
 
 // UpsertOdds writes each row and reports whether any row changed. A row whose
 // values are identical apart from nothing is left alone; a new fetch time is a
@@ -35,15 +88,19 @@ func (s *Store) UpsertOdds(ctx context.Context, rows []Odds) (bool, error) {
 			result, err := tx.conn().ExecContext(ctx, `
 				INSERT INTO odds (
 					game_id, book, market_type, team, player_name, side,
-					line, price, fetched_at
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+					line, price, link, sid, fetched_at
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 				ON CONFLICT (game_id, book, market_type, team, player_name, side)
 				DO UPDATE SET
 					line = excluded.line,
 					price = excluded.price,
+					link = excluded.link,
+					sid = excluded.sid,
 					fetched_at = excluded.fetched_at
 				WHERE odds.line IS NOT excluded.line
 					OR odds.price IS NOT excluded.price
+					OR odds.link IS NOT excluded.link
+					OR odds.sid IS NOT excluded.sid
 					OR odds.fetched_at IS NOT excluded.fetched_at`,
 				row.GameID,
 				row.Book,
@@ -53,6 +110,8 @@ func (s *Store) UpsertOdds(ctx context.Context, rows []Odds) (bool, error) {
 				row.Side,
 				nullableFloat(row.Line),
 				row.Price,
+				nullableString(row.Link),
+				nullableString(row.Sid),
 				formatTimestamp(row.FetchedAt),
 			)
 			if err != nil {
@@ -108,6 +167,8 @@ func scanOdds(row rowScanner) (Odds, error) {
 	var (
 		odds      Odds
 		line      sql.NullFloat64
+		link      sql.NullString
+		sid       sql.NullString
 		fetchedAt string
 	)
 	if err := row.Scan(
@@ -119,6 +180,8 @@ func scanOdds(row rowScanner) (Odds, error) {
 		&odds.Side,
 		&line,
 		&odds.Price,
+		&link,
+		&sid,
 		&fetchedAt,
 	); err != nil {
 		return Odds{}, err
@@ -129,6 +192,8 @@ func scanOdds(row rowScanner) (Odds, error) {
 		return Odds{}, err
 	}
 	odds.Line = nullableFloatPtr(line)
+	odds.Link = nullableStringPtr(link)
+	odds.Sid = nullableStringPtr(sid)
 	odds.FetchedAt = parsed
 	return odds, nil
 }

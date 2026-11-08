@@ -33,6 +33,8 @@ const (
 // Line is one game-line row from one book, shaped like the odds table. Team is
 // The Odds API's display name; the caller maps it to an ESPN abbreviation. Line
 // is nil for a moneyline and set for a spread or total. Price is American odds.
+// Link and Sid are the book's deep link and selection ID for this outcome, and
+// are empty when the book supplied none.
 type Line struct {
 	EventID    string
 	Book       string
@@ -41,6 +43,8 @@ type Line struct {
 	Side       string
 	Line       *float64
 	Price      int
+	Link       string
+	Sid        string
 }
 
 // Lines fetches every book's moneyline, spread, and total for the events The
@@ -52,6 +56,8 @@ func (c *Client) Lines(ctx context.Context) ([]Line, Credits, error) {
 	query.Set("regions", "us")
 	query.Set("markets", "h2h,spreads,totals")
 	query.Set("oddsFormat", "american")
+	query.Set("includeLinks", "true")
+	query.Set("includeSids", "true")
 
 	var raw []eventResponse
 	credits, err := c.get(ctx, oddsPath, query, &raw)
@@ -129,6 +135,8 @@ func mapTeamMarket(
 			Side:       SideTeam,
 			Line:       line,
 			Price:      price,
+			Link:       outcome.Link,
+			Sid:        outcome.Sid,
 		})
 	}
 	return lines, nil
@@ -159,6 +167,8 @@ func mapTotalMarket(eventID, book string, market marketResponse) ([]Line, error)
 			Side:       side,
 			Line:       line,
 			Price:      price,
+			Link:       outcome.Link,
+			Sid:        outcome.Sid,
 		})
 	}
 	return lines, nil

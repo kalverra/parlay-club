@@ -59,6 +59,7 @@
     </form>
   {{else if .Slip}}
     {{template "slip-panel" .}}
+    {{template "slip-export" .Export}}
     {{template "slip-payout" .Slip.Payout}}
     {{template "slip-activity" .}}
     {{template "leg-sheet" .}}

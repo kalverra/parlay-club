@@ -199,3 +199,82 @@ func TestUpsertOddsInsertsUpdatesAndLists(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, changed)
 }
+
+func TestUpsertOddsStoresAndRefreshesLinksWithPrices(t *testing.T) {
+	t.Parallel()
+
+	store, _ := openTestStore(t)
+	week := createTestWeek(t, store, 9)
+	game, err := store.UpsertGame(t.Context(), testSlateGame(week))
+	require.NoError(t, err)
+	fetchedAt := time.Date(2026, time.November, 7, 12, 0, 0, 0, time.UTC)
+
+	rows := []db.Odds{
+		{
+			GameID: game.ID, Book: "draftkings", MarketType: "SPREAD", Team: "BUF",
+			Side: "TEAM", Line: new(-2.5), Price: -110,
+			Link: new("https://sportsbook.draftkings.com/?outcomes=0HC1P250_1"), Sid: new("0HC1P250_1"),
+			FetchedAt: fetchedAt,
+		},
+		{
+			GameID: game.ID, Book: "betmgm", MarketType: "ML", Team: "BUF",
+			Side: "TEAM", Price: -155, FetchedAt: fetchedAt,
+		},
+	}
+	changed, err := store.UpsertOdds(t.Context(), rows)
+	require.NoError(t, err)
+	assert.True(t, changed)
+
+	stored, err := store.OddsForGame(t.Context(), game.ID)
+	require.NoError(t, err)
+	require.Len(t, stored, 2)
+	byBook := make(map[string]db.Odds, len(stored))
+	for _, row := range stored {
+		byBook[row.Book] = row
+	}
+	assert.Equal(t, new("https://sportsbook.draftkings.com/?outcomes=0HC1P250_1"), byBook["draftkings"].Link)
+	assert.Equal(t, new("0HC1P250_1"), byBook["draftkings"].Sid)
+	assert.Nil(t, byBook["betmgm"].Link, "a book without a link stores NULL")
+	assert.Nil(t, byBook["betmgm"].Sid, "a book without a sid stores NULL")
+
+	changed, err = store.UpsertOdds(t.Context(), rows)
+	require.NoError(t, err)
+	assert.False(t, changed, "the same link and price at the same fetch time change nothing")
+
+	rows[0].Price = -115
+	rows[0].Link = new("https://sportsbook.draftkings.com/?outcomes=0HC1P250_2")
+	rows[0].Sid = new("0HC1P250_2")
+	changed, err = store.UpsertOdds(t.Context(), rows)
+	require.NoError(t, err)
+	assert.True(t, changed)
+
+	stored, err = store.OddsForGame(t.Context(), game.ID)
+	require.NoError(t, err)
+	require.Len(t, stored, 2)
+	for _, row := range stored {
+		if row.Book == "draftkings" {
+			assert.Equal(t, -115, row.Price)
+			assert.Equal(t, new("https://sportsbook.draftkings.com/?outcomes=0HC1P250_2"), row.Link)
+			assert.Equal(t, new("0HC1P250_2"), row.Sid)
+		}
+		if row.Book == "betmgm" {
+			assert.Equal(t, -155, row.Price, "another book's row is untouched")
+			assert.Nil(t, row.Link)
+		}
+	}
+
+	rows[0].Link = nil
+	rows[0].Sid = nil
+	changed, err = store.UpsertOdds(t.Context(), rows)
+	require.NoError(t, err)
+	assert.True(t, changed, "losing a link is a change")
+
+	stored, err = store.OddsForGame(t.Context(), game.ID)
+	require.NoError(t, err)
+	for _, row := range stored {
+		if row.Book == "draftkings" {
+			assert.Nil(t, row.Link, "a vanished link becomes NULL")
+			assert.Nil(t, row.Sid)
+		}
+	}
+}

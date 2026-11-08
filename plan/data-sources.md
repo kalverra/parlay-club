@@ -51,6 +51,9 @@ uses (product.md "Grading" table names the stat).
 
 - Base: `https://api.the-odds-api.com/v4/sports/americanfootball_nfl`. Auth: `apiKey` query param.
 - Cost per call = markets returned × regions. Use `regions=us` and `oddsFormat=american`.
+- `includeLinks=true&includeSids=true` cost no extra credits. A 2026-11-07 probe measured `x-requests-last` at 3 with
+  and without the flags for `h2h,spreads,totals`, and at 1 with and without them for one prop market. The flags add
+  nothing to the lines-and-props budget, so the credit floors stay as they are.
 - After every call, store `x-requests-remaining` in `sync_state.odds_credits_remaining`.
 
 Game lines, event matching, bookmakers, and the credit budget are documented in
@@ -60,6 +63,35 @@ Game lines, event matching, bookmakers, and the credit budget are documented in
 
 - Props for one game: `GET /events/{eventId}/odds?regions=us&markets={prop keys}&oddsFormat=american`.
 - Event list: `GET /events` (free) gives `id`, `home_team`, `away_team`, `commence_time` for matching.
+- The per-event odds endpoint returns one event object, not an array like the all-events endpoint.
+
+### Deep-link flags
+
+A 2026-11-07 probe used Cincinnati Bengals at Atlanta Falcons (event `dc56d980f527ffeef89940133b211b13`, kickoff
+2026-11-08T14:30:00Z). It called the per-event endpoint once for `h2h,spreads,totals` and once for `player_pass_yds`,
+each with and without `includeLinks=true&includeSids=true`.
+
+- **Cost:** zero extra credits. Game lines reported `x-requests-last: 3` with and without the flags; the prop reported
+  `1` with and without them. Remaining fell only by the base market cost each time.
+- **Fields:** with the flags, each bookmaker and each outcome gain `link` and `sid`. The market object keeps both as
+  NULL. Without the flags, the fields are absent.
+- **DraftKings and FanDuel:** both returned a link and sid on every game-line outcome (6 of 6 each) and every
+  `player_pass_yds` outcome (4 of 4 each).
+- **Other books:** coverage varies. BETUS, BetOnline.ag, Bovada, LowVig, and MyBookie.ag returned no outcome links for
+  these calls even with the flags, though some returned a book-level link. Treat a missing `link` as normal and store
+  NULL.
+- **Link shape:** both books put one selection in a link. DraftKings is
+  `https://sportsbook.draftkings.com/?outcomes={sid}`, where the sid is URL-encoded in the link (`#` becomes `%23`).
+  DraftKings game-line sids look like `0ML84695561_1`, `0HC84695561P300_1`, and `0OU84695561O5250_1`; a prop sid looks
+  like `0QA385017402#2346593166_13L88808Q1466938236Q20`. FanDuel is
+  `https://sportsbook.fanduel.com/addToBetslip?marketId={marketId}&selectionId={sid}`, where the sid is the numeric
+  selection ID. Book-level links point at the event page, not a betslip: DraftKings uses
+  `https://sportsbook.draftkings.com/event/{bookSid}` and FanDuel uses its game page. A 2026-11-07 phone check confirmed
+  that both books take several selections in one URL: DraftKings uses comma-separated sids in one `outcomes` parameter,
+  and FanDuel uses indexed `marketId`/`selectionId` pairs. The exact shapes are in `docs/concepts/export.md`.
+
+Saved fixtures: `internal/ingest/odds/testdata/odds_game_links.json` and
+`internal/ingest/odds/testdata/odds_prop_links.json`, both fetched with the flags on the same probe.
 
 ### Market keys
 

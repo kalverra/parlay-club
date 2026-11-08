@@ -28,6 +28,7 @@ const partialsFile = "templates/partials.html"
 // partialFiles names the fragments the slip screen can render on its own.
 var partialFiles = map[string]string{
 	"slip-panel":    partialsFile,
+	"slip-export":   partialsFile,
 	"slip-activity": partialsFile,
 	"slip-payout":   partialsFile,
 	"leg-form":      partialsFile,
@@ -122,6 +123,7 @@ func templateFuncs() template.FuncMap {
 	return template.FuncMap{
 		"asset": AssetURL,
 		"list":  func(values ...string) []string { return values },
+		"inc":   func(value int) int { return value + 1 },
 	}
 }
 

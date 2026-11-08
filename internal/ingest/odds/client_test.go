@@ -59,6 +59,8 @@ func linesQuery() url.Values {
 	query.Set("regions", "us")
 	query.Set("markets", "h2h,spreads,totals")
 	query.Set("oddsFormat", "american")
+	query.Set("includeLinks", "true")
+	query.Set("includeSids", "true")
 	return query
 }
 

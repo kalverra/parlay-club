@@ -113,8 +113,8 @@ func slateGame(game espn.Game, weekID int64, now time.Time) db.Game {
 		AwayESPNID: game.Away.ID,
 		Kickoff:    game.Kickoff,
 		Status:     db.GameStatus(game.Status),
-		VenueID:    optionalString(game.Venue.ID),
-		VenueName:  optionalString(game.Venue.Name),
+		VenueID:    db.OptionalString(game.Venue.ID),
+		VenueName:  db.OptionalString(game.Venue.Name),
 		Indoor:     game.Venue.Indoor,
 		HomeScore:  game.Home.Score,
 		AwayScore:  game.Away.Score,
@@ -314,6 +314,8 @@ func oddsRow(game db.Game, line odds.Line, now time.Time) (db.Odds, error) {
 		Side:       line.Side,
 		Line:       line.Line,
 		Price:      line.Price,
+		Link:       db.OptionalString(line.Link),
+		Sid:        db.OptionalString(line.Sid),
 		FetchedAt:  now,
 	}, nil
 }
@@ -330,12 +332,4 @@ func matchGames(games []db.Game) []odds.MatchGame {
 		})
 	}
 	return matches
-}
-
-// optionalString turns a blank string into nil so the database stores NULL.
-func optionalString(value string) *string {
-	if value == "" {
-		return nil
-	}
-	return &value
 }

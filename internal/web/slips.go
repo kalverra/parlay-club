@@ -56,6 +56,7 @@ func (h *slipHandlers) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /slips", h.createSlip)
 	mux.HandleFunc("GET /slips/{id}", h.slipPage)
 	mux.HandleFunc("GET /slips/{id}/panel", h.panel)
+	mux.HandleFunc("GET /slips/{id}/export", h.export)
 	mux.HandleFunc("GET /slips/{id}/payout", h.payout)
 	mux.HandleFunc("GET /slips/{id}/activity", h.activity)
 	mux.HandleFunc("POST /slips/{id}/members", h.addMember)
@@ -76,6 +77,7 @@ func (h *slipHandlers) Routes(mux *http.ServeMux) {
 type SlipPage struct {
 	Page
 	Slip     *SlipView
+	Export   ExportView
 	Creating bool
 	Create   SlipCreateView
 }
@@ -669,6 +671,9 @@ func (h *slipHandlers) lockIn(w http.ResponseWriter, r *http.Request) {
 		h.respondError(w, err)
 		return
 	}
+	// The export card is a sibling of the panel, so it needs its own refresh
+	// signal even when no SSE stream is open.
+	w.Header().Set("Hx-Trigger", "slip-updated")
 	h.renderPanel(w, r, slip)
 }
 
@@ -682,6 +687,8 @@ func (h *slipHandlers) unlock(w http.ResponseWriter, r *http.Request) {
 		h.respondError(w, err)
 		return
 	}
+	// Hide the export card for the person who unlocked, without waiting on SSE.
+	w.Header().Set("Hx-Trigger", "slip-updated")
 	h.renderPanel(w, r, slip)
 }
 
@@ -819,7 +826,12 @@ func (h *slipHandlers) renderSlip(
 		h.serverError(w, err)
 		return
 	}
-	h.renderPage(w, "slip", SlipPage{Page: page, Slip: &view})
+	export, err := h.exportView(r.Context(), slip)
+	if err != nil {
+		h.serverError(w, err)
+		return
+	}
+	h.renderPage(w, "slip", SlipPage{Page: page, Slip: &view, Export: export})
 }
 
 // slipOptions lists the group's slips in the slip's week for the top bar. The
@@ -1199,7 +1211,7 @@ func memberBooks(members []db.SlipMember) map[string]bool {
 		if member.User.HomeBook == nil {
 			continue
 		}
-		book := strings.ToLower(strings.TrimSpace(*member.User.HomeBook))
+		book := db.NormalizeBook(*member.User.HomeBook)
 		if book != "" {
 			books[book] = true
 		}
@@ -1210,45 +1222,20 @@ func memberBooks(members []db.SlipMember) map[string]bool {
 // candidatePrices collects one decimal price per member home book for the
 // selection a leg picked. Rows from an older sync are already dropped.
 func candidatePrices(rows []db.Odds, leg db.Leg, books map[string]bool) []float64 {
-	team := ""
-	if leg.Team != nil {
-		team = *leg.Team
-	}
-	player := ""
-	if leg.PlayerName != nil {
-		player = *leg.PlayerName
-	}
-	side := ""
-	if leg.Side != nil {
-		side = *leg.Side
-	}
-
 	seen := make(map[string]bool, len(books))
 	prices := make([]float64, 0, len(books))
 	for _, row := range rows {
-		book := strings.ToLower(strings.TrimSpace(row.Book))
+		book := db.NormalizeBook(row.Book)
 		if !books[book] || seen[book] {
 			continue
 		}
-		if row.MarketType != leg.MarketType ||
-			row.Team != team ||
-			row.PlayerName != player ||
-			row.Side != side ||
-			!sameLine(row.Line, leg.Line) {
+		if !row.MatchesSelection(leg) || !db.SameLine(row.Line, leg.Line) {
 			continue
 		}
 		seen[book] = true
 		prices = append(prices, parlay.AmericanToDecimal(row.Price))
 	}
 	return prices
-}
-
-// sameLine compares two optional lines for an exact match.
-func sameLine(left, right *float64) bool {
-	if left == nil || right == nil {
-		return left == nil && right == nil
-	}
-	return *left == *right
 }
 
 // legFormView maps a stored leg to the edit form.
@@ -1320,12 +1307,12 @@ func (h *slipHandlers) legFromForm(w http.ResponseWriter, r *http.Request, slipI
 		MarketType: market,
 		Selection:  selection,
 		Odds:       odds,
-		Team:       optionalString(r.PostForm.Get("team")),
-		PlayerName: optionalString(r.PostForm.Get("player_name")),
-		PlayerID:   optionalString(r.PostForm.Get("player_id")),
-		Side:       optionalString(strings.ToUpper(strings.TrimSpace(r.PostForm.Get("side")))),
+		Team:       db.OptionalString(r.PostForm.Get("team")),
+		PlayerName: db.OptionalString(r.PostForm.Get("player_name")),
+		PlayerID:   db.OptionalString(r.PostForm.Get("player_id")),
+		Side:       db.OptionalString(strings.ToUpper(strings.TrimSpace(r.PostForm.Get("side")))),
 		Line:       line,
-		GameID:     optionalString(r.PostForm.Get("game_id")),
+		GameID:     db.OptionalString(r.PostForm.Get("game_id")),
 	}
 	if market == "ANYTIME_TD" && leg.Side == nil {
 		side := "YES"
@@ -1603,15 +1590,6 @@ func parseID(raw string) (int64, bool) {
 		return 0, false
 	}
 	return id, true
-}
-
-// optionalString trims a form value, returning nil when it is blank.
-func optionalString(raw string) *string {
-	value := strings.TrimSpace(raw)
-	if value == "" {
-		return nil
-	}
-	return &value
 }
 
 // optionalFloat parses a blank-able line.
