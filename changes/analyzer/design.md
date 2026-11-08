@@ -49,7 +49,7 @@ slip. `median_trap` waits for `props-research`, which brings player stats. Read 
 
 ### Phase 2: Weather, key numbers, chalk
 
-- [ ] Add wind, fake_weather, hook, total_key_number, and chalk with table tests covering every threshold row, plus
+- [x] Add wind, fake_weather, hook, total_key_number, and chalk with table tests covering every threshold row, plus
   OTHER legs and empty slips, and keep package coverage at or above 95%
 - [ ] Docs: add Rule Sets B, C, and chalk to docs/reference/analyzer-rules.md; delete them from plan/analyzer.md
 

@@ -17,6 +17,15 @@ func games() map[string]analyzer.Game {
 	}
 }
 
+// weatherGames is the shared slate with a forecast on BUF at MIA and no
+// forecast on DAL at PHI.
+func weatherGames(weather *analyzer.Weather, indoor bool) map[string]analyzer.Game {
+	return map[string]analyzer.Game{
+		"buf-mia": {ID: "buf-mia", Home: "MIA", Away: "BUF", Indoor: indoor, Weather: weather},
+		"dal-phi": {ID: "dal-phi", Home: "PHI", Away: "DAL"},
+	}
+}
+
 // leg builds one analyzer leg with the fields a rule reads.
 func leg(
 	id int64,
@@ -99,40 +108,54 @@ func TestBlowoutPassing(t *testing.T) {
 		{
 			name: "opposing team's receiver stays quiet",
 			legs: []analyzer.Leg{
-				leg(1, "Adam", "buf-mia", "SPREAD", "BUF", "", "TEAM", new(-7.5), -110),
+				leg(1, "Adam", "buf-mia", "SPREAD", "BUF", "", "TEAM", new(-8.5), -110),
 				leg(2, "Adam", "buf-mia", "REC_YDS", "MIA", "Tyreek Hill", "OVER", new(72.5), -110),
 			},
 		},
 		{
 			name: "other game stays quiet",
 			legs: []analyzer.Leg{
-				leg(1, "Adam", "buf-mia", "SPREAD", "BUF", "", "TEAM", new(-7.5), -110),
+				leg(1, "Adam", "buf-mia", "SPREAD", "BUF", "", "TEAM", new(-8.5), -110),
 				leg(2, "Adam", "dal-phi", "REC_YDS", "BUF", "Khalil Shakir", "OVER", new(52.5), -110),
 			},
 		},
 		{
-			name: "one warning lists every matching prop",
+			name: "team missing from the game falls back to the other team",
 			legs: []analyzer.Leg{
-				leg(1, "Adam", "buf-mia", "SPREAD", "BUF", "", "TEAM", new(-7.5), -110),
-				leg(2, "Adam", "buf-mia", "PASS_YDS", "BUF", "Josh Allen", "OVER", new(245.5), -110),
-				leg(3, "Adam", "buf-mia", "REC_YDS", "BUF", "Khalil Shakir", "OVER", new(52.5), -110),
+				leg(1, "", "buf-mia", "SPREAD", "KC", "", "TEAM", new(-8.5), -110),
+				leg(2, "Sam", "buf-mia", "PASS_YDS", "KC", "Patrick Mahomes", "OVER", new(285.5), -110),
 			},
 			want: []want{{
-				rule: "blowout_passing", severity: analyzer.Warn, ids: []int64{1, 2, 3},
-				contains: []string{"Josh Allen Over 245.5 Pass Yds and Khalil Shakir Over 52.5 Rec Yds"},
+				rule: "blowout_passing", severity: analyzer.Warn, ids: []int64{1, 2},
+				contains: []string{"KC -8.5", "the other team"},
+			}},
+		},
+		{
+			name: "one warning lists every matching prop",
+			legs: []analyzer.Leg{
+				leg(1, "Adam", "buf-mia", "SPREAD", "BUF", "", "TEAM", new(-8.5), -110),
+				leg(2, "Adam", "buf-mia", "PASS_YDS", "BUF", "Josh Allen", "OVER", new(245.5), -110),
+				leg(3, "Adam", "buf-mia", "REC_YDS", "BUF", "Khalil Shakir", "OVER", new(52.5), -110),
+				leg(4, "Adam", "buf-mia", "REC_YDS", "BUF", "Keon Coleman", "OVER", new(41.5), -110),
+			},
+			want: []want{{
+				rule: "blowout_passing", severity: analyzer.Warn, ids: []int64{1, 2, 3, 4},
+				contains: []string{
+					"Josh Allen Over 245.5 Pass Yds, Khalil Shakir Over 52.5 Rec Yds, and Keon Coleman Over 41.5 Rec Yds",
+				},
 			}},
 		},
 		{
 			name: "under prop does not count",
 			legs: []analyzer.Leg{
-				leg(1, "Adam", "buf-mia", "SPREAD", "BUF", "", "TEAM", new(-7.5), -110),
+				leg(1, "Adam", "buf-mia", "SPREAD", "BUF", "", "TEAM", new(-8.5), -110),
 				leg(2, "Adam", "buf-mia", "PASS_YDS", "BUF", "Josh Allen", "UNDER", new(245.5), -110),
 			},
 		},
 		{
 			name: "passing touchdowns and receptions are not yardage props",
 			legs: []analyzer.Leg{
-				leg(1, "Adam", "buf-mia", "SPREAD", "BUF", "", "TEAM", new(-7.5), -110),
+				leg(1, "Adam", "buf-mia", "SPREAD", "BUF", "", "TEAM", new(-8.5), -110),
 				leg(2, "Adam", "buf-mia", "PASS_TDS", "BUF", "Josh Allen", "OVER", new(1.5), -110),
 				leg(3, "Adam", "buf-mia", "RECEPTIONS", "BUF", "Khalil Shakir", "OVER", new(4.5), -110),
 			},
@@ -165,12 +188,41 @@ func TestTrailingRB(t *testing.T) {
 			}},
 		},
 		{
-			name: "plus six and a half triggers",
+			name: "two rush overs fight the script",
+			legs: []analyzer.Leg{
+				leg(1, "Adam", "buf-mia", "SPREAD", "MIA", "", "TEAM", new(4.5), -110),
+				leg(2, "Adam", "buf-mia", "RUSH_YDS", "MIA", "De'Von Achane", "OVER", new(64.5), -110),
+				leg(3, "Adam", "buf-mia", "RUSH_ATT", "MIA", "De'Von Achane", "OVER", new(14.5), -110),
+			},
+			want: []want{{
+				rule: "trailing_rb", severity: analyzer.Danger, ids: []int64{1, 2, 3},
+				contains: []string{"De'Von Achane Over 64.5 Rush Yds and De'Von Achane Over 14.5 Rush Att fight"},
+			}},
+		},
+		{
+			name: "plus six and a half triggers the hook too",
 			legs: []analyzer.Leg{
 				leg(1, "Adam", "buf-mia", "SPREAD", "MIA", "", "TEAM", new(6.5), -110),
 				leg(2, "Adam", "buf-mia", "RUSH_ATT", "MIA", "De'Von Achane", "OVER", new(14.5), -110),
 			},
-			want: []want{{rule: "trailing_rb", severity: analyzer.Danger, ids: []int64{1, 2}}},
+			want: []want{
+				{rule: "trailing_rb", severity: analyzer.Danger, ids: []int64{1, 2}},
+				{
+					rule: "hook", severity: analyzer.Warn, ids: []int64{1},
+					contains: []string{"MIA +6.5", "Landing on exactly 7", "Buying to +7"},
+				},
+			},
+		},
+		{
+			name: "mixed owners name both",
+			legs: []analyzer.Leg{
+				leg(1, "Adam", "buf-mia", "SPREAD", "MIA", "", "TEAM", new(4.5), -110),
+				leg(2, "Sam", "buf-mia", "RUSH_YDS", "MIA", "De'Von Achane", "OVER", new(64.5), -110),
+			},
+			want: []want{{
+				rule: "trailing_rb", severity: analyzer.Danger, ids: []int64{1, 2},
+				contains: []string{"Adam's MIA +4.5", "Sam's De'Von Achane Over 64.5 Rush Yds"},
+			}},
 		},
 		{
 			name: "underdog moneyline triggers",
@@ -191,18 +243,23 @@ func TestTrailingRB(t *testing.T) {
 			},
 		},
 		{
-			name: "favorite stays quiet",
+			name: "favorite stays quiet but sits on the hook",
 			legs: []analyzer.Leg{
 				leg(1, "Adam", "buf-mia", "SPREAD", "MIA", "", "TEAM", new(-3.5), -110),
 				leg(2, "Adam", "buf-mia", "RUSH_YDS", "MIA", "De'Von Achane", "OVER", new(64.5), -110),
 			},
+			want: []want{{
+				rule: "hook", severity: analyzer.Warn, ids: []int64{1},
+				contains: []string{"MIA -3.5", "switching to the ML"},
+			}},
 		},
 		{
-			name: "other team's running back stays quiet",
+			name: "other team's running back stays quiet but the hook fires",
 			legs: []analyzer.Leg{
 				leg(1, "Adam", "buf-mia", "SPREAD", "MIA", "", "TEAM", new(6.5), -110),
 				leg(2, "Adam", "buf-mia", "RUSH_YDS", "BUF", "James Cook", "OVER", new(64.5), -110),
 			},
+			want: []want{{rule: "hook", severity: analyzer.Warn, ids: []int64{1}}},
 		},
 	}
 	for _, test := range tests {
@@ -223,35 +280,58 @@ func TestTotalContradiction(t *testing.T) {
 		{
 			name: "under with two scoring legs triggers",
 			legs: []analyzer.Leg{
-				leg(1, "Adam", "buf-mia", "TOTAL", "", "", "UNDER", new(44.5), -110),
+				leg(1, "Adam", "buf-mia", "TOTAL", "", "", "UNDER", new(45.5), -110),
 				leg(2, "Adam", "buf-mia", "PASS_YDS", "BUF", "Josh Allen", "OVER", new(245.5), -110),
 				leg(3, "Adam", "buf-mia", "ANYTIME_TD", "MIA", "De'Von Achane", "YES", nil, -110),
 			},
 			want: []want{{
 				rule: "total_contradiction", severity: analyzer.Danger, ids: []int64{1, 2, 3},
-				contains: []string{"Under 44.5", "Josh Allen Over 245.5 Pass Yds and De'Von Achane Anytime TD"},
+				contains: []string{"Under 45.5", "Josh Allen Over 245.5 Pass Yds and De'Von Achane Anytime TD"},
 			}},
 		},
 		{
 			name: "under with two receiving overs triggers",
 			legs: []analyzer.Leg{
-				leg(1, "Adam", "buf-mia", "TOTAL", "", "", "UNDER", new(44.5), -110),
+				leg(1, "Adam", "buf-mia", "TOTAL", "", "", "UNDER", new(45.5), -110),
 				leg(2, "Adam", "buf-mia", "REC_YDS", "BUF", "Khalil Shakir", "OVER", new(52.5), -110),
 				leg(3, "Adam", "buf-mia", "RECEPTIONS", "MIA", "Tyreek Hill", "OVER", new(6.5), -110),
 			},
 			want: []want{{rule: "total_contradiction", severity: analyzer.Danger, ids: []int64{1, 2, 3}}},
 		},
 		{
+			name: "mixed owners are named",
+			legs: []analyzer.Leg{
+				leg(1, "Adam", "buf-mia", "TOTAL", "", "", "UNDER", new(45.5), -110),
+				leg(2, "Sam", "buf-mia", "PASS_YDS", "BUF", "Josh Allen", "OVER", new(245.5), -110),
+				leg(3, "Adam", "buf-mia", "ANYTIME_TD", "MIA", "De'Von Achane", "YES", nil, -110),
+			},
+			want: []want{{
+				rule: "total_contradiction", severity: analyzer.Danger, ids: []int64{1, 2, 3},
+				contains: []string{
+					"Adam's Under 45.5",
+					"Sam's Josh Allen Over 245.5 Pass Yds and Adam's De'Von Achane Anytime TD",
+				},
+			}},
+		},
+		{
+			name: "kicking overs do not need points",
+			legs: []analyzer.Leg{
+				leg(1, "Adam", "buf-mia", "TOTAL", "", "", "UNDER", new(45.5), -110),
+				leg(2, "Adam", "buf-mia", "ANYTIME_TD", "BUF", "James Cook", "YES", nil, -110),
+				leg(3, "Adam", "buf-mia", "KICKER_PTS", "BUF", "Tyler Bass", "OVER", new(6.5), -110),
+			},
+		},
+		{
 			name: "under with one scoring leg stays quiet",
 			legs: []analyzer.Leg{
-				leg(1, "Adam", "buf-mia", "TOTAL", "", "", "UNDER", new(44.5), -110),
+				leg(1, "Adam", "buf-mia", "TOTAL", "", "", "UNDER", new(45.5), -110),
 				leg(2, "Adam", "buf-mia", "ANYTIME_TD", "BUF", "James Cook", "YES", nil, -110),
 			},
 		},
 		{
 			name: "scoring legs in another game stay quiet",
 			legs: []analyzer.Leg{
-				leg(1, "Adam", "buf-mia", "TOTAL", "", "", "UNDER", new(44.5), -110),
+				leg(1, "Adam", "buf-mia", "TOTAL", "", "", "UNDER", new(45.5), -110),
 				leg(2, "Adam", "buf-mia", "PASS_YDS", "BUF", "Josh Allen", "OVER", new(245.5), -110),
 				leg(3, "Adam", "dal-phi", "ANYTIME_TD", "DAL", "CeeDee Lamb", "YES", nil, -110),
 			},
@@ -259,7 +339,7 @@ func TestTotalContradiction(t *testing.T) {
 		{
 			name: "total over does not trigger",
 			legs: []analyzer.Leg{
-				leg(1, "Adam", "buf-mia", "TOTAL", "", "", "OVER", new(44.5), -110),
+				leg(1, "Adam", "buf-mia", "TOTAL", "", "", "OVER", new(45.5), -110),
 				leg(2, "Adam", "buf-mia", "PASS_YDS", "BUF", "Josh Allen", "OVER", new(245.5), -110),
 				leg(3, "Adam", "buf-mia", "ANYTIME_TD", "MIA", "De'Von Achane", "YES", nil, -110),
 			},
@@ -298,6 +378,46 @@ func TestStackClockDrain(t *testing.T) {
 						"MIA Team Total Under 20.5 stays quiet",
 					},
 				},
+			},
+		},
+		{
+			name: "mixed owners are named",
+			legs: []analyzer.Leg{
+				leg(1, "Adam", "buf-mia", "SPREAD", "BUF", "", "TEAM", new(-6.5), -110),
+				leg(2, "Sam", "buf-mia", "RUSH_YDS", "BUF", "James Cook", "OVER", new(64.5), -110),
+				leg(3, "Adam", "buf-mia", "TEAM_TOTAL", "MIA", "", "UNDER", new(20.5), -110),
+			},
+			want: []want{{
+				rule: "stack_clock_drain", severity: analyzer.Info, ids: []int64{1, 2, 3},
+				contains: []string{
+					"Adam's BUF -6.5 covers",
+					"Sam's James Cook grinds the clock",
+					"MIA Team Total Under 20.5 stays quiet",
+				},
+			}},
+		},
+		{
+			name: "two rush overs and two team totals stack",
+			legs: []analyzer.Leg{
+				leg(1, "Adam", "buf-mia", "SPREAD", "BUF", "", "TEAM", new(-6.5), -110),
+				leg(2, "Adam", "buf-mia", "RUSH_YDS", "BUF", "James Cook", "OVER", new(64.5), -110),
+				leg(3, "Adam", "buf-mia", "RUSH_ATT", "BUF", "James Cook", "OVER", new(14.5), -110),
+				leg(4, "Adam", "buf-mia", "TEAM_TOTAL", "MIA", "", "UNDER", new(20.5), -110),
+				leg(5, "Adam", "buf-mia", "TEAM_TOTAL", "MIA", "", "UNDER", new(10.5), -110),
+			},
+			want: []want{{
+				rule: "stack_clock_drain", severity: analyzer.Info, ids: []int64{1, 2, 3, 4, 5},
+				contains: []string{
+					"James Cook and James Cook grind the clock",
+					"MIA Team Total Under 20.5 and MIA Team Total Under 10.5 stay quiet",
+				},
+			}},
+		},
+		{
+			name: "spread team missing from the game stays quiet",
+			legs: []analyzer.Leg{
+				leg(1, "Adam", "buf-mia", "SPREAD", "KC", "", "TEAM", new(-6.5), -110),
+				leg(2, "Adam", "buf-mia", "RUSH_YDS", "KC", "Isiah Pacheco", "OVER", new(64.5), -110),
 			},
 		},
 		{
@@ -359,7 +479,7 @@ func TestStackShootout(t *testing.T) {
 			legs: []analyzer.Leg{
 				leg(1, "Adam", "buf-mia", "PASS_YDS", "BUF", "Josh Allen", "OVER", new(245.5), -110),
 				leg(2, "Adam", "buf-mia", "REC_YDS", "BUF", "Khalil Shakir", "OVER", new(52.5), -110),
-				leg(3, "Adam", "buf-mia", "TOTAL", "", "", "OVER", new(47.5), -110),
+				leg(3, "Adam", "buf-mia", "TOTAL", "", "", "OVER", new(48.5), -110),
 			},
 			want: []want{
 				{
@@ -369,7 +489,7 @@ func TestStackShootout(t *testing.T) {
 					contains: []string{
 						"Josh Allen Over 245.5 Pass Yds",
 						"Khalil Shakir Over 52.5 Rec Yds",
-						"game Over 47.5",
+						"game Over 48.5",
 					},
 				},
 			},
@@ -379,7 +499,7 @@ func TestStackShootout(t *testing.T) {
 			legs: []analyzer.Leg{
 				leg(1, "Adam", "buf-mia", "PASS_YDS", "BUF", "Josh Allen", "OVER", new(245.5), -110),
 				leg(2, "Adam", "buf-mia", "RECEPTIONS", "BUF", "Khalil Shakir", "OVER", new(4.5), -110),
-				leg(3, "Adam", "buf-mia", "TOTAL", "", "", "OVER", new(47.5), -110),
+				leg(3, "Adam", "buf-mia", "TOTAL", "", "", "OVER", new(48.5), -110),
 			},
 			want: []want{{rule: "stack_shootout", severity: analyzer.Info, ids: []int64{1, 2, 3}}},
 		},
@@ -394,15 +514,46 @@ func TestStackShootout(t *testing.T) {
 					leg(2, "Adam", "buf-mia", "REC_YDS", "BUF", "Josh Allen", "OVER", new(20.5), -110),
 					"allen",
 				),
-				leg(3, "Adam", "buf-mia", "TOTAL", "", "", "OVER", new(47.5), -110),
+				leg(3, "Adam", "buf-mia", "TOTAL", "", "", "OVER", new(48.5), -110),
 			},
+		},
+		{
+			name: "players matched by name are not a receiver stack",
+			legs: []analyzer.Leg{
+				leg(1, "Adam", "buf-mia", "PASS_YDS", "BUF", "Josh Allen", "OVER", new(245.5), -110),
+				leg(2, "Adam", "buf-mia", "REC_YDS", "BUF", "Josh Allen", "OVER", new(20.5), -110),
+				leg(3, "Adam", "buf-mia", "TOTAL", "", "", "OVER", new(48.5), -110),
+			},
+		},
+		{
+			name: "one missing player ID falls back to the name",
+			legs: []analyzer.Leg{
+				withPlayerID(
+					leg(1, "Adam", "buf-mia", "PASS_YDS", "BUF", "Josh Allen", "OVER", new(245.5), -110),
+					"allen",
+				),
+				leg(2, "Adam", "buf-mia", "REC_YDS", "BUF", "Josh Allen", "OVER", new(20.5), -110),
+				leg(3, "Adam", "buf-mia", "TOTAL", "", "", "OVER", new(48.5), -110),
+			},
+		},
+		{
+			name: "two unnamed players are different receivers",
+			legs: []analyzer.Leg{
+				leg(1, "Adam", "buf-mia", "PASS_YDS", "BUF", "", "OVER", new(245.5), -110),
+				leg(2, "Adam", "buf-mia", "REC_YDS", "BUF", "", "OVER", new(20.5), -110),
+				leg(3, "Adam", "buf-mia", "TOTAL", "", "", "OVER", new(48.5), -110),
+			},
+			want: []want{{
+				rule: "stack_shootout", severity: analyzer.Info, ids: []int64{1, 2, 3},
+				contains: []string{"BUF Over 245.5 Pass Yds", "game Over 48.5"},
+			}},
 		},
 		{
 			name: "receiver on the other team stays quiet",
 			legs: []analyzer.Leg{
 				leg(1, "Adam", "buf-mia", "PASS_YDS", "BUF", "Josh Allen", "OVER", new(245.5), -110),
 				leg(2, "Adam", "buf-mia", "REC_YDS", "MIA", "Tyreek Hill", "OVER", new(72.5), -110),
-				leg(3, "Adam", "buf-mia", "TOTAL", "", "", "OVER", new(47.5), -110),
+				leg(3, "Adam", "buf-mia", "TOTAL", "", "", "OVER", new(48.5), -110),
 			},
 		},
 		{
@@ -410,7 +561,7 @@ func TestStackShootout(t *testing.T) {
 			legs: []analyzer.Leg{
 				leg(1, "Adam", "buf-mia", "PASS_YDS", "BUF", "Josh Allen", "OVER", new(245.5), -110),
 				leg(2, "Adam", "buf-mia", "REC_YDS", "BUF", "Khalil Shakir", "OVER", new(52.5), -110),
-				leg(3, "Adam", "buf-mia", "TOTAL", "", "", "UNDER", new(47.5), -110),
+				leg(3, "Adam", "buf-mia", "TOTAL", "", "", "UNDER", new(48.5), -110),
 			},
 			// The under and the two overs are a total_contradiction, but the
 			// missing total over means this is not a shootout stack.
@@ -423,6 +574,531 @@ func TestStackShootout(t *testing.T) {
 			assertWarnings(t, analyzer.AnalyzeSlip(test.legs, games(), nil), test.want)
 		})
 	}
+}
+
+func TestWind(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		legs  []analyzer.Leg
+		games map[string]analyzer.Game
+		want  []want
+	}{
+		{
+			name:  "fifteen mph is a warn",
+			games: weatherGames(&analyzer.Weather{WindMPH: 15}, false),
+			legs: []analyzer.Leg{
+				leg(1, "Adam", "buf-mia", "PASS_YDS", "BUF", "Josh Allen", "OVER", new(245.5), -110),
+			},
+			want: []want{{
+				rule: "wind", severity: analyzer.Warn, ids: []int64{1},
+				contains: []string{"15 mph winds", "Josh Allen Over 245.5 Pass Yds gets tougher"},
+			}},
+		},
+		{
+			name:  "just under twenty is still a warn",
+			games: weatherGames(&analyzer.Weather{WindMPH: 19.9}, false),
+			legs: []analyzer.Leg{
+				leg(1, "Adam", "buf-mia", "PASS_YDS", "BUF", "Josh Allen", "OVER", new(245.5), -110),
+			},
+			want: []want{{rule: "wind", severity: analyzer.Warn, ids: []int64{1}}},
+		},
+		{
+			name:  "gusts to twenty five warn",
+			games: weatherGames(&analyzer.Weather{WindMPH: 5, GustMPH: 25}, false),
+			legs: []analyzer.Leg{
+				leg(1, "Adam", "buf-mia", "REC_YDS", "BUF", "Khalil Shakir", "OVER", new(52.5), -110),
+			},
+			want: []want{{
+				rule: "wind", severity: analyzer.Warn, ids: []int64{1},
+				contains: []string{"gusts to 25 mph"},
+			}},
+		},
+		{
+			name:  "twenty mph is danger",
+			games: weatherGames(&analyzer.Weather{WindMPH: 20}, false),
+			legs: []analyzer.Leg{
+				leg(1, "Adam", "buf-mia", "PASS_TDS", "BUF", "Josh Allen", "OVER", new(1.5), -110),
+			},
+			want: []want{{
+				rule: "wind", severity: analyzer.Danger, ids: []int64{1},
+				contains: []string{"20 mph winds", "Pass TDs"},
+			}},
+		},
+		{
+			name:  "just under both thresholds stays quiet",
+			games: weatherGames(&analyzer.Weather{WindMPH: 14.9, GustMPH: 24.9}, false),
+			legs: []analyzer.Leg{
+				leg(1, "Adam", "buf-mia", "PASS_YDS", "BUF", "Josh Allen", "OVER", new(245.5), -110),
+			},
+		},
+		{
+			name:  "indoor stays quiet",
+			games: weatherGames(&analyzer.Weather{WindMPH: 30}, true),
+			legs: []analyzer.Leg{
+				leg(1, "Adam", "buf-mia", "PASS_YDS", "BUF", "Josh Allen", "OVER", new(245.5), -110),
+			},
+		},
+		{
+			name:  "missing weather stays quiet",
+			games: weatherGames(nil, false),
+			legs: []analyzer.Leg{
+				leg(1, "Adam", "buf-mia", "PASS_YDS", "BUF", "Josh Allen", "OVER", new(245.5), -110),
+			},
+		},
+		{
+			name:  "one warning per game lists every flagged leg",
+			games: weatherGames(&analyzer.Weather{WindMPH: 22}, false),
+			legs: []analyzer.Leg{
+				leg(1, "Adam", "buf-mia", "PASS_YDS", "BUF", "Josh Allen", "OVER", new(245.5), -110),
+				leg(2, "Adam", "buf-mia", "KICKER_PTS", "BUF", "", "OVER", new(6.5), -110),
+				leg(3, "Adam", "buf-mia", "TOTAL", "", "", "OVER", new(48.5), -110),
+			},
+			want: []want{{
+				rule: "wind", severity: analyzer.Danger, ids: []int64{1, 2, 3},
+				contains: []string{"BUF Over 6.5 Kicking Pts", "get tougher"},
+			}},
+		},
+		{
+			name:  "mixed owners are named",
+			games: weatherGames(&analyzer.Weather{WindMPH: 22}, false),
+			legs: []analyzer.Leg{
+				leg(1, "Adam", "buf-mia", "PASS_YDS", "BUF", "Josh Allen", "OVER", new(245.5), -110),
+				leg(2, "Sam", "buf-mia", "KICKER_PTS", "BUF", "Tyler Bass", "OVER", new(6.5), -110),
+			},
+			want: []want{{
+				rule: "wind", severity: analyzer.Danger, ids: []int64{1, 2},
+				contains: []string{"Adam's Josh Allen Over 245.5 Pass Yds", "Sam's Tyler Bass Over 6.5 Kicking Pts"},
+			}},
+		},
+		{
+			name:  "unders and team totals are not flagged",
+			games: weatherGames(&analyzer.Weather{WindMPH: 22}, false),
+			legs: []analyzer.Leg{
+				leg(1, "Adam", "buf-mia", "PASS_YDS", "BUF", "Josh Allen", "UNDER", new(245.5), -110),
+				leg(2, "Adam", "buf-mia", "REC_YDS", "MIA", "Tyreek Hill", "UNDER", new(72.5), -110),
+				leg(3, "Adam", "buf-mia", "TEAM_TOTAL", "BUF", "", "OVER", new(24.5), -110),
+			},
+		},
+		{
+			name: "each windy game gets its own warning",
+			games: map[string]analyzer.Game{
+				"buf-mia": {ID: "buf-mia", Home: "MIA", Away: "BUF", Weather: &analyzer.Weather{WindMPH: 22}},
+				"dal-phi": {ID: "dal-phi", Home: "PHI", Away: "DAL", Weather: &analyzer.Weather{WindMPH: 22}},
+			},
+			legs: []analyzer.Leg{
+				leg(1, "Adam", "buf-mia", "PASS_YDS", "BUF", "Josh Allen", "OVER", new(245.5), -110),
+				leg(2, "Adam", "dal-phi", "REC_YDS", "DAL", "CeeDee Lamb", "OVER", new(72.5), -110),
+			},
+			want: []want{
+				{rule: "wind", severity: analyzer.Danger, ids: []int64{1}},
+				{rule: "wind", severity: analyzer.Danger, ids: []int64{2}},
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			assertWarnings(t, analyzer.AnalyzeSlip(test.legs, test.games, nil), test.want)
+		})
+	}
+}
+
+func TestFakeWeather(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		legs    []analyzer.Leg
+		weather *analyzer.Weather
+		indoor  bool
+		want    []want
+	}{
+		{
+			name:    "light rain without wind and an under triggers",
+			weather: &analyzer.Weather{PrecipIn: 0.05, WindMPH: 9},
+			legs: []analyzer.Leg{
+				leg(1, "Adam", "buf-mia", "TOTAL", "", "", "UNDER", new(45.5), -110),
+			},
+			want: []want{{
+				rule: "fake_weather", severity: analyzer.Info, ids: []int64{1},
+				contains: []string{"Under 45.5 gets no extra help"},
+			}},
+		},
+		{
+			name:    "a tenth of an inch is too much",
+			weather: &analyzer.Weather{PrecipIn: 0.1, WindMPH: 5},
+			legs: []analyzer.Leg{
+				leg(1, "Adam", "buf-mia", "TOTAL", "", "", "UNDER", new(45.5), -110),
+			},
+		},
+		{
+			name:    "ten mph is too much wind",
+			weather: &analyzer.Weather{PrecipIn: 0.05, WindMPH: 10},
+			legs: []analyzer.Leg{
+				leg(1, "Adam", "buf-mia", "TOTAL", "", "", "UNDER", new(45.5), -110),
+			},
+		},
+		{
+			name:    "no rain stays quiet",
+			weather: &analyzer.Weather{PrecipIn: 0, WindMPH: 5},
+			legs: []analyzer.Leg{
+				leg(1, "Adam", "buf-mia", "TOTAL", "", "", "UNDER", new(45.5), -110),
+			},
+		},
+		{
+			name:    "an over stays quiet",
+			weather: &analyzer.Weather{PrecipIn: 0.05, WindMPH: 5},
+			legs: []analyzer.Leg{
+				leg(1, "Adam", "buf-mia", "TOTAL", "", "", "OVER", new(45.5), -110),
+			},
+		},
+		{
+			name:    "indoor stays quiet",
+			weather: &analyzer.Weather{PrecipIn: 0.05, WindMPH: 5},
+			indoor:  true,
+			legs: []analyzer.Leg{
+				leg(1, "Adam", "buf-mia", "TOTAL", "", "", "UNDER", new(45.5), -110),
+			},
+		},
+		{
+			name:    "missing weather stays quiet",
+			weather: nil,
+			legs: []analyzer.Leg{
+				leg(1, "Adam", "buf-mia", "TOTAL", "", "", "UNDER", new(45.5), -110),
+			},
+		},
+		{
+			name:    "a windy day is not fake weather",
+			weather: &analyzer.Weather{PrecipIn: 0.05, WindMPH: 20},
+			legs: []analyzer.Leg{
+				leg(1, "Adam", "buf-mia", "TOTAL", "", "", "UNDER", new(45.5), -110),
+			},
+		},
+		{
+			name:    "a missing line still reads",
+			weather: &analyzer.Weather{PrecipIn: 0.05, WindMPH: 5},
+			legs: []analyzer.Leg{
+				leg(1, "Adam", "buf-mia", "TOTAL", "", "", "UNDER", nil, -110),
+			},
+			want: []want{{
+				rule: "fake_weather", severity: analyzer.Info, ids: []int64{1},
+				contains: []string{"Under gets no extra help"},
+			}},
+		},
+		{
+			name:    "two unders get one warning",
+			weather: &analyzer.Weather{PrecipIn: 0.05, WindMPH: 5},
+			legs: []analyzer.Leg{
+				leg(1, "Adam", "buf-mia", "TOTAL", "", "", "UNDER", new(45.5), -110),
+				leg(2, "Sam", "buf-mia", "TOTAL", "", "", "UNDER", new(45.5), -110),
+			},
+			want: []want{{
+				rule: "fake_weather", severity: analyzer.Info, ids: []int64{1, 2},
+				contains: []string{"Adam's Under 45.5 and Sam's Under 45.5 get no extra help"},
+			}},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			assertWarnings(t, analyzer.AnalyzeSlip(test.legs, weatherGames(test.weather, test.indoor), nil), test.want)
+		})
+	}
+}
+
+func TestHook(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		legs []analyzer.Leg
+		want []want
+	}{
+		{
+			name: "minus three and a half triggers",
+			legs: []analyzer.Leg{
+				leg(1, "Adam", "buf-mia", "SPREAD", "BUF", "", "TEAM", new(-3.5), -110),
+			},
+			want: []want{{
+				rule: "hook", severity: analyzer.Warn, ids: []int64{1},
+				contains: []string{"BUF -3.5", "About 15% of games", "switching to the ML"},
+			}},
+		},
+		{
+			name: "minus seven and a half triggers",
+			legs: []analyzer.Leg{
+				leg(1, "Adam", "buf-mia", "SPREAD", "BUF", "", "TEAM", new(-7.5), -110),
+			},
+			want: []want{{
+				rule: "hook", severity: analyzer.Warn, ids: []int64{1},
+				contains: []string{"BUF -7.5", "Landing on exactly 7", "Buying to -7 or switching to the ML"},
+			}},
+		},
+		{
+			name: "plus two and a half triggers",
+			legs: []analyzer.Leg{
+				leg(1, "Adam", "buf-mia", "SPREAD", "MIA", "", "TEAM", new(2.5), -110),
+			},
+			want: []want{{
+				rule: "hook", severity: analyzer.Warn, ids: []int64{1},
+				contains: []string{"MIA +2.5", "Landing on exactly 3", "Buying to +3 is worth a look"},
+			}},
+		},
+		{
+			name: "plus six and a half triggers",
+			legs: []analyzer.Leg{
+				leg(1, "Adam", "buf-mia", "SPREAD", "MIA", "", "TEAM", new(6.5), -110),
+			},
+			want: []want{{
+				rule: "hook", severity: analyzer.Warn, ids: []int64{1},
+				contains: []string{"MIA +6.5", "Landing on exactly 7", "Buying to +7 is worth a look"},
+			}},
+		},
+		{
+			name: "minus three is off the hook",
+			legs: []analyzer.Leg{
+				leg(1, "Adam", "buf-mia", "SPREAD", "BUF", "", "TEAM", new(-3.0), -110),
+			},
+		},
+		{
+			name: "minus four is off the hook",
+			legs: []analyzer.Leg{
+				leg(1, "Adam", "buf-mia", "SPREAD", "BUF", "", "TEAM", new(-4.0), -110),
+			},
+		},
+		{
+			name: "plus three and a half is off the hook",
+			legs: []analyzer.Leg{
+				leg(1, "Adam", "buf-mia", "SPREAD", "MIA", "", "TEAM", new(3.5), -110),
+			},
+		},
+		{
+			name: "minus six and a half is off the hook",
+			legs: []analyzer.Leg{
+				leg(1, "Adam", "buf-mia", "SPREAD", "BUF", "", "TEAM", new(-6.5), -110),
+			},
+		},
+		{
+			name: "a spread without a line is quiet",
+			legs: []analyzer.Leg{
+				leg(1, "Adam", "buf-mia", "SPREAD", "BUF", "", "TEAM", nil, -110),
+			},
+		},
+		{
+			name: "a moneyline with a line is quiet",
+			legs: []analyzer.Leg{
+				leg(1, "Adam", "buf-mia", "ML", "BUF", "", "TEAM", new(-3.5), -110),
+			},
+		},
+		{
+			name: "two hooks get two warnings",
+			legs: []analyzer.Leg{
+				leg(1, "Adam", "buf-mia", "SPREAD", "BUF", "", "TEAM", new(-3.5), -110),
+				leg(2, "Adam", "buf-mia", "SPREAD", "MIA", "", "TEAM", new(2.5), -110),
+			},
+			want: []want{
+				{rule: "hook", severity: analyzer.Warn, ids: []int64{1}},
+				{rule: "hook", severity: analyzer.Warn, ids: []int64{2}},
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			assertWarnings(t, analyzer.AnalyzeSlip(test.legs, games(), nil), test.want)
+		})
+	}
+}
+
+func TestTotalKeyNumber(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		legs []analyzer.Leg
+		want []want
+	}{
+		{
+			name: "forty three is a key number",
+			legs: []analyzer.Leg{
+				leg(1, "Adam", "buf-mia", "TOTAL", "", "", "UNDER", new(43.0), -110),
+			},
+			want: []want{{
+				rule: "total_key_number", severity: analyzer.Info, ids: []int64{1},
+				contains: []string{"43 is one of the most common NFL final totals", "half point either way"},
+			}},
+		},
+		{
+			name: "forty three and a half sits between two keys",
+			legs: []analyzer.Leg{
+				leg(1, "Adam", "buf-mia", "TOTAL", "", "", "OVER", new(43.5), -110),
+			},
+			want: []want{{
+				rule: "total_key_number", severity: analyzer.Info, ids: []int64{1},
+				contains: []string{"43.5 sits right between 43 and 44"},
+			}},
+		},
+		{
+			name: "thirty six and a half is near thirty seven",
+			legs: []analyzer.Leg{
+				leg(1, "Adam", "buf-mia", "TOTAL", "", "", "UNDER", new(36.5), -110),
+			},
+			want: []want{{
+				rule: "total_key_number", severity: analyzer.Info, ids: []int64{1},
+				contains: []string{"36.5 is half a point off 37"},
+			}},
+		},
+		{
+			name: "fifty one and a half is near fifty one",
+			legs: []analyzer.Leg{
+				leg(1, "Adam", "buf-mia", "TOTAL", "", "", "OVER", new(51.5), -110),
+			},
+			want: []want{{
+				rule: "total_key_number", severity: analyzer.Info, ids: []int64{1},
+				contains: []string{"51.5 is half a point off 51"},
+			}},
+		},
+		{
+			name: "every key number triggers",
+			legs: []analyzer.Leg{
+				leg(1, "Adam", "buf-mia", "TOTAL", "", "", "OVER", new(37.0), -110),
+				leg(2, "Adam", "buf-mia", "TOTAL", "", "", "OVER", new(41.0), -110),
+				leg(3, "Adam", "buf-mia", "TOTAL", "", "", "OVER", new(44.0), -110),
+				leg(4, "Adam", "buf-mia", "TOTAL", "", "", "OVER", new(47.0), -110),
+				leg(5, "Adam", "buf-mia", "TOTAL", "", "", "OVER", new(51.0), -110),
+			},
+			want: []want{
+				{rule: "total_key_number", severity: analyzer.Info, ids: []int64{1}},
+				{rule: "total_key_number", severity: analyzer.Info, ids: []int64{2}},
+				{rule: "total_key_number", severity: analyzer.Info, ids: []int64{3}},
+				{rule: "total_key_number", severity: analyzer.Info, ids: []int64{4}},
+				{rule: "total_key_number", severity: analyzer.Info, ids: []int64{5}},
+			},
+		},
+		{
+			name: "forty five and a half is between keys",
+			legs: []analyzer.Leg{
+				leg(1, "Adam", "buf-mia", "TOTAL", "", "", "OVER", new(45.5), -110),
+			},
+		},
+		{
+			name: "forty nine is between keys",
+			legs: []analyzer.Leg{
+				leg(1, "Adam", "buf-mia", "TOTAL", "", "", "UNDER", new(49.0), -110),
+			},
+		},
+		{
+			name: "a team total is not a game total",
+			legs: []analyzer.Leg{
+				leg(1, "Adam", "buf-mia", "TEAM_TOTAL", "BUF", "", "OVER", new(43.5), -110),
+			},
+		},
+		{
+			name: "a total without a line is quiet",
+			legs: []analyzer.Leg{
+				leg(1, "Adam", "buf-mia", "TOTAL", "", "", "OVER", nil, -110),
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			assertWarnings(t, analyzer.AnalyzeSlip(test.legs, games(), nil), test.want)
+		})
+	}
+}
+
+func TestChalk(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		legs []analyzer.Leg
+		want []want
+	}{
+		{
+			name: "minus two thirty triggers",
+			legs: []analyzer.Leg{
+				leg(1, "Adam", "buf-mia", "ML", "BUF", "", "TEAM", nil, -230),
+			},
+			want: []want{{
+				rule: "chalk", severity: analyzer.Warn, ids: []int64{1},
+				contains: []string{"This -230 leg", "1.43×", "about 30%"},
+			}},
+		},
+		{
+			name: "minus five hundred triggers",
+			legs: []analyzer.Leg{
+				leg(1, "Adam", "buf-mia", "ML", "BUF", "", "TEAM", nil, -500),
+			},
+			want: []want{{
+				rule: "chalk", severity: analyzer.Warn, ids: []int64{1},
+				contains: []string{"This -500 leg", "1.2×", "about 17%"},
+			}},
+		},
+		{
+			name: "minus three hundred triggers on a prop",
+			legs: []analyzer.Leg{
+				leg(1, "Adam", "buf-mia", "PASS_YDS", "BUF", "Josh Allen", "OVER", new(245.5), -300),
+			},
+			want: []want{{
+				rule: "chalk", severity: analyzer.Warn, ids: []int64{1},
+				contains: []string{"1.33×", "about 25%"},
+			}},
+		},
+		{
+			name: "minus two twenty nine is quiet",
+			legs: []analyzer.Leg{
+				leg(1, "Adam", "buf-mia", "ML", "BUF", "", "TEAM", nil, -229),
+			},
+		},
+		{
+			name: "a plus price is quiet",
+			legs: []analyzer.Leg{
+				leg(1, "Adam", "buf-mia", "ML", "MIA", "", "TEAM", nil, 150),
+			},
+		},
+		{
+			name: "two chalk legs get two warnings",
+			legs: []analyzer.Leg{
+				leg(1, "Adam", "buf-mia", "ML", "BUF", "", "TEAM", nil, -300),
+				leg(2, "Adam", "dal-phi", "ML", "PHI", "", "TEAM", nil, -350),
+			},
+			want: []want{
+				{rule: "chalk", severity: analyzer.Warn, ids: []int64{1}},
+				{rule: "chalk", severity: analyzer.Warn, ids: []int64{2}},
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			assertWarnings(t, analyzer.AnalyzeSlip(test.legs, games(), nil), test.want)
+		})
+	}
+}
+
+func TestOutputOrderAcrossRuleSets(t *testing.T) {
+	t.Parallel()
+	legs := []analyzer.Leg{
+		leg(1, "Adam", "buf-mia", "SPREAD", "BUF", "", "TEAM", new(-7.5), -110),
+		leg(2, "Adam", "buf-mia", "PASS_YDS", "BUF", "Josh Allen", "OVER", new(245.5), -110),
+		leg(3, "Adam", "buf-mia", "TOTAL", "", "", "UNDER", new(43.5), -110),
+		leg(4, "Adam", "buf-mia", "ML", "BUF", "", "TEAM", nil, -300),
+	}
+
+	got := analyzer.AnalyzeSlip(legs, games(), nil)
+	require.Len(t, got, 4)
+	assert.Equal(t, "blowout_passing", got[0].Rule)
+	assert.Equal(t, analyzer.Warn, got[0].Severity)
+	assert.Equal(t, []int64{1, 2}, got[0].LegIDs)
+	assert.Equal(t, "hook", got[1].Rule)
+	assert.Equal(t, analyzer.Warn, got[1].Severity)
+	assert.Equal(t, []int64{1}, got[1].LegIDs)
+	assert.Equal(t, "chalk", got[2].Rule)
+	assert.Equal(t, analyzer.Warn, got[2].Severity)
+	assert.Equal(t, []int64{4}, got[2].LegIDs)
+	assert.Equal(t, "total_key_number", got[3].Rule)
+	assert.Equal(t, analyzer.Info, got[3].Severity)
+	assert.Equal(t, []int64{3}, got[3].LegIDs)
+	assert.Equal(t, got, analyzer.AnalyzeSlip(legs, games(), nil), "same input must give the same output")
 }
 
 func TestSkippedLegs(t *testing.T) {
@@ -441,7 +1117,7 @@ func TestSkippedLegs(t *testing.T) {
 		{
 			name: "other legs do not feed a total under",
 			legs: []analyzer.Leg{
-				leg(1, "Adam", "buf-mia", "TOTAL", "", "", "UNDER", new(44.5), -110),
+				leg(1, "Adam", "buf-mia", "TOTAL", "", "", "UNDER", new(45.5), -110),
 				leg(2, "Adam", "buf-mia", "OTHER", "BUF", "", "", nil, -110),
 				leg(3, "Adam", "buf-mia", "OTHER", "MIA", "", "", nil, -110),
 			},
@@ -470,8 +1146,8 @@ func TestSkippedLegs(t *testing.T) {
 func TestOutputOrder(t *testing.T) {
 	t.Parallel()
 	legs := []analyzer.Leg{
-		leg(1, "Adam", "buf-mia", "TOTAL", "", "", "UNDER", new(44.5), -110),
-		leg(2, "Adam", "buf-mia", "SPREAD", "BUF", "", "TEAM", new(-7.5), -110),
+		leg(1, "Adam", "buf-mia", "TOTAL", "", "", "UNDER", new(45.5), -110),
+		leg(2, "Adam", "buf-mia", "SPREAD", "BUF", "", "TEAM", new(-8.5), -110),
 		leg(3, "Adam", "buf-mia", "PASS_YDS", "BUF", "Josh Allen", "OVER", new(245.5), -110),
 		leg(4, "Adam", "buf-mia", "REC_YDS", "BUF", "Khalil Shakir", "OVER", new(52.5), -110),
 	}
@@ -491,7 +1167,7 @@ func TestOutputOrder(t *testing.T) {
 func TestOutputOrderWithinSeverity(t *testing.T) {
 	t.Parallel()
 	legs := []analyzer.Leg{
-		leg(1, "Adam", "buf-mia", "SPREAD", "BUF", "", "TEAM", new(-7.5), -110),
+		leg(1, "Adam", "buf-mia", "SPREAD", "BUF", "", "TEAM", new(-8.5), -110),
 		leg(2, "Adam", "buf-mia", "PASS_YDS", "BUF", "Josh Allen", "OVER", new(245.5), -110),
 		leg(3, "Adam", "dal-phi", "SPREAD", "DAL", "", "TEAM", new(-7.0), -110),
 		leg(4, "Adam", "dal-phi", "REC_YDS", "DAL", "CeeDee Lamb", "OVER", new(72.5), -110),
@@ -506,25 +1182,25 @@ func TestOutputOrderWithinSeverity(t *testing.T) {
 func TestMessagesNameOwners(t *testing.T) {
 	t.Parallel()
 	legs := []analyzer.Leg{
-		leg(1, "Adam", "buf-mia", "SPREAD", "BUF", "", "TEAM", new(-7.5), -110),
+		leg(1, "Adam", "buf-mia", "SPREAD", "BUF", "", "TEAM", new(-8.5), -110),
 		leg(2, "Sam", "buf-mia", "PASS_YDS", "BUF", "Josh Allen", "OVER", new(245.5), -110),
 	}
 
 	got := analyzer.AnalyzeSlip(legs, games(), nil)
 	require.Len(t, got, 1)
-	assert.Contains(t, got[0].Message, "Adam's BUF -7.5")
+	assert.Contains(t, got[0].Message, "Adam's BUF -8.5")
 	assert.Contains(t, got[0].Message, "Sam's Josh Allen Over 245.5 Pass Yds")
 }
 
 func TestMessagesKeepOneOwnerQuiet(t *testing.T) {
 	t.Parallel()
 	legs := []analyzer.Leg{
-		leg(1, "Adam", "buf-mia", "SPREAD", "BUF", "", "TEAM", new(-7.5), -110),
+		leg(1, "Adam", "buf-mia", "SPREAD", "BUF", "", "TEAM", new(-8.5), -110),
 		leg(2, "Adam", "buf-mia", "PASS_YDS", "BUF", "Josh Allen", "OVER", new(245.5), -110),
 	}
 
 	got := analyzer.AnalyzeSlip(legs, games(), nil)
 	require.Len(t, got, 1)
 	assert.NotContains(t, got[0].Message, "Adam's")
-	assert.Contains(t, got[0].Message, "BUF -7.5")
+	assert.Contains(t, got[0].Message, "BUF -8.5")
 }

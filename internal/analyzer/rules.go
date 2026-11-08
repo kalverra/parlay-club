@@ -2,6 +2,7 @@ package analyzer
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 )
@@ -37,13 +38,30 @@ const (
 	ruleTotalContradiction = "total_contradiction"
 	ruleStackClockDrain    = "stack_clock_drain"
 	ruleStackShootout      = "stack_shootout"
+	ruleWind               = "wind"
+	ruleFakeWeather        = "fake_weather"
+	ruleHook               = "hook"
+	ruleTotalKeyNumber     = "total_key_number"
+	ruleChalk              = "chalk"
 )
 
 // Thresholds from plan/analyzer.md.
 const (
 	blowoutSpread  = -7.0
 	trailingSpread = 4.5
+
+	windDanger = 20.0
+	windWarn   = 15.0
+	gustWarn   = 25.0
+
+	fakeWeatherPrecipMax = 0.1
+	fakeWeatherWindMax   = 10.0
+
+	chalkOdds = -230
 )
+
+// totalKeyNumbers are the NFL final totals that decide the most bets.
+var totalKeyNumbers = []float64{37, 41, 43, 44, 47, 51}
 
 // blowoutPassing warns when a big favorite's spread asks for a quiet fourth
 // quarter while a passing or receiving over on that team needs volume.
@@ -137,7 +155,7 @@ func totalContradiction(a *analysis) []Warning {
 func stackClockDrain(a *analysis) []Warning {
 	var warnings []Warning
 	for _, spread := range a.legs {
-		if spread.Market != marketSpread || !favorite(spread) {
+		if !favorite(spread) || spread.Market != marketSpread {
 			continue
 		}
 		opponent := a.opponent(spread)
@@ -203,6 +221,135 @@ func stackShootout(a *analysis) []Warning {
 	return warnings
 }
 
+// wind warns when sustained wind or gusts make passing and kicking overs a
+// worse bet. It flags every such leg in the game and gives one warning per
+// outdoor game with known weather.
+func wind(a *analysis) []Warning {
+	var warnings []Warning
+	seen := make(map[string]bool)
+	for _, leg := range a.legs {
+		if seen[leg.GameID] {
+			continue
+		}
+		seen[leg.GameID] = true
+
+		game, ok := a.games[leg.GameID]
+		if !ok || game.Indoor || game.Weather == nil {
+			continue
+		}
+		severity, windy := windLevel(*game.Weather)
+		if !windy {
+			continue
+		}
+		flagged := a.inGame(leg.GameID, windHit)
+		if len(flagged) == 0 {
+			continue
+		}
+
+		owners := mixedOwners(flagged)
+		message := fmt.Sprintf(
+			"Heads up: %s in %s today. Passing and kicking overs take a real hit in that, so %s %s tougher. Field goals drop to about 77%%.",
+			windText(*game.Weather),
+			game.Home,
+			describe(flagged, owners),
+			getVerb(len(flagged)),
+		)
+		warnings = append(warnings, a.warning(ruleWind, severity, message, flagged))
+	}
+	return warnings
+}
+
+// fakeWeather notes that light rain without wind is not the scoring brake the
+// slip might expect it to be.
+func fakeWeather(a *analysis) []Warning {
+	var warnings []Warning
+	seen := make(map[string]bool)
+	for _, leg := range a.legs {
+		if seen[leg.GameID] {
+			continue
+		}
+		seen[leg.GameID] = true
+
+		game, ok := a.games[leg.GameID]
+		if !ok || game.Indoor || game.Weather == nil {
+			continue
+		}
+		weather := *game.Weather
+		if weather.PrecipIn <= 0 || weather.PrecipIn >= fakeWeatherPrecipMax || weather.WindMPH >= fakeWeatherWindMax {
+			continue
+		}
+		unders := a.inGame(leg.GameID, func(leg Leg) bool {
+			return leg.Market == marketTotal && leg.Side == sideUnder
+		})
+		if len(unders) == 0 {
+			continue
+		}
+
+		owners := mixedOwners(unders)
+		message := fmt.Sprintf(
+			"FYI: light rain without wind doesn't actually lower NFL scoring. %s %s no extra help here.",
+			describe(unders, owners), getVerb(len(unders)))
+		warnings = append(warnings, a.warning(ruleFakeWeather, Info, message, unders))
+	}
+	return warnings
+}
+
+// hook warns when a spread sits on a half point that key numbers decide.
+func hook(a *analysis) []Warning {
+	var warnings []Warning
+	for _, leg := range a.legs {
+		if leg.Market != marketSpread || leg.Line == nil {
+			continue
+		}
+		landing, buyTo, moneyline, ok := hookPoint(*leg.Line)
+		if !ok {
+			continue
+		}
+
+		message := hookMessage(leg, *leg.Line, landing, buyTo, moneyline)
+		warnings = append(warnings, a.warning(ruleHook, Warn, message, []Leg{leg}))
+	}
+	return warnings
+}
+
+// totalKeyNumber notes a game total sitting on or next to a common NFL final
+// total.
+func totalKeyNumber(a *analysis) []Warning {
+	var warnings []Warning
+	for _, leg := range a.legs {
+		if leg.Market != marketTotal || leg.Line == nil {
+			continue
+		}
+		keys := keyNumbersNear(*leg.Line)
+		if len(keys) == 0 {
+			continue
+		}
+
+		message := keyNumberMessage(*leg.Line, keys)
+		warnings = append(warnings, a.warning(ruleTotalKeyNumber, Info, message, []Leg{leg}))
+	}
+	return warnings
+}
+
+// chalk warns that a heavy favorite's leg adds little payout and still loses
+// the slip about a third of the time.
+func chalk(a *analysis) []Warning {
+	var warnings []Warning
+	for _, leg := range a.legs {
+		if leg.Odds > chalkOdds {
+			continue
+		}
+		odds := float64(-leg.Odds)
+		multiplier := 1 + 100/odds
+		bust := 1 - odds/(odds+100)
+		message := fmt.Sprintf(
+			"This %d leg only bumps the payout %s× but still busts the slip about %d%% of the time.",
+			leg.Odds, multiplierText(multiplier), int(math.Round(bust*100)))
+		warnings = append(warnings, a.warning(ruleChalk, Warn, message, []Leg{leg}))
+	}
+	return warnings
+}
+
 // matching returns the legs in anchor's game, other than anchor itself, that
 // keep approves. The legs stay in slip order.
 func (a *analysis) matching(anchor Leg, keep func(Leg) bool) []Leg {
@@ -216,6 +363,120 @@ func (a *analysis) matching(anchor Leg, keep func(Leg) bool) []Leg {
 		}
 	}
 	return matches
+}
+
+// inGame returns every leg in the game that keep approves, in slip order.
+func (a *analysis) inGame(gameID string, keep func(Leg) bool) []Leg {
+	var matches []Leg
+	for _, leg := range a.legs {
+		if leg.GameID != gameID || !keep(leg) {
+			continue
+		}
+		matches = append(matches, leg)
+	}
+	return matches
+}
+
+// windLevel grades a forecast. It reports false when the weather is mild
+// enough that nothing needs a note.
+func windLevel(weather Weather) (Severity, bool) {
+	switch {
+	case weather.WindMPH >= windDanger:
+		return Danger, true
+	case weather.WindMPH >= windWarn, weather.GustMPH >= gustWarn:
+		return Warn, true
+	default:
+		return Info, false
+	}
+}
+
+// windHit reports a leg that wind makes harder: an over on a passing,
+// receiving, or kicking market, or a game total over.
+func windHit(leg Leg) bool {
+	if leg.Side != sideOver {
+		return false
+	}
+	switch leg.Market {
+	case marketPassYds, marketPassTDs, marketRecYds, marketReceptions, marketKickerPts, marketTotal:
+		return true
+	default:
+		return false
+	}
+}
+
+// windText names the weather that matters for the warning.
+func windText(weather Weather) string {
+	if weather.WindMPH >= windWarn {
+		return number(weather.WindMPH) + " mph winds"
+	}
+	return "gusts to " + number(weather.GustMPH) + " mph"
+}
+
+// hookPoint maps a spread on the hook to the number it would land on, the
+// number to buy to, and whether the moneyline is a sensible switch.
+func hookPoint(line float64) (landing, buyTo string, moneyline, ok bool) {
+	switch line {
+	case -3.5:
+		return "3", "-3", true, true
+	case -7.5:
+		return "7", "-7", true, true
+	case 2.5:
+		return "3", "+3", false, true
+	case 6.5:
+		return "7", "+7", false, true
+	default:
+		return "", "", false, false
+	}
+}
+
+// hookMessage spells the hook warning for one spread.
+func hookMessage(leg Leg, line float64, landing, buyTo string, moneyline bool) string {
+	subject := selection(leg)
+	if line == -3.5 {
+		return subject +
+			" is on the hook. About 15% of games land on exactly 3, and that's a loss here. " +
+			"Buying to -3 or switching to the ML is worth a look."
+	}
+	suggestion := "Buying to " + buyTo + " is worth a look."
+	if moneyline {
+		suggestion = "Buying to " + buyTo + " or switching to the ML is worth a look."
+	}
+	return fmt.Sprintf(
+		"%s is on the hook. Landing on exactly %s loses by the hook. %s",
+		subject, landing, suggestion)
+}
+
+// keyNumbersNear returns the common final totals within half a point.
+func keyNumbersNear(line float64) []float64 {
+	var near []float64
+	for _, key := range totalKeyNumbers {
+		if math.Abs(line-key) <= 0.5 {
+			near = append(near, key)
+		}
+	}
+	return near
+}
+
+// keyNumberMessage explains where a total sits against the key numbers.
+func keyNumberMessage(line float64, keys []float64) string {
+	text := number(line)
+	switch {
+	case len(keys) == 1 && keys[0] == line:
+		return text + " is one of the most common NFL final totals. A half point either way decides it."
+	case len(keys) == 1:
+		return fmt.Sprintf(
+			"%s is half a point off %s, one of the most common NFL final totals. The half point matters here.",
+			text, number(keys[0]))
+	default:
+		return fmt.Sprintf(
+			"%s sits right between %s and %s, two of the most common NFL final totals. The half point matters here.",
+			text, number(keys[0]), number(keys[1]))
+	}
+}
+
+// multiplierText prints a payout multiplier with no trailing zeros.
+func multiplierText(multiplier float64) string {
+	return strings.TrimSuffix(fmt.Sprintf("%.2f", multiplier), "0")
 }
 
 // sameGame reports whether both legs are tied to the same known game.
@@ -286,10 +547,13 @@ func underdog(leg Leg) bool {
 // trailingUnderdog narrows underdog to the legs that ask for a trailing script:
 // a spread of +4.5 or more, or any underdog moneyline.
 func trailingUnderdog(leg Leg) bool {
-	if leg.Market == marketSpread {
-		return leg.Line != nil && *leg.Line >= trailingSpread
+	if !underdog(leg) {
+		return false
 	}
-	return underdog(leg)
+	if leg.Market == marketSpread {
+		return *leg.Line >= trailingSpread
+	}
+	return true
 }
 
 // passOrRecYardsOver reports an over on passing or receiving yards.
@@ -446,7 +710,12 @@ func lineText(line *float64) string {
 	if line == nil {
 		return ""
 	}
-	return strconv.FormatFloat(*line, 'f', -1, 64)
+	return number(*line)
+}
+
+// number prints a float without trailing zeros.
+func number(value float64) string {
+	return strconv.FormatFloat(value, 'f', -1, 64)
 }
 
 // signedLine keeps the plus on a positive spread.
@@ -533,4 +802,11 @@ func stayVerb(count int) string {
 		return "stays"
 	}
 	return "stay"
+}
+
+func getVerb(count int) string {
+	if count == 1 {
+		return "gets"
+	}
+	return "get"
 }
