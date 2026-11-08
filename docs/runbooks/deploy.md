@@ -69,8 +69,8 @@ push, so a broken gate fails before it can block or allow a deploy.
 5. Runs `gcloud run deploy` with one instance at most, concurrency 80, 1 CPU, 512 MiB, a 3600 second timeout, CPU boost,
    public access, the runtime account, `APP_ENV=prod`, `DB_PATH=/data/parlay.db`, `LITESTREAM_BUCKET`, `BASE_URL`, and
    the four Secret Manager secrets.
-6. Reads the service URL and retries once without `BASE_URL` set if the first revision could not boot. That is the
-   first-deploy path; later deploys get `BASE_URL` from the repo variable.
+6. Reads the service URL and retries once with `BASE_URL` set to that URL if the first revision could not boot. That is
+   the first-deploy path; later deploys get `BASE_URL` from the repo variable.
 7. Waits for `GET /healthz` on the new revision, then writes the image and URL to the job summary.
 
 The image holds the server, the pinned Litestream binary, its config, the entrypoint, `seed/history.yaml`, and `web/`.

@@ -985,6 +985,9 @@ func (h *slipHandlers) renderCreate(
 		create.WeekID = form.WeekID
 		create.Name = form.Name
 		create.LegsPerMember = form.LegsPerMember
+		create.Season = form.Season
+		create.SeasonType = form.SeasonType
+		create.WeekNum = form.WeekNum
 		create.Error = form.Error
 		if form.Selected != nil {
 			chosen := make(map[int64]bool, len(form.Selected))
