@@ -1,0 +1,68 @@
+---
+id: analyzer
+title: Analyzer
+type: concept
+summary: How the sharp-friend banner under a slip turns legs, games, and weather into plain-Go warnings, and the tone those warnings keep.
+tags: [analyzer, warnings, banner, severity, tone, slips, weather, rules]
+sources: [internal/analyzer/analyzer.go, internal/analyzer/rules.go, internal/web/analyzer.go, web/templates/partials.html]
+last_verified: 2026-11-07
+---
+
+# Analyzer
+
+## Summary
+
+The analyzer is the sharp-friend banner under a slip's legs. It reads the picks people already made and points out where
+they fight each other, the weather, the key numbers, or the price. It never blocks a pick. Every leg stays allowed, and
+the banner only adds a heads-up.
+
+`internal/analyzer` is pure Go: no I/O, no clock, no network calls, and no LLM. It runs on every slip render, and its
+output is not stored. The rule list and example messages live in [Analyzer rules](../reference/analyzer-rules.md).
+
+## What the banner shows
+
+The slip panel renders one banner under the legs. With no warnings it shows a green "Looks clean". Otherwise it shows
+one card per warning, sorted `Danger`, `Warn`, then `Info` and colored red, amber, and blue. Each card carries the
+message, the severity, and a chip for every leg involved with its owner's name.
+
+The banner is part of the slip panel, so it refreshes with the panel on `slip-updated` and `board-updated`. A weather
+change needs no separate wiring: the next board refresh re-renders the slip, and the rules see the new forecast. See
+[Live updates](live-updates.md).
+
+## Tone
+
+Warnings read like a sharp friend's heads-up: short, specific, and free of lectures. They name the people, the teams,
+and the numbers, and they suggest a better pick or a safer number. They never say "don't," and they never explain
+expected value. A warning on two people's legs names both owners, such as "Adam's BUF -7.5 + Sam's Josh Allen Over
+245.5."
+
+The tone rules live in `plan/analyzer.md`. Every message is checked against them before an analyzer change ships.
+
+## Inputs
+
+`AnalyzeSlip(legs, games, stats)` takes three plain values:
+
+| Input   | Fields the rules read                                                                    |
+| ------- | ---------------------------------------------------------------------------------------- |
+| `legs`  | owner name, game, market, team, player, side, line, American odds                        |
+| `games` | home and away teams, indoor flag, weather (wind, gusts, precipitation, temperature)      |
+| `stats` | per-player game logs per market, most recent game first, this season only                |
+
+`internal/web` builds those values from the stored slip and the week's games when it renders the panel. It keys the
+games map by the same `GameID` each leg carries, so no leg loses its game. `stats` is passed through and unread until
+`props-research` adds player numbers; `nil` is fine.
+
+Legs the analyzer skips:
+
+- market `OTHER`;
+- an empty `GameID`;
+- a `GameID` missing from the games map.
+
+Output order is stable: severity first (`Danger` before `Warn` before `Info`), then the slip position of the first leg
+named. The same slip and data always produce the same warnings.
+
+## Related
+
+- [Analyzer rules](../reference/analyzer-rules.md): every rule, its severity, trigger, and example message.
+- [Slips](slips.md): the legs and games the banner reads.
+- [Data refresh](data-refresh.md): where the weather behind a warning comes from.

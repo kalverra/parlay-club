@@ -90,8 +90,6 @@ columns and Record Book is a top-nav link.
     count;
   - reference odds and a payout calculator (stake default $10, boost % default 0), recomputed by the server on input
     with a 300 ms debounce;
-  - **analyzer banner:** green "Looks clean" when there are no warnings, else one card per warning, sorted Danger, Warn,
-    Info, colored red, amber, blue, showing the message and the legs involved with their owners;
   - activity feed, collapsed by default, newest first.
 - **Research tab (`props-research`):** opens from a game card or a player name. Player view: last-5 bars, green over the
   line and red under, with median and mean marked, plus season games played. Game view: key injuries filtered to QB, RB,
