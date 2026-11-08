@@ -18,8 +18,9 @@ Facts and unknowns:
 
 - The Odds API documents two flags on the odds endpoints: `includeLinks` and `includeSids`. Its deep-links page shows an
   `h2h` response where each outcome carries its own betslip `link` and `sid`, and the market-level `link` is null. The
-  page is old. Nothing public says what the flags cost, whether DraftKings or FanDuel return links, or whether props
-  have them.
+  page is old. The Phase 1 probe answered the open questions: the flags cost no extra credits, DraftKings and FanDuel
+  return both fields on game lines and on a probed prop market, and other books vary. Details and link shapes live in
+  `plan/data-sources.md`.
 - Outcome links point at one selection. Whether a book accepts several selections in one URL is unknown. This design
   makes the one-selection-per-link case the guaranteed path and treats a combined link as an upgrade.
 - The seam stays the same as other sources: the odds client parses, `refresh` writes, a handler reads `odds`. No new
@@ -39,10 +40,10 @@ flowchart LR
 ```
 
 **Data.** A migration adds nullable `link` and `sid` columns to `odds`. They hold the outcome-level values for that
-book, and are NULL when the book gave none. The odds client adds `includeLinks=true&includeSids=true` to the two odds
-calls and parses both fields onto each outcome. The same upsert that refreshes `price` refreshes `link` and `sid`, so a
-link is as fresh as its price. If Phase 1 shows the flags cost credits, the design stops there and the cost goes into
-the credit-floor math before any other work.
+book, and are NULL when the book gave none. The odds client adds `includeLinks=true&includeSids=true` to the odds calls
+(the game-lines call today, and the prop call when it lands) and parses both fields onto each outcome. The same upsert
+that refreshes `price` refreshes `link` and `sid`, so a link is as fresh as its price. The Phase 1 probe measured zero
+extra credits for both flags, so the credit-floor math is unchanged.
 
 **Planning.** A new `internal/export` package is pure. `export.Plan(slip, legs, odds, book, now)` returns a `Plan` per
 book:
@@ -69,12 +70,12 @@ decides. The match is exact on `line` and uses the same key the odds table is ke
 type Combiner interface{ Combine(linked []LegLink) (url string, ok bool) }
 ```
 
-Phase 1 records, from live responses and by hand on a phone, whether either book takes several selections in one URL and
-how. A book with a verified format gets a `Combiner`. A book without one returns `ok = false`, and the panel shows one
-tap per leg instead. No format is guessed. The per-leg path ships first and is complete without a `Combiner`.
+The hands-on phone check before Phase 3 records whether either book takes several selections in one URL and how. A book
+with a verified format gets a `Combiner`. A book without one returns `ok = false`, and the panel shows one tap per leg
+instead. No format is guessed. The per-leg path ships first and is complete without a `Combiner`.
 
-**UI.** The slip panel gains an export panel, shown only when `slips.status = 'LOCKED'`. At phone width it is a card
-with:
+**UI.** The slip page gains an export card after the slip panel, shown only when `slips.status = 'LOCKED'`. At phone
+width it is a card with:
 
 - one button per book: "Open in DraftKings", "Open in FanDuel". With a `Combined` link it is one tap. Without, it
   expands to a numbered list of per-leg taps, each labeled with the selection.
@@ -122,11 +123,13 @@ Rejected:
 
 ## Risks
 
-- **Links may be missing or differ by book.** The API says "if available". The live test settles it. If props or a book
-  have no links, the panel lists those legs by name, which is the designed fallback and not a failure.
-- **Credit cost.** If `includeLinks` or `includeSids` costs extra credits, the cost multiplies across every lines and
-  props fetch. The live test measures it before code lands. If it is large, the change needs a new decision, and we
-  stop.
+- **Links may be missing or differ by book.** The API says "if available". The Phase 1 probe found full coverage on
+  DraftKings and FanDuel for game lines and the probed prop, and gaps on other books. Coverage can still vary by market
+  or change later. If props or a book have no links, the panel lists those legs by name, which is the designed fallback
+  and not a failure.
+- **Credit cost.** The Phase 1 probe measured zero extra credits for `includeLinks` and `includeSids` on both a game
+  lines call and a prop call, so they do not multiply the lines-and-props fetch cost. If The Odds API changes that, the
+  cost goes into the credit-floor math before any further work.
 - **Link format changes.** A sportsbook can change its URL scheme without notice. Per-leg links come straight from the
   API, so they follow the change. A `Combiner` is ours and can rot; the `live-api-watch` live test should include one
   link-shape check, and a broken `Combiner` can be turned off by returning `ok = false`.
@@ -140,26 +143,26 @@ Effort: medium (small UI, but the first phase depends on unknown API behavior an
 
 ### Phase 1: Probe and store links
 
-- [ ] Run the live probe on one real game for a game line and a prop on both books, measure the credit cost of both
+- [x] Run the live probe on one real game for a game line and a prop on both books, measure the credit cost of both
       flags, save the responses to `testdata/`, and write the findings into `plan/data-sources.md`. Stop and ask a
       person if the cost is more than the lines-and-props budget can take.
-- [ ] Add `link` and `sid` to `odds` with a migration, send both flags from the odds client, parse them from the saved
+- [x] Add `link` and `sid` to `odds` with a migration, send both flags from the odds client, parse them from the saved
   fixtures, and write them in the same upsert as `price`, tested against a fake server and a temp DB
-- [ ] Docs: add the two columns to `docs/reference/schema.md` and the flags to the Odds API section of the data-sources
+- [x] Docs: add the two columns to `docs/reference/schema.md` and the flags to the Odds API section of the data-sources
       doc
 
 ### Phase 2: Plan and show the export
 
-- [ ] Add `internal/export` with `Plan`, the match rules, and the manual reasons, with table tests for every case in
+- [x] Add `internal/export` with `Plan`, the match rules, and the manual reasons, with table tests for every case in
   Verification
-- [ ] Add `GET /slips/{id}/export` and the export card on the locked slip at phone width, with per-leg taps, the manual
+- [x] Add `GET /slips/{id}/export` and the export card on the locked slip at phone width, with per-leg taps, the manual
       list with friendly notes, "links as of", "Copy slip as text", and SSE refresh on unlock
-- [ ] Docs: write `docs/concepts/export.md` and add the route to `plan/architecture.md`
+- [x] Docs: write `docs/concepts/export.md` and add the route to `plan/architecture.md`
 
 ### Phase 3: Combined links
 
 Effort: hard (needs hands-on checks of each book's link behavior on a phone)
 
-- [ ] For each book where the probe and a phone test show a multi-selection URL works, add a `Combiner` and one-tap
+- [x] For each book where the probe and a phone test show a multi-selection URL works, add a `Combiner` and one-tap
   `Combined` link, with tests on saved `sid`s; leave other books on per-leg taps
-- [ ] Docs: record each verified format in `docs/concepts/export.md`, with the date checked
+- [x] Docs: record each verified format in `docs/concepts/export.md`, with the date checked

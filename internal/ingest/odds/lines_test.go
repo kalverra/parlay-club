@@ -3,6 +3,8 @@ package odds_test
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -86,6 +88,53 @@ func TestLinesMapsMoneylineSpreadsAndTotals(t *testing.T) {
 		},
 	}
 	assert.Equal(t, want, onlyBook(lines, eventID, "draftkings"))
+}
+
+func TestLinesMapsDeepLinksFromTheSavedEvent(t *testing.T) {
+	t.Parallel()
+
+	raw, err := os.ReadFile(filepath.Join("testdata", "odds_game_links.json"))
+	require.NoError(t, err)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/odds", r.URL.Path)
+		assert.Equal(t, linesQuery(), r.URL.Query())
+		w.Header().Set("X-Requests-Remaining", "491")
+		w.Header().Set("X-Requests-Used", "6")
+		w.Header().Set("X-Requests-Last", "3")
+		w.Header().Set("Content-Type", "application/json")
+		// The live all-events call returns an array; the saved fixture is one event.
+		_, _ = w.Write([]byte("[" + string(raw) + "]"))
+	}))
+	t.Cleanup(server.Close)
+
+	lines, _, err := odds.NewClient(server.URL, testAPIKey, server.Client()).Lines(t.Context())
+	require.NoError(t, err)
+
+	const eventID = "dc56d980f527ffeef89940133b211b13"
+	want := map[string]struct{ link, sid string }{
+		"draftkings": {
+			link: "https://sportsbook.draftkings.com/?outcomes=0ML84695561_1",
+			sid:  "0ML84695561_1",
+		},
+		"fanduel": {
+			link: "https://sportsbook.fanduel.com/addToBetslip?marketId=42.578189645&selectionId=50199",
+			sid:  "50199",
+		},
+	}
+	for book, expected := range want {
+		found := false
+		for _, line := range lines {
+			if line.EventID != eventID || line.Book != book ||
+				line.MarketType != odds.MarketML || line.Team != "Atlanta Falcons" {
+				continue
+			}
+			found = true
+			assert.Equal(t, expected.link, line.Link)
+			assert.Equal(t, expected.sid, line.Sid)
+		}
+		assert.True(t, found, "no %s moneyline row for Atlanta", book)
+	}
 }
 
 func TestLinesReportsAnHTTPFailure(t *testing.T) {

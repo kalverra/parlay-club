@@ -231,6 +231,7 @@ func TestSyncOddsWritesOnlyMatchedGamesAndRecordsCredits(t *testing.T) {
 			{
 				EventID: "evt-1", Book: "draftkings", MarketType: odds.MarketML,
 				Team: "Buffalo Bills", Side: odds.SideTeam, Price: -155,
+				Link: "https://sportsbook.draftkings.com/?outcomes=0ML1_1", Sid: "0ML1_1",
 			},
 			{
 				EventID: "evt-1", Book: "draftkings", MarketType: odds.MarketSpread,
@@ -272,6 +273,8 @@ func TestSyncOddsWritesOnlyMatchedGamesAndRecordsCredits(t *testing.T) {
 		Team:       "BUF",
 		Side:       odds.SideTeam,
 		Price:      -155,
+		Link:       new("https://sportsbook.draftkings.com/?outcomes=0ML1_1"),
+		Sid:        new("0ML1_1"),
 		FetchedAt:  now,
 	}, bySelection["ML|BUF|TEAM"])
 	assert.Equal(t, db.Odds{

@@ -1,6 +1,6 @@
 ---
 slug: export-to-sportsbook
-status: designed
+status: implementing
 created: "2026-11-05"
 depends_on:
     - slips-live
