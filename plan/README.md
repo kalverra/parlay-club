@@ -27,7 +27,7 @@ Every change is done when its Verification checks pass and the verify commands i
 | Doc                                    | Covers                                                                |
 | -------------------------------------- | --------------------------------------------------------------------- |
 | [product.md](product.md)               | Grading, Record Book, screens, and links to the living docs           |
-| [architecture.md](architecture.md)     | Repo layout, routes, deploy                                           |
+| [architecture.md](architecture.md)     | Repo layout, routes, and database access                              |
 | [data-sources.md](data-sources.md)     | ESPN, Open-Meteo, The Odds API, matching, fixtures                    |
 | [analyzer.md](analyzer.md)             | Warning types and every rule with exact triggers                      |
 

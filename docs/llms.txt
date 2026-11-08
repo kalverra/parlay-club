@@ -28,6 +28,7 @@
 
 ## Guide
 
+- [GCP setup](guides/gcp-setup.md): Create the Google Cloud project resources once, add the secrets and GitHub variables, and run the first deploy that puts the app on Cloud Run.
 - [Local development](guides/local-dev.md): Start the app with hot reload, set up the git hooks, and fall back to a plain server run when you need it.
 
 ## Reference
@@ -43,4 +44,5 @@
 ## Runbook
 
 - [Archive size check](runbooks/archive-size.md): Measure the raw response archive and the SQLite file, know the number to act at, and prune old responses without losing the parsed tables.
+- [Deploy](runbooks/deploy.md): How a commit reaches Cloud Run, why deploys pause during game windows, how to force one, and how to verify, roll back, and read the spend.
 - [Google OAuth setup](runbooks/google-oauth-setup.md): Create the Google Web client, register the local and prod redirect URIs, publish the consent screen, and set the client secrets.
