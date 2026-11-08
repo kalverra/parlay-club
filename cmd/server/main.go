@@ -27,6 +27,7 @@ import (
 	"github.com/kalverra/parlay-club/internal/ingest/weather"
 	"github.com/kalverra/parlay-club/internal/live"
 	"github.com/kalverra/parlay-club/internal/refresh"
+	"github.com/kalverra/parlay-club/internal/seed"
 	"github.com/kalverra/parlay-club/internal/slips"
 	"github.com/kalverra/parlay-club/internal/web"
 	assets "github.com/kalverra/parlay-club/web"
@@ -95,6 +96,7 @@ func run() error {
 
 	hub := &live.Hub{}
 	slipService := slips.New(store, hub, nil)
+	loadHistory(ctx, logger, store)
 	ingestClient := newIngestClient(store)
 	refresher := refresh.New(refresh.Deps{
 		Store:      store,
@@ -129,6 +131,37 @@ func run() error {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	return listenAndServe(ctx, logger, server)
+}
+
+// loadHistory imports seed/history.yaml after migrations. A bad file logs and
+// lets the app serve: history is nice to have, and the rest of the app must
+// still come up. With no group yet there is nowhere to put the slips, so it
+// waits for a later boot.
+func loadHistory(ctx context.Context, logger zerolog.Logger, store *db.Store) {
+	group, err := store.FirstGroup(ctx)
+	if errors.Is(err, db.ErrGroupNotFound) {
+		logger.Info().Msg("history: no group yet, skipping " + seed.DefaultPath)
+		return
+	}
+	if err != nil {
+		logger.Error().Err(err).Msg("history: read first group")
+		return
+	}
+
+	report, err := seed.Load(ctx, store, group.ID, seed.DefaultPath)
+	if err != nil {
+		logger.Error().Err(err).Str("path", seed.DefaultPath).Msg("history: load")
+		return
+	}
+	if report.Slips == 0 && report.Users == 0 {
+		return
+	}
+	logger.Info().
+		Int64("group", group.ID).
+		Int("slips", report.Slips).
+		Int("skipped", report.Skipped).
+		Int("users", report.Users).
+		Msg("history loaded")
 }
 
 // newIngestClient builds the HTTP client every ingest source shares. Its

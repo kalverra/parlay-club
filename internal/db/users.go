@@ -166,6 +166,25 @@ func (s *Store) UserByGoogleSub(ctx context.Context, sub string) (User, error) {
 	return user, nil
 }
 
+// UserByName returns the oldest user with name, ignoring case. Names are not
+// unique, so a repeated display name resolves to the person created first. A
+// missing row wraps ErrUserNotFound.
+func (s *Store) UserByName(ctx context.Context, name string) (User, error) {
+	user, err := scanUser(s.conn().QueryRowContext(ctx, `
+		SELECT id, name, avatar_color, home_book, active, email, picture_url
+		FROM users
+		WHERE name = ?
+		ORDER BY id
+		LIMIT 1`, name))
+	if errors.Is(err, sql.ErrNoRows) {
+		return User{}, fmt.Errorf("user %q: %w", name, ErrUserNotFound)
+	}
+	if err != nil {
+		return User{}, fmt.Errorf("user %q: %w", name, err)
+	}
+	return user, nil
+}
+
 // UserByEmail returns the user holding email, ignoring case. A missing row
 // wraps ErrUserNotFound.
 func (s *Store) UserByEmail(ctx context.Context, email string) (User, error) {

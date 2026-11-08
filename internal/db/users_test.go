@@ -130,6 +130,27 @@ func TestUserByIDReturnsHomeBookAndActiveFlag(t *testing.T) {
 	assert.False(t, stored.Active)
 }
 
+func TestUserByNameMatchesIgnoringCaseAndTakesTheOldest(t *testing.T) {
+	t.Parallel()
+
+	store, _ := openTestStore(t)
+	first := createUser(t, store, "Ada")
+	createUser(t, store, "ada")
+
+	found, err := store.UserByName(t.Context(), "ADA")
+	require.NoError(t, err)
+	assert.Equal(t, first, found, "duplicate display names resolve to the first person created")
+}
+
+func TestUserByNameReportsAMissingUser(t *testing.T) {
+	t.Parallel()
+
+	store, _ := openTestStore(t)
+
+	_, err := store.UserByName(t.Context(), "Ada")
+	require.ErrorIs(t, err, db.ErrUserNotFound)
+}
+
 func TestSetUserHomeBookSetsAndClears(t *testing.T) {
 	t.Parallel()
 

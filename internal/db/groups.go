@@ -71,6 +71,25 @@ func (s *Store) Create(ctx context.Context, userID int64, name string) (Group, e
 	return group, nil
 }
 
+// FirstGroup returns the group created first. The history import targets it
+// when the file names no group. A missing row wraps ErrGroupNotFound.
+func (s *Store) FirstGroup(ctx context.Context) (Group, error) {
+	var group Group
+	err := s.conn().QueryRowContext(ctx, `
+		SELECT id, name, invite_token
+		FROM groups
+		ORDER BY id
+		LIMIT 1`).
+		Scan(&group.ID, &group.Name, &group.InviteToken)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Group{}, fmt.Errorf("first group: %w", ErrGroupNotFound)
+	}
+	if err != nil {
+		return Group{}, fmt.Errorf("first group: %w", err)
+	}
+	return group, nil
+}
+
 // ForUser returns the groups userID belongs to, oldest membership first. A
 // user with no groups gets an empty slice, not nil.
 func (s *Store) ForUser(ctx context.Context, userID int64) ([]Group, error) {

@@ -58,7 +58,7 @@ Sunday, Nov 8. It runs interactively: the user runs the GCP setup and the first 
 
 ### Phase 2: History file
 
-- [ ] Add internal/seed and an empty seed/history.yaml with a commented example, load it at boot, and test that loading
+- [x] Add internal/seed and an empty seed/history.yaml with a commented example, load it at boot, and test that loading
   twice creates each slip once, unknown users are created, and results compute slip result
 - [ ] Docs: add docs/reference/history-file.md; delete History from plan/product.md
 
