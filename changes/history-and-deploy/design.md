@@ -25,7 +25,10 @@ Sunday, Nov 8. It runs interactively: the user runs the GCP setup and the first 
   then runs `litestream replicate -exec`. A `LITESTREAM_REPLICA_URL` override lets local runs use a local replica
   directory.
 - `deploy/setup.sh` is idempotent `gcloud` and prints the GitHub variables. The agent writes it; the user runs it.
-- Workflows: `ci.yml` and `deploy.yml` per `plan/architecture.md` CI, with `deploy/blackout.sh` gating deploys.
+- Workflows: `ci.yml` runs the generate-diff check, lint, tests, and the blackout test. `deploy.yml` runs on
+  `workflow_run` after CI passes on `main` and on manual dispatch, checks out the commit CI tested, gates on
+  `deploy/blackout.sh` unless `force` is set, and queues rather than cancels. The first deploy has no `BASE_URL` yet, so
+  the workflow deploys once without it, reads the new service URL, and redeploys once with it.
 - Groups and `google-oauth` later: `internal/seed` resolves each person through one function. Today it creates a user by
   name; once Google sign-in lands, that function matches by email or an alias, and `groups` points it at a group. Keep
   `seed/history.yaml` free of group fields for now.
@@ -47,9 +50,14 @@ Sunday, Nov 8. It runs interactively: the user runs the GCP setup and the first 
 
 - Litestream config syntax differs by version: 0.5.18 is pinned, and the local smoke test confirmed its config, restore,
   and replicate paths. Treat a version bump as a config change.
-- Two writers during a deploy: covered by the blackout; documented in the persistence concept doc.
-- Free-tier drift: the $5 budget alert is the backstop. The deploy runbook says how to check spend.
-- The agent can't run GCP or GitHub setup; the runbook must let the user finish alone.
+- Two writers during a deploy: the blackout narrows this to game windows, where a deploy pauses; outside them the write
+  gap is small. A forced deploy accepts the gap. Documented in the persistence concept doc.
+- Prod refuses to boot without `BASE_URL`, and the first deploy cannot know the URL until a service exists. The workflow
+  retries once against the new URL; the first revision is expected to fail on that path.
+- Free-tier drift: the $5 budget alert is the backstop, and setup keeps only the last three images. The deploy runbook
+  says how to check spend.
+- The agent can't run GCP or GitHub setup; the runbook must let the user finish alone. The setup script, the first
+  deploy, and the GCS restore get their first real run from the user.
 
 ## TODO
 
@@ -78,4 +86,4 @@ Sunday, Nov 8. It runs interactively: the user runs the GCP setup and the first 
 - [x] Add deploy/blackout.sh with a test script covering both windows via NOW, and deploy/setup.sh for every resource in
   plan/architecture.md One-time setup
 - [x] Add .github/workflows/deploy.yml with blackout gate, WIF auth, build, push, and gcloud run deploy
-- [ ] Docs: add docs/runbooks/deploy.md and docs/guides/gcp-setup.md; delete Deploy and CI from plan/architecture.md
+- [x] Docs: add docs/runbooks/deploy.md and docs/guides/gcp-setup.md; delete Deploy and CI from plan/architecture.md
