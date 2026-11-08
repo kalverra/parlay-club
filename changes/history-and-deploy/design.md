@@ -77,5 +77,5 @@ Sunday, Nov 8. It runs interactively: the user runs the GCP setup and the first 
 - [x] Add .github/workflows/ci.yml with generate-diff check, lint, and tests
 - [x] Add deploy/blackout.sh with a test script covering both windows via NOW, and deploy/setup.sh for every resource in
   plan/architecture.md One-time setup
-- [ ] Add .github/workflows/deploy.yml with blackout gate, WIF auth, build, push, and gcloud run deploy
+- [x] Add .github/workflows/deploy.yml with blackout gate, WIF auth, build, push, and gcloud run deploy
 - [ ] Docs: add docs/runbooks/deploy.md and docs/guides/gcp-setup.md; delete Deploy and CI from plan/architecture.md

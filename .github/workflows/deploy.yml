@@ -1,0 +1,157 @@
+name: Deploy
+
+# Deploy the commit CI tested. Runs after CI passes on main, or by hand from the
+# Actions tab. The game-window blackout gates both paths; force=true skips it.
+# See docs/runbooks/deploy.md.
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Deploy even when the blackout says a game is on
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  id-token: write
+
+# One deploy at a time. Queue, do not cancel: a cancelled deploy can leave the
+# old and new revisions overlapping, which the blackout exists to avoid.
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+env:
+  SERVICE: parlay-club
+
+jobs:
+  deploy:
+    name: Build and deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # A workflow_run from a pull request must never reach the deployer, even if
+    # a fork branch happens to be named main.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.conclusion == 'success')
+
+    steps:
+      - name: Check out the tested commit
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      # Two writers during a deploy can drop the old instance's last writes.
+      # The blackout pauses that until the games end.
+      - name: Blackout gate
+        if: ${{ github.event.inputs.force != 'true' }}
+        run: deploy/blackout.sh
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.DEPLOY_SA }}
+          project_id: ${{ vars.GCP_PROJECT }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v3
+        with:
+          project_id: ${{ vars.GCP_PROJECT }}
+
+      - name: Build and push the image
+        env:
+          PROJECT: ${{ vars.GCP_PROJECT }}
+          REGION: ${{ vars.GCP_REGION }}
+          AR_REPO: ${{ vars.AR_REPO }}
+          SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+        run: |
+          IMAGE="${REGION}-docker.pkg.dev/${PROJECT}/${AR_REPO}/${SERVICE}:${SHA}"
+          gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+          docker build -t "$IMAGE" .
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+
+      - name: Deploy to Cloud Run
+        env:
+          PROJECT: ${{ vars.GCP_PROJECT }}
+          REGION: ${{ vars.GCP_REGION }}
+          RUNTIME_SA: ${{ vars.RUNTIME_SA }}
+          BUCKET: ${{ vars.LITESTREAM_BUCKET }}
+          BASE_URL_VAR: ${{ vars.BASE_URL }}
+        run: |
+          set -euo pipefail
+
+          service_url() {
+            gcloud run services describe "$SERVICE" \
+              --project "$PROJECT" --region "$REGION" \
+              --format='value(status.url)' 2>/dev/null || true
+          }
+
+          run_deploy() {
+            local base_url="$1"
+            local env_vars="APP_ENV=prod,DB_PATH=/data/parlay.db,LITESTREAM_BUCKET=$BUCKET"
+            if [ -n "$base_url" ]; then
+              env_vars="$env_vars,BASE_URL=$base_url"
+            fi
+            gcloud run deploy "$SERVICE" \
+              --project "$PROJECT" \
+              --region "$REGION" \
+              --image "$IMAGE" \
+              --min-instances 0 \
+              --max-instances 1 \
+              --concurrency 80 \
+              --cpu 1 \
+              --memory 512Mi \
+              --timeout 3600 \
+              --cpu-boost \
+              --allow-unauthenticated \
+              --service-account "$RUNTIME_SA" \
+              --update-env-vars "$env_vars" \
+              --set-secrets "SESSION_KEY=session-key:latest,GOOGLE_CLIENT_ID=google-client-id:latest,GOOGLE_CLIENT_SECRET=google-client-secret:latest,ODDS_API_KEY=odds-api-key:latest"
+          }
+
+          # BASE_URL is required in prod and holds the service's own URL. On the
+          # very first deploy neither a repo variable nor a service exists yet.
+          BASE_URL="${BASE_URL_VAR:-}"
+          if [ -z "$BASE_URL" ]; then
+            BASE_URL=$(service_url)
+          fi
+
+          if ! run_deploy "$BASE_URL"; then
+            # The first revision could not boot without BASE_URL, but the
+            # service and its URL now exist. Redeploy once with it.
+            URL=$(service_url)
+            if [ -z "$URL" ] || [ "$URL" = "$BASE_URL" ]; then
+              exit 1
+            fi
+            echo "::warning::first revision had no BASE_URL; retrying with $URL"
+            BASE_URL="$URL"
+            run_deploy "$BASE_URL"
+          fi
+
+          URL=$(service_url)
+          if [ -z "$URL" ]; then
+            echo "deploy: cannot read the service URL" >&2
+            exit 1
+          fi
+
+          {
+            echo "### Deployed"
+            echo ""
+            echo "- Image: \`$IMAGE\`"
+            echo "- URL: $URL"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # Prove the revision boots, not just that Cloud Run accepted it.
+          curl -fsS --retry 8 --retry-delay 3 --retry-all-errors "$URL/healthz" >/dev/null
+
+          if [ -z "${BASE_URL_VAR:-}" ]; then
+            echo "::notice::set the BASE_URL repo variable to $URL so future deploys pass it without a retry"
+          fi
