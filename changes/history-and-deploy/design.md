@@ -66,7 +66,7 @@ Sunday, Nov 8. It runs interactively: the user runs the GCP setup and the first 
 
 ### Phase 3: Container and persistence
 
-- [ ] Add the Dockerfile, deploy/litestream.yml, and deploy/entrypoint.sh with a pinned Litestream release, and smoke
+- [x] Add the Dockerfile, deploy/litestream.yml, and deploy/entrypoint.sh with a pinned Litestream release, and smoke
   test locally: build, run with a file replica, write a slip, restart, and confirm it restored
 - [ ] Docs: add docs/concepts/persistence.md; delete Persistence from plan/architecture.md
 
