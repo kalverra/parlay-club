@@ -431,3 +431,74 @@ func TestWeekPlayerNames(t *testing.T) {
 	// Expected: sorted and deduplicated, only for BUF and MIA teams/game
 	assert.Equal(t, []string{"Dalton Kincaid", "De'Von Achane", "Josh Allen"}, names)
 }
+
+func TestLatestPropForPlayer(t *testing.T) {
+	t.Parallel()
+
+	store, _ := openTestStore(t)
+	week := createTestWeek(t, store, 10)
+	game, err := store.UpsertGame(t.Context(), testSlateGame(week))
+	require.NoError(t, err)
+	now := time.Now().UTC()
+
+	// 1. No props stored -> returns false, nil
+	_, ok, err := store.LatestPropForPlayer(t.Context(), "3918298", "Josh Allen", "BUF")
+	require.NoError(t, err)
+	assert.False(t, ok)
+
+	// 2. Insert older and newer props
+	older := now.Add(-1 * time.Hour)
+	newer := now
+	_, err = store.UpsertOdds(t.Context(), []db.Odds{
+		{
+			GameID:     game.ID,
+			Book:       "draftkings",
+			MarketType: "PASS_YDS",
+			Team:       "BUF",
+			PlayerName: "Josh Allen",
+			Side:       "OVER",
+			Line:       new(260.5),
+			Price:      -110,
+			FetchedAt:  older,
+		},
+		{
+			GameID:     game.ID,
+			Book:       "draftkings",
+			MarketType: "PASS_YDS",
+			Team:       "BUF",
+			PlayerName: "Josh Allen",
+			Side:       "OVER",
+			Line:       new(265.5),
+			Price:      -115,
+			FetchedAt:  newer,
+		},
+	})
+	require.NoError(t, err)
+
+	prop, ok, err := store.LatestPropForPlayer(t.Context(), "3918298", "Josh Allen", "BUF")
+	require.NoError(t, err)
+	assert.True(t, ok)
+	assert.InDelta(t, 265.5, *prop.Line, 0.001)
+
+	// 3. Match via player_matches
+	require.NoError(t, store.SaveManualPlayerMatch(t.Context(), "Gabe Davis", "BUF", "4241479"))
+	_, err = store.UpsertOdds(t.Context(), []db.Odds{
+		{
+			GameID:     game.ID,
+			Book:       "draftkings",
+			MarketType: "REC_YDS",
+			Team:       "BUF",
+			PlayerName: "Gabe Davis",
+			Side:       "OVER",
+			Line:       new(42.5),
+			Price:      -110,
+			FetchedAt:  newer,
+		},
+	})
+	require.NoError(t, err)
+
+	prop, ok, err = store.LatestPropForPlayer(t.Context(), "4241479", "Gabriel Davis", "BUF")
+	require.NoError(t, err)
+	assert.True(t, ok)
+	assert.InDelta(t, 42.5, *prop.Line, 0.001)
+}

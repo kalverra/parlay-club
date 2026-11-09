@@ -211,6 +211,8 @@ func renderPage(t *testing.T, page string, data webui.Page) string {
 		value = webui.SlipPage{Page: data}
 	case "games":
 		value = webui.GamesPage{Page: data}
+	case "research":
+		value = webui.ResearchPage{Page: data}
 	}
 
 	html, err := renderer.Render(page, value)

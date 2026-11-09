@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -204,4 +205,59 @@ func scanOdds(row rowScanner) (Odds, error) {
 	odds.EventSid = nullableStringPtr(eventSid)
 	odds.FetchedAt = parsed
 	return odds, nil
+}
+
+// LatestPropForPlayer returns the newest prop odds row for a player with a line.
+func (s *Store) LatestPropForPlayer(ctx context.Context, athleteID, playerName, team string) (Odds, bool, error) {
+	candidates := make([]string, 0, 4)
+	if playerName != "" {
+		candidates = append(candidates, playerName)
+		norm := NormalizePlayerName(playerName)
+		if norm != "" && norm != playerName {
+			candidates = append(candidates, norm)
+		}
+	}
+	if athleteID != "" {
+		rows, err := s.conn().QueryContext(ctx,
+			"SELECT odds_name FROM player_matches WHERE espn_athlete_id = ?", athleteID)
+		if err == nil {
+			defer func() { _ = rows.Close() }()
+			for rows.Next() {
+				var name string
+				if err := rows.Scan(&name); err == nil && name != "" {
+					candidates = append(candidates, name)
+				}
+			}
+		}
+	}
+	if len(candidates) == 0 {
+		return Odds{}, false, nil
+	}
+
+	placeholders := strings.Repeat("?,", len(candidates))
+	placeholders = placeholders[:len(placeholders)-1]
+	args := make([]any, 0, len(candidates)+1)
+	for _, c := range candidates {
+		args = append(args, c)
+	}
+
+	query := "SELECT " + oddsColumns + `
+		FROM odds
+		WHERE player_name COLLATE NOCASE IN (` + placeholders + `)
+			AND line IS NOT NULL`
+	if team != "" {
+		query += " AND (team = ? OR team = '')"
+		args = append(args, team)
+	}
+	query += " ORDER BY fetched_at DESC LIMIT 1"
+
+	row := s.conn().QueryRowContext(ctx, query, args...)
+	o, err := scanOdds(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Odds{}, false, nil
+	}
+	if err != nil {
+		return Odds{}, false, fmt.Errorf("latest prop for player %s: %w", playerName, err)
+	}
+	return o, true, nil
 }
