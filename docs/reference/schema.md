@@ -5,7 +5,7 @@ type: reference
 summary: SQLite tables, including groups and their members, the odds rows and their sportsbook deep links, the raw external response archive, how migrations are tracked and applied, and the connection settings behind every query.
 tags: [database, sqlite, migrations, groups, archive, api, raw-responses, odds, links]
 sources: [internal/db/migrations/*.sql, internal/db/migrate.go, internal/db/db.go, internal/db/odds.go, internal/db/groups.go, internal/db/archive.go, internal/db/archive_read.go, internal/ingest/archive/transport.go]
-last_verified: 2026-11-07
+last_verified: 2026-11-09
 ---
 
 # Database schema
@@ -148,7 +148,7 @@ CREATE TABLE weeks (
 CREATE TABLE games (
   id             TEXT PRIMARY KEY,             -- ESPN event ID
   week_id        INTEGER NOT NULL REFERENCES weeks(id),
-  odds_event_id  TEXT UNIQUE,                  -- The Odds API event ID once matched
+  odds_event_id  TEXT UNIQUE,                  -- matched odds provider event ID (primary wins)
   home_team      TEXT NOT NULL,                -- ESPN abbreviation, e.g. 'BUF'
   away_team      TEXT NOT NULL,
   home_name      TEXT NOT NULL,                -- ESPN displayName, e.g. 'Buffalo Bills' (used for odds matching)

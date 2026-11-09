@@ -32,7 +32,8 @@ You run this once per project. Every step is safe to repeat, and the setup scrip
 
 - Admin access to the GitHub repo, enough to set Actions variables. The repo is `kalverra/parlay-club` unless you forked
   it.
-- Access to [Parlay API](https://parlay-api.com) for a key, or nothing if you skip odds.
+- Access to [Parlay API](https://parlay-api.com) and [The Odds API](https://the-odds-api.com) for keys, or nothing if
+  you skip odds.
 
 ## Steps
 
@@ -215,7 +216,7 @@ The free-tier pieces this app leans on:
 - Cloud Run scales to zero (`--min-instances 0`) and runs at most one instance.
 - Artifact Registry keeps only the last 3 images.
 - The bucket holds the SQLite replica, which is small.
-- Parlay API has its own 1,000-credit monthly budget, tracked in the app; see
+- Parlay API has a 1,000-credit monthly budget and The Odds API has 500, both tracked in the app; see
   [Data refresh](../concepts/data-refresh.md).
 
 ## Troubleshooting

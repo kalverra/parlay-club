@@ -78,8 +78,8 @@ ctx = archive.WithKey(ctx, "odds:props:401")
 
 The key is the same string `sync_state.source` uses. `source` comes from the part before the first colon, lowercased.
 Without a label, the transport falls back to `host + path` and derives `source` from the host: `espn.com`,
-`open-meteo.com`, and `parlay-api.com` (or the older `the-odds-api.com`) map to `espn`, `weather`, and `odds`; any other
-host becomes its own source.
+`open-meteo.com`, and both `parlay-api.com` and `the-odds-api.com` map to `espn`, `weather`, and `odds`; any other host
+becomes its own source.
 
 Labelled rows join cleanly with `sync_state`. Fallback rows are still kept but are harder to group, so every client
 should set a label. The constants `archive.SourceESPN`, `archive.SourceWeather`, and `archive.SourceOdds` name the three

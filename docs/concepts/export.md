@@ -2,9 +2,9 @@
 id: export
 title: Export
 type: concept
-summary: How a locked slip turns stored sportsbook deep links into a one-tap combined FanDuel link, with per-leg taps, a manual list, and copy text for every pick that has no link.
-tags: [export, sportsbook, fanduel, draftkings, deep-links, links, combined-links, locking, manual-legs, copy, sse]
-sources: [internal/export/export.go, internal/web/export.go, internal/ingest/odds/lines.go, internal/db/odds.go, internal/db/migrations/0004_odds_links.sql, internal/web/slips.go, web/templates/partials.html]
+summary: How a locked slip turns stored sportsbook deep links into a one-tap combined DraftKings or FanDuel link, with per-leg taps, a manual list, and copy text for every pick that has no link.
+tags: [export, sportsbook, fanduel, draftkings, deep-links, links, combined-links, locking, manual-legs, copy, sse, the-odds-api]
+sources: [internal/export/export.go, internal/web/export.go, internal/ingest/odds/lines.go, internal/refresh/sources.go, internal/db/odds.go, internal/db/migrations/0004_odds_links.sql, internal/web/slips.go, web/templates/partials.html]
 last_verified: 2026-11-09
 ---
 
@@ -19,19 +19,25 @@ book. Nothing here places a bet or moves money.
 
 ## Where the links come from
 
-The Parlay API game-lines call sends `includeLinks=true&includeSids=true`. Each eligible outcome then arrives with a
-`link` and a `sid`, and each bookmaker block carries its own event `sid`. The odds client maps them onto `odds.link`,
-`odds.sid`, and `odds.event_sid`. Refresh writes all three in the same upsert as `price`, so a link is as fresh as the
-price beside it. A book that returns no link stores NULL, which is normal. See
-[Data sources](../reference/data-sources.md) and [Database schema](../reference/schema.md).
+Both game-lines calls send `includeLinks=true&includeSids=true`. Each eligible outcome then arrives with a `link` and a
+`sid`, and each bookmaker block carries its own event `sid`. The odds client maps them onto `odds.link`, `odds.sid`, and
+`odds.event_sid`. Refresh writes all three in the same upsert as `price`, so a link is as fresh as the price beside it.
+A book that returns no link stores NULL, which is normal. See [Data sources](../reference/data-sources.md) and
+[Database schema](../reference/schema.md).
 
-Parlay API currently populates validated links and sids on FanDuel only, and only while a matching native quote is
-open. DraftKings and other books omit them, so their legs store NULL links and land in the manual list as `no link`.
+Parlay API populates validated links and sids on FanDuel only, and only while a matching native quote is open.
+DraftKings and other books omit them. The Odds API enrichment in the same sync fills those gaps: a DraftKings row gains
+its `link`, `sid`, and `event_sid`, and a FanDuel row missing a link gains one too. When the enrichment's line differs
+from the unlinked primary row, refresh stores the linked line and price so the row and its deep link agree. A row that
+already has a link keeps Parlay API's line, price, and link. A book or market only The Odds API quotes is stored as
+well. See [Data refresh](data-refresh.md) for when enrichment pauses at its credit floor.
+
 FanDuel single and combined links work unchanged because its combiner reads `marketId` from each leg's stored link and
-pairs it with `odds.sid`; it never uses `event_sid`.
+pairs it with `odds.sid`; it never uses `event_sid`. DraftKings uses both the stored selection `sid` and the bookmaker's
+`event_sid`.
 
-The export card reads those stored rows. It never calls Parlay API and never writes to the database, so rendering it,
-tapping a link, and copying the slip spend no credits.
+The export card reads those stored rows. It never calls either provider and never writes to the database, so rendering
+it, tapping a link, and copying the slip spend no credits.
 
 ## Planning a book's export
 
@@ -39,7 +45,7 @@ tapping a link, and copying the slip spend no credits.
 
 | Field      | Meaning                                                                     |
 | ---------- | --------------------------------------------------------------------------- |
-| `Book`     | The Parlay API book key, `draftkings` or `fanduel`.                          |
+| `Book`     | The book key, `draftkings` or `fanduel`.                                     |
 | `Linked`   | Legs the book can open from a link, with the book's line, price, and sids.  |
 | `Manual`   | Legs to add by hand, each with one reason and the book's current line.      |
 | `Combined` | One URL for all linked legs, set only for a verified format; else empty.    |
@@ -74,8 +80,9 @@ not block a link: the sportsbook shows its own price, and the person decides.
 one, so a slip with two or more linked legs at a book gets a single "Open in ..." button. Fewer than two linked legs
 keep the per-leg list, because one tap is already one tap.
 
-With Parlay API, only FanDuel returns links today. In practice a DraftKings plan is all manual until the provider adds
-DraftKings link metadata; its combiner stays ready in case it does. FanDuel combined links work as before.
+The Odds API enrichment supplies the DraftKings links, so a locked slip with two or more linked DraftKings legs on one
+game gets a single event-page URL. A slip that spans games, or a game whose sync ran while enrichment was paused, keeps
+per-leg taps or `no link` entries. FanDuel combined links work as before.
 
 A `Combiner` returns `ok = false` when it cannot build the whole URL, which leaves `Combined` empty and the per-leg
 links in place. That happens when a linked leg has no stored `sid`, or, for FanDuel, its stored link has no `marketId`,
@@ -101,8 +108,8 @@ FanDuel indexes each `marketId` and `selectionId` pair from zero, and the bracke
 so a share sheet keeps the whole URL together. The market ID lives only in the stored per-leg link, so the FanDuel
 `Combiner` reads it from there; the selection ID comes from `odds.sid`.
 
-The stored links are still the shapes Parlay API returns, not URLs the app composes. Parlay API uses The Odds API's
-FanDuel link shape. DraftKings would send `https://sportsbook.draftkings.com/?outcomes={sid}`, and FanDuel sends
+The stored links are the shapes the providers return, not URLs the app composes. Parlay API and The Odds API use the
+same FanDuel link shape. DraftKings sends `https://sportsbook.draftkings.com/?outcomes={sid}`, and FanDuel sends
 `https://sportsbook.fanduel.com/addToBetslip?marketId={marketId}&selectionId={sid}`. Both hold one selection and are the
 fallback when a combined link cannot be built. The full probe notes live in
 [Data sources](../reference/data-sources.md).
