@@ -104,7 +104,7 @@ flowchart LR
       R->>DB: Tx: SetGameOddsEvent + UpsertOdds + RecordSync("odds:lines")
   ```
 - **Event matching across providers:** Each provider's `Events` list is matched independently against `matchGames(games)` using `odds.MatchEvents`, and its `[]odds.Line` slice is converted to `[]db.Odds` using that provider's own `eventGames` map. Because `db.Odds` is keyed by ESPN `GameID` and ESPN team abbreviations (`HomeTeam` / `AwayTeam`), provider event IDs never need to match each other.
-- **Preserving `games.odds_event_id`:** `writeOdds` stores `primaryMatches` on `games.odds_event_id`. A game matched only in `fallbackMatches` updates `games.odds_event_id` only when the game has no `primaryMatches` entry and its stored `game.OddsEventID` is `nil`, preventing `odds_event_id` churn if Parlay API has a transient failure.
+- **Preserving `games.odds_event_id`:** `syncOdds` builds one match map from `primaryMatches`, then adds a fallback-only match only when the game has no primary match and its stored `game.OddsEventID` is `nil`. `writeOdds` stores that merged map, so a transient Parlay API failure does not churn `odds_event_id`.
 - **Row-level merging (`mergeOdds(primary, secondary []db.Odds) []db.Odds`):**
   - Keys rows by `(GameID, Book, MarketType, Team, PlayerName, Side)`.
   - Records each `(GameID, Book)`'s non-nil `EventSid` from `secondary` so any primary row for that game and book with `EventSid == nil` receives it.
@@ -144,7 +144,7 @@ flowchart LR
 
 - **The Odds API monthly credit burn if staleness windows shorten:** At ~20 line syncs per week × 3 credits (~240 credits/month), The Odds API stays well under its 500-credit cap. If extra page loads or playoff weeks push usage higher, `TheOddsAPIEnrichFloor = 100` automatically pauses routine enrichment while keeping 100 credits in reserve for fallback.
 - **Line divergence between providers at sync time:** Parlay API and The Odds API may briefly quote a half-point difference on DraftKings (`-3` vs `-3.5`). Because `mergeOdds` adopts The Odds API's `Line` and `Price` whenever it attaches a deep link to a previously unlinked row (`prim.Link == nil && sec.Link != nil`), the stored `odds` row always matches the selection opened by `odds.link` and `odds.sid`.
-- **Event-ID churn on `games.odds_event_id`:** If Parlay API and The Odds API use different event IDs for the same game, writing fallback's event ID during a transient Parlay API error could overwrite Parlay API's event ID. Guarding `writeOdds` so fallback matches only set `games.odds_event_id` when it is currently `NULL` prevents flapping.
+- **Event-ID churn on `games.odds_event_id`:** If Parlay API and The Odds API use different event IDs for the same game, writing fallback's event ID during a transient Parlay API error could overwrite Parlay API's event ID. Guarding the match merge in `syncOdds` so fallback-only matches set `games.odds_event_id` only when it is currently `NULL` prevents flapping.
 
 ## TODO
 
@@ -159,4 +159,4 @@ Effort: medium (extends `internal/ingest/odds` with nested per-event props and p
 
 - [x] Add `FallbackLines`, `TheOddsAPISource` (`"odds:theoddsapi"`), `TheOddsAPIEnrichFloor` (`100`), and `TheOddsAPIFallbackFloor` (`25`) to `internal/refresh`, and update `syncOdds` (`internal/refresh/sources.go`) with `mergeOdds` to enrich Parlay API lines with The Odds API deep links and missing quotes, fall back when primary fails or pauses, and degrade gracefully, with unit tests in `internal/refresh/refresh_test.go`
 - [x] Add `TheOddsAPIKey` (`THE_ODDS_API_KEY`) to `internal/config/config.go`, wire `FallbackLines` in `cmd/server/main.go`, add `the-odds-api-key` to `deploy/setup.sh` and `.github/workflows/deploy.yml`, and add config tests in `internal/config/config_test.go`
-- [ ] Docs: update `docs/reference/data-sources.md`, `docs/concepts/data-refresh.md`, `docs/concepts/export.md`, `docs/reference/config.md`, `docs/guides/gcp-setup.md`, and `plan/data-sources.md` for The Odds API enrichment and fallback, `THE_ODDS_API_KEY`, `odds:theoddsapi` credit tracking, tiered credit floors, and DraftKings deep-link export
+- [x] Docs: update `docs/reference/data-sources.md`, `docs/concepts/data-refresh.md`, `docs/concepts/export.md`, `docs/reference/config.md`, `docs/guides/gcp-setup.md`, and `plan/data-sources.md` for The Odds API enrichment and fallback, `THE_ODDS_API_KEY`, `odds:theoddsapi` credit tracking, tiered credit floors, and DraftKings deep-link export

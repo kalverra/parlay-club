@@ -38,8 +38,10 @@ falling back.
 `BASE_URL` is trimmed of trailing slashes. It must match the scheme, host, and port registered on the Google client, or
 sign-in stops at `redirect_uri_mismatch`. The app builds the redirect URI by appending `/auth/google/callback`.
 
-`ODDS_API_KEY` is the Parlay API key and `THE_ODDS_API_KEY` is the The Odds API key. Both are optional; an empty key
-disables that provider. `internal/ingest/odds` defaults the primary base URL to
+`ODDS_API_KEY` is the Parlay API key and `THE_ODDS_API_KEY` is the key for The Odds API. Both are optional; an empty key
+disables that provider. Parlay API is the primary game-line feed. The Odds API enriches its rows with DraftKings links
+and missing quotes, and serves the whole week when Parlay API is unconfigured, fails, or falls below its credit floor.
+`internal/ingest/odds` defaults the primary base URL to
 `https://parlay-api.com/v1/sports/americanfootball_nfl` and the fallback base URL to
 `https://api.the-odds-api.com/v4/sports/americanfootball_nfl`; tests point `NewClient` at a fake server instead.
 

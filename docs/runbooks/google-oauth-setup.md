@@ -93,7 +93,7 @@ what a person sees.
 ```text
 GOOGLE_CLIENT_ID     from secret google-client-id
 GOOGLE_CLIENT_SECRET from secret google-client-secret
-Base_URL             https://SERVICE_URL
+BASE_URL             https://SERVICE_URL
 SESSION_KEY          from secret session-key
 ODDS_API_KEY         from secret odds-api-key
 THE_ODDS_API_KEY     from secret the-odds-api-key

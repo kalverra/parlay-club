@@ -2,9 +2,9 @@
 id: data-sources
 title: Data sources
 type: reference
-summary: The free sources behind the slate, the ESPN scoreboard endpoint and its Sunday and Monday filter, the Open-Meteo forecast behind a game's weather, Parlay API game lines, props, bookmakers, deep links, and credit budget, and the raw response archive every successful call leaves.
-tags: [data, espn, scoreboard, games, sync, fixtures, weather, open-meteo, venues, odds, parlay-api, props, lines, bookmakers, links, credits, budget, archive, raw-responses, sqlite]
-sources: [internal/ingest/espn/client.go, internal/ingest/espn/scoreboard.go, internal/db/weeks.go, internal/db/games.go, internal/ingest/weather/client.go, internal/ingest/weather/forecast.go, internal/ingest/weather/venues.go, internal/ingest/odds/client.go, internal/ingest/odds/events.go, internal/ingest/odds/lines.go, internal/ingest/odds/props.go, internal/ingest/odds/match.go, internal/ingest/archive/transport.go, internal/ingest/archive/labels.go, internal/db/archive.go, cmd/server/main.go, internal/refresh/refresh.go]
+summary: The free sources behind the slate, the ESPN scoreboard endpoint and its Sunday and Monday filter, the Open-Meteo forecast behind a game's weather, Parlay API game lines and props with The Odds API enrichment and fallback, bookmakers, deep links, tiered credit floors, and the raw response archive every successful call leaves.
+tags: [data, espn, scoreboard, games, sync, fixtures, weather, open-meteo, venues, odds, parlay-api, the-odds-api, props, lines, bookmakers, links, credits, budget, enrichment, fallback, archive, raw-responses, sqlite]
+sources: [internal/ingest/espn/client.go, internal/ingest/espn/scoreboard.go, internal/db/weeks.go, internal/db/games.go, internal/ingest/weather/client.go, internal/ingest/weather/forecast.go, internal/ingest/weather/venues.go, internal/ingest/odds/client.go, internal/ingest/odds/events.go, internal/ingest/odds/lines.go, internal/ingest/odds/props.go, internal/ingest/odds/match.go, internal/ingest/archive/transport.go, internal/ingest/archive/labels.go, internal/db/archive.go, internal/refresh/refresh.go, internal/refresh/sources.go, cmd/server/main.go]
 last_verified: 2026-11-09
 ---
 
@@ -26,10 +26,11 @@ Every successful call to these sources is saved raw before the client parses it.
   method, redacted URL, status, time, duration, and body hash.
 - Non-2xx responses, transport errors, timeouts, and bodies over the cap pass through unrecorded. A sink error is logged
   and dropped, so the client still gets its response.
-- The stored URL keeps every query parameter except the odds API's `apiKey`, which becomes `REDACTED`. Odds responses
+- The stored URL keeps every query parameter except the odds APIs' `apiKey`, which becomes `REDACTED`. Odds responses
   also fill `credits_remaining` from `x-requests-remaining` and `credits_used` from `x-requests-last`.
 - The `key` is the `sync_state` key that `refresh` puts in the request context. If a client forgets the label, the
-  transport falls back to `host + path`.
+  transport falls back to `host + path`. Parlay API calls use `odds:lines`; The Odds API calls use `odds:theoddsapi`.
+  Both hosts map to `source = "odds"`.
 
 The archive is research data. No page or route reads it. See [Response archive](../concepts/archive.md) for the tables,
 the read API, and the size check.
@@ -126,14 +127,15 @@ shaped like an `odds` row:
   land on each outcome, not on the market or book; `event_sid` comes from the bookmaker block. A book may omit either,
   so a missing link is normal and the row stores NULL.
 - On Parlay API, only FanDuel outcomes currently carry a validated `link` and `sid`, and only while a matching native
-  quote is open. DraftKings and other books omit them. FanDuel single and combined links still work unchanged;
-  DraftKings legs store NULL links and render as manual `no link` entries in export.
+  quote is open. DraftKings and other books omit them. The Odds API enrichment fills the DraftKings links and any
+  missing FanDuel link in the same sync; see [Enrichment and fallback](#enrichment-and-fallback). A week whose
+  enrichment has paused keeps the primary rows, and an unlinked leg renders as a manual `no link` entry in export.
 - A market key the client does not read produces no rows, so the same client can serve prop requests.
 - A book that omits a market produces no rows for it. Some books omit the moneyline on future games.
 - A `regions=us` response includes exchanges and DFS books that may quote only one side of a two-way market. An outcome
   with a null or missing `price`, or a spread or total with no `point`, is skipped rather than failing the whole sync. A
   moneyline outcome whose name is neither team, such as a three-way feed's `Draw`, is skipped too.
-- `Team` stays Parlay API's display name; the caller maps it to an ESPN abbreviation.
+- `Team` stays the provider's display name; the caller maps it to an ESPN abbreviation.
 
 ### Event list and matching
 
@@ -196,10 +198,72 @@ no subject or book is skipped, so unpriced DFS rows never reach `refresh`.
 | `player_anytime_td`              | `player_anytime_touchdown_scorer`, `anytime_td`, `anytime_touchdown_scorer` | `ANYTIME_TD` |
 | `player_kicking_points`          |                                                                  | `KICKER_PTS` |
 
-Only FanDuel rows carry validated prop links and sids today. `refresh` does not call `Client.Props` yet;
-`props-research` adds the `odds:props:{game}` sync that will use it.
+Parlay API rows carry validated prop links and sids on FanDuel only today. `refresh` does not call `Client.Props` yet;
+`props-research` adds the `odds:props:{game}` sync that will use it. `odds.MergeProps` is ready to fill DraftKings prop
+links from The Odds API's per-event board when that sync lands.
 
-### Budget
+## The Odds API (free tier: 500 credits/month)
+
+Base: `https://api.the-odds-api.com/v4/sports/americanfootball_nfl`. It speaks the same Odds API wire format as Parlay
+API. `odds.NewClient(odds.TheOddsAPIBaseURL, cfg.TheOddsAPIKey, httpClient)` builds it, and `refresh` wires it as
+`FallbackLines`. An empty `THE_ODDS_API_KEY` disables the provider.
+
+### Credits and sync state
+
+Every response carries the same `x-requests-remaining`, `x-requests-used`, and `x-requests-last` headers. Refresh stores
+the remaining balance in `sync_state` under `odds:theoddsapi` (`refresh.TheOddsAPISource`). The `odds:` prefix makes the
+archive record these responses as `source = "odds"` and fill their credit columns. The primary balance stays under
+`odds:lines`.
+
+### Game lines
+
+```text
+GET /odds?regions=us&markets=h2h,spreads,totals&oddsFormat=american&includeLinks=true&includeSids=true
+```
+
+The call costs 3 credits. The Odds API bills by `markets × regions`, not by bookmaker count, so asking for all of
+`regions=us` costs the same 3 credits as filtering to one book. Its rows map through the same `Line` table above.
+DraftKings and FanDuel outcomes carry `link` and `sid`, and each bookmaker block carries its own event `sid`, so a
+DraftKings combined export link has both IDs it needs.
+
+### Enrichment and fallback
+
+Refresh matches each provider's free `/events` list to the week's games on its own, maps its rows to ESPN game IDs and
+team abbreviations, then merges the rows. Provider event IDs never need to agree.
+
+- **Enrichment.** When Parlay API buys the week's lines and The Odds API has at least 100 credits, the sync also buys
+  The Odds API lines. A primary row with no link adopts The Odds API's `link`, `sid`, and `event_sid`. If the linked
+  line differs, the row also adopts The Odds API's line and price, so the stored line matches the deep link. A primary
+  row that already has a link keeps its line, price, and link; a missing sid backfills only when the lines match, and a
+  missing event sid always backfills. Selections only The Odds API quotes are appended, filling missing books and
+  markets.
+- **Fallback.** When Parlay API is unconfigured, errors, or sits below its 50-credit floor, The Odds API serves the
+  whole week if it has at least 25 credits. Its event IDs fill `games.odds_event_id` only for games that have no stored
+  ID, so a transient primary failure does not churn an existing ID.
+- **Failures.** `odds.ErrNoAPIKey` means the provider is disabled, not failed. If one provider fails while the other
+  succeeds, refresh logs a warning and commits the surviving rows, so the source does not back off. If every
+  configured provider fails, the sync returns the joined error and refresh backs off for 5 minutes with cached rows
+  still served.
+
+### Per-event props
+
+```text
+GET /events/{id}/odds?regions=us&markets={prop markets}
+    &oddsFormat=american&includeLinks=true&includeSids=true
+```
+
+The call costs 1 credit per market returned, unlike Parlay API's flat 3-credit `/props`. It returns one event object
+whose `bookmakers[].markets[].outcomes[]` carry the prices. `Client.EventProps` maps them into the same `Prop` rows and
+copies `bookmakers[].sid` into `Prop.EventSid`. `odds.MergeProps` merges a Parlay API board with one of these boards
+using the same precedence as game lines. Refresh does not call it yet, and a caller must merge one event's board at a
+time because the event ID backfills by book.
+
+## Budget
+
+Two free tiers fund the odds data. Refresh checks each balance after that provider's free event list and before its paid
+call. Both balances live in `sync_state`: `odds:lines` for Parlay API and `odds:theoddsapi` for The Odds API.
+
+### Parlay API
 
 The free tier is 1,000 credits a month. Target at most 800, leaving room for testing and playoff weeks.
 
@@ -208,7 +272,21 @@ The free tier is 1,000 credits a month. Target at most 800, leaving room for tes
   kicked off.
 - `odds:props:{game}` will run only when someone opens that game's quick-add, and only while at least 150 credits
   remain. Each game is one flat 3-credit `/props` call for all nine markets, not one credit per market.
-- `odds:lines` runs only while at least 50 credits remain.
+- `odds:lines` runs only while at least 50 credits remain (`refresh.OddsLinesFloor`).
 - Below a floor, serve cached rows and show "lines paused until the monthly reset".
 - The rough split: lines are about 20 calls × 3 = 60 credits a week, and props about 6 games × 3 = 18 a week, or about
   72 a month. That is about 312 credits a month at the high end. Props stop first, at 150, which protects lines.
+
+### The Odds API
+
+The free tier is 500 credits a month. Its `/odds` call costs 3 credits, the same as Parlay API's.
+
+- Enrichment runs only while at least 100 credits remain (`refresh.TheOddsAPIEnrichFloor`) and Parlay API bought the
+  week's lines. Below that, the free `/events` call still refreshes the balance and matches, but no paid lines are
+  bought.
+- Fallback runs only while at least 25 credits remain (`refresh.TheOddsAPIFallbackFloor`) when Parlay API is
+  unconfigured, errors, or sits below its floor.
+- Routine enrichment is about 20 line calls a week × 3 = 60 credits, or about 240 a month. Enrichment pauses at 100,
+  so it never spends the reserve kept for fallback.
+- Per-event props cost 1 credit per market returned, so a nine-market call costs 9. Props are not wired into refresh
+  yet.
