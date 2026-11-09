@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"strconv"
@@ -59,6 +60,7 @@ func analyzerGameMap(games []db.Game, nfelo map[string]db.NfeloGame) map[string]
 func analyzerView(
 	legs []db.Leg,
 	gamesByID map[string]analyzer.Game,
+	stats map[string]analyzer.PlayerStats,
 	names map[int64]string,
 ) AnalyzerView {
 	input := make([]analyzer.Leg, 0, len(legs))
@@ -68,7 +70,7 @@ func analyzerView(
 		input = append(input, analyzerLeg(leg, names))
 	}
 
-	warnings := analyzer.AnalyzeSlip(input, gamesByID, nil)
+	warnings := analyzer.AnalyzeSlip(input, gamesByID, stats)
 	view := AnalyzerView{Clean: len(warnings) == 0}
 	for _, warning := range warnings {
 		label, class := analyzerSeverity(warning.Severity)
@@ -216,6 +218,44 @@ func (h *slipHandlers) nfeloForGames(
 		rows[game.ID] = projection
 	}
 	return rows
+}
+
+// playerStatsForLegs loads player_gamelogs for every distinct matched athlete on
+// the slip. A missing row or read error leaves that player without stats.
+func (h *slipHandlers) playerStatsForLegs(
+	ctx context.Context,
+	legs []db.Leg,
+) map[string]analyzer.PlayerStats {
+	seen := make(map[string]struct{}, len(legs))
+	var athleteIDs []string
+	for _, leg := range legs {
+		if leg.PlayerID == nil || *leg.PlayerID == "" {
+			continue
+		}
+		id := *leg.PlayerID
+		if _, ok := seen[id]; !ok {
+			seen[id] = struct{}{}
+			athleteIDs = append(athleteIDs, id)
+		}
+	}
+	if len(athleteIDs) == 0 {
+		return nil
+	}
+
+	logs, err := h.deps.Store.PlayerGameLogs(ctx, athleteIDs)
+	if err != nil {
+		return nil
+	}
+
+	stats := make(map[string]analyzer.PlayerStats, len(logs))
+	for id, log := range logs {
+		var markets map[string][]float64
+		if err := json.Unmarshal([]byte(log.StatsJSON), &markets); err != nil || len(markets) == 0 {
+			continue
+		}
+		stats[id] = analyzer.PlayerStats{Games: markets}
+	}
+	return stats
 }
 
 // analyzerSeverity names the card's heading and the classes that color it.

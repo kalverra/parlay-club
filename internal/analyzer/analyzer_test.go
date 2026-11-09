@@ -1462,3 +1462,223 @@ func TestMessagesKeepOneOwnerQuiet(t *testing.T) {
 	assert.NotContains(t, got[0].Message, "Adam's")
 	assert.Contains(t, got[0].Message, "BUF -8.5")
 }
+
+func TestMedianTrap(t *testing.T) {
+	t.Parallel()
+
+	shakirStats := analyzer.PlayerStats{
+		Games: map[string][]float64{
+			// 5 games: median = 41, mean = 58
+			"REC_YDS": {41, 41, 41, 41, 126},
+		},
+	}
+
+	tests := []struct {
+		name  string
+		legs  []analyzer.Leg
+		stats map[string]analyzer.PlayerStats
+		want  []want
+	}{
+		{
+			name: "line over L5 median with line under mean appends mean sentence",
+			legs: []analyzer.Leg{
+				withPlayerID(leg(1, "Adam", "buf-mia", "REC_YDS", "BUF", "Shakir", "OVER", new(52.5), -110), "shakir"),
+			},
+			stats: map[string]analyzer.PlayerStats{"shakir": shakirStats},
+			want: []want{{
+				rule:     "median_trap",
+				severity: analyzer.Warn,
+				ids:      []int64{1},
+				contains: []string{
+					"Shakir's last-5 median is 41 yards, so 52.5 is a stretch.",
+					"His 58-yard average is propped up by one big game.",
+				},
+			}},
+		},
+		{
+			name: "line over L5 median but above mean omits mean sentence",
+			legs: []analyzer.Leg{
+				withPlayerID(leg(1, "Adam", "buf-mia", "REC_YDS", "BUF", "Shakir", "OVER", new(60.0), -110), "shakir"),
+			},
+			stats: map[string]analyzer.PlayerStats{"shakir": shakirStats},
+			want: []want{{
+				rule:     "median_trap",
+				severity: analyzer.Warn,
+				ids:      []int64{1},
+				contains: []string{
+					"Shakir's last-5 median is 41 yards, so 60 is a stretch.",
+				},
+				notContains: []string{
+					"propped up by one big game",
+					"average",
+				},
+			}},
+		},
+		{
+			name: "line equal to median does not trigger",
+			legs: []analyzer.Leg{
+				withPlayerID(leg(1, "Adam", "buf-mia", "REC_YDS", "BUF", "Shakir", "OVER", new(41.0), -110), "shakir"),
+			},
+			stats: map[string]analyzer.PlayerStats{"shakir": shakirStats},
+			want:  nil,
+		},
+		{
+			name: "line below median does not trigger",
+			legs: []analyzer.Leg{
+				withPlayerID(leg(1, "Adam", "buf-mia", "REC_YDS", "BUF", "Shakir", "OVER", new(38.5), -110), "shakir"),
+			},
+			stats: map[string]analyzer.PlayerStats{"shakir": shakirStats},
+			want:  nil,
+		},
+		{
+			name: "fewer than 3 games does not trigger",
+			legs: []analyzer.Leg{
+				withPlayerID(leg(1, "Adam", "buf-mia", "REC_YDS", "BUF", "Shakir", "OVER", new(52.5), -110), "shakir"),
+			},
+			stats: map[string]analyzer.PlayerStats{
+				"shakir": {
+					Games: map[string][]float64{
+						"REC_YDS": {41, 126},
+					},
+				},
+			},
+			want: nil,
+		},
+		{
+			name: "unmatched player does not trigger",
+			legs: []analyzer.Leg{
+				leg(1, "Adam", "buf-mia", "REC_YDS", "BUF", "Shakir", "OVER", new(52.5), -110),
+			},
+			stats: map[string]analyzer.PlayerStats{"shakir": shakirStats},
+			want:  nil,
+		},
+		{
+			name: "under side does not trigger",
+			legs: []analyzer.Leg{
+				withPlayerID(leg(1, "Adam", "buf-mia", "REC_YDS", "BUF", "Shakir", "UNDER", new(52.5), -110), "shakir"),
+			},
+			stats: map[string]analyzer.PlayerStats{"shakir": shakirStats},
+			want:  nil,
+		},
+		{
+			name: "receptions market does not trigger",
+			legs: []analyzer.Leg{
+				withPlayerID(
+					leg(1, "Adam", "buf-mia", "RECEPTIONS", "BUF", "Shakir", "OVER", new(5.5), -110),
+					"shakir",
+				),
+			},
+			stats: map[string]analyzer.PlayerStats{
+				"shakir": {
+					Games: map[string][]float64{
+						"RECEPTIONS": {3, 3, 3, 3, 10},
+					},
+				},
+			},
+			want: nil,
+		},
+		{
+			name: "pass tds market does not trigger",
+			legs: []analyzer.Leg{
+				withPlayerID(
+					leg(1, "Adam", "buf-mia", "PASS_TDS", "BUF", "Josh Allen", "OVER", new(2.5), -110),
+					"allen",
+				),
+			},
+			stats: map[string]analyzer.PlayerStats{
+				"allen": {
+					Games: map[string][]float64{
+						"PASS_TDS": {1, 1, 1, 2, 4},
+					},
+				},
+			},
+			want: nil,
+		},
+		{
+			name: "rush yards over triggers",
+			legs: []analyzer.Leg{
+				withPlayerID(
+					leg(1, "Adam", "buf-mia", "RUSH_YDS", "BUF", "James Cook", "OVER", new(75.5), -110),
+					"cook",
+				),
+			},
+			stats: map[string]analyzer.PlayerStats{
+				"cook": {
+					Games: map[string][]float64{
+						// median = 60, mean = 80
+						"RUSH_YDS": {60, 60, 60, 70, 150},
+					},
+				},
+			},
+			want: []want{{
+				rule:     "median_trap",
+				severity: analyzer.Warn,
+				ids:      []int64{1},
+				contains: []string{
+					"James Cook's last-5 median is 60 yards, so 75.5 is a stretch.",
+					"His 80-yard average is propped up by one big game.",
+				},
+			}},
+		},
+		{
+			name: "pass yards over triggers",
+			legs: []analyzer.Leg{
+				withPlayerID(
+					leg(1, "Adam", "buf-mia", "PASS_YDS", "BUF", "Josh Allen", "OVER", new(255.5), -110),
+					"allen",
+				),
+			},
+			stats: map[string]analyzer.PlayerStats{
+				"allen": {
+					Games: map[string][]float64{
+						// 3 games: median = 220, mean = 230
+						"PASS_YDS": {210, 220, 260},
+					},
+				},
+			},
+			want: []want{{
+				rule:     "median_trap",
+				severity: analyzer.Warn,
+				ids:      []int64{1},
+				contains: []string{
+					"Josh Allen's last-5 median is 220 yards, so 255.5 is a stretch.",
+				},
+				notContains: []string{
+					"propped up by one big game",
+				},
+			}},
+		},
+		{
+			name: "six games uses last 5 for median and all 6 for season mean",
+			legs: []analyzer.Leg{
+				withPlayerID(leg(1, "Adam", "buf-mia", "REC_YDS", "BUF", "Shakir", "OVER", new(50.5), -110), "shakir"),
+			},
+			stats: map[string]analyzer.PlayerStats{
+				"shakir": {
+					Games: map[string][]float64{
+						// 6 games: L5 are {40, 42, 41, 43, 39} -> median = 41
+						// 6th game was 200 -> season mean = 405 / 6 = 67.5 -> rounded 68
+						"REC_YDS": {40, 42, 41, 43, 39, 200},
+					},
+				},
+			},
+			want: []want{{
+				rule:     "median_trap",
+				severity: analyzer.Warn,
+				ids:      []int64{1},
+				contains: []string{
+					"Shakir's last-5 median is 41 yards, so 50.5 is a stretch.",
+					"His 68-yard average is propped up by one big game.",
+				},
+			}},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			got := analyzer.AnalyzeSlip(test.legs, games(), test.stats)
+			assertWarnings(t, got, test.want)
+		})
+	}
+}

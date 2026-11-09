@@ -1184,6 +1184,7 @@ func (h *slipHandlers) slipPageData(ctx context.Context, slip db.Slip) (SlipPage
 	open := slip.Status == db.SlipOpen
 	nfelo := h.nfeloForGames(ctx, games)
 	gamesByID := analyzerGameMap(games, nfelo)
+	playerStats := h.playerStatsForLegs(ctx, legs)
 	for _, leg := range legs {
 		owner := names[leg.UserID]
 		legsByUser[leg.UserID] = append(legsByUser[leg.UserID], LegView{
@@ -1231,7 +1232,7 @@ func (h *slipHandlers) slipPageData(ctx context.Context, slip db.Slip) (SlipPage
 		MemberCount:   len(members),
 		Members:       memberViews,
 		Activity:      activity,
-		Analyzer:      analyzerView(legs, gamesByID, names),
+		Analyzer:      analyzerView(legs, gamesByID, playerStats, names),
 	}
 	if hasUser {
 		view.LegForm = LegFormView{
