@@ -202,3 +202,40 @@ func TestLoadDevStartsWithNoSecrets(t *testing.T) {
 	assert.Empty(t, cfg.TheOddsAPIKey)
 	assert.Equal(t, "http://localhost:8080", cfg.BaseURL)
 }
+
+func TestLoadOddsAPIKeysWithParlayAndOddsAPI(t *testing.T) {
+	t.Parallel()
+
+	t.Run("parlay key aliases odds api key", func(t *testing.T) {
+		t.Parallel()
+		cfg, err := config.Load(envFrom(map[string]string{
+			"PARLAY_API_KEY": "parlay-key",
+		}))
+		require.NoError(t, err)
+		assert.Equal(t, "parlay-key", cfg.OddsAPIKey)
+		assert.Empty(t, cfg.TheOddsAPIKey)
+	})
+
+	t.Run("parlay key and odds key both set", func(t *testing.T) {
+		t.Parallel()
+		cfg, err := config.Load(envFrom(map[string]string{
+			"PARLAY_API_KEY": "parlay-key",
+			"ODDS_API_KEY":   "the-odds-key",
+		}))
+		require.NoError(t, err)
+		assert.Equal(t, "parlay-key", cfg.OddsAPIKey)
+		assert.Equal(t, "the-odds-key", cfg.TheOddsAPIKey)
+	})
+
+	t.Run("explicit the odds api key takes precedence", func(t *testing.T) {
+		t.Parallel()
+		cfg, err := config.Load(envFrom(map[string]string{
+			"PARLAY_API_KEY":   "parlay-key",
+			"ODDS_API_KEY":     "other-odds-key",
+			"THE_ODDS_API_KEY": "the-odds-key",
+		}))
+		require.NoError(t, err)
+		assert.Equal(t, "parlay-key", cfg.OddsAPIKey)
+		assert.Equal(t, "the-odds-key", cfg.TheOddsAPIKey)
+	})
+}

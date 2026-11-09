@@ -65,8 +65,8 @@ func Load(env Env) (Config, error) {
 		GoogleClientID:     devDefault(env, "GOOGLE_CLIENT_ID", "", prod),
 		GoogleClientSecret: devDefault(env, "GOOGLE_CLIENT_SECRET", "", prod),
 		BaseURL:            baseURLOr(env, port, prod),
-		OddsAPIKey:         env("ODDS_API_KEY"),
-		TheOddsAPIKey:      env("THE_ODDS_API_KEY"),
+		OddsAPIKey:         oddsAPIKeyOr(env),
+		TheOddsAPIKey:      theOddsAPIKeyOr(env),
 		LogLevel:           levelOr(env, prod, &problems),
 	}
 
@@ -147,4 +147,25 @@ func levelOr(env Env, prod bool, problems *[]error) zerolog.Level {
 		return zerolog.InfoLevel
 	}
 	return level
+}
+
+// oddsAPIKeyOr returns the Parlay API key. It checks PARLAY_API_KEY first,
+// falling back to ODDS_API_KEY.
+func oddsAPIKeyOr(env Env) string {
+	if key := env("PARLAY_API_KEY"); key != "" {
+		return key
+	}
+	return env("ODDS_API_KEY")
+}
+
+// theOddsAPIKeyOr returns The Odds API key. It checks THE_ODDS_API_KEY first;
+// if unset and PARLAY_API_KEY is provided, it accepts ODDS_API_KEY as The Odds API key.
+func theOddsAPIKeyOr(env Env) string {
+	if key := env("THE_ODDS_API_KEY"); key != "" {
+		return key
+	}
+	if env("PARLAY_API_KEY") != "" {
+		return env("ODDS_API_KEY")
+	}
+	return ""
 }
