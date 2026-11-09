@@ -1,0 +1,520 @@
+package db
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+)
+
+var (
+	// ErrPlayerNotFound is returned when a roster player lookup matches no row.
+	ErrPlayerNotFound = errors.New("roster player not found")
+	// ErrGameLogNotFound is returned when a player gamelog lookup matches no row.
+	ErrGameLogNotFound = errors.New("player gamelog not found")
+)
+
+// RosterPlayer is one athlete on an NFL team's ESPN roster.
+type RosterPlayer struct {
+	AthleteID  string
+	Team       string
+	ESPNTeamID string
+	FullName   string
+	NormName   string
+	Position   string
+	UpdatedAt  time.Time
+}
+
+const rosterColumns = `athlete_id, team, espn_team_id, full_name, norm_name, position, updated_at`
+
+// PlayerGameLog is one athlete's cached season game log and market stats.
+type PlayerGameLog struct {
+	AthleteID   string
+	GamesPlayed int
+	StatsJSON   string
+	UpdatedAt   time.Time
+}
+
+const gameLogColumns = `athlete_id, games_played, stats_json, updated_at`
+
+// PlayerMatch connects a normalized sportsbook player name and team to an ESPN athlete ID.
+type PlayerMatch struct {
+	OddsName      string
+	Team          string
+	ESPNAthleteID string
+	Manual        bool
+}
+
+const matchColumns = `odds_name, team, espn_athlete_id, manual`
+
+// NormalizePlayerName lowercases, strips '.', ”', '-', and ',', collapses
+// whitespace, and drops a trailing generational suffix (jr, sr, ii, iii, iv, v)
+// when preceded by a space.
+func NormalizePlayerName(name string) string {
+	name = strings.ToLower(name)
+	var b strings.Builder
+	b.Grow(len(name))
+	for _, r := range name {
+		switch r {
+		case '.', '\'', '-', ',':
+			// drop punctuation
+		default:
+			b.WriteRune(r)
+		}
+	}
+	fields := strings.Fields(b.String())
+	if len(fields) == 0 {
+		return ""
+	}
+	last := fields[len(fields)-1]
+	switch last {
+	case "jr", "sr", "ii", "iii", "iv", "v":
+		if len(fields) > 1 {
+			fields = fields[:len(fields)-1]
+		}
+	}
+	return strings.Join(fields, " ")
+}
+
+// UpsertRosterPlayers inserts or updates players on a team's roster.
+func (s *Store) UpsertRosterPlayers(ctx context.Context, players []RosterPlayer) error {
+	if len(players) == 0 {
+		return nil
+	}
+	return s.Tx(ctx, func(tx *Store) error {
+		for _, p := range players {
+			norm := p.NormName
+			if norm == "" {
+				norm = NormalizePlayerName(p.FullName)
+			}
+			_, err := tx.conn().ExecContext(ctx, `
+				INSERT INTO roster_players (
+					athlete_id, team, espn_team_id, full_name, norm_name, position, updated_at
+				) VALUES (?, ?, ?, ?, ?, ?, ?)
+				ON CONFLICT (athlete_id) DO UPDATE SET
+					team = excluded.team,
+					espn_team_id = excluded.espn_team_id,
+					full_name = excluded.full_name,
+					norm_name = excluded.norm_name,
+					position = excluded.position,
+					updated_at = excluded.updated_at`,
+				p.AthleteID,
+				p.Team,
+				p.ESPNTeamID,
+				p.FullName,
+				norm,
+				p.Position,
+				formatTimestamp(p.UpdatedAt),
+			)
+			if err != nil {
+				return fmt.Errorf("upsert roster player %s: %w", p.AthleteID, err)
+			}
+		}
+		return nil
+	})
+}
+
+// RosterPlayerByID returns one athlete by ESPN athlete ID.
+func (s *Store) RosterPlayerByID(ctx context.Context, athleteID string) (RosterPlayer, error) {
+	row := s.conn().QueryRowContext(ctx,
+		"SELECT "+rosterColumns+" FROM roster_players WHERE athlete_id = ?", athleteID)
+	player, err := scanRosterPlayer(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return RosterPlayer{}, fmt.Errorf("athlete %s: %w", athleteID, ErrPlayerNotFound)
+	}
+	if err != nil {
+		return RosterPlayer{}, fmt.Errorf("athlete %s: %w", athleteID, err)
+	}
+	return player, nil
+}
+
+// RosterForTeam returns all roster players for an NFL team.
+func (s *Store) RosterForTeam(ctx context.Context, team string) ([]RosterPlayer, error) {
+	rows, err := s.conn().QueryContext(ctx,
+		"SELECT "+rosterColumns+" FROM roster_players WHERE team = ? ORDER BY full_name", team)
+	if err != nil {
+		return nil, fmt.Errorf("roster for team %s: %w", team, err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var result []RosterPlayer
+	for rows.Next() {
+		p, err := scanRosterPlayer(rows)
+		if err != nil {
+			return nil, fmt.Errorf("roster for team %s: %w", team, err)
+		}
+		result = append(result, p)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("roster for team %s: %w", team, err)
+	}
+	return result, nil
+}
+
+// RosterForTeams returns all roster players for the given NFL teams.
+func (s *Store) RosterForTeams(ctx context.Context, teams []string) ([]RosterPlayer, error) {
+	if len(teams) == 0 {
+		return nil, nil
+	}
+	placeholders := strings.Repeat("?,", len(teams))
+	placeholders = placeholders[:len(placeholders)-1]
+	args := make([]any, len(teams))
+	for i, t := range teams {
+		args[i] = t
+	}
+	rows, err := s.conn().QueryContext(ctx,
+		"SELECT "+rosterColumns+" FROM roster_players WHERE team IN ("+placeholders+") ORDER BY team, full_name", args...)
+	if err != nil {
+		return nil, fmt.Errorf("rosters for teams: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var result []RosterPlayer
+	for rows.Next() {
+		p, err := scanRosterPlayer(rows)
+		if err != nil {
+			return nil, fmt.Errorf("rosters for teams: %w", err)
+		}
+		result = append(result, p)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rosters for teams: %w", err)
+	}
+	return result, nil
+}
+
+// UpsertPlayerGameLog inserts or updates an athlete's game log.
+func (s *Store) UpsertPlayerGameLog(ctx context.Context, log PlayerGameLog) error {
+	statsJSON := log.StatsJSON
+	if statsJSON == "" {
+		statsJSON = "{}"
+	}
+	_, err := s.conn().ExecContext(ctx, `
+		INSERT INTO player_gamelogs (athlete_id, games_played, stats_json, updated_at)
+		VALUES (?, ?, ?, ?)
+		ON CONFLICT (athlete_id) DO UPDATE SET
+			games_played = excluded.games_played,
+			stats_json = excluded.stats_json,
+			updated_at = excluded.updated_at`,
+		log.AthleteID,
+		log.GamesPlayed,
+		statsJSON,
+		formatTimestamp(log.UpdatedAt),
+	)
+	if err != nil {
+		return fmt.Errorf("upsert player gamelog %s: %w", log.AthleteID, err)
+	}
+	return nil
+}
+
+// PlayerGameLog returns one athlete's game log.
+func (s *Store) PlayerGameLog(ctx context.Context, athleteID string) (PlayerGameLog, error) {
+	row := s.conn().QueryRowContext(ctx,
+		"SELECT "+gameLogColumns+" FROM player_gamelogs WHERE athlete_id = ?", athleteID)
+	log, err := scanPlayerGameLog(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return PlayerGameLog{}, fmt.Errorf("athlete %s: %w", athleteID, ErrGameLogNotFound)
+	}
+	if err != nil {
+		return PlayerGameLog{}, fmt.Errorf("athlete %s: %w", athleteID, err)
+	}
+	return log, nil
+}
+
+// PlayerGameLogs returns game logs for multiple athletes indexed by athlete ID.
+func (s *Store) PlayerGameLogs(ctx context.Context, athleteIDs []string) (map[string]PlayerGameLog, error) {
+	if len(athleteIDs) == 0 {
+		return map[string]PlayerGameLog{}, nil
+	}
+	placeholders := strings.Repeat("?,", len(athleteIDs))
+	placeholders = placeholders[:len(placeholders)-1]
+	args := make([]any, len(athleteIDs))
+	for i, id := range athleteIDs {
+		args[i] = id
+	}
+	rows, err := s.conn().QueryContext(ctx,
+		"SELECT "+gameLogColumns+" FROM player_gamelogs WHERE athlete_id IN ("+placeholders+")", args...)
+	if err != nil {
+		return nil, fmt.Errorf("player gamelogs: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	result := make(map[string]PlayerGameLog, len(athleteIDs))
+	for rows.Next() {
+		log, err := scanPlayerGameLog(rows)
+		if err != nil {
+			return nil, fmt.Errorf("player gamelogs: %w", err)
+		}
+		result[log.AthleteID] = log
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("player gamelogs: %w", err)
+	}
+	return result, nil
+}
+
+// ResolvePlayerMatch matches a sportsbook odds player name against home and away teams.
+//  1. Normalizes oddsName. If empty, returns unmatched.
+//  2. Checks player_matches for (norm, homeTeam) and (norm, awayTeam). If a manual = 1
+//     row exists, it wins immediately. If one unambiguous cached row exists, returns its
+//     (espn_athlete_id, team).
+//  3. On a miss, queries roster_players for team IN (homeTeam, awayTeam) AND norm_name = norm.
+//  4. If exactly one athlete matches across both teams, upserts
+//     player_matches(odds_name, team, espn_athlete_id, manual=0) and returns (athlete_id, team).
+//     If zero or multiple athletes match, leaves player_id empty.
+func (s *Store) ResolvePlayerMatch(
+	ctx context.Context,
+	oddsName, homeTeam, awayTeam string,
+) (athleteID, team string, err error) {
+	norm := NormalizePlayerName(oddsName)
+	if norm == "" {
+		return "", "", nil
+	}
+
+	rows, err := s.conn().QueryContext(ctx, `
+		SELECT team, espn_athlete_id, manual
+		FROM player_matches
+		WHERE odds_name = ? AND team IN (?, ?)`,
+		norm, homeTeam, awayTeam,
+	)
+	if err != nil {
+		return "", "", fmt.Errorf("resolve player match: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	type matchRow struct {
+		team      string
+		athleteID string
+		manual    bool
+	}
+	var matches []matchRow
+	for rows.Next() {
+		var (
+			t, aid string
+			manual int
+		)
+		if err := rows.Scan(&t, &aid, &manual); err != nil {
+			return "", "", fmt.Errorf("resolve player match: %w", err)
+		}
+		matches = append(matches, matchRow{team: t, athleteID: aid, manual: manual == 1})
+	}
+	if err := rows.Err(); err != nil {
+		return "", "", fmt.Errorf("resolve player match: %w", err)
+	}
+
+	var manualMatches []matchRow
+	for _, m := range matches {
+		if m.manual {
+			manualMatches = append(manualMatches, m)
+		}
+	}
+	if len(manualMatches) == 1 {
+		return manualMatches[0].athleteID, manualMatches[0].team, nil
+	}
+	if len(manualMatches) > 1 {
+		return "", "", nil
+	}
+	if len(matches) == 1 {
+		return matches[0].athleteID, matches[0].team, nil
+	}
+	if len(matches) > 1 {
+		return "", "", nil
+	}
+
+	rosterRows, err := s.conn().QueryContext(ctx, `
+		SELECT athlete_id, team
+		FROM roster_players
+		WHERE team IN (?, ?) AND norm_name = ?`,
+		homeTeam, awayTeam, norm,
+	)
+	if err != nil {
+		return "", "", fmt.Errorf("resolve player match roster: %w", err)
+	}
+	defer func() { _ = rosterRows.Close() }()
+
+	var rosterMatches []struct {
+		athleteID string
+		team      string
+	}
+	for rosterRows.Next() {
+		var aid, t string
+		if err := rosterRows.Scan(&aid, &t); err != nil {
+			return "", "", fmt.Errorf("resolve player match roster: %w", err)
+		}
+		rosterMatches = append(rosterMatches, struct {
+			athleteID string
+			team      string
+		}{athleteID: aid, team: t})
+	}
+	if err := rosterRows.Err(); err != nil {
+		return "", "", fmt.Errorf("resolve player match roster: %w", err)
+	}
+
+	if len(rosterMatches) != 1 {
+		return "", "", nil
+	}
+
+	hit := rosterMatches[0]
+	_, err = s.conn().ExecContext(ctx, `
+		INSERT INTO player_matches (odds_name, team, espn_athlete_id, manual)
+		VALUES (?, ?, ?, 0)
+		ON CONFLICT (odds_name, team) DO UPDATE SET
+			espn_athlete_id = excluded.espn_athlete_id
+		WHERE player_matches.manual = 0`,
+		norm, hit.team, hit.athleteID,
+	)
+	if err != nil {
+		return "", "", fmt.Errorf("resolve player match upsert: %w", err)
+	}
+	return hit.athleteID, hit.team, nil
+}
+
+// SaveManualPlayerMatch writes manual = 1 in player_matches, removes any
+// conflicting non-manual row for the other team in that matchup if needed,
+// and backfills team and player_id on matching odds and legs rows.
+func (s *Store) SaveManualPlayerMatch(ctx context.Context, oddsName, team, athleteID string) error {
+	norm := NormalizePlayerName(oddsName)
+	if norm == "" {
+		return errors.New("empty player name")
+	}
+
+	return s.Tx(ctx, func(tx *Store) error {
+		_, err := tx.conn().ExecContext(ctx, `
+			INSERT INTO player_matches (odds_name, team, espn_athlete_id, manual)
+			VALUES (?, ?, ?, 1)
+			ON CONFLICT (odds_name, team) DO UPDATE SET
+				espn_athlete_id = excluded.espn_athlete_id,
+				manual = 1`,
+			norm, team, athleteID,
+		)
+		if err != nil {
+			return fmt.Errorf("save manual match: %w", err)
+		}
+
+		_, err = tx.conn().ExecContext(ctx, `
+			DELETE FROM player_matches
+			WHERE odds_name = ?
+				AND manual = 0
+				AND (
+					team IN (
+						SELECT CASE WHEN home_team = ? THEN away_team ELSE home_team END
+						FROM games
+						WHERE home_team = ? OR away_team = ?
+					)
+					OR NOT EXISTS (SELECT 1 FROM games WHERE home_team = ? OR away_team = ?)
+				)
+				AND team != ?`,
+			norm, team, team, team, team, team, team,
+		)
+		if err != nil {
+			return fmt.Errorf("clean conflicting match: %w", err)
+		}
+
+		_, err = tx.conn().ExecContext(ctx, `
+			UPDATE OR REPLACE odds
+			SET team = ?
+			WHERE (player_name = ? OR player_name = ? COLLATE NOCASE)
+				AND (
+					game_id IN (SELECT id FROM games WHERE home_team = ? OR away_team = ?)
+					OR NOT EXISTS (SELECT 1 FROM games WHERE home_team = ? OR away_team = ?)
+				)`,
+			team, oddsName, norm, team, team, team, team,
+		)
+		if err != nil {
+			return fmt.Errorf("backfill odds: %w", err)
+		}
+
+		_, err = tx.conn().ExecContext(ctx, `
+			UPDATE legs
+			SET team = ?, player_id = ?
+			WHERE (player_name = ? OR player_name = ? COLLATE NOCASE)
+				AND (
+					game_id IS NULL
+					OR game_id IN (SELECT id FROM games WHERE home_team = ? OR away_team = ?)
+					OR NOT EXISTS (SELECT 1 FROM games WHERE home_team = ? OR away_team = ?)
+				)`,
+			team, athleteID, oddsName, norm, team, team, team, team,
+		)
+		if err != nil {
+			return fmt.Errorf("backfill legs: %w", err)
+		}
+
+		return nil
+	})
+}
+
+// PlayerMatchesForTeams returns all player matches for the given teams.
+func (s *Store) PlayerMatchesForTeams(ctx context.Context, teams []string) ([]PlayerMatch, error) {
+	if len(teams) == 0 {
+		return nil, nil
+	}
+	placeholders := strings.Repeat("?,", len(teams))
+	placeholders = placeholders[:len(placeholders)-1]
+	args := make([]any, len(teams))
+	for i, t := range teams {
+		args[i] = t
+	}
+	rows, err := s.conn().QueryContext(ctx,
+		"SELECT "+matchColumns+" FROM player_matches WHERE team IN ("+placeholders+") ORDER BY team, odds_name", args...)
+	if err != nil {
+		return nil, fmt.Errorf("player matches for teams: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var matches []PlayerMatch
+	for rows.Next() {
+		var m PlayerMatch
+		var manual int
+		if err := rows.Scan(&m.OddsName, &m.Team, &m.ESPNAthleteID, &manual); err != nil {
+			return nil, fmt.Errorf("player matches for teams: %w", err)
+		}
+		m.Manual = manual == 1
+		matches = append(matches, m)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("player matches for teams: %w", err)
+	}
+	return matches, nil
+}
+
+func scanRosterPlayer(row rowScanner) (RosterPlayer, error) {
+	var (
+		p         RosterPlayer
+		updatedAt string
+	)
+	if err := row.Scan(
+		&p.AthleteID,
+		&p.Team,
+		&p.ESPNTeamID,
+		&p.FullName,
+		&p.NormName,
+		&p.Position,
+		&updatedAt,
+	); err != nil {
+		return RosterPlayer{}, err
+	}
+	t, err := scanTimestamp(updatedAt)
+	if err != nil {
+		return RosterPlayer{}, err
+	}
+	p.UpdatedAt = t
+	return p, nil
+}
+
+func scanPlayerGameLog(row rowScanner) (PlayerGameLog, error) {
+	var (
+		g         PlayerGameLog
+		updatedAt string
+	)
+	if err := row.Scan(&g.AthleteID, &g.GamesPlayed, &g.StatsJSON, &updatedAt); err != nil {
+		return PlayerGameLog{}, err
+	}
+	t, err := scanTimestamp(updatedAt)
+	if err != nil {
+		return PlayerGameLog{}, err
+	}
+	g.UpdatedAt = t
+	return g, nil
+}

@@ -44,7 +44,7 @@ Add three methods on `*espn.Client`:
   `[]RosterPlayer{ID, FullName, Position}` (skipping athletes without an `id` or `fullName`).
 - `SummaryInjuries(ctx, eventID)` fetches `GET /summary?event={eventID}` and returns the raw `injuries` JSON array (or
   `"[]"` when absent) plus a helper `ParseInjuries(rawJSON)` that extracts per-team injuries filtered to key positions
-  (`QB`, `RB`, `WR`, `TE`, `LT`, `C`, `CB`, `S`).
+  (`QB`, `RB`, `WR`, `TE`, `LT`, `OT`, `C`, `CB`, `S`).
 - `GameLog(ctx, athleteID)` fetches
   `GET https://site.web.api.espn.com/apis/common/v3/sports/football/nfl/athletes/{athleteID}/gamelog`. `espn.Client`
   stores a `webBaseURL` that defaults to `https://site.web.api.espn.com/apis/common/v3/sports/football/nfl`, or uses
@@ -143,7 +143,7 @@ Add `medianTrap` to `rules` in `internal/analyzer`:
   - `GET /research`: full page with a week game selector and player search/picker, pre-loading `?game_id=` or
     `?player_id=` (`&leg_id=`, `&market=`, `&line=`) when linked from a game card or slip leg.
   - `GET /research/games/{id}`: syncs game research (injuries, rosters, props), renders key injuries per team filtered
-    to `QB`, `RB`, `WR`, `TE`, `LT`, `C`, `CB`, `S`, and shows a player-match section where any unmatched (or matched)
+    to `QB`, `RB`, `WR`, `TE`, `LT`, `OT`, `C`, `CB`, `S`, and shows a player-match section where any unmatched (or matched)
     prop player can be linked to an ESPN roster athlete via `POST /research/matches`.
   - `GET /research/players/{espnID}`: syncs `espn:gamelog:{espnID}`, resolves the active market and comparison line
     (from `?leg_id=`, `?market=`/`?line=`, or the player's latest prop in `odds`), and renders last-5 vertical/horizontal
@@ -189,7 +189,7 @@ Effort: hard (spans three new ESPN endpoints, a schema migration, player normali
 - [x] Save real ESPN `roster`, `gamelog`, and `summary` fixtures under `internal/ingest/espn/testdata/`, and add
       `Client.Roster`, `Client.GameLog`, `Client.SummaryInjuries`, and `ParseInjuries` in `internal/ingest/espn` with
       fixture unit tests and `TestLive*` tests that skip under `-short`
-- [ ] Add migration `0007_props_research.sql` (`roster_players` and `player_gamelogs`), Store methods for rosters, game
+- [x] Add migration `0007_props_research.sql` (`roster_players` and `player_gamelogs`), Store methods for rosters, game
       logs, `games.injuries_json`, and `player_matches`, plus `NormalizePlayerName`, `ResolvePlayerMatch`, and
       `SaveManualPlayerMatch` with unit tests for suffixes, punctuation, manual overrides, and same-name players across
       teams

@@ -4,7 +4,7 @@ title: Database schema
 type: reference
 summary: SQLite tables, including groups and their members, the odds rows and their sportsbook deep links, nfelo's per-game projections, the raw external response archive, how migrations are tracked and applied, and the connection settings behind every query.
 tags: [database, sqlite, migrations, groups, archive, api, raw-responses, odds, links, nfelo, projections]
-sources: [internal/db/migrations/*.sql, internal/db/migrate.go, internal/db/db.go, internal/db/odds.go, internal/db/groups.go, internal/db/nfelo.go, internal/db/archive.go, internal/db/archive_read.go, internal/ingest/archive/transport.go]
+sources: [internal/db/migrations/*.sql, internal/db/migrate.go, internal/db/db.go, internal/db/odds.go, internal/db/groups.go, internal/db/nfelo.go, internal/db/players.go, internal/db/archive.go, internal/db/archive_read.go, internal/ingest/archive/transport.go]
 last_verified: 2026-11-09
 ---
 
@@ -17,7 +17,7 @@ including groups, their members, and `slips.group_id`. `0002_google_identity.sql
 identity columns and drop the unique name rule. `0003_api_archive.sql` adds the raw response archive, `api_bodies` and
 `api_responses`; see [Archive](../concepts/archive.md). `0004_odds_links.sql` adds each book's deep link and selection
 ID to `odds`, and `0005_odds_event_sid.sql` adds the book's own event ID. `0006_nfelo_games.sql` adds `nfelo_games`,
-one model projection per game.
+one model projection per game. `0007_props_research.sql` adds `roster_players` and `player_gamelogs` for props research.
 
 ## Connection settings
 
@@ -41,7 +41,7 @@ connection rules out `SQLITE_BUSY`.
 - `db.Migrate` applies every file whose number is greater than `PRAGMA user_version`, in number order.
 - Each file runs in its own transaction. The migration's statements and its `user_version` bump commit together, so a
   failed migration leaves neither behind.
-- A fresh database ends at version 6 with every table below.
+- A fresh database ends at version 7 with every table below.
 - `0001_init.sql` creates `groups`, `group_members`, and `slips.group_id`. A database created before groups existed has
   the old `slips` shape, so delete it and let the migrations rebuild.
 - `0002_google_identity.sql` rebuilds `users` in its transaction with the SQLite 12-step method and
@@ -55,29 +55,33 @@ connection rules out `SQLITE_BUSY`.
 - `0006_nfelo_games.sql` creates `nfelo_games`, keyed by `game_id` with `ON DELETE CASCADE` to `games`. A game without a
   matching nfelo row simply has no projection, and a game that drops out of the CSV keeps its last one. It changes no
   existing table.
-- Never edit an applied file. Add `0007_name.sql` and up.
+- `0007_props_research.sql` creates `roster_players` and `player_gamelogs` for ESPN NFL team rosters and athlete
+  game logs.
+- Never edit an applied file. Add `0008_name.sql` and up.
 - `PRAGMA user_version` on the database file is the only record of what ran.
 
 ## Tables
 
-| Table            | Holds                                                        |
-| ---------------- | ------------------------------------------------------------ |
-| `groups`         | One club: its name, invite token, and creation time.          |
-| `group_members`  | Which people belong to which group and when they joined.      |
-| `users`          | People, their Google identity, avatar color, home book, and active flag. |
-| `weeks`          | NFL weeks, keyed `season*1000 + season_type*100 + week_num`.  |
-| `games`          | One row per ESPN event: teams, kickoff, venue, weather, scores. |
-| `odds`           | Odds API prices and sportsbook deep links per game, book, market, and selection. |
-| `nfelo_games`    | nfelo's pre-game model spread, win probability, and QB adjustments per game. |
-| `slips`          | One shared parlay per group per week, with status and result.  |
-| `slip_members`   | Who is on a slip and when they locked in.                     |
-| `legs`           | Picks on a slip, with market, selection, line, odds, and result. |
-| `wagers`         | Optional stake, odds, and boost per member per slip.          |
-| `player_matches` | Odds player name to ESPN athlete ID, per team.                |
-| `activity`       | Human-readable slip history; `user_id` is NULL for system entries. |
-| `sync_state`     | Last fetch time per outside data source, plus remaining odds credits. |
-| `api_bodies`     | Raw external response bodies, gzipped and keyed by the SHA-256 of the uncompressed bytes. |
-| `api_responses`  | One row per archived external call: source, key, redacted URL, status, time, and body hash. |
+| Table             | Holds                                                        |
+| ----------------- | ------------------------------------------------------------ |
+| `groups`          | One club: its name, invite token, and creation time.          |
+| `group_members`   | Which people belong to which group and when they joined.      |
+| `users`           | People, their Google identity, avatar color, home book, and active flag. |
+| `weeks`           | NFL weeks, keyed `season*1000 + season_type*100 + week_num`.  |
+| `games`           | One row per ESPN event: teams, kickoff, venue, weather, scores. |
+| `odds`            | Odds API prices and sportsbook deep links per game, book, market, and selection. |
+| `nfelo_games`     | nfelo's pre-game model spread, win probability, and QB adjustments per game. |
+| `slips`           | One shared parlay per group per week, with status and result.  |
+| `slip_members`    | Who is on a slip and when they locked in.                     |
+| `legs`            | Picks on a slip, with market, selection, line, odds, and result. |
+| `wagers`          | Optional stake, odds, and boost per member per slip.          |
+| `player_matches`  | Odds player name to ESPN athlete ID, per team.                |
+| `roster_players`  | ESPN NFL team rosters by athlete ID with normalized names.    |
+| `player_gamelogs` | ESPN athlete game logs and market stats by athlete ID.        |
+| `activity`        | Human-readable slip history; `user_id` is NULL for system entries. |
+| `sync_state`      | Last fetch time per outside data source, plus remaining odds credits. |
+| `api_bodies`      | Raw external response bodies, gzipped and keyed by the SHA-256 of the uncompressed bytes. |
+| `api_responses`   | One row per archived external call: source, key, redacted URL, status, time, and body hash. |
 
 ## Users and identity
 
@@ -257,6 +261,24 @@ CREATE TABLE player_matches (
   espn_athlete_id TEXT NOT NULL,
   manual          INTEGER NOT NULL DEFAULT 0,  -- 1 = fixed by hand; never overwritten by matching
   PRIMARY KEY (odds_name, team)
+);
+
+CREATE TABLE roster_players (
+  athlete_id   TEXT PRIMARY KEY,
+  team         TEXT NOT NULL,
+  espn_team_id TEXT NOT NULL,
+  full_name    TEXT NOT NULL,
+  norm_name    TEXT NOT NULL,
+  position     TEXT NOT NULL DEFAULT '',
+  updated_at   TEXT NOT NULL
+);
+CREATE INDEX roster_players_team_norm ON roster_players(team, norm_name);
+
+CREATE TABLE player_gamelogs (
+  athlete_id   TEXT PRIMARY KEY,
+  games_played INTEGER NOT NULL DEFAULT 0,
+  stats_json   TEXT NOT NULL DEFAULT '{}',
+  updated_at   TEXT NOT NULL
 );
 
 CREATE TABLE activity (
