@@ -55,15 +55,16 @@ func (s *Store) SyncState(ctx context.Context, source string) (SyncState, error)
 }
 
 // RecordSync stores a successful fetch time and, for an odds source, the
-// remaining credits the response reported. A nil credits pointer clears the
-// stored count.
+// remaining credits the response reported. A nil credits pointer leaves any
+// stored count alone, so a sync that never reached the paid call (a failed or
+// disabled provider) cannot erase a known balance.
 func (s *Store) RecordSync(ctx context.Context, source string, fetchedAt time.Time, credits *int) error {
 	_, err := s.conn().ExecContext(ctx, `
 		INSERT INTO sync_state (source, fetched_at, odds_credits_remaining)
 		VALUES (?, ?, ?)
 		ON CONFLICT (source) DO UPDATE SET
 			fetched_at = excluded.fetched_at,
-			odds_credits_remaining = excluded.odds_credits_remaining`,
+			odds_credits_remaining = COALESCE(excluded.odds_credits_remaining, sync_state.odds_credits_remaining)`,
 		source,
 		formatTimestamp(fetchedAt),
 		nullableInt(credits),
