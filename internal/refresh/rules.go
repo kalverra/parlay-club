@@ -95,6 +95,22 @@ func oddsAge(now time.Time, games []db.Game) time.Duration {
 	}
 }
 
+// regularSeasonType is ESPN's season_type for the regular season.
+const regularSeasonType = 2
+
+// nfeloStale reports whether the week's model projections are due. It skips a
+// week that is not regular season, a week with no games, and a week whose games
+// have all kicked off.
+func nfeloStale(last, now time.Time, week db.Week, games []db.Game) bool {
+	if week.SeasonType != regularSeasonType || len(games) == 0 || allKickedOff(games, now) {
+		return false
+	}
+	if last.IsZero() {
+		return true
+	}
+	return !now.Before(last.Add(nfeloAge))
+}
+
 // allKickedOff reports whether every game has reached its kickoff time.
 func allKickedOff(games []db.Game, now time.Time) bool {
 	for _, game := range games {

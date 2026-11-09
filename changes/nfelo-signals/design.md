@@ -157,7 +157,7 @@ Effort: medium (a new source, a migration, three rules, and a view change, all o
 - [x] Add `internal/ingest/nfelo` with `Projections`, the team-code map, a saved fixture of the real CSV, and tests for
       header-name parsing and every error case; use the fixture to confirm the spread column and fix the Approach if it
       is wrong
-- [ ] Add migration `0006_nfelo_games.sql`, the store read and upsert, and the `nfelo:projections` refresh source with a
+- [x] Add migration `0006_nfelo_games.sql`, the store read and upsert, and the `nfelo:projections` refresh source with a
   12 hour window, the regular-season and all-kicked-off skips, backoff, and a publish on change, with the sync tests
 - [ ] Docs: add nfelo to `docs/reference/data-sources.md`, `docs/concepts/data-refresh.md`, and
       `docs/reference/schema.md`; add the source to `plan/data-sources.md` only if that file lists sources
