@@ -298,6 +298,30 @@ func (s *Store) SetGameOddsEvent(ctx context.Context, gameID, eventID string) (b
 	return false, nil
 }
 
+// SetGameInjuries stores a game's raw ESPN injuries JSON array and reports
+// whether the value changed. A missing game wraps ErrGameNotFound.
+func (s *Store) SetGameInjuries(ctx context.Context, gameID, injuriesJSON string) (bool, error) {
+	result, err := s.conn().ExecContext(ctx, `
+		UPDATE games
+		SET injuries_json = ?
+		WHERE id = ? AND injuries_json IS NOT ?`,
+		injuriesJSON, gameID, injuriesJSON)
+	if err != nil {
+		return false, fmt.Errorf("set game %s injuries: %w", gameID, err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("set game %s injuries: %w", gameID, err)
+	}
+	if affected > 0 {
+		return true, nil
+	}
+	if _, err := s.GameKickoff(ctx, gameID); err != nil {
+		return false, err
+	}
+	return false, nil
+}
+
 // scanGame reads the columns every game query selects, in order.
 func scanGame(row rowScanner) (Game, error) {
 	var (

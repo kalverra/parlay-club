@@ -170,6 +170,40 @@ func TestSetGameOddsEventReportsRealChanges(t *testing.T) {
 	assert.True(t, changed)
 }
 
+func TestSetGameInjuriesReportsRealChanges(t *testing.T) {
+	t.Parallel()
+
+	store, _ := openTestStore(t)
+	week := createTestWeek(t, store, 9)
+	game, err := store.UpsertGame(t.Context(), testSlateGame(week))
+	require.NoError(t, err)
+
+	changed, err := store.SetGameInjuries(t.Context(), game.ID, `[{"athlete":"Player 1"}]`)
+	require.NoError(t, err)
+	assert.True(t, changed)
+
+	stored, err := store.GameByID(t.Context(), game.ID)
+	require.NoError(t, err)
+	assert.Equal(t, new(`[{"athlete":"Player 1"}]`), stored.InjuriesJSON)
+
+	changed, err = store.SetGameInjuries(t.Context(), game.ID, `[{"athlete":"Player 1"}]`)
+	require.NoError(t, err)
+	assert.False(t, changed)
+
+	changed, err = store.SetGameInjuries(t.Context(), game.ID, `[{"athlete":"Player 2"}]`)
+	require.NoError(t, err)
+	assert.True(t, changed)
+}
+
+func TestSetGameInjuriesReportsAMissingGame(t *testing.T) {
+	t.Parallel()
+
+	store, _ := openTestStore(t)
+
+	_, err := store.SetGameInjuries(t.Context(), "missing", `[]`)
+	require.ErrorIs(t, err, db.ErrGameNotFound)
+}
+
 func TestUpsertOddsInsertsUpdatesAndLists(t *testing.T) {
 	t.Parallel()
 
