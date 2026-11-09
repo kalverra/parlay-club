@@ -3,6 +3,7 @@ package analyzer
 import (
 	"fmt"
 	"math"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -44,6 +45,7 @@ const (
 	ruleTotalKeyNumber     = "total_key_number"
 	ruleChalk              = "chalk"
 	ruleQBDrag             = "qb_drag"
+	ruleMedianTrap         = "median_trap"
 )
 
 // Thresholds from plan/analyzer.md.
@@ -486,6 +488,84 @@ func modelSpreadText(spread float64) string {
 		return "+" + text
 	}
 	return text
+}
+
+// medianTrap warns when a yardage over line is higher than the player's last-5
+// game median. When the line is also below the season average, it notes that
+// the average is propped up by one big game.
+func medianTrap(a *analysis) []Warning {
+	if len(a.stats) == 0 {
+		return nil
+	}
+	var warnings []Warning
+	for _, leg := range a.legs {
+		if !isYardageMarket(leg.Market) || leg.Side != sideOver || leg.Line == nil || leg.PlayerID == "" {
+			continue
+		}
+		playerStats, ok := a.stats[leg.PlayerID]
+		if !ok || playerStats.Games == nil {
+			continue
+		}
+		games := playerStats.Games[leg.Market]
+		if len(games) < 3 {
+			continue
+		}
+
+		l5Len := min(5, len(games))
+		l5 := games[:l5Len]
+		median := computeMedian(l5)
+		if *leg.Line <= median {
+			continue
+		}
+
+		name := playerName(leg)
+		message := fmt.Sprintf("%s's last-5 median is %s yards, so %s is a stretch.",
+			name, number(median), number(*leg.Line))
+		mean := computeMean(games)
+		if *leg.Line < mean {
+			message += fmt.Sprintf(" His %s-yard average is propped up by one big game.",
+				number(math.Round(mean)))
+		}
+
+		warnings = append(warnings, a.warning(ruleMedianTrap, Warn, message, []Leg{leg}))
+	}
+	return warnings
+}
+
+// isYardageMarket reports whether the market is measured in yards.
+func isYardageMarket(market string) bool {
+	switch market {
+	case marketPassYds, marketRushYds, marketRecYds:
+		return true
+	default:
+		return false
+	}
+}
+
+// computeMedian computes the median of values.
+func computeMedian(values []float64) float64 {
+	if len(values) == 0 {
+		return 0
+	}
+	sorted := slices.Clone(values)
+	slices.Sort(sorted)
+	middle := len(sorted) / 2
+	if len(sorted)%2 == 0 {
+		return (sorted[middle-1] + sorted[middle]) / 2
+	}
+	return sorted[middle]
+}
+
+// computeMean computes the arithmetic mean of values.
+func computeMean(values []float64) float64 {
+	if len(values) == 0 {
+		return 0
+	}
+	var sum float64
+	for _, v := range values {
+		sum += v
+	}
+	return sum / float64(len(values))
 }
 
 // matching returns the legs in anchor's game, other than anchor itself, that

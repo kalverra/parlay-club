@@ -209,7 +209,7 @@ Effort: hard (spans three new ESPN endpoints, a schema migration, player normali
 
 Effort: medium (self-contained pure rule in `internal/analyzer` and store-to-analyzer wiring in `internal/web`)
 
-- [ ] Add the `median_trap` rule in `internal/analyzer` with table-driven threshold tests (`line > L5 median`,
+- [x] Add the `median_trap` rule in `internal/analyzer` with table-driven threshold tests (`line > L5 median`,
       `line <= median`, `< 3` games, unmatched player, and the `line < mean` sentence) and wire stored
       `player_gamelogs` into `internal/web/analyzer.go` with handler tests
 - [ ] Docs: update `docs/reference/analyzer-rules.md` and `docs/concepts/analyzer.md` with `median_trap` and live player

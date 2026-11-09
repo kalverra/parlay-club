@@ -112,12 +112,9 @@ type PlayerStats struct {
 // severity (Danger first), then by the first leg's position in the slip. Legs
 // with market OTHER, no game, or a game missing from games are skipped.
 func AnalyzeSlip(legs []Leg, games map[string]Game, stats map[string]PlayerStats) []Warning {
-	// median_trap reads stats once props-research brings player numbers.
-	// No Phase 1 rule needs them yet.
-	_ = stats
-
 	a := &analysis{
 		games:     games,
+		stats:     stats,
 		positions: make(map[int64]int, len(legs)),
 		legs:      make([]Leg, 0, len(legs)),
 	}
@@ -162,12 +159,14 @@ var rules = []rule{
 	totalKeyNumber,
 	chalk,
 	qbDrag,
+	medianTrap,
 }
 
 // analysis is the filtered input shared by every rule.
 type analysis struct {
 	legs      []Leg
 	games     map[string]Game
+	stats     map[string]PlayerStats
 	positions map[int64]int
 }
 

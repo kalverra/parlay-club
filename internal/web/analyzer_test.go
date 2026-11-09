@@ -258,6 +258,135 @@ func TestSlipLegRowShowsModelOnlyForSpreadAndMoneyline(t *testing.T) {
 		"the chip shares the wrapping row beside the odds")
 }
 
+// TestSlipPanelBannerShowsMedianTrap verifies that stored player_gamelogs
+// feed the analyzer and render the median_trap warning card on the slip panel.
+func TestSlipPanelBannerShowsMedianTrap(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	game := addGame(t, fixture, gameKickoff())
+
+	err := fixture.store.UpsertPlayerGameLog(t.Context(), db.PlayerGameLog{
+		AthleteID:   "4430755",
+		GamesPlayed: 5,
+		StatsJSON:   `{"REC_YDS":[41.0, 41.0, 41.0, 41.0, 126.0]}`,
+		UpdatedAt:   time.Now().UTC(),
+	})
+	require.NoError(t, err)
+
+	addStoredLeg(t, fixture, db.Leg{
+		UserID:     fixture.user.ID,
+		GameID:     new(game.ID),
+		MarketType: "REC_YDS",
+		Selection:  "Khalil Shakir Over 52.5 Rec Yds",
+		Team:       new("BUF"),
+		PlayerID:   new("4430755"),
+		PlayerName: new("Khalil Shakir"),
+		Side:       new("OVER"),
+		Line:       new(52.5),
+		Odds:       -110,
+	})
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodGet,
+		fmt.Sprintf("/slips/%d/panel", fixture.slip.ID),
+		nil,
+	)
+	fixture.handler.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	body := recorder.Body.String()
+	text := html.UnescapeString(body)
+
+	assert.Contains(t, body, `data-rule="median_trap"`)
+	assert.Contains(t, text, "Khalil Shakir's last-5 median is 41 yards, so 52.5 is a stretch.")
+	assert.Contains(t, text, "His 58-yard average is propped up by one big game.")
+	assert.Contains(t, text, "Ada · Khalil Shakir Over 52.5 Rec Yds")
+}
+
+// TestSlipPanelBannerMedianTrapQuietCases checks that median_trap stays quiet
+// when the line is safe, the player is unmatched, or no gamelogs exist.
+func TestSlipPanelBannerMedianTrapQuietCases(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		playerID  *string
+		hasLog    bool
+		line      float64
+		statsJSON string
+	}{
+		{
+			name:      "line at or below median",
+			playerID:  new("4430755"),
+			hasLog:    true,
+			line:      40.5,
+			statsJSON: `{"REC_YDS":[41.0, 41.0, 41.0, 41.0, 126.0]}`,
+		},
+		{
+			name:      "unmatched player",
+			playerID:  nil,
+			hasLog:    false,
+			line:      52.5,
+			statsJSON: ``,
+		},
+		{
+			name:      "no gamelog in store",
+			playerID:  new("9999999"),
+			hasLog:    false,
+			line:      52.5,
+			statsJSON: ``,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			fixture := newSlipFixture(t, 2)
+			game := addGame(t, fixture, gameKickoff())
+
+			if test.hasLog && test.playerID != nil {
+				err := fixture.store.UpsertPlayerGameLog(t.Context(), db.PlayerGameLog{
+					AthleteID:   *test.playerID,
+					GamesPlayed: 5,
+					StatsJSON:   test.statsJSON,
+					UpdatedAt:   time.Now().UTC(),
+				})
+				require.NoError(t, err)
+			}
+
+			addStoredLeg(t, fixture, db.Leg{
+				UserID:     fixture.user.ID,
+				GameID:     new(game.ID),
+				MarketType: "REC_YDS",
+				Selection:  "Khalil Shakir Over Rec Yds",
+				Team:       new("BUF"),
+				PlayerID:   test.playerID,
+				PlayerName: new("Khalil Shakir"),
+				Side:       new("OVER"),
+				Line:       new(test.line),
+				Odds:       -110,
+			})
+
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequestWithContext(
+				t.Context(),
+				http.MethodGet,
+				fmt.Sprintf("/slips/%d/panel", fixture.slip.ID),
+				nil,
+			)
+			fixture.handler.ServeHTTP(recorder, request)
+
+			require.Equal(t, http.StatusOK, recorder.Code)
+			body := recorder.Body.String()
+			assert.NotContains(t, body, `data-rule="median_trap"`)
+		})
+	}
+}
+
 // addStoredLeg writes one leg straight through the store so a test can give
 // legs to more than one person without switching the signed-in user.
 func addStoredLeg(t *testing.T, fixture *slipFixture, leg db.Leg) db.Leg {
