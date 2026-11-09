@@ -99,12 +99,13 @@ func run() error {
 	loadHistory(ctx, logger, store)
 	ingestClient := newIngestClient(store)
 	refresher := refresh.New(refresh.Deps{
-		Store:      store,
-		Scoreboard: espn.NewClient("", ingestClient),
-		Forecast:   weather.NewClient("", ingestClient),
-		Lines:      odds.NewClient("", cfg.OddsAPIKey, ingestClient),
-		Publisher:  hub,
-		Logger:     logger,
+		Store:         store,
+		Scoreboard:    espn.NewClient("", ingestClient),
+		Forecast:      weather.NewClient("", ingestClient),
+		Lines:         odds.NewClient("", cfg.OddsAPIKey, ingestClient),
+		FallbackLines: odds.NewClient(odds.TheOddsAPIBaseURL, cfg.TheOddsAPIKey, ingestClient),
+		Publisher:     hub,
+		Logger:        logger,
 	})
 	stream := live.NewStream(hub, refresher.LiveWindow)
 	shell := web.NewWithDeps(web.Dependencies{

@@ -32,6 +32,7 @@ func TestLoadDevDefaults(t *testing.T) {
 	assert.Empty(t, cfg.GoogleClientSecret)
 	assert.Equal(t, "http://localhost:8080", cfg.BaseURL)
 	assert.Empty(t, cfg.OddsAPIKey)
+	assert.Empty(t, cfg.TheOddsAPIKey)
 	assert.Equal(t, zerolog.DebugLevel, cfg.LogLevel)
 }
 
@@ -56,6 +57,7 @@ func TestLoadOverridesEveryValue(t *testing.T) {
 		"GOOGLE_CLIENT_SECRET": "client-secret",
 		"BASE_URL":             "https://parlay.example.com/",
 		"ODDS_API_KEY":         "odds-key",
+		"THE_ODDS_API_KEY":     "the-odds-key",
 		"LOG_LEVEL":            "warn",
 	}))
 	require.NoError(t, err)
@@ -68,6 +70,7 @@ func TestLoadOverridesEveryValue(t *testing.T) {
 	assert.Equal(t, "client-secret", cfg.GoogleClientSecret)
 	assert.Equal(t, "https://parlay.example.com", cfg.BaseURL, "the trailing slash is trimmed")
 	assert.Equal(t, "odds-key", cfg.OddsAPIKey)
+	assert.Equal(t, "the-odds-key", cfg.TheOddsAPIKey)
 	assert.Equal(t, zerolog.WarnLevel, cfg.LogLevel)
 }
 
@@ -91,6 +94,8 @@ func TestLoadProdDefaults(t *testing.T) {
 	assert.Equal(t, "client-id", cfg.GoogleClientID)
 	assert.Equal(t, "client-secret", cfg.GoogleClientSecret)
 	assert.Equal(t, "https://parlay.example.com", cfg.BaseURL)
+	assert.Empty(t, cfg.OddsAPIKey)
+	assert.Empty(t, cfg.TheOddsAPIKey)
 	assert.Equal(t, zerolog.InfoLevel, cfg.LogLevel)
 }
 
@@ -194,5 +199,6 @@ func TestLoadDevStartsWithNoSecrets(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Empty(t, cfg.GoogleClientID)
+	assert.Empty(t, cfg.TheOddsAPIKey)
 	assert.Equal(t, "http://localhost:8080", cfg.BaseURL)
 }

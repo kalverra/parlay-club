@@ -35,7 +35,7 @@
 ## Reference
 
 - [Analyzer rules](reference/analyzer-rules.md): The stable IDs, severities, triggers, and example messages for the correlation, weather, key-number, and chalk rules in internal/analyzer.
-- [Configuration](reference/config.md): Environment variables the server reads, their dev defaults, the Parlay API key they configure, and the values it rejects in prod.
+- [Configuration](reference/config.md): Environment variables the server reads, their dev defaults, the odds provider keys they configure, and the values it rejects in prod.
 - [Data sources](reference/data-sources.md): The free sources behind the slate, the ESPN scoreboard endpoint and its Sunday and Monday filter, the Open-Meteo forecast behind a game's weather, Parlay API game lines, props, bookmakers, deep links, and credit budget, and the raw response archive every successful call leaves.
 - [History file](reference/history-file.md): The seed/history.yaml format, its slip and leg fields and defaults, how boot imports it into the first group, which slips are skipped, and how errors and users are handled.
 - [Odds math](reference/odds-math.md): The formulas in internal/parlay for converting American and decimal odds, combining legs, picking a reference price, and computing payout and units.

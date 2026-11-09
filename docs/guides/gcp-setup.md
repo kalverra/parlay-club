@@ -52,8 +52,8 @@ The script stops at the first failure and prints what it finished. It creates:
 | APIs                 | Cloud Run, Artifact Registry, Secret Manager, IAM, STS, billing budgets, GCS              |
 | GCS bucket           | `gs://PROJECT_ID-parlay-litestream` in `us-central1`, for Litestream                      |
 | Artifact Registry    | Docker repo `parlay-club` with a cleanup policy that keeps the last 3 images               |
-| Secrets              | `session-key`, `google-client-id`, `google-client-secret`, `odds-api-key`, all empty       |
-| Runtime account      | `parlay-runtime`, read/write on the bucket and read on the four secrets                   |
+| Secrets              | `session-key`, `google-client-id`, `google-client-secret`, `odds-api-key`, `the-odds-api-key`, all empty |
+| Runtime account      | `parlay-runtime`, read/write on the bucket and read on the five secrets                  |
 | Deployer account     | `parlay-deployer`, `run.admin` and `artifactregistry.writer`, act-as on the runtime account |
 | Cloud Run agent      | read on the image repo, so Cloud Run can pull the image                                   |
 | Workload Identity    | pool `github` and provider `github`, limited to `kalverra/parlay-club`                    |
@@ -86,7 +86,7 @@ step 6, after the Cloud Run URL exists.
 
 ### 3. Add a version to every secret
 
-Cloud Run refuses to start a revision that points at a secret with no version, so add one to all four now.
+Cloud Run refuses to start a revision that points at a secret with no version, so add one to all five now.
 
 The session key signs cookies. Generate 32 or more random bytes and keep it secret:
 
@@ -105,6 +105,13 @@ Add the Parlay API key. An empty value disables odds calls, which is fine for a 
 
 ```sh
 printf '%s' "$ODDS_API_KEY" | gcloud secrets versions add odds-api-key --data-file=-
+```
+
+Add The Odds API key. It enriches Parlay API lines and serves as fallback when Parlay API is unavailable. An empty value
+disables that provider:
+
+```sh
+printf '%s' "$THE_ODDS_API_KEY" | gcloud secrets versions add the-odds-api-key --data-file=-
 ```
 
 To replace a value later, add a new version of that secret and deploy again. `:latest` points Cloud Run at the newest
@@ -222,7 +229,7 @@ The free-tier pieces this app leans on:
 | Startup says `GOOGLE_CLIENT_ID is required in prod`  | `google-client-id` has no version, or the client value is empty. Add one.                |
 | Startup says `BASE_URL is required in prod`          | Set the `BASE_URL` repo variable, then deploy again.                                     |
 | Startup says `entrypoint: set LITESTREAM_BUCKET`     | `LITESTREAM_BUCKET` is missing from the repo variables.                                  |
-| `secret ... not found` on deploy                     | Run `deploy/setup.sh` first; it creates the four secrets.                                |
+| `secret ... not found` on deploy                     | Run `deploy/setup.sh` first; it creates the five secrets.                                |
 | Cloud Run cannot pull the image                      | Re-run `deploy/setup.sh`; it grants the Cloud Run service agent read on the repo.        |
 | History does not appear                              | No group existed at boot, or the history belongs to another group. Create the first group and redeploy. |
 | Budget emails never arrive                           | Add yourself as a billing administrator or user on the billing account.                  |

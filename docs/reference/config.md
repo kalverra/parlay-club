@@ -2,8 +2,8 @@
 id: config
 title: Configuration
 type: reference
-summary: Environment variables the server reads, their dev defaults, the Parlay API key they configure, and the values it rejects in prod.
-tags: [config, environment, startup, google, oauth, odds, parlay-api]
+summary: Environment variables the server reads, their dev defaults, the odds provider keys they configure, and the values it rejects in prod.
+tags: [config, environment, startup, google, oauth, odds, parlay-api, the-odds-api]
 sources: [internal/config/config.go, cmd/server/main.go, internal/ingest/odds/client.go]
 last_verified: 2026-11-09
 ---
@@ -27,6 +27,7 @@ exits with status 1 when any value is invalid.
 | `GOOGLE_CLIENT_SECRET` | empty                    | The OAuth Web client secret. Required in prod.                                |
 | `BASE_URL`             | `http://localhost:{PORT}` | Public base URL without a trailing slash. The redirect URI is `BASE_URL + /auth/google/callback`. Required in prod. |
 | `ODDS_API_KEY`         | empty                    | Parlay API key. Empty disables odds calls.                                    |
+| `THE_ODDS_API_KEY`     | empty                    | The Odds API key for enrichment and fallback lines. Empty disables that provider. |
 | `LOG_LEVEL`            | `debug`                  | A zerolog level: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `panic`, `disabled`. `prod` defaults to `info`. |
 | `LITESTREAM_BUCKET`    | unset                    | Read by Litestream, not by the app.                                           |
 
@@ -37,8 +38,10 @@ falling back.
 `BASE_URL` is trimmed of trailing slashes. It must match the scheme, host, and port registered on the Google client, or
 sign-in stops at `redirect_uri_mismatch`. The app builds the redirect URI by appending `/auth/google/callback`.
 
-`ODDS_API_KEY` is the only odds setting. `internal/ingest/odds` defaults its base URL to
-`https://parlay-api.com/v1/sports/americanfootball_nfl`; tests point `NewClient` at a fake server instead.
+`ODDS_API_KEY` is the Parlay API key and `THE_ODDS_API_KEY` is the The Odds API key. Both are optional; an empty key
+disables that provider. `internal/ingest/odds` defaults the primary base URL to
+`https://parlay-api.com/v1/sports/americanfootball_nfl` and the fallback base URL to
+`https://api.the-odds-api.com/v4/sports/americanfootball_nfl`; tests point `NewClient` at a fake server instead.
 
 Sign-up is open, so there is no email list to configure. Group membership is what decides who sees which slips; see
 [Groups](../concepts/groups.md).
