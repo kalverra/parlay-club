@@ -40,11 +40,39 @@ const (
 	NfeloProjectionsSource = "nfelo:projections"
 	// weatherSourcePrefix keys per-game forecasts.
 	weatherSourcePrefix = "weather:"
+	// oddsPropsSourcePrefix keys per-game prop lines.
+	oddsPropsSourcePrefix = "odds:props:"
+	// rosterSourcePrefix keys per-team rosters.
+	rosterSourcePrefix = "espn:roster:"
+	// gameLogSourcePrefix keys per-athlete season game logs.
+	gameLogSourcePrefix = "espn:gamelog:"
+	// summarySourcePrefix keys per-game ESPN summaries and injury lists.
+	summarySourcePrefix = "espn:summary:"
 )
 
 // WeatherSource returns the sync_state key for one game's forecast.
 func WeatherSource(gameID string) string {
 	return weatherSourcePrefix + gameID
+}
+
+// OddsPropsSource returns the sync_state key for one game's props.
+func OddsPropsSource(gameID string) string {
+	return oddsPropsSourcePrefix + gameID
+}
+
+// RosterSource returns the sync_state key for one team's roster.
+func RosterSource(teamID string) string {
+	return rosterSourcePrefix + teamID
+}
+
+// GameLogSource returns the sync_state key for one athlete's game log.
+func GameLogSource(athleteID string) string {
+	return gameLogSourcePrefix + athleteID
+}
+
+// SummarySource returns the sync_state key for one game's summary.
+func SummarySource(gameID string) string {
+	return summarySourcePrefix + gameID
 }
 
 // Staleness windows and the failure backoff. The odds windows match the credit
@@ -59,9 +87,14 @@ const (
 	oddsSaturdayAge      = 12 * time.Hour
 	oddsSundayAge        = 45 * time.Minute
 	oddsLateAge          = 3 * time.Hour
+	oddsPropsAge         = 2 * time.Hour
+	rosterAge            = 24 * time.Hour
+	gameLogAge           = 12 * time.Hour
+	summaryAge           = 2 * time.Hour
 	nfeloAge             = 12 * time.Hour
 	failureBackoff       = 5 * time.Minute
 	syncTimeout          = 30 * time.Second
+	requestTimeout       = 10 * time.Second
 )
 
 // Credit floors. The odds client uses the free event list first, so refresh
@@ -69,11 +102,13 @@ const (
 const (
 	// OddsLinesFloor is the least remaining balance that permits the lines call.
 	OddsLinesFloor = 50
+	// OddsPropsFloor is the least remaining balance that permits the props call.
+	OddsPropsFloor = 150
 	// TheOddsAPIEnrichFloor is the least remaining The Odds API balance that
-	// permits enrichment while Parlay API supplied the week's lines.
+	// permits enrichment while Parlay API supplied the week's lines or game props.
 	TheOddsAPIEnrichFloor = 100
 	// TheOddsAPIFallbackFloor is the least remaining The Odds API balance that
-	// lets it serve the week's lines when Parlay API is unavailable.
+	// lets it serve the week's lines or game props when Parlay API is unavailable.
 	TheOddsAPIFallbackFloor = 25
 )
 
@@ -86,6 +121,13 @@ type ScoreboardClient interface {
 	Scoreboard(ctx context.Context, params espn.ScoreboardParams) (espn.Scoreboard, error)
 }
 
+// ESPNResearchClient is the slice of *espn.Client refresh needs for rosters, summaries, and game logs.
+type ESPNResearchClient interface {
+	Roster(ctx context.Context, espnTeamID string) ([]espn.RosterPlayer, error)
+	SummaryInjuries(ctx context.Context, eventID string) (string, error)
+	GameLog(ctx context.Context, athleteID string) (espn.GameLog, error)
+}
+
 // ForecastClient is the slice of *weather.Client refresh needs.
 type ForecastClient interface {
 	Forecast(ctx context.Context, venue weather.Venue, kickoff time.Time) (weather.Forecast, error)
@@ -95,6 +137,18 @@ type ForecastClient interface {
 type LinesClient interface {
 	Events(ctx context.Context) ([]odds.Event, odds.Credits, error)
 	Lines(ctx context.Context) ([]odds.Line, odds.Credits, error)
+}
+
+// PropsClient is the slice of *odds.Client refresh needs for Parlay API bulk props.
+type PropsClient interface {
+	Events(ctx context.Context) ([]odds.Event, odds.Credits, error)
+	Props(ctx context.Context, eventID string) ([]odds.Prop, odds.Credits, error)
+}
+
+// FallbackPropsClient is the slice of *odds.Client refresh needs for The Odds API per-event props.
+type FallbackPropsClient interface {
+	Events(ctx context.Context) ([]odds.Event, odds.Credits, error)
+	EventProps(ctx context.Context, eventID string) ([]odds.Prop, odds.Credits, error)
 }
 
 // ProjectionsClient is the slice of *nfelo.Client refresh needs.
@@ -111,9 +165,12 @@ type Publisher interface {
 type Deps struct {
 	Store         *db.Store
 	Scoreboard    ScoreboardClient
+	ESPN          ESPNResearchClient
 	Forecast      ForecastClient
 	Lines         LinesClient
 	FallbackLines LinesClient
+	Props         PropsClient
+	FallbackProps FallbackPropsClient
 	Projections   ProjectionsClient
 	Publisher     Publisher
 	Now           Clock
@@ -125,9 +182,12 @@ type Deps struct {
 type Service struct {
 	store         *db.Store
 	scoreboard    ScoreboardClient
+	espn          ESPNResearchClient
 	forecast      ForecastClient
 	lines         LinesClient
 	fallbackLines LinesClient
+	props         PropsClient
+	fallbackProps FallbackPropsClient
 	projections   ProjectionsClient
 	publisher     Publisher
 	now           Clock
@@ -156,12 +216,33 @@ func New(deps Deps) *Service {
 	if now == nil {
 		now = time.Now
 	}
+	espn := deps.ESPN
+	if espn == nil {
+		if ec, ok := deps.Scoreboard.(ESPNResearchClient); ok {
+			espn = ec
+		}
+	}
+	props := deps.Props
+	if props == nil {
+		if pc, ok := deps.Lines.(PropsClient); ok {
+			props = pc
+		}
+	}
+	fallbackProps := deps.FallbackProps
+	if fallbackProps == nil {
+		if fpc, ok := deps.FallbackLines.(FallbackPropsClient); ok {
+			fallbackProps = fpc
+		}
+	}
 	return &Service{
 		store:         deps.Store,
 		scoreboard:    deps.Scoreboard,
+		espn:          espn,
 		forecast:      deps.Forecast,
 		lines:         deps.Lines,
 		fallbackLines: deps.FallbackLines,
+		props:         props,
+		fallbackProps: fallbackProps,
 		projections:   deps.Projections,
 		publisher:     deps.Publisher,
 		now:           now,
@@ -212,6 +293,29 @@ func (s *Service) kick(ctx context.Context) {
 	if s.projections != nil && week.ID != 0 {
 		sources = append(sources, s.nfeloSource(week, games, now))
 	}
+	if s.espn != nil && week.ID != 0 {
+		slipIDs, err := s.store.SlipIDsForWeek(ctx, week.ID)
+		if err != nil {
+			s.logger.Error().Err(err).Int64("week", week.ID).Msg("list slips for gamelogs")
+		} else {
+			athletes := make(map[string]struct{})
+			for _, slipID := range slipIDs {
+				legs, err := s.store.LegsForSlip(ctx, slipID)
+				if err != nil {
+					s.logger.Error().Err(err).Int64("slip", slipID).Msg("read slip legs for gamelogs")
+					continue
+				}
+				for _, leg := range legs {
+					if leg.PlayerID != nil && *leg.PlayerID != "" {
+						athletes[*leg.PlayerID] = struct{}{}
+					}
+				}
+			}
+			for athleteID := range athletes {
+				sources = append(sources, s.gameLogSource(athleteID, now))
+			}
+		}
+	}
 	s.runSources(ctx, now, sources)
 }
 
@@ -250,24 +354,30 @@ func (s *Service) wait() {
 
 // refresh runs one source when it is due, unless a failure has paused it.
 func (s *Service) refresh(parent context.Context, src source, now time.Time) {
-	if s.paused(src.key, now) {
-		return
-	}
-
 	ctx, cancel := context.WithTimeout(parent, syncTimeout)
 	defer cancel()
+	_ = s.refreshSync(ctx, src, now)
+}
+
+// refreshSync runs one source synchronously when it is due, respecting the failure
+// backoff and single-flight deduplication.
+func (s *Service) refreshSync(parent context.Context, src source, now time.Time) error {
+	if s.paused(src.key, now) {
+		return nil
+	}
+
 	// Label every outside call with the same key sync_state uses, so the
 	// archive and the sync record join cleanly.
-	ctx = archive.WithKey(ctx, src.key)
+	ctx := archive.WithKey(parent, src.key)
 
 	due, err := s.shouldRun(ctx, src)
 	if err != nil {
 		s.logger.Error().Err(err).Str("source", src.key).Msg("check refresh source")
 		s.backOff(src.key, now)
-		return
+		return err
 	}
 	if !due {
-		return
+		return nil
 	}
 
 	_, err, _ = s.flight.Do(src.key, func() (any, error) {
@@ -282,9 +392,69 @@ func (s *Service) refresh(parent context.Context, src source, now time.Time) {
 	if err != nil {
 		s.logger.Error().Err(err).Str("source", src.key).Msg("refresh failed")
 		s.backOff(src.key, now)
-		return
+		return err
 	}
 	s.clearBackoff(src.key)
+	return nil
+}
+
+// SyncGameProps fetches and writes props for one game if stale.
+func (s *Service) SyncGameProps(ctx context.Context, gameID string) error {
+	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
+	defer cancel()
+
+	game, err := s.store.GameByID(ctx, gameID)
+	if err != nil {
+		return fmt.Errorf("game %s: %w", gameID, err)
+	}
+
+	now := s.now()
+	return s.refreshSync(ctx, s.oddsPropsSource(game, now), now)
+}
+
+// SyncGameResearch syncs injuries, rosters, and props for one game if stale.
+func (s *Service) SyncGameResearch(ctx context.Context, gameID string) error {
+	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
+	defer cancel()
+
+	game, err := s.store.GameByID(ctx, gameID)
+	if err != nil {
+		return fmt.Errorf("game %s: %w", gameID, err)
+	}
+
+	now := s.now()
+	var errs []error
+	if err := s.refreshSync(ctx, s.summarySource(game, now), now); err != nil {
+		errs = append(errs, err)
+	}
+	if err := s.refreshSync(ctx, s.oddsPropsSource(game, now), now); err != nil && !errors.Is(err, odds.ErrNoAPIKey) {
+		errs = append(errs, err)
+	}
+	if !now.Before(game.Kickoff) {
+		if game.HomeESPNID != "" && game.HomeTeam != "" {
+			if err := s.refreshSync(ctx, s.rosterSource(game.HomeTeam, game.HomeESPNID, now), now); err != nil {
+				errs = append(errs, err)
+			}
+		}
+		if game.AwayESPNID != "" && game.AwayTeam != "" {
+			if err := s.refreshSync(ctx, s.rosterSource(game.AwayTeam, game.AwayESPNID, now), now); err != nil {
+				errs = append(errs, err)
+			}
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// SyncPlayerResearch syncs one athlete's game log if stale.
+func (s *Service) SyncPlayerResearch(ctx context.Context, athleteID string) error {
+	if athleteID == "" {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
+	defer cancel()
+
+	now := s.now()
+	return s.refreshSync(ctx, s.gameLogSource(athleteID, now), now)
 }
 
 // shouldRun reads a source's state and applies its due rule. Credit floors are

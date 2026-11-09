@@ -4,7 +4,7 @@ title: Data refresh
 type: concept
 summary: How page loads drive lazy syncs of the slate, weather, game lines, and nfelo projections, with per-source staleness windows, single-flight, failure backoff, tiered Parlay API and The Odds API credit floors, and an archive of every successful response.
 tags: [refresh, sync, lazy, staleness, singleflight, backoff, credits, odds, parlay-api, the-odds-api, enrichment, fallback, props, weather, slate, live-window, nfelo, projections, archive, raw-responses]
-sources: [internal/refresh/refresh.go, internal/refresh/rules.go, internal/refresh/sources.go, internal/refresh/nfelo.go, internal/refresh/publish.go, internal/refresh/live.go, internal/db/sync.go, internal/db/nfelo.go, internal/ingest/nfelo/client.go, internal/ingest/archive/transport.go, cmd/server/main.go]
+sources: [internal/refresh/refresh.go, internal/refresh/rules.go, internal/refresh/sources.go, internal/refresh/research.go, internal/refresh/nfelo.go, internal/refresh/publish.go, internal/refresh/live.go, internal/db/sync.go, internal/db/nfelo.go, internal/ingest/nfelo/client.go, internal/ingest/archive/transport.go, cmd/server/main.go]
 last_verified: 2026-11-09
 ---
 
@@ -63,6 +63,10 @@ Each source records its last successful sync in `sync_state.fetched_at`. A sourc
 | `espn:scoreboard`  | Latest week's slate, scores, and status | 10 min while any game is live; 30 min on Sunday or Monday; 6 h otherwise                                                 | Never                                                              |
 | `weather:{gameID}` | Kickoff-window forecast for one game    | 1 h                                                                                                                      | Indoor, unknown venue, more than 48 h before kickoff, or kicked off |
 | `odds:lines`       | The week's game lines                   | 24 h Monday–Friday; 12 h Saturday; 45 min Sunday before the last Sunday kickoff; 3 h after that and all day Monday      | No games, or every game has kicked off                             |
+| `odds:props:{gameID}` | Game prop odds                       | 2 h                                                                                                                     | Once game has kicked off                                           |
+| `espn:roster:{teamID}`| NFL team roster                      | 24 h                                                                                                                    | Never                                                              |
+| `espn:summary:{gameID}`| Game summary and key injuries        | 2 h                                                                                                                     | Game status is FINAL                                               |
+| `espn:gamelog:{athleteID}`| Athlete season game log and stats | 12 h                                                                                                                    | Never                                                              |
 | `nfelo:projections`| The week's model spreads, win probabilities, and QB adjustments | 12 h                                                                                                     | Not a regular-season week, no games, or every game has kicked off  |
 
 "Sunday" and "Monday" mean `America/New_York`. The zone database is embedded in the binary, so it resolves in the
@@ -110,9 +114,20 @@ disabled, not failed. If one provider fails while the other succeeds, refresh lo
 rows, so `odds:lines` does not enter backoff. If every configured provider fails, the sync returns the joined error and
 the source backs off with cached rows still served.
 
-Props are not wired into refresh yet. When `props-research` adds them, each game gets its own `odds:props:{game}`
-source, a 150 credit floor, and Parlay API's one flat 3-credit `/props` call. The Odds API's per-event board costs 1
-credit per market returned and can fill DraftKings links with `odds.MergeProps`.
+Props and research data run on demand through `SyncGameProps`, `SyncGameResearch`, and `SyncPlayerResearch`.
+Opening a game card or research partial triggers an on-demand sync with a short 10-second timeout:
+
+- `odds:props:{gameID}`: Stale after 2 hours, skipped once kickoff has passed. Before matching players, it syncs
+  rosters (`espn:roster:{teamID}`) for both teams. It enforces the Parlay API 150-credit floor (`OddsPropsFloor`). When
+  The Odds API is configured and Parlay API bought props, it calls `EventProps` at or above 100 credits
+  (`TheOddsAPIEnrichFloor`) and merges via `odds.MergeProps` to populate DraftKings prop deep links. If Parlay API is
+  unconfigured, errors, returns no props, or sits below 150 credits, it falls back to The Odds API when at least 25
+  credits remain (`TheOddsAPIFallbackFloor`). Prop players are matched against team rosters via `ResolvePlayerMatch`.
+- `espn:roster:{teamID}`: Stale after 24 hours. Upserts team roster players into `roster_players` with normalized names.
+- `espn:summary:{gameID}`: Stale after 2 hours, skipped when game status is `FINAL`. Stores raw `injuries_json` on
+  `games`.
+- `espn:gamelog:{athleteID}`: Stale after 12 hours. Upserts `player_gamelogs` with market stats. In addition to on-demand
+  research lookups, `Kick()` scans slip legs in the current week and syncs stale game logs in the background.
 
 ## Failure and backoff
 

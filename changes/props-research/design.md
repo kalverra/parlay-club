@@ -196,7 +196,7 @@ Effort: hard (spans three new ESPN endpoints, a schema migration, player normali
 
 ### Phase 2: On-demand prop refresh and ESPN research syncs
 
-- [ ] Add `SyncGameProps`, `SyncGameResearch`, and `SyncPlayerResearch` (plus background gamelog sync for matched slip
+- [x] Add `SyncGameProps`, `SyncGameResearch`, and `SyncPlayerResearch` (plus background gamelog sync for matched slip
       legs) in `internal/refresh` for `odds:props:{game}` (2 h window, 150-credit Parlay API floor, The Odds API
       `EventProps`/`MergeProps` enrichment and fallback, skipped after kickoff), `espn:roster:{team}` (24 h),
       `espn:gamelog:{id}` (12 h), and `espn:summary:{game}` (2 h, non-final), with fake-clock tests proving that opening

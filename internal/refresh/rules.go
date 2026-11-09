@@ -163,3 +163,44 @@ func knownVenue(game db.Game) bool {
 	_, ok := weather.VenueByID(*game.VenueID)
 	return ok
 }
+
+// oddsPropsStale reports whether a game's props are due. It skips a game once
+// it has kicked off. Inside the window props are good for two hours.
+func oddsPropsStale(last, now time.Time, game db.Game) bool {
+	if !now.Before(game.Kickoff) {
+		return false
+	}
+	if last.IsZero() {
+		return true
+	}
+	return !now.Before(last.Add(oddsPropsAge))
+}
+
+// rosterStale reports whether a team's roster is due. Rosters are good for 24 hours.
+func rosterStale(last, now time.Time) bool {
+	if last.IsZero() {
+		return true
+	}
+	return !now.Before(last.Add(rosterAge))
+}
+
+// summaryStale reports whether a game's summary is due. It skips games that
+// are final. Inside the window summaries are good for two hours.
+func summaryStale(last, now time.Time, game db.Game) bool {
+	if game.Status == db.GameFinal {
+		return false
+	}
+	if last.IsZero() {
+		return true
+	}
+	return !now.Before(last.Add(summaryAge))
+}
+
+// gameLogStale reports whether an athlete's game log is due. Game logs are good
+// for 12 hours.
+func gameLogStale(last, now time.Time) bool {
+	if last.IsZero() {
+		return true
+	}
+	return !now.Before(last.Add(gameLogAge))
+}
