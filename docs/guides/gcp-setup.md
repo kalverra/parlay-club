@@ -5,7 +5,7 @@ type: guide
 summary: Create the Google Cloud project resources once, add the secrets and GitHub variables, and run the first deploy that puts the app on Cloud Run.
 tags: [gcp, setup, cloud-run, artifact-registry, secret-manager, workload-identity, github, deploy, litestream]
 sources: [deploy/setup.sh, deploy/entrypoint.sh, .github/workflows/deploy.yml, Dockerfile, internal/config/config.go, .github/workflows/ci.yml]
-last_verified: 2026-11-08
+last_verified: 2026-11-09
 ---
 
 # GCP setup
@@ -32,7 +32,7 @@ You run this once per project. Every step is safe to repeat, and the setup scrip
 
 - Admin access to the GitHub repo, enough to set Actions variables. The repo is `kalverra/parlay-club` unless you forked
   it.
-- Access to [The Odds API](https://the-odds-api.com) for a key, or nothing if you skip odds.
+- Access to [Parlay API](https://parlay-api.com) for a key, or nothing if you skip odds.
 
 ## Steps
 
@@ -101,7 +101,7 @@ printf '%s' "$GOOGLE_CLIENT_ID" | gcloud secrets versions add google-client-id -
 printf '%s' "$GOOGLE_CLIENT_SECRET" | gcloud secrets versions add google-client-secret --data-file=-
 ```
 
-Add the Odds API key. An empty value disables odds calls, which is fine for a first deploy:
+Add the Parlay API key. An empty value disables odds calls, which is fine for a first deploy:
 
 ```sh
 printf '%s' "$ODDS_API_KEY" | gcloud secrets versions add odds-api-key --data-file=-
@@ -208,7 +208,7 @@ The free-tier pieces this app leans on:
 - Cloud Run scales to zero (`--min-instances 0`) and runs at most one instance.
 - Artifact Registry keeps only the last 3 images.
 - The bucket holds the SQLite replica, which is small.
-- The Odds API has its own 500-credit monthly budget, tracked in the app; see
+- Parlay API has its own 1,000-credit monthly budget, tracked in the app; see
   [Data refresh](../concepts/data-refresh.md).
 
 ## Troubleshooting

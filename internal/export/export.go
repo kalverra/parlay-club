@@ -12,7 +12,7 @@ import (
 	"github.com/kalverra/parlay-club/internal/db"
 )
 
-// The books the export offers, spelled as The Odds API keys.
+// The books the export offers, spelled as Parlay API keys.
 const (
 	DraftKings = "draftkings"
 	FanDuel    = "fanduel"
@@ -218,7 +218,7 @@ func (fanDuelCombiner) Combine(linked []LegLink) (string, bool) {
 	return b.String(), true
 }
 
-// fanDuelMarketID pulls the market ID out of the per-leg link The Odds API
+// fanDuelMarketID pulls the market ID out of the per-leg link Parlay API
 // stored. A link without one cannot take part in a combined link.
 func fanDuelMarketID(link string) (string, bool) {
 	parsed, err := url.Parse(link)

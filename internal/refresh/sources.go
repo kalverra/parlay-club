@@ -280,7 +280,7 @@ func (s *Service) writeOdds(
 	return changed, nil
 }
 
-// oddsRow maps one line onto an odds row and converts the Odds API display
+// oddsRow maps one line onto an odds row and converts the Parlay API display
 // name to the game's ESPN abbreviation.
 func oddsRow(game db.Game, line odds.Line, now time.Time) (db.Odds, error) {
 	team := ""

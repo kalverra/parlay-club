@@ -22,7 +22,7 @@ const (
 	SideUnder = "UNDER"
 )
 
-// The Odds API market keys this client reads.
+// Parlay API market keys this client reads.
 const (
 	marketH2H     = "h2h"
 	marketSpreads = "spreads"
