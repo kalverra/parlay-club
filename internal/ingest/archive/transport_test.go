@@ -381,6 +381,45 @@ func TestTransportFallsBackToKnownHostSource(t *testing.T) {
 	assert.Equal(t, "site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard", list[0].Key)
 }
 
+func TestTransportLabelsParlayAPIAndKeepsCredits(t *testing.T) {
+	t.Parallel()
+
+	store, database := openArchiveStore(t)
+	client := &http.Client{Transport: archive.NewTransport(
+		roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Status:     "200 OK",
+				Body:       io.NopCloser(strings.NewReader(`[{"event_id":"evt-1"}]`)),
+				Header: http.Header{
+					"X-Requests-Remaining": []string{"987"},
+					"X-Requests-Last":      []string{"3"},
+				},
+				Request: req,
+			}, nil
+		}),
+		store,
+		func() time.Time { return testClock },
+	)}
+
+	target := "https://parlay-api.com/v1/sports/americanfootball_nfl/props" +
+		"?apiKey=super-secret&eventId=evt-1&markets=team_totals"
+	get(t.Context(), t, client, target)
+
+	list := responses(t, database)
+	require.Len(t, list, 1)
+	row := list[0]
+	assert.Equal(t, "odds", row.Source, "an unlabelled Parlay API call archives as odds")
+	assert.Equal(t, "parlay-api.com/v1/sports/americanfootball_nfl/props", row.Key)
+	assert.NotContains(t, row.URL, "super-secret")
+	assert.Contains(t, row.URL, "apiKey=REDACTED")
+	assert.Contains(t, row.URL, "eventId=evt-1")
+	require.True(t, row.CreditsRemaining.Valid)
+	assert.Equal(t, int64(987), row.CreditsRemaining.Int64)
+	require.True(t, row.CreditsUsed.Valid)
+	assert.Equal(t, int64(3), row.CreditsUsed.Int64, "X-Requests-Last records the call's cost")
+}
+
 // roundTripFunc adapts a function to http.RoundTripper.
 type roundTripFunc func(*http.Request) (*http.Response, error)
 

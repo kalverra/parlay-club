@@ -171,6 +171,138 @@ func TestPropsSkipsOtherEventsOtherPeriodsAndUnpricedRows(t *testing.T) {
 	assert.Empty(t, props)
 }
 
+func TestPropsMapsTheSavedParlayAPIResponse(t *testing.T) {
+	t.Parallel()
+
+	const eventID = "dc56d980f527ffeef89940133b211b13"
+	server := fixtureServer(t, "props_sample.json", "/props",
+		odds.Credits{Remaining: 988, Used: 12, Last: 3}, propsQuery(eventID))
+
+	props, credits, err := odds.NewClient(server.URL, testAPIKey, server.Client()).Props(t.Context(), eventID)
+	require.NoError(t, err)
+	assert.Equal(t, odds.Credits{Remaining: 988, Used: 12, Last: 3}, credits)
+	require.Len(t, props, 16, "one row per priced side on the full-game board")
+
+	want := []odds.Prop{
+		{
+			EventID:    eventID,
+			Book:       "fanduel",
+			MarketType: odds.MarketPassYds,
+			PlayerName: "Joe Burrow",
+			Side:       odds.SideOver,
+			Line:       new(268.5),
+			Price:      -115,
+			Link:       "https://sportsbook.fanduel.com/addToBetslip?marketId=42.578189645&selectionId=20101",
+			Sid:        "20101",
+		},
+		{
+			EventID:    eventID,
+			Book:       "fanduel",
+			MarketType: odds.MarketPassYds,
+			PlayerName: "Joe Burrow",
+			Side:       odds.SideUnder,
+			Line:       new(268.5),
+			Price:      -105,
+			Link:       "https://sportsbook.fanduel.com/addToBetslip?marketId=42.578189645&selectionId=20102",
+			Sid:        "20102",
+		},
+		{
+			EventID:    eventID,
+			Book:       "draftkings",
+			MarketType: odds.MarketPassYds,
+			PlayerName: "Joe Burrow",
+			Side:       odds.SideOver,
+			Line:       new(268.5),
+			Price:      -110,
+		},
+		{
+			EventID:    eventID,
+			Book:       "fanduel",
+			MarketType: odds.MarketPassTds,
+			PlayerName: "Joe Burrow",
+			Side:       odds.SideOver,
+			Line:       new(1.5),
+			Price:      120,
+			Link:       "https://sportsbook.fanduel.com/addToBetslip?marketId=42.578189646&selectionId=20201",
+			Sid:        "20201",
+		},
+		{
+			EventID:    eventID,
+			Book:       "fanduel",
+			MarketType: odds.MarketRecYds,
+			PlayerName: "Ja'Marr Chase",
+			Side:       odds.SideUnder,
+			Line:       new(78.5),
+			Price:      100,
+			Link:       "https://sportsbook.fanduel.com/addToBetslip?marketId=42.578189647&selectionId=20302",
+			Sid:        "20302",
+		},
+		{
+			EventID:    eventID,
+			Book:       "betmgm",
+			MarketType: odds.MarketRushAtt,
+			PlayerName: "Joe Mixon",
+			Side:       odds.SideOver,
+			Line:       new(16.5),
+			Price:      -110,
+		},
+		{
+			EventID:    eventID,
+			Book:       "fanduel",
+			MarketType: odds.MarketAnytimeTD,
+			PlayerName: "Ja'Marr Chase",
+			Side:       odds.SideYES,
+			Line:       nil,
+			Price:      145,
+			Link:       "https://sportsbook.fanduel.com/addToBetslip?marketId=42.578189648&selectionId=20401",
+			Sid:        "20401",
+		},
+		{
+			EventID:    eventID,
+			Book:       "draftkings",
+			MarketType: odds.MarketKickerPts,
+			PlayerName: "Evan McPherson",
+			Side:       odds.SideUnder,
+			Line:       new(7.5),
+			Price:      -115,
+		},
+		{
+			EventID:    eventID,
+			Book:       "fanduel",
+			MarketType: odds.MarketTeamTotal,
+			Team:       "Cincinnati Bengals",
+			Side:       odds.SideOver,
+			Line:       new(23.5),
+			Price:      -110,
+			Link:       "https://sportsbook.fanduel.com/addToBetslip?marketId=42.578189649&selectionId=20501",
+			Sid:        "20501",
+		},
+		{
+			EventID:    eventID,
+			Book:       "prizepicks",
+			MarketType: odds.MarketRecYds,
+			PlayerName: "Tee Higgins",
+			Side:       odds.SideOver,
+			Line:       new(55.5),
+			Price:      -125,
+		},
+	}
+	for _, expected := range want {
+		assert.Contains(t, props, expected)
+	}
+
+	for _, prop := range props {
+		assert.Equal(t, eventID, prop.EventID, "only the requested event's rows survive")
+		if prop.MarketType == odds.MarketTeamTotal {
+			assert.Empty(t, prop.PlayerName, "team totals carry Team, not PlayerName")
+			assert.NotEmpty(t, prop.Team)
+			continue
+		}
+		assert.Empty(t, prop.Team)
+		assert.NotEmpty(t, prop.PlayerName)
+	}
+}
+
 func TestPropsRequiresAnEventID(t *testing.T) {
 	t.Parallel()
 
