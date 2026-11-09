@@ -2,7 +2,6 @@ package odds
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/url"
 )
@@ -31,7 +30,7 @@ const (
 )
 
 // Line is one game-line row from one book, shaped like the odds table. Team is
-// The Odds API's display name; the caller maps it to an ESPN abbreviation. Line
+// the provider's display name; the caller maps it to an ESPN abbreviation. Line
 // is nil for a moneyline and set for a spread or total. Price is American odds.
 // Link and Sid are the book's deep link and selection ID for this outcome, and
 // are empty when the book supplied none. EventSid is the book's own ID for the
@@ -49,10 +48,11 @@ type Line struct {
 	EventSid   string
 }
 
-// Lines fetches every book's moneyline, spread, and total for the events The
-// Odds API returns, and maps them into one row per selection. Unknown markets
-// are ignored so the same client can serve later prop requests; a malformed
-// moneyline, spread, or total is an error rather than a guess.
+// Lines fetches every book's moneyline, spread, and total for the events Parlay
+// API returns, and maps them into one row per priced selection. Unknown markets
+// are ignored so the same client can serve later prop requests; an outcome that
+// is missing its price, or its point on a spread or total, is skipped rather
+// than failing the whole slate.
 func (c *Client) Lines(ctx context.Context) ([]Line, Credits, error) {
 	query := url.Values{}
 	query.Set("regions", "us")
@@ -80,7 +80,7 @@ func parseLines(raw []eventResponse) ([]Line, error) {
 	for _, event := range raw {
 		for _, book := range event.Bookmakers {
 			for _, market := range book.Markets {
-				mapped, err := mapMarket(event.ID, book.Key, book.Sid, market)
+				mapped, err := mapMarket(event, book, market)
 				if err != nil {
 					return nil, fmt.Errorf("event %s book %s market %s: %w",
 						event.ID, book.Key, market.Key, err)
@@ -94,69 +94,67 @@ func parseLines(raw []eventResponse) ([]Line, error) {
 
 // mapMarket turns one market's outcomes into rows, or nil for a market this
 // client does not read.
-func mapMarket(eventID, book, eventSid string, market marketResponse) ([]Line, error) {
+func mapMarket(event eventResponse, book bookmakerResponse, market marketResponse) ([]Line, error) {
 	switch market.Key {
 	case marketH2H:
-		return mapTeamMarket(eventID, book, eventSid, market, MarketML, false)
+		return mapTeamMarket(event, book, market, MarketML, false)
 	case marketSpreads:
-		return mapTeamMarket(eventID, book, eventSid, market, MarketSpread, true)
+		return mapTeamMarket(event, book, market, MarketSpread, true)
 	case marketTotals:
-		return mapTotalMarket(eventID, book, eventSid, market)
+		return mapTotalMarket(event, book, market)
 	default:
 		return nil, nil
 	}
 }
 
 // mapTeamMarket maps a moneyline or spread. Both outcomes name teams; a spread
-// must carry a point.
+// must carry a point. Unpriced outcomes are skipped, and so is a moneyline
+// outcome that names neither team, such as a three-way feed's draw.
 func mapTeamMarket(
-	eventID, book, eventSid string,
+	event eventResponse,
+	book bookmakerResponse,
 	market marketResponse,
 	marketType string,
 	needsPoint bool,
 ) ([]Line, error) {
 	lines := make([]Line, 0, len(market.Outcomes))
 	for _, outcome := range market.Outcomes {
-		price, err := outcomePrice(outcome)
-		if err != nil {
-			return nil, fmt.Errorf("outcome %q: %w", outcome.Name, err)
+		if outcome.Price == nil {
+			continue
 		}
 		if outcome.Name == "" {
 			return nil, fmt.Errorf("outcome %q has no name", outcome.Name)
 		}
-		line, err := outcomePoint(outcome, needsPoint)
-		if err != nil {
-			return nil, fmt.Errorf("outcome %q: %w", outcome.Name, err)
+		if marketType == MarketML && outcome.Name != event.HomeTeam && outcome.Name != event.AwayTeam {
+			continue
+		}
+		if needsPoint && outcome.Point == nil {
+			continue
 		}
 
 		lines = append(lines, Line{
-			EventID:    eventID,
-			Book:       book,
+			EventID:    event.ID,
+			Book:       book.Key,
 			MarketType: marketType,
 			Team:       outcome.Name,
 			Side:       SideTeam,
-			Line:       line,
-			Price:      price,
+			Line:       outcome.Point,
+			Price:      *outcome.Price,
 			Link:       outcome.Link,
 			Sid:        outcome.Sid,
-			EventSid:   eventSid,
+			EventSid:   book.Sid,
 		})
 	}
 	return lines, nil
 }
 
 // mapTotalMarket maps a total's Over and Under. Each outcome carries the point
-// it prices, and the team column stays empty.
-func mapTotalMarket(eventID, book, eventSid string, market marketResponse) ([]Line, error) {
+// it prices, and the team column stays empty. Unpriced outcomes are skipped.
+func mapTotalMarket(event eventResponse, book bookmakerResponse, market marketResponse) ([]Line, error) {
 	lines := make([]Line, 0, len(market.Outcomes))
 	for _, outcome := range market.Outcomes {
-		price, err := outcomePrice(outcome)
-		if err != nil {
-			return nil, fmt.Errorf("total outcome %q: %w", outcome.Name, err)
-		}
-		line, err := outcomePoint(outcome, true)
-		if err != nil {
-			return nil, fmt.Errorf("total outcome %q: %w", outcome.Name, err)
+		if outcome.Price == nil || outcome.Point == nil {
+			continue
 		}
 		side, err := totalSide(outcome.Name)
 		if err != nil {
@@ -164,15 +162,15 @@ func mapTotalMarket(eventID, book, eventSid string, market marketResponse) ([]Li
 		}
 
 		lines = append(lines, Line{
-			EventID:    eventID,
-			Book:       book,
+			EventID:    event.ID,
+			Book:       book.Key,
 			MarketType: MarketTotal,
 			Side:       side,
-			Line:       line,
-			Price:      price,
+			Line:       outcome.Point,
+			Price:      *outcome.Price,
 			Link:       outcome.Link,
 			Sid:        outcome.Sid,
-			EventSid:   eventSid,
+			EventSid:   book.Sid,
 		})
 	}
 	return lines, nil
@@ -188,23 +186,4 @@ func totalSide(name string) (string, error) {
 	default:
 		return "", fmt.Errorf("unknown total outcome %q", name)
 	}
-}
-
-// outcomePrice requires a price on every outcome.
-func outcomePrice(outcome outcomeResponse) (int, error) {
-	if outcome.Price == nil {
-		return 0, errors.New("price is missing")
-	}
-	return *outcome.Price, nil
-}
-
-// outcomePoint returns the line for a market that needs one, and nil otherwise.
-func outcomePoint(outcome outcomeResponse, needed bool) (*float64, error) {
-	if !needed {
-		return nil, nil
-	}
-	if outcome.Point == nil {
-		return nil, errors.New("point is missing")
-	}
-	return outcome.Point, nil
 }

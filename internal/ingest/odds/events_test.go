@@ -37,6 +37,35 @@ func TestEventsParsesTheEventList(t *testing.T) {
 	}, events[len(events)-1])
 }
 
+func TestEventsSkipsFixturesWithoutACommenceTime(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/events", r.URL.Path)
+		assert.Equal(t, apiKeyQuery(), r.URL.Query())
+		w.Header().Set("X-Requests-Remaining", "500")
+		w.Header().Set("X-Requests-Used", "0")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[
+			{"id":"ready","commence_time":"2026-11-08T14:30:00Z","home_team":"Atlanta Falcons","away_team":"Cincinnati Bengals"},
+			{"id":"unreported","commence_time":null,"home_team":"Buffalo Bills","away_team":"New York Jets"},
+			{"id":"blank","commence_time":"","home_team":"Dallas Cowboys","away_team":"Philadelphia Eagles"}
+		]`))
+	}))
+	t.Cleanup(server.Close)
+
+	events, credits, err := odds.NewClient(server.URL, testAPIKey, server.Client()).Events(t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, odds.Credits{Remaining: 500}, credits)
+	require.Len(t, events, 1)
+	assert.Equal(t, odds.Event{
+		ID:           "ready",
+		CommenceTime: time.Date(2026, time.November, 8, 14, 30, 0, 0, time.UTC),
+		HomeTeam:     "Atlanta Falcons",
+		AwayTeam:     "Cincinnati Bengals",
+	}, events[0])
+}
+
 func TestEventsReportsAnHTTPFailure(t *testing.T) {
 	t.Parallel()
 
