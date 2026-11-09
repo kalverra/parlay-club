@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -113,14 +114,15 @@ type SlipMemberView struct {
 
 // LegView is one leg row.
 type LegView struct {
-	ID        int64
-	Selection string
-	Odds      string
-	Model     string // nfelo chip; "" when there is no fresh model
-	Result    string
-	OwnerName string
-	CanEdit   bool
-	CanGrade  bool
+	ID          int64
+	Selection   string
+	Odds        string
+	Model       string // nfelo chip; "" when there is no fresh model
+	Result      string
+	OwnerName   string
+	CanEdit     bool
+	CanGrade    bool
+	ResearchURL string
 }
 
 // ActivityView is one activity line.
@@ -1195,15 +1197,34 @@ func (h *slipHandlers) slipPageData(ctx context.Context, slip db.Slip) (SlipPage
 	playerStats := h.playerStatsForLegs(ctx, legs)
 	for _, leg := range legs {
 		owner := names[leg.UserID]
+		researchURL := ""
+		if leg.PlayerID != nil && *leg.PlayerID != "" {
+			u := url.Values{}
+			u.Set("player_id", *leg.PlayerID)
+			u.Set("leg_id", strconv.FormatInt(leg.ID, 10))
+			if leg.MarketType != "" {
+				u.Set("market", leg.MarketType)
+			}
+			if leg.Line != nil {
+				u.Set("line", fmt.Sprintf("%g", *leg.Line))
+			}
+			researchURL = "/research?" + u.Encode()
+		} else if leg.GameID != nil && *leg.GameID != "" {
+			u := url.Values{}
+			u.Set("game_id", *leg.GameID)
+			u.Set("leg_id", strconv.FormatInt(leg.ID, 10))
+			researchURL = "/research?" + u.Encode()
+		}
 		legsByUser[leg.UserID] = append(legsByUser[leg.UserID], LegView{
-			ID:        leg.ID,
-			Selection: leg.Selection,
-			Odds:      formatOdds(leg.Odds),
-			Model:     legModel(leg, gamesByID),
-			Result:    string(leg.Result),
-			OwnerName: owner,
-			CanEdit:   open && hasUser && leg.UserID == user.ID,
-			CanGrade:  viewerIsMember,
+			ID:          leg.ID,
+			Selection:   leg.Selection,
+			Odds:        formatOdds(leg.Odds),
+			Model:       legModel(leg, gamesByID),
+			Result:      string(leg.Result),
+			OwnerName:   owner,
+			CanEdit:     open && hasUser && leg.UserID == user.ID,
+			CanGrade:    viewerIsMember,
+			ResearchURL: researchURL,
 		})
 	}
 

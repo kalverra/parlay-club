@@ -220,7 +220,7 @@ Effort: medium (self-contained pure rule in `internal/analyzer` and store-to-ana
 - [x] Add `GET /games/{id}/props` for on-demand prop quick-add pills on expanded game cards, player `<datalist>`
       autocomplete in the leg form, and automatic `player_id`/`team` resolution when saving a leg in `internal/web`,
       with handler tests
-- [ ] Build `GET /research`, `GET /research/games/{id}`, `GET /research/players/{espnID}`, and `POST /research/matches`
+- [x] Build `GET /research`, `GET /research/games/{id}`, `GET /research/players/{espnID}`, and `POST /research/matches`
       (last-5 hit bars with median and mean marked, season games played, position-filtered key injuries, manual match
       fixes, and links from game cards and slip legs), with handler and template tests
 - [ ] Docs: update `docs/concepts/slips.md` and `docs/reference/routes.md` with prop quick-add, player autocomplete, and
