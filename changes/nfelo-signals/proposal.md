@@ -1,6 +1,6 @@
 ---
 slug: nfelo-signals
-status: designed
+status: implementing
 created: "2026-11-05"
 depends_on:
     - analyzer
