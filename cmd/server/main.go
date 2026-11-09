@@ -119,6 +119,7 @@ func run() error {
 		Store:      store,
 		Slips:      slipService,
 		Stream:     stream,
+		Refresh:    refresher,
 	})
 
 	server := &http.Server{

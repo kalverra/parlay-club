@@ -355,3 +355,79 @@ func TestSaveManualPlayerMatch(t *testing.T) {
 	assert.Equal(t, new("BUF"), slipLegs[0].Team)
 	assert.Equal(t, new("3918298"), slipLegs[0].PlayerID)
 }
+
+func TestWeekPlayerNames(t *testing.T) {
+	t.Parallel()
+
+	store, _ := openTestStore(t)
+	week := createTestWeek(t, store, 10)
+	now := time.Date(2026, time.November, 9, 12, 0, 0, 0, time.UTC)
+
+	// No games in week
+	names, err := store.WeekPlayerNames(t.Context(), week.ID)
+	require.NoError(t, err)
+	assert.Empty(t, names)
+
+	game, err := store.UpsertGame(t.Context(), testSlateGame(week)) // BUF vs MIA
+	require.NoError(t, err)
+
+	// Add roster players
+	require.NoError(t, store.UpsertRosterPlayers(t.Context(), []db.RosterPlayer{
+		{
+			AthleteID:  "3918298",
+			Team:       "BUF",
+			ESPNTeamID: "2",
+			FullName:   "Josh Allen",
+			Position:   "QB",
+			UpdatedAt:  now,
+		},
+		{
+			AthleteID:  "4429013",
+			Team:       "MIA",
+			ESPNTeamID: "15",
+			FullName:   "De'Von Achane",
+			Position:   "RB",
+			UpdatedAt:  now,
+		},
+		{
+			AthleteID:  "4047646",
+			Team:       "KC",
+			ESPNTeamID: "12",
+			FullName:   "Patrick Mahomes",
+			Position:   "QB",
+			UpdatedAt:  now,
+		},
+	}))
+
+	// Add prop odds for the game with another player not on roster
+	_, err = store.UpsertOdds(t.Context(), []db.Odds{
+		{
+			GameID:     game.ID,
+			Book:       "draftkings",
+			MarketType: "PASS_YDS",
+			Team:       "BUF",
+			PlayerName: "Josh Allen", // duplicate with roster
+			Side:       "OVER",
+			Line:       new(265.5),
+			Price:      -115,
+			FetchedAt:  now,
+		},
+		{
+			GameID:     game.ID,
+			Book:       "draftkings",
+			MarketType: "REC_YDS",
+			Team:       "BUF",
+			PlayerName: "Dalton Kincaid", // in odds, not in roster
+			Side:       "OVER",
+			Line:       new(45.5),
+			Price:      -110,
+			FetchedAt:  now,
+		},
+	})
+	require.NoError(t, err)
+
+	names, err = store.WeekPlayerNames(t.Context(), week.ID)
+	require.NoError(t, err)
+	// Expected: sorted and deduplicated, only for BUF and MIA teams/game
+	assert.Equal(t, []string{"Dalton Kincaid", "De'Von Achane", "Josh Allen"}, names)
+}

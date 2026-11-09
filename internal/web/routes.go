@@ -31,6 +31,13 @@ type GroupsFrom func(context.Context) []GroupOption
 // groups.From; tests pass a stub.
 type GroupFrom func(context.Context) (db.Group, bool)
 
+// Refresher describes on-demand sync for game props and research.
+type Refresher interface {
+	SyncGameProps(ctx context.Context, gameID string) error
+	SyncGameResearch(ctx context.Context, gameID string) error
+	SyncPlayerResearch(ctx context.Context, athleteID string) error
+}
+
 // Dependencies are the services the app's routes need. A nil store or slip
 // service leaves the slip screen in its placeholder state, which keeps the
 // shell's own tests small.
@@ -43,6 +50,7 @@ type Dependencies struct {
 	Store      *db.Store
 	Slips      *slips.Service
 	Stream     *live.Stream
+	Refresh    Refresher
 }
 
 // pageRoutes are the shell's pages without per-slip data. The slip screen owns

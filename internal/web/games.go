@@ -25,6 +25,7 @@ type gameHandlers struct {
 // like the slip screen.
 func (h *gameHandlers) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /games", h.games)
+	mux.HandleFunc("GET /games/{id}/props", h.props)
 }
 
 // GamesPage is the full Games tab: one card per game in the latest week and the
@@ -37,6 +38,24 @@ type GamesPage struct {
 	CanAdd       bool
 	LinesAtISO   string
 	LinesAtLabel string
+}
+
+// GamePropsView is the rendered partial for GET /games/{id}/props.
+type GamePropsView struct {
+	GameID     string
+	SlipID     int64
+	HasSlip    bool
+	CanAdd     bool
+	TeamTotals []GameLineView
+	Players    []GamePlayerPropsView
+}
+
+// GamePlayerPropsView groups prop lines for one athlete.
+type GamePlayerPropsView struct {
+	Name     string
+	Team     string
+	PlayerID string
+	Pills    []GameLineView
 }
 
 // GameCardView is one game card.
@@ -60,13 +79,15 @@ type GameCardView struct {
 
 // GameLineView is one market selection with the price quick-add posts.
 type GameLineView struct {
-	Text   string
-	Price  string
-	Market string
-	Team   string
-	Side   string
-	Line   string
-	Odds   int
+	Text       string
+	Price      string
+	Market     string
+	Team       string
+	PlayerName string
+	PlayerID   string
+	Side       string
+	Line       string
+	Odds       int
 }
 
 // GameBadgeView is one weather or venue badge.
@@ -432,6 +453,233 @@ func (h *gameHandlers) render(w http.ResponseWriter, data GamesPage) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	_, _ = w.Write(html)
+}
+
+// renderPartial writes one HTMX fragment.
+func (h *gameHandlers) renderPartial(w http.ResponseWriter, name string, data any) {
+	html, err := h.deps.Renderer.RenderPartial(name, data)
+	if err != nil {
+		h.deps.Logger.Error().Err(err).Str("partial", name).Msg("render partial")
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = w.Write(html)
+}
+
+// props renders on-demand prop quick-add pills for one expanded game card.
+func (h *gameHandlers) props(w http.ResponseWriter, r *http.Request) {
+	gameID := r.PathValue("id")
+	if gameID == "" || h.deps.Store == nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	game, err := h.deps.Store.GameByID(r.Context(), gameID)
+	if errors.Is(err, db.ErrGameNotFound) {
+		http.NotFound(w, r)
+		return
+	}
+	if err != nil {
+		h.serverError(w, err)
+		return
+	}
+
+	if h.deps.Refresh != nil {
+		if err := h.deps.Refresh.SyncGameProps(r.Context(), gameID); err != nil {
+			h.deps.Logger.Warn().Err(err).Str("game_id", gameID).Msg("sync game props on demand")
+		}
+	}
+
+	rows, err := h.deps.Store.OddsForGame(r.Context(), gameID)
+	if err != nil {
+		h.serverError(w, err)
+		return
+	}
+
+	user, hasUser := h.user(r.Context())
+	homeBook := ""
+	if hasUser && user.HomeBook != nil {
+		homeBook = *user.HomeBook
+	}
+
+	view := GamePropsView{
+		GameID: game.ID,
+	}
+	if group, ok := h.group(r.Context()); ok {
+		slips, err := h.deps.Store.SlipsForWeek(r.Context(), group.ID, game.WeekID)
+		if err == nil && len(slips) > 0 {
+			view.SlipID = slips[0].ID
+			view.HasSlip = true
+			view.CanAdd = slips[0].Status == db.SlipOpen
+		}
+	}
+
+	propRows := filterPropOdds(rows)
+	propRows = currentOdds(propRows)
+
+	view.TeamTotals = buildTeamTotals(game, propRows, homeBook)
+	view.Players = h.buildPlayerProps(r.Context(), game, propRows, homeBook)
+
+	h.renderPartial(w, "game-props", view)
+}
+
+func filterPropOdds(rows []db.Odds) []db.Odds {
+	out := make([]db.Odds, 0, len(rows))
+	for _, row := range rows {
+		if row.MarketType == "TEAM_TOTAL" || row.PlayerName != "" || isPlayerMarket(row.MarketType) {
+			out = append(out, row)
+		}
+	}
+	return out
+}
+
+func buildTeamTotals(game db.Game, rows []db.Odds, homeBook string) []GameLineView {
+	var views []GameLineView
+	for _, team := range []string{game.AwayTeam, game.HomeTeam} {
+		if team == "" {
+			continue
+		}
+		for _, side := range []string{"OVER", "UNDER"} {
+			var matching []db.Odds
+			for _, r := range rows {
+				if r.MarketType == "TEAM_TOTAL" && r.Team == team && r.Side == side {
+					matching = append(matching, r)
+				}
+			}
+			if line, ok := pickGameLine(matching, homeBook); ok {
+				line.Market = "TEAM_TOTAL"
+				line.Team = team
+				line.Side = side
+				line.Text = team + " " + titleSide(side) + " " + line.Line
+				views = append(views, line)
+			}
+		}
+	}
+	return views
+}
+
+var propMarketOrder = []string{
+	"PASS_YDS",
+	"PASS_TDS",
+	"RUSH_YDS",
+	"RUSH_ATT",
+	"REC_YDS",
+	"RECEPTIONS",
+	"ANYTIME_TD",
+	"KICKER_PTS",
+}
+
+func (h *gameHandlers) buildPlayerProps(
+	ctx context.Context,
+	game db.Game,
+	rows []db.Odds,
+	homeBook string,
+) []GamePlayerPropsView {
+	var playerNames []string
+	seen := make(map[string]bool)
+	for _, r := range rows {
+		name := strings.TrimSpace(r.PlayerName)
+		if name != "" && !seen[name] {
+			seen[name] = true
+			playerNames = append(playerNames, name)
+		}
+	}
+
+	var players []GamePlayerPropsView
+	for _, name := range playerNames {
+		athleteID := ""
+		team := ""
+		if h.deps.Store != nil {
+			aid, tm, err := h.deps.Store.ResolvePlayerMatch(ctx, name, game.HomeTeam, game.AwayTeam)
+			if err == nil {
+				athleteID = aid
+				team = tm
+			}
+		}
+		if team == "" {
+			for _, r := range rows {
+				if r.PlayerName == name && r.Team != "" {
+					team = r.Team
+					break
+				}
+			}
+		}
+
+		var pills []GameLineView
+		for _, market := range propMarketOrder {
+			if market == "ANYTIME_TD" {
+				var matching []db.Odds
+				for _, r := range rows {
+					if r.PlayerName == name && r.MarketType == "ANYTIME_TD" && r.Side == "YES" {
+						matching = append(matching, r)
+					}
+				}
+				if pill, ok := pickGameLine(matching, homeBook); ok {
+					pill.Market = "ANYTIME_TD"
+					pill.PlayerName = name
+					pill.PlayerID = athleteID
+					pill.Team = team
+					pill.Side = "YES"
+					pill.Text = "Anytime TD"
+					pills = append(pills, pill)
+				}
+			} else {
+				for _, side := range []string{"OVER", "UNDER"} {
+					var matching []db.Odds
+					for _, r := range rows {
+						if r.PlayerName == name && r.MarketType == market && r.Side == side {
+							matching = append(matching, r)
+						}
+					}
+					if pill, ok := pickGameLine(matching, homeBook); ok {
+						pill.Market = market
+						pill.PlayerName = name
+						pill.PlayerID = athleteID
+						pill.Team = team
+						pill.Side = side
+						label := marketLabels[market]
+						if pill.Line != "" {
+							pill.Text = titleSide(side) + " " + pill.Line + " " + label
+						} else {
+							pill.Text = titleSide(side) + " " + label
+						}
+						pills = append(pills, pill)
+					}
+				}
+			}
+		}
+
+		if len(pills) > 0 {
+			players = append(players, GamePlayerPropsView{
+				Name:     name,
+				Team:     team,
+				PlayerID: athleteID,
+				Pills:    pills,
+			})
+		}
+	}
+
+	slices.SortFunc(players, func(a, b GamePlayerPropsView) int {
+		teamScore := func(t string) int {
+			switch t {
+			case game.AwayTeam:
+				return 0
+			case game.HomeTeam:
+				return 1
+			default:
+				return 2
+			}
+		}
+		sa, sb := teamScore(a.Team), teamScore(b.Team)
+		if sa != sb {
+			return sa - sb
+		}
+		return strings.Compare(a.Name, b.Name)
+	})
+
+	return players
 }
 
 // serverError logs err and answers 500.
