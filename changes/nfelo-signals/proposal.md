@@ -1,9 +1,10 @@
 ---
 slug: nfelo-signals
-status: proposed
-created: 2026-11-05
+status: designed
+created: "2026-11-05"
+depends_on:
+    - analyzer
 effort: medium
-depends_on: [analyzer]
 ---
 
 # nfelo signals in the analyzer
