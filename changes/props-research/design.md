@@ -212,7 +212,7 @@ Effort: medium (self-contained pure rule in `internal/analyzer` and store-to-ana
 - [x] Add the `median_trap` rule in `internal/analyzer` with table-driven threshold tests (`line > L5 median`,
       `line <= median`, `< 3` games, unmatched player, and the `line < mean` sentence) and wire stored
       `player_gamelogs` into `internal/web/analyzer.go` with handler tests
-- [ ] Docs: update `docs/reference/analyzer-rules.md` and `docs/concepts/analyzer.md` with `median_trap` and live player
+- [x] Docs: update `docs/reference/analyzer-rules.md` and `docs/concepts/analyzer.md` with `median_trap` and live player
       stats, and remove the built `median_trap` section from `plan/analyzer.md`
 
 ### Phase 4: Prop quick-add, player autocomplete, and Research tab

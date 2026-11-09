@@ -5,7 +5,7 @@
 ## Concept
 
 - [Access](concepts/access.md): How Google sign-in, open sign-up, and signed session and group cookies decide who is using the app and which group they see.
-- [Analyzer](concepts/analyzer.md): How the sharp-friend banner under a slip turns legs, games, weather, and nfelo's model into plain-Go warnings, and the tone those warnings keep.
+- [Analyzer](concepts/analyzer.md): How the sharp-friend banner under a slip turns legs, games, weather, player stats, and nfelo's model into plain-Go warnings, and the tone those warnings keep.
 - [Response archive](concepts/archive.md): How every successful external API response is kept raw in SQLite, how the source key labels it, and how to read the stored metadata and gzipped bodies.
 - [Data refresh](concepts/data-refresh.md): How page loads and on-demand views drive lazy syncs of the slate, weather, game lines, props, rosters, injuries, game logs, and nfelo projections, with per-source staleness windows, single-flight, failure backoff, tiered Parlay API and The Odds API credit floors, and an archive of every successful response.
 - [Export](concepts/export.md): How a locked slip turns stored sportsbook deep links into a one-tap combined DraftKings or FanDuel link, with per-leg taps, a manual list, and copy text for every pick that has no link.
@@ -37,7 +37,7 @@
 
 ## Reference
 
-- [Analyzer rules](reference/analyzer-rules.md): The stable IDs, severities, triggers, and example messages for the correlation, weather, key-number, chalk, and nfelo model rules in internal/analyzer.
+- [Analyzer rules](reference/analyzer-rules.md): The stable IDs, severities, triggers, and example messages for the correlation, weather, key-number, chalk, player stats, and nfelo model rules in internal/analyzer.
 - [Configuration](reference/config.md): Environment variables the server reads, their dev defaults, the odds provider keys they configure, and the values it rejects in prod.
 - [Data sources](reference/data-sources.md): The free sources behind the slate, the ESPN scoreboard endpoint and its Sunday and Monday filter, the Open-Meteo forecast behind a game's weather, Parlay API game lines and props with The Odds API enrichment and fallback, ESPN rosters, game logs, and summary injuries, player matching, nfelo model projections, bookmakers, deep links, tiered credit floors, and the raw response archive every successful call leaves.
 - [History file](reference/history-file.md): The seed/history.yaml format, its slip and leg fields and defaults, how boot imports it into the first group, which slips are skipped, and how errors and users are handled.

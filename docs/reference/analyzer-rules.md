@@ -2,9 +2,9 @@
 id: analyzer-rules
 title: Analyzer rules
 type: reference
-summary: The stable IDs, severities, triggers, and example messages for the correlation, weather, key-number, chalk, and nfelo model rules in internal/analyzer.
-tags: [analyzer, rules, warnings, correlation, severity, slips, nfelo, model, quarterback]
-sources: [internal/analyzer/analyzer.go, internal/analyzer/rules.go, internal/analyzer/analyzer_test.go, internal/web/analyzer.go]
+summary: The stable IDs, severities, triggers, and example messages for the correlation, weather, key-number, chalk, player stats, and nfelo model rules in internal/analyzer.
+tags: [analyzer, rules, warnings, correlation, severity, slips, nfelo, model, quarterback, props, player-stats]
+sources: [internal/analyzer/analyzer.go, internal/analyzer/rules.go, internal/analyzer/analyzer_test.go, internal/web/analyzer.go, internal/db/players.go]
 last_verified: 2026-11-09
 ---
 
@@ -17,7 +17,8 @@ deterministic: no I/O, no clock, and no LLM calls. It returns warnings with a st
 the legs involved.
 
 When nfelo's model is fresh, `hook` and `chalk` add a sentence about it, and `qb_drag` reads it for a downgraded
-quarterback. A game without model data behaves exactly as it did before the model existed.
+quarterback. When player game logs exist, `median_trap` warns when a yardage over sits above recent game medians. A game
+without model data or a leg without player stats behaves exactly as it did before those sources existed.
 
 Rule IDs are stable across releases. A warning's severity is `Info`, `Warn`, or `Danger`.
 
@@ -33,6 +34,9 @@ Rule IDs are stable across releases. A warning's severity is `Info`, `Warn`, or 
 - **Model data**: nfelo's pre-game spread, win probability, and QB adjustments for the game. `internal/web` attaches it
   only when the game is `SCHEDULED` and the last successful `nfelo:projections` fetch is under 72 hours old. Otherwise
   the game has no model, and the model sentences and `qb_drag` stay quiet.
+- **Player stats**: `stats` maps ESPN athlete IDs to recent game logs per market, most recent first. `internal/web`
+  populates it from `player_gamelogs` for every matched `PlayerID` on the slip. An unmatched player, a missing game log,
+  or a market with fewer than 3 games leaves player-stat rules quiet.
 - When a rule's legs belong to more than one person, the message names each owner.
 
 ## Rule Set A: Correlation
@@ -190,3 +194,25 @@ team, naming the QB and every matching leg; when two people own legs, it names b
 > Over 20.5.
 
 A game without fresh model data never triggers the rule.
+
+## Props and player stats
+
+| Rule          | Severity | Fires when                                                                                           |
+| ------------- | -------- | ---------------------------------------------------------------------------------------------------- |
+| `median_trap` | `Warn`   | A yardage over on a matched player with ≥ 3 games where the line is above the player's last-5 median. |
+
+### `median_trap` — Warn
+
+A yardage `OVER` (`PASS_YDS`, `RUSH_YDS`, or `REC_YDS`) on a matched player with at least 3 games in that market this season,
+whose line sits higher than their median over the last 5 games (or all season games when under 5). One warning per
+qualifying leg.
+
+> Khalil Shakir's last-5 median is 41 yards, so 52.5 is a stretch.
+
+When the line is also below the player's season average, the message adds that the average is propped up by one big
+game:
+
+> Khalil Shakir's last-5 median is 41 yards, so 52.5 is a stretch. His 58-yard average is propped up by one big game.
+
+An unmatched player (`PlayerID` is empty), an `UNDER` side, non-yardage markets (`RECEPTIONS`, `PASS_TDS`, `ANYTIME_TD`),
+and players with fewer than 3 games stay quiet.
