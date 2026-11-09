@@ -154,7 +154,7 @@ Effort: medium (a new source, a migration, three rules, and a view change, all o
 
 ### Phase 1: Sync nfelo projections
 
-- [ ] Add `internal/ingest/nfelo` with `Projections`, the team-code map, a saved fixture of the real CSV, and tests for
+- [x] Add `internal/ingest/nfelo` with `Projections`, the team-code map, a saved fixture of the real CSV, and tests for
       header-name parsing and every error case; use the fixture to confirm the spread column and fix the Approach if it
       is wrong
 - [ ] Add migration `0006_nfelo_games.sql`, the store read and upsert, and the `nfelo:projections` refresh source with a
