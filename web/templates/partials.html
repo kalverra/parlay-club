@@ -53,6 +53,12 @@
               <p class="truncate text-sm font-medium">{{.Selection}}</p>
               <div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-400">
                 <span>{{.Odds}}</span>
+                {{if .Model}}
+                  <span
+                    class="whitespace-nowrap rounded-full border border-slate-700 bg-slate-950 px-1.5 py-0.5 text-slate-300"
+                    >{{.Model}}</span
+                  >
+                {{end}}
                 {{if .CanGrade}}
                   <details class="relative">
                     <summary

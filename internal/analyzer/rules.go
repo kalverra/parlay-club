@@ -402,7 +402,7 @@ func qbDrag(a *analysis) []Warning {
 // minus the model's spread for the same team, so a positive cushion means the
 // model is farther from the number than the leg.
 func hookModelNote(game Game, leg Leg) string {
-	model, ok := game.modelSpread(leg.Team)
+	model, ok := game.ModelSpread(leg.Team)
 	if !ok {
 		return ""
 	}
@@ -423,7 +423,7 @@ func hookModelNote(game Game, leg Leg) string {
 
 // chalkModelNote appends nfelo's win probability to a moneyline chalk warning.
 func chalkModelNote(game Game, leg Leg) string {
-	probability, ok := game.modelWinProb(leg.Team)
+	probability, ok := game.ModelWinProb(leg.Team)
 	if !ok {
 		return ""
 	}

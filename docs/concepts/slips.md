@@ -3,9 +3,9 @@ id: slips
 title: Slips
 type: concept
 summary: How a group builds one shared parlay a week from the slate, with members, legs, quick-add, create-slip defaults, grading, and the editing and locking rules.
-tags: [slips, weeks, legs, members, locking, grading, results, activity, groups, games, quick-add]
-sources: [internal/slips/slips.go, internal/slips/rules.go, internal/db/slips.go, internal/db/legs.go, internal/db/weeks.go, internal/db/games.go, internal/web/games.go]
-last_verified: 2026-11-08
+tags: [slips, weeks, legs, members, locking, grading, results, activity, groups, games, quick-add, nfelo]
+sources: [internal/slips/slips.go, internal/slips/rules.go, internal/db/slips.go, internal/db/legs.go, internal/db/weeks.go, internal/db/games.go, internal/web/games.go, internal/web/slips.go]
+last_verified: 2026-11-09
 ---
 
 # Slips
@@ -73,6 +73,11 @@ line, American odds, and a display `selection` generated from those fields.
   every game and allows no game. `?game_id=` preselects one when a card opens the form.
 - A leg needs a game, except on a slip for a past week, where the game is optional and `OTHER` is the usual market.
 - `OTHER` legs skip the analyzer and grade by hand.
+
+The slip panel draws each leg as a row: the selection, then the odds, the model chip, and the result. A `SPREAD` or
+`ML` leg with a fresh nfelo model shows it beside the odds, from that leg's team's side: `nfelo -5.0` for a spread or
+`nfelo 76%` for a moneyline. Totals and props show no chip, and a missing row, a fetch older than 72 hours, or a live
+game leaves it off.
 
 `db.Store.CreateLeg` starts every leg `PENDING` and treats an odds value of 0 as -110.
 

@@ -2,6 +2,9 @@ package web
 
 import (
 	"context"
+	"fmt"
+	"math"
+	"strconv"
 	"time"
 
 	"github.com/kalverra/parlay-club/internal/analyzer"
@@ -36,16 +39,10 @@ type AnalyzerLegView struct {
 	Selection string
 }
 
-// analyzerView maps the slip's legs and the week's games into analyzer inputs,
-// then shapes the warnings for the banner. The games map is keyed by the same
-// ID the legs carry so no leg is dropped. nfelo rows are only present when the
-// caller has already checked that they are fresh.
-func analyzerView(
-	legs []db.Leg,
-	games []db.Game,
-	names map[int64]string,
-	nfelo map[string]db.NfeloGame,
-) AnalyzerView {
+// analyzerGameMap maps the week's games into analyzer inputs. The map is keyed
+// by the same ID the legs carry so no leg is dropped. nfelo rows are only
+// present when the caller has already checked that they are fresh.
+func analyzerGameMap(games []db.Game, nfelo map[string]db.NfeloGame) map[string]analyzer.Game {
 	gamesByID := make(map[string]analyzer.Game, len(games))
 	for _, game := range games {
 		projection, ok := nfelo[game.ID]
@@ -55,7 +52,15 @@ func analyzerView(
 		}
 		gamesByID[game.ID] = analyzerGame(game, &projection)
 	}
+	return gamesByID
+}
 
+// analyzerView shapes the analyzer's warnings for the banner.
+func analyzerView(
+	legs []db.Leg,
+	gamesByID map[string]analyzer.Game,
+	names map[int64]string,
+) AnalyzerView {
 	input := make([]analyzer.Leg, 0, len(legs))
 	legsByID := make(map[int64]db.Leg, len(legs))
 	for _, leg := range legs {
@@ -86,6 +91,45 @@ func analyzerView(
 		view.Warnings = append(view.Warnings, card)
 	}
 	return view
+}
+
+// legModel is the nfelo chip beside a leg's odds. A spread shows the model's
+// number from the leg team's side; a moneyline shows the model's win
+// probability. Anything else, or a game without model data, has no chip.
+func legModel(leg db.Leg, games map[string]analyzer.Game) string {
+	if leg.Team == nil || leg.GameID == nil {
+		return ""
+	}
+	game, ok := games[*leg.GameID]
+	if !ok || game.Nfelo == nil {
+		return ""
+	}
+	switch leg.MarketType {
+	case "SPREAD":
+		spread, ok := game.ModelSpread(*leg.Team)
+		if !ok {
+			return ""
+		}
+		return "nfelo " + formatModelSpread(spread)
+	case "ML":
+		probability, ok := game.ModelWinProb(*leg.Team)
+		if !ok {
+			return ""
+		}
+		return fmt.Sprintf("nfelo %d%%", int(math.Round(probability*100)))
+	default:
+		return ""
+	}
+}
+
+// formatModelSpread prints a model spread with one decimal and a plus on a
+// positive number.
+func formatModelSpread(spread float64) string {
+	text := strconv.FormatFloat(spread, 'f', 1, 64)
+	if spread > 0 {
+		return "+" + text
+	}
+	return text
 }
 
 // analyzerGame carries the slice of a stored game a rule reads. nfelo data is
