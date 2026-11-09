@@ -18,6 +18,9 @@ import (
 const (
 	// DefaultBaseURL is Parlay API's NFL root.
 	DefaultBaseURL = "https://parlay-api.com/v1/sports/americanfootball_nfl"
+	// TheOddsAPIBaseURL is The Odds API's NFL root. The client parses the same
+	// event and game-line shapes from both providers.
+	TheOddsAPIBaseURL = "https://api.the-odds-api.com/v4/sports/americanfootball_nfl"
 	// eventsPath is the free event-list endpoint under the base URL.
 	eventsPath = "/events"
 	// oddsPath is the game-lines endpoint under the base URL.

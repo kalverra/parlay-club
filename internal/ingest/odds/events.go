@@ -71,12 +71,14 @@ type marketResponse struct {
 }
 
 // outcomeResponse is one priced selection. Point is set for spreads and totals
-// and absent for moneylines. Link and Sid are sent only when the request asks
+// and absent for moneylines. Description names the player or team a prop prices
+// and is empty on game lines. Link and Sid are sent only when the request asks
 // for them with includeLinks and includeSids, and a book may omit either.
 type outcomeResponse struct {
-	Name  string   `json:"name"`
-	Price *int     `json:"price"`
-	Point *float64 `json:"point"`
-	Link  string   `json:"link"`
-	Sid   string   `json:"sid"`
+	Name        string   `json:"name"`
+	Description string   `json:"description"`
+	Price       *int     `json:"price"`
+	Point       *float64 `json:"point"`
+	Link        string   `json:"link"`
+	Sid         string   `json:"sid"`
 }
