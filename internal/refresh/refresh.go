@@ -32,6 +32,9 @@ const (
 	ScoreboardSource = "espn:scoreboard"
 	// OddsLinesSource is the week's game lines.
 	OddsLinesSource = "odds:lines"
+	// TheOddsAPISource is The Odds API's event list, lines, and props. Its
+	// "odds:" prefix makes the archive label its responses as odds.
+	TheOddsAPISource = "odds:theoddsapi"
 	// weatherSourcePrefix keys per-game forecasts.
 	weatherSourcePrefix = "weather:"
 )
@@ -62,6 +65,12 @@ const (
 const (
 	// OddsLinesFloor is the least remaining balance that permits the lines call.
 	OddsLinesFloor = 50
+	// TheOddsAPIEnrichFloor is the least remaining The Odds API balance that
+	// permits enrichment while Parlay API supplied the week's lines.
+	TheOddsAPIEnrichFloor = 100
+	// TheOddsAPIFallbackFloor is the least remaining The Odds API balance that
+	// lets it serve the week's lines when Parlay API is unavailable.
+	TheOddsAPIFallbackFloor = 25
 )
 
 // Clock returns the current time. The server passes time.Now; tests pass a
@@ -91,25 +100,27 @@ type Publisher interface {
 
 // Deps are the services refresh works with.
 type Deps struct {
-	Store      *db.Store
-	Scoreboard ScoreboardClient
-	Forecast   ForecastClient
-	Lines      LinesClient
-	Publisher  Publisher
-	Now        Clock
-	Logger     zerolog.Logger
+	Store         *db.Store
+	Scoreboard    ScoreboardClient
+	Forecast      ForecastClient
+	Lines         LinesClient
+	FallbackLines LinesClient
+	Publisher     Publisher
+	Now           Clock
+	Logger        zerolog.Logger
 }
 
 // Service runs background syncs. Its zero value is not usable; build one with
 // New.
 type Service struct {
-	store      *db.Store
-	scoreboard ScoreboardClient
-	forecast   ForecastClient
-	lines      LinesClient
-	publisher  Publisher
-	now        Clock
-	logger     zerolog.Logger
+	store         *db.Store
+	scoreboard    ScoreboardClient
+	forecast      ForecastClient
+	lines         LinesClient
+	fallbackLines LinesClient
+	publisher     Publisher
+	now           Clock
+	logger        zerolog.Logger
 
 	flight singleflight.Group
 
@@ -135,14 +146,15 @@ func New(deps Deps) *Service {
 		now = time.Now
 	}
 	return &Service{
-		store:      deps.Store,
-		scoreboard: deps.Scoreboard,
-		forecast:   deps.Forecast,
-		lines:      deps.Lines,
-		publisher:  deps.Publisher,
-		now:        now,
-		logger:     deps.Logger,
-		backoff:    make(map[string]time.Time),
+		store:         deps.Store,
+		scoreboard:    deps.Scoreboard,
+		forecast:      deps.Forecast,
+		lines:         deps.Lines,
+		fallbackLines: deps.FallbackLines,
+		publisher:     deps.Publisher,
+		now:           now,
+		logger:        deps.Logger,
+		backoff:       make(map[string]time.Time),
 	}
 }
 
