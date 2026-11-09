@@ -164,7 +164,7 @@ Effort: medium (a new source, a migration, three rules, and a view change, all o
 
 ### Phase 2: Rules and slip view
 
-- [ ] Add `analyzer.Nfelo`, the web mapping with the `SCHEDULED` and 72 hour guards, the `hook` and `chalk` sentences,
+- [x] Add `analyzer.Nfelo`, the web mapping with the `SCHEDULED` and 72 hour guards, the `hook` and `chalk` sentences,
       and the new `qb_drag` rule, with the table tests and the nil-input regression test
 - [ ] Add `LegView.Model` and the leg row chip, with a handler test and a phone-width check
 - [ ] Docs: add the three changes to `docs/reference/analyzer-rules.md` and nfelo as an input in

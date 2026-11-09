@@ -43,6 +43,7 @@ const (
 	ruleHook               = "hook"
 	ruleTotalKeyNumber     = "total_key_number"
 	ruleChalk              = "chalk"
+	ruleQBDrag             = "qb_drag"
 )
 
 // Thresholds from plan/analyzer.md.
@@ -58,6 +59,11 @@ const (
 	fakeWeatherWindMax   = 10.0
 
 	chalkOdds = -230
+
+	// qbDragElo is the nfelo QB adjustment at which a team's QB is dragging the
+	// rating down. 25 Elo is about a point of spread.
+	qbDragElo   = -30.0
+	eloPerPoint = 25.0
 )
 
 // totalKeyNumbers are the NFL final totals that decide the most bets.
@@ -307,6 +313,9 @@ func hook(a *analysis) []Warning {
 		}
 
 		message := hookMessage(leg, *leg.Line, landing, buyTo, moneyline)
+		if game, ok := a.games[leg.GameID]; ok {
+			message += hookModelNote(game, leg)
+		}
 		warnings = append(warnings, a.warning(ruleHook, Warn, message, []Leg{leg}))
 	}
 	return warnings
@@ -345,9 +354,138 @@ func chalk(a *analysis) []Warning {
 		message := fmt.Sprintf(
 			"This %d leg only bumps the payout %s× but still busts the slip about %d%% of the time.",
 			leg.Odds, multiplierText(multiplier), int(math.Round(bust*100)))
+		if leg.Market == marketML {
+			if game, ok := a.games[leg.GameID]; ok {
+				message += chalkModelNote(game, leg)
+			}
+		}
 		warnings = append(warnings, a.warning(ruleChalk, Warn, message, []Leg{leg}))
 	}
 	return warnings
+}
+
+// qbDrag notes a team whose nfelo QB adjustment drags the rating down while the
+// slip asks that team to do the things a good QB does. It gives one warning per
+// game and team.
+func qbDrag(a *analysis) []Warning {
+	var warnings []Warning
+	seen := make(map[string]bool)
+	for _, leg := range a.legs {
+		game, ok := a.games[leg.GameID]
+		if !ok || game.Nfelo == nil {
+			continue
+		}
+		team, qb, adjustment, ok := qbDragTeam(game, leg.Team)
+		if !ok || adjustment > qbDragElo {
+			continue
+		}
+		key := leg.GameID + "\x00" + team
+		if seen[key] {
+			continue
+		}
+		flagged := a.inGame(leg.GameID, func(other Leg) bool {
+			return qbDragHit(other, team)
+		})
+		if len(flagged) == 0 {
+			continue
+		}
+		seen[key] = true
+
+		owners := mixedOwners(flagged)
+		message := qbDragMessage(team, qb, adjustment, describe(flagged, owners))
+		warnings = append(warnings, a.warning(ruleQBDrag, Info, message, flagged))
+	}
+	return warnings
+}
+
+// hookModelNote appends nfelo's view of a hook. The cushion is the leg's line
+// minus the model's spread for the same team, so a positive cushion means the
+// model is farther from the number than the leg.
+func hookModelNote(game Game, leg Leg) string {
+	model, ok := game.modelSpread(leg.Team)
+	if !ok {
+		return ""
+	}
+	cushion := *leg.Line - model
+	switch {
+	case cushion >= 2:
+		return fmt.Sprintf(" nfelo has it nearer %s, so the hook matters less.", modelSpreadText(model))
+	case cushion <= -2:
+		return fmt.Sprintf(
+			" nfelo has it closer to %s, so this asks for more than the model does.",
+			modelSpreadText(model))
+	default:
+		return fmt.Sprintf(
+			" nfelo sees it near the number too (%s), so the hook is live.",
+			modelSpreadText(model))
+	}
+}
+
+// chalkModelNote appends nfelo's win probability to a moneyline chalk warning.
+func chalkModelNote(game Game, leg Leg) string {
+	probability, ok := game.modelWinProb(leg.Team)
+	if !ok {
+		return ""
+	}
+	return fmt.Sprintf(
+		" nfelo has %s at about %d%% to win.", leg.Team, int(math.Round(probability*100)))
+}
+
+// qbDragTeam returns the team's nfelo QB and adjustment when the team is in the
+// game and has a model.
+func qbDragTeam(game Game, team string) (string, string, float64, bool) {
+	if game.Nfelo == nil {
+		return "", "", 0, false
+	}
+	switch team {
+	case game.Home:
+		return team, game.Nfelo.HomeQB, game.Nfelo.HomeQBAdj, true
+	case game.Away:
+		return team, game.Nfelo.AwayQB, game.Nfelo.AwayQBAdj, true
+	default:
+		return "", "", 0, false
+	}
+}
+
+// qbDragHit reports a leg the QB downgrade cuts against: a favorite spread or
+// moneyline, or an over on that team's passing, receiving, or team total.
+func qbDragHit(leg Leg, team string) bool {
+	if leg.Team != team {
+		return false
+	}
+	switch leg.Market {
+	case marketSpread, marketML:
+		return favorite(leg)
+	case marketPassYds, marketPassTDs, marketRecYds, marketReceptions, marketTeamTotal:
+		return leg.Side == sideOver
+	default:
+		return false
+	}
+}
+
+// qbDragMessage names the QB, the points the model takes off, and the legs it
+// drags on.
+func qbDragMessage(team, qb string, adjustment float64, legs string) string {
+	points := strings.TrimSuffix(
+		strconv.FormatFloat(math.Abs(adjustment)/eloPerPoint, 'f', 1, 64), ".0")
+	if qb == "" {
+		return fmt.Sprintf(
+			"nfelo marks down %s's QB by about %s points. That drags on %s.",
+			team, points, legs)
+	}
+	return fmt.Sprintf(
+		"nfelo marks down %s's QB, %s, by about %s points. That drags on %s.",
+		team, qb, points, legs)
+}
+
+// modelSpreadText prints a model spread with one decimal and a plus on a
+// positive number.
+func modelSpreadText(spread float64) string {
+	text := strings.TrimSuffix(strconv.FormatFloat(spread, 'f', 1, 64), ".0")
+	if spread > 0 {
+		return "+" + text
+	}
+	return text
 }
 
 // matching returns the legs in anchor's game, other than anchor itself, that
