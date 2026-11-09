@@ -22,6 +22,7 @@ import (
 	"github.com/kalverra/parlay-club/internal/db"
 	"github.com/kalverra/parlay-club/internal/ingest/archive"
 	"github.com/kalverra/parlay-club/internal/ingest/espn"
+	"github.com/kalverra/parlay-club/internal/ingest/nfelo"
 	"github.com/kalverra/parlay-club/internal/ingest/odds"
 	"github.com/kalverra/parlay-club/internal/ingest/weather"
 )
@@ -35,6 +36,8 @@ const (
 	// TheOddsAPISource is The Odds API's event list, lines, and props. Its
 	// "odds:" prefix makes the archive label its responses as odds.
 	TheOddsAPISource = "odds:theoddsapi"
+	// NfeloProjectionsSource is nfelo's model spreads and QB adjustments.
+	NfeloProjectionsSource = "nfelo:projections"
 	// weatherSourcePrefix keys per-game forecasts.
 	weatherSourcePrefix = "weather:"
 )
@@ -56,6 +59,7 @@ const (
 	oddsSaturdayAge      = 12 * time.Hour
 	oddsSundayAge        = 45 * time.Minute
 	oddsLateAge          = 3 * time.Hour
+	nfeloAge             = 12 * time.Hour
 	failureBackoff       = 5 * time.Minute
 	syncTimeout          = 30 * time.Second
 )
@@ -93,6 +97,11 @@ type LinesClient interface {
 	Lines(ctx context.Context) ([]odds.Line, odds.Credits, error)
 }
 
+// ProjectionsClient is the slice of *nfelo.Client refresh needs.
+type ProjectionsClient interface {
+	Projections(ctx context.Context) ([]nfelo.Projection, error)
+}
+
 // Publisher receives live change signals. *live.Hub satisfies it.
 type Publisher interface {
 	Publish(topic string)
@@ -105,6 +114,7 @@ type Deps struct {
 	Forecast      ForecastClient
 	Lines         LinesClient
 	FallbackLines LinesClient
+	Projections   ProjectionsClient
 	Publisher     Publisher
 	Now           Clock
 	Logger        zerolog.Logger
@@ -118,6 +128,7 @@ type Service struct {
 	forecast      ForecastClient
 	lines         LinesClient
 	fallbackLines LinesClient
+	projections   ProjectionsClient
 	publisher     Publisher
 	now           Clock
 	logger        zerolog.Logger
@@ -151,6 +162,7 @@ func New(deps Deps) *Service {
 		forecast:      deps.Forecast,
 		lines:         deps.Lines,
 		fallbackLines: deps.FallbackLines,
+		projections:   deps.Projections,
 		publisher:     deps.Publisher,
 		now:           now,
 		logger:        deps.Logger,
@@ -179,43 +191,46 @@ func (s *Service) KickContext(ctx context.Context) {
 func (s *Service) kick(ctx context.Context) {
 	now := s.now()
 
-	games, err := s.currentGames(ctx)
+	_, games, err := s.currentWeek(ctx)
 	if err != nil {
 		s.logger.Error().Err(err).Msg("read current games")
 		return
 	}
 	s.refresh(ctx, s.scoreboardSource(games, now), now)
 
-	games, err = s.currentGames(ctx)
+	week, games, err := s.currentWeek(ctx)
 	if err != nil {
 		s.logger.Error().Err(err).Msg("read current games")
 		return
 	}
 
-	sources := make([]source, 0, len(games)+1)
+	sources := make([]source, 0, len(games)+2)
 	for _, game := range games {
 		sources = append(sources, s.weatherSource(game, now))
 	}
 	sources = append(sources, s.oddsSource(games, now))
+	if s.projections != nil && week.ID != 0 {
+		sources = append(sources, s.nfeloSource(week, games, now))
+	}
 	s.runSources(ctx, now, sources)
 }
 
-// currentGames returns the latest week's games. Before the first slate sync
-// there is no week, which is not an error.
-func (s *Service) currentGames(ctx context.Context) ([]db.Game, error) {
+// currentWeek returns the latest week and its games. Before the first slate
+// sync there is no week, which is not an error.
+func (s *Service) currentWeek(ctx context.Context) (db.Week, []db.Game, error) {
 	week, err := s.store.LatestWeek(ctx)
 	if errors.Is(err, db.ErrWeekNotFound) {
-		return nil, nil
+		return db.Week{}, nil, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("latest week: %w", err)
+		return db.Week{}, nil, fmt.Errorf("latest week: %w", err)
 	}
 
 	games, err := s.store.GamesForWeek(ctx, week.ID)
 	if err != nil {
-		return nil, fmt.Errorf("week %d games: %w", week.ID, err)
+		return db.Week{}, nil, fmt.Errorf("week %d games: %w", week.ID, err)
 	}
-	return games, nil
+	return week, games, nil
 }
 
 // runSources starts one goroutine per source.
