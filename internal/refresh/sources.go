@@ -2,11 +2,14 @@ package refresh
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"maps"
 	"reflect"
 	"time"
 
 	"github.com/kalverra/parlay-club/internal/db"
+	"github.com/kalverra/parlay-club/internal/ingest/archive"
 	"github.com/kalverra/parlay-club/internal/ingest/espn"
 	"github.com/kalverra/parlay-club/internal/ingest/odds"
 	"github.com/kalverra/parlay-club/internal/ingest/weather"
@@ -166,45 +169,89 @@ func (s *Service) syncWeather(ctx context.Context, game db.Game, now time.Time) 
 	return changed, nil
 }
 
-// syncOdds matches the free event list to the week's games, then buys one
-// lines response for the whole week. It writes rows only for matched games,
-// because the response also carries next week's events.
-func (s *Service) syncOdds(ctx context.Context, games []db.Game, now time.Time) (bool, error) {
-	if len(games) == 0 || allKickedOff(games, now) {
-		return false, nil
+// oddsFetch is one provider's contribution to a game-line sync. matches and
+// rows are already normalized to ESPN game IDs and team abbreviations, so the
+// two providers never need to agree on event IDs.
+type oddsFetch struct {
+	matches     map[string]string
+	rows        []db.Odds
+	remaining   *int
+	linesBought bool
+	disabled    bool
+	err         error
+}
+
+// fetchOdds runs one provider's free event list and, when the balance permits,
+// its paid lines call. record stores each response's reported balance. A
+// missing client and an empty API key are both "provider disabled", not a
+// failure.
+func (s *Service) fetchOdds(
+	ctx context.Context,
+	client LinesClient,
+	name string,
+	floor int,
+	games []db.Game,
+	byID map[string]db.Game,
+	record func(odds.Credits) error,
+	now time.Time,
+) oddsFetch {
+	if client == nil {
+		return oddsFetch{disabled: true}
 	}
 
-	weekID := games[0].WeekID
-	events, credits, err := s.lines.Events(ctx)
+	events, credits, err := client.Events(ctx)
+	if errors.Is(err, odds.ErrNoAPIKey) {
+		return oddsFetch{disabled: true}
+	}
 	if err != nil {
-		return false, fmt.Errorf("odds events: %w", err)
-	}
-	if err := s.store.SetSyncCredits(ctx, OddsLinesSource, credits.Remaining); err != nil {
-		return false, err
+		return oddsFetch{err: fmt.Errorf("%s events: %w", name, err)}
 	}
 
-	matches, _ := odds.MatchEvents(events, matchGames(games))
-	byID := make(map[string]db.Game, len(games))
-	for _, game := range games {
-		byID[game.ID] = game
+	remaining := credits.Remaining
+	fetch := oddsFetch{remaining: &remaining}
+	fetch.matches, _ = odds.MatchEvents(events, matchGames(games))
+	if err := record(credits); err != nil {
+		fetch.err = err
+		return fetch
 	}
 
-	if credits.Remaining < OddsLinesFloor {
+	if credits.Remaining < floor {
 		s.logger.Warn().
+			Str("provider", name).
 			Int("remaining", credits.Remaining).
-			Int("floor", OddsLinesFloor).
+			Int("floor", floor).
 			Msg("odds lines paused below credit floor")
-		return s.publishOdds(ctx, weekID, matches, nil, credits.Remaining, now)
+		return fetch
 	}
 
-	lines, lineCredits, err := s.lines.Lines(ctx)
+	lines, lineCredits, err := client.Lines(ctx)
 	if err != nil {
-		return false, fmt.Errorf("odds lines: %w", err)
+		fetch.err = fmt.Errorf("%s lines: %w", name, err)
+		return fetch
 	}
-	if err := s.store.SetSyncCredits(ctx, OddsLinesSource, lineCredits.Remaining); err != nil {
-		return false, err
+	if err := record(lineCredits); err != nil {
+		fetch.err = err
+		return fetch
 	}
 
+	lineRemaining := lineCredits.Remaining
+	fetch.remaining = &lineRemaining
+	fetch.linesBought = true
+	fetch.rows, err = rowsForLines(lines, fetch.matches, byID, now)
+	if err != nil {
+		fetch.err = fmt.Errorf("%s: %w", name, err)
+	}
+	return fetch
+}
+
+// rowsForLines maps one provider's lines onto the week's games. Lines for
+// other weeks are dropped.
+func rowsForLines(
+	lines []odds.Line,
+	matches map[string]string,
+	byID map[string]db.Game,
+	now time.Time,
+) ([]db.Odds, error) {
 	eventGames := make(map[string]db.Game, len(matches))
 	for gameID, eventID := range matches {
 		eventGames[eventID] = byID[gameID]
@@ -218,12 +265,196 @@ func (s *Service) syncOdds(ctx context.Context, games []db.Game, now time.Time) 
 		}
 		row, err := oddsRow(game, line, now)
 		if err != nil {
-			return false, err
+			return nil, err
 		}
 		rows = append(rows, row)
 	}
+	return rows, nil
+}
 
-	return s.publishOdds(ctx, weekID, matches, rows, lineCredits.Remaining, now)
+// syncOdds matches each provider's free event list to the week's games, buys
+// lines when the balance permits, and merges the rows. Parlay API is primary;
+// The Odds API enriches it with missing links and markets, and serves the whole
+// week when the primary is unconfigured, fails, or sits below its floor.
+func (s *Service) syncOdds(ctx context.Context, games []db.Game, now time.Time) (bool, error) {
+	if len(games) == 0 || allKickedOff(games, now) {
+		return false, nil
+	}
+
+	weekID := games[0].WeekID
+	byID := make(map[string]db.Game, len(games))
+	for _, game := range games {
+		byID[game.ID] = game
+	}
+
+	primary := s.fetchOdds(
+		ctx,
+		s.lines,
+		"odds",
+		OddsLinesFloor,
+		games,
+		byID,
+		func(credits odds.Credits) error {
+			return s.store.SetSyncCredits(ctx, OddsLinesSource, credits.Remaining)
+		},
+		now,
+	)
+
+	fallback := oddsFetch{disabled: s.fallbackLines == nil}
+	if !fallback.disabled {
+		floor := TheOddsAPIFallbackFloor
+		if primary.err == nil && primary.linesBought {
+			floor = TheOddsAPIEnrichFloor
+		}
+		fallbackCtx := archive.WithKey(ctx, TheOddsAPISource)
+		fallback = s.fetchOdds(
+			fallbackCtx,
+			s.fallbackLines,
+			"fallback odds",
+			floor,
+			games,
+			byID,
+			func(credits odds.Credits) error {
+				remaining := credits.Remaining
+				return s.store.RecordSync(fallbackCtx, TheOddsAPISource, now, &remaining)
+			},
+			now,
+		)
+	}
+
+	configured, failures := 0, make([]error, 0, 2)
+	for _, fetch := range []oddsFetch{primary, fallback} {
+		if fetch.disabled {
+			continue
+		}
+		configured++
+		if fetch.err != nil {
+			failures = append(failures, fetch.err)
+		}
+	}
+	if configured == 0 {
+		return false, odds.ErrNoAPIKey
+	}
+	if len(failures) == configured {
+		return false, errors.Join(failures...)
+	}
+	for _, failure := range failures {
+		s.logger.Warn().
+			Err(failure).
+			Msg("odds provider unavailable; committing the other provider's lines")
+	}
+
+	matches := make(map[string]string, len(primary.matches)+len(fallback.matches))
+	maps.Copy(matches, primary.matches)
+	for gameID, eventID := range fallback.matches {
+		if _, ok := primary.matches[gameID]; ok {
+			continue
+		}
+		game, ok := byID[gameID]
+		if !ok || game.OddsEventID != nil {
+			continue // keep Parlay API's event ID through a transient outage
+		}
+		matches[gameID] = eventID
+	}
+
+	rows := mergeOdds(primary.rows, fallback.rows)
+	return s.publishOdds(ctx, weekID, matches, rows, primary.remaining, now)
+}
+
+// oddsKey identifies one book's price for one selection across providers.
+type oddsKey struct {
+	gameID     string
+	book       string
+	marketType string
+	team       string
+	playerName string
+	side       string
+}
+
+// oddsRowKey reads the selection key of a stored odds row.
+func oddsRowKey(row db.Odds) oddsKey {
+	return oddsKey{
+		gameID:     row.GameID,
+		book:       row.Book,
+		marketType: row.MarketType,
+		team:       row.Team,
+		playerName: row.PlayerName,
+		side:       row.Side,
+	}
+}
+
+// gameBook identifies one book's board for one game.
+type gameBook struct {
+	gameID string
+	book   string
+}
+
+// mergeOdds merges a secondary provider's rows into the primary provider's
+// rows. A primary row with no link adopts the secondary row's link and IDs; if
+// the line differs, it also adopts the secondary line and price so the stored
+// line matches the deep link. A linked primary row keeps its line, price, and
+// link. Secondary-only selections are appended.
+func mergeOdds(primary, secondary []db.Odds) []db.Odds {
+	if len(primary) == 0 {
+		return append([]db.Odds(nil), secondary...)
+	}
+	if len(secondary) == 0 {
+		return append([]db.Odds(nil), primary...)
+	}
+
+	rows := append([]db.Odds(nil), primary...)
+	index := make(map[oddsKey]int, len(rows))
+	for i, row := range rows {
+		index[oddsRowKey(row)] = i
+	}
+
+	// A book's event ID belongs to the game, not one selection, so backfill it
+	// on every primary row for that game and book.
+	eventSids := make(map[gameBook]string, len(secondary))
+	for _, row := range secondary {
+		if row.EventSid != nil && *row.EventSid != "" {
+			eventSids[gameBook{gameID: row.GameID, book: row.Book}] = *row.EventSid
+		}
+	}
+	for i := range rows {
+		if rows[i].EventSid != nil {
+			continue
+		}
+		if eventSid, ok := eventSids[gameBook{gameID: rows[i].GameID, book: rows[i].Book}]; ok {
+			rows[i].EventSid = &eventSid
+		}
+	}
+
+	for _, sec := range secondary {
+		i, ok := index[oddsRowKey(sec)]
+		if !ok {
+			rows = append(rows, sec)
+			index[oddsRowKey(sec)] = len(rows) - 1
+			continue
+		}
+
+		prim := &rows[i]
+		switch {
+		case prim.Link == nil && sec.Link != nil:
+			prim.Link = sec.Link
+			prim.Sid = sec.Sid
+			if sec.EventSid != nil {
+				prim.EventSid = sec.EventSid
+			}
+			if !db.SameLine(prim.Line, sec.Line) {
+				prim.Line = sec.Line
+				prim.Price = sec.Price
+			}
+		case prim.Link != nil:
+			if prim.Sid == nil && db.SameLine(prim.Line, sec.Line) {
+				prim.Sid = sec.Sid
+			}
+			if prim.EventSid == nil {
+				prim.EventSid = sec.EventSid
+			}
+		}
+	}
+	return rows
 }
 
 // publishOdds writes the odds sync's rows and signals the week when anything
@@ -233,7 +464,7 @@ func (s *Service) publishOdds(
 	weekID int64,
 	matches map[string]string,
 	rows []db.Odds,
-	remaining int,
+	remaining *int,
 	now time.Time,
 ) (bool, error) {
 	changed, err := s.writeOdds(ctx, matches, rows, remaining, now)
@@ -253,7 +484,7 @@ func (s *Service) writeOdds(
 	ctx context.Context,
 	matches map[string]string,
 	rows []db.Odds,
-	remaining int,
+	remaining *int,
 	now time.Time,
 ) (bool, error) {
 	changed := false
@@ -272,7 +503,7 @@ func (s *Service) writeOdds(
 		}
 		changed = changed || rowsChanged
 
-		return tx.RecordSync(ctx, OddsLinesSource, now, &remaining)
+		return tx.RecordSync(ctx, OddsLinesSource, now, remaining)
 	})
 	if err != nil {
 		return changed, err
