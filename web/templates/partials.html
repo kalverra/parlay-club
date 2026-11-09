@@ -478,9 +478,15 @@
     <input
       type="text"
       name="player_name"
+      list="player-names"
       value="{{.PlayerName}}"
       class="mt-1 w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1 text-sm text-slate-100"
     >
+    <datalist id="player-names">
+      {{range .Players}}
+        <option value="{{.}}"></option>
+      {{end}}
+    </datalist>
   </label>
   <button
     type="submit"
@@ -489,4 +495,103 @@
     {{if .Editing}}Save leg{{else}}Add leg{{end}}
   </button>
 </form>
+{{end}}
+
+{{define "game-props"}}
+<div class="mt-3 border-t border-slate-800 pt-3">
+  <div class="flex items-center justify-between">
+    <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Props</p>
+    <a
+      href="/research?game_id={{.GameID}}"
+      class="text-xs font-medium text-sky-400 hover:text-sky-300"
+    >
+      Game research &rarr;
+    </a>
+  </div>
+
+  {{if .TeamTotals}}
+    <div class="mt-2.5">
+      <p class="text-[11px] font-medium text-slate-400">Team Totals</p>
+      <div class="mt-1.5 flex flex-wrap gap-2">
+        {{range .TeamTotals}}
+          {{if and $.CanAdd}}
+            <form hx-post="/slips/{{$.SlipID}}/legs" hx-target="#quick-add-{{$.GameID}}" hx-swap="innerHTML">
+              <input type="hidden" name="quick" value="1">
+              <input type="hidden" name="game_id" value="{{$.GameID}}">
+              <input type="hidden" name="market_type" value="{{.Market}}">
+              <input type="hidden" name="team" value="{{.Team}}">
+              <input type="hidden" name="side" value="{{.Side}}">
+              {{if .Line}}<input type="hidden" name="line" value="{{.Line}}">{{end}}
+              <input type="hidden" name="odds" value="{{.Odds}}">
+              <button
+                type="submit"
+                class="rounded-full border border-sky-800 bg-sky-950/40 px-3 py-1.5 text-xs font-medium text-sky-300 hover:bg-sky-900/60"
+              >
+                {{.Text}} <span class="text-sky-400/70">{{.Price}}</span>
+              </button>
+            </form>
+          {{else}}
+            <span class="rounded-full border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-300">
+              {{.Text}} <span class="text-slate-400">{{.Price}}</span>
+            </span>
+          {{end}}
+        {{end}}
+      </div>
+    </div>
+  {{end}}
+
+  {{if .Players}}
+    <div class="mt-3 space-y-3">
+      <p class="text-[11px] font-medium text-slate-400">Player Props</p>
+      {{range .Players}}
+        <div>
+          <div class="flex items-center justify-between text-xs">
+            <span class="font-medium text-slate-200">
+              {{.Name}} {{if .Team}}<span class="text-slate-400">({{.Team}})</span>{{end}}
+            </span>
+            {{if .PlayerID}}
+              <a
+                href="/research?player_id={{.PlayerID}}"
+                class="font-medium text-sky-400 hover:text-sky-300"
+              >
+                Research &rarr;
+              </a>
+            {{end}}
+          </div>
+          <div class="mt-1.5 flex flex-wrap gap-2">
+            {{range .Pills}}
+              {{if and $.CanAdd}}
+                <form hx-post="/slips/{{$.SlipID}}/legs" hx-target="#quick-add-{{$.GameID}}" hx-swap="innerHTML">
+                  <input type="hidden" name="quick" value="1">
+                  <input type="hidden" name="game_id" value="{{$.GameID}}">
+                  <input type="hidden" name="market_type" value="{{.Market}}">
+                  <input type="hidden" name="team" value="{{.Team}}">
+                  <input type="hidden" name="side" value="{{.Side}}">
+                  <input type="hidden" name="player_name" value="{{.PlayerName}}">
+                  {{if .PlayerID}}<input type="hidden" name="player_id" value="{{.PlayerID}}">{{end}}
+                  {{if .Line}}<input type="hidden" name="line" value="{{.Line}}">{{end}}
+                  <input type="hidden" name="odds" value="{{.Odds}}">
+                  <button
+                    type="submit"
+                    class="rounded-full border border-sky-800 bg-sky-950/40 px-3 py-1.5 text-xs font-medium text-sky-300 hover:bg-sky-900/60"
+                  >
+                    {{.Text}} <span class="text-sky-400/70">{{.Price}}</span>
+                  </button>
+                </form>
+              {{else}}
+                <span class="rounded-full border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-300">
+                  {{.Text}} <span class="text-slate-400">{{.Price}}</span>
+                </span>
+              {{end}}
+            {{end}}
+          </div>
+        </div>
+      {{end}}
+    </div>
+  {{end}}
+
+  {{if and (not .TeamTotals) (not .Players)}}
+    <p class="mt-2 text-xs text-slate-500">No prop lines available yet.</p>
+  {{end}}
+</div>
 {{end}}

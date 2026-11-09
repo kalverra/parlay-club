@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 )
@@ -183,6 +184,78 @@ func (s *Store) RosterForTeams(ctx context.Context, teams []string) ([]RosterPla
 		return nil, fmt.Errorf("rosters for teams: %w", err)
 	}
 	return result, nil
+}
+
+// WeekPlayerNames returns a sorted, deduplicated slice of player names appearing
+// on rosters or in prop odds for games in the given week.
+func (s *Store) WeekPlayerNames(ctx context.Context, weekID int64) ([]string, error) {
+	games, err := s.GamesForWeek(ctx, weekID)
+	if err != nil {
+		return nil, fmt.Errorf("week player names: games: %w", err)
+	}
+	if len(games) == 0 {
+		return nil, nil
+	}
+
+	teams := make([]string, 0, len(games)*2)
+	gameIDs := make([]string, 0, len(games))
+	for _, g := range games {
+		gameIDs = append(gameIDs, g.ID)
+		if g.HomeTeam != "" {
+			teams = append(teams, g.HomeTeam)
+		}
+		if g.AwayTeam != "" {
+			teams = append(teams, g.AwayTeam)
+		}
+	}
+
+	unique := make(map[string]struct{})
+
+	rosterPlayers, err := s.RosterForTeams(ctx, teams)
+	if err != nil {
+		return nil, fmt.Errorf("week player names: rosters: %w", err)
+	}
+	for _, p := range rosterPlayers {
+		if name := strings.TrimSpace(p.FullName); name != "" {
+			unique[name] = struct{}{}
+		}
+	}
+
+	if len(gameIDs) > 0 {
+		placeholders := strings.Repeat("?,", len(gameIDs))
+		placeholders = placeholders[:len(placeholders)-1]
+		args := make([]any, len(gameIDs))
+		for i, id := range gameIDs {
+			args[i] = id
+		}
+		rows, err := s.conn().QueryContext(ctx,
+			"SELECT DISTINCT player_name FROM odds WHERE game_id IN ("+placeholders+") AND player_name != ''",
+			args...,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("week player names: odds: %w", err)
+		}
+		defer func() { _ = rows.Close() }()
+		for rows.Next() {
+			var name string
+			if err := rows.Scan(&name); err != nil {
+				return nil, fmt.Errorf("week player names: scan: %w", err)
+			}
+			if name = strings.TrimSpace(name); name != "" {
+				unique[name] = struct{}{}
+			}
+		}
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("week player names: odds rows: %w", err)
+		}
+	}
+
+	names := make([]string, 0, len(unique))
+	for name := range unique {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	return names, nil
 }
 
 // UpsertPlayerGameLog inserts or updates an athlete's game log.

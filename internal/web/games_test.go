@@ -126,6 +126,9 @@ func TestGamesPageShowsCardsLinesWeatherAndNote(t *testing.T) {
 	assert.Contains(t, body, "Over 47.5")
 	assert.Contains(t, body, "Under 47.5")
 	assert.Contains(t, body, "Custom leg")
+	assert.Contains(t, body, fmt.Sprintf(`hx-get="/games/%s/props"`, game.ID))
+	assert.Contains(t, body, `hx-trigger="toggle once"`)
+	assert.Contains(t, body, fmt.Sprintf(`hx-target="#game-props-%s"`, game.ID))
 	assert.Contains(t, body, "Lines as of")
 	assert.Contains(t, body, fetched.Format("3:04 PM")+" UTC")
 }
@@ -378,6 +381,16 @@ func TestCustomLegFormTargetsTheGameCard(t *testing.T) {
 // is how the home-book test changes the profile after the fixture is built.
 func gamesHandler(t *testing.T, fixture *slipFixture, user db.User) http.Handler {
 	t.Helper()
+	return gamesHandlerWithRefresher(t, fixture, user, nil)
+}
+
+func gamesHandlerWithRefresher(
+	t *testing.T,
+	fixture *slipFixture,
+	user db.User,
+	refresher webui.Refresher,
+) http.Handler {
+	t.Helper()
 
 	renderer, err := webui.NewRenderer(assets.Templates, false)
 	require.NoError(t, err)
@@ -395,8 +408,192 @@ func gamesHandler(t *testing.T, fixture *slipFixture, user db.User) http.Handler
 		GroupFrom: func(context.Context) (db.Group, bool) {
 			return fixture.group, true
 		},
-		Store:  fixture.store,
-		Slips:  slips.New(fixture.store, hub, nil),
-		Stream: live.NewStream(hub, func(int64) bool { return false }),
+		Store:   fixture.store,
+		Slips:   slips.New(fixture.store, hub, nil),
+		Stream:  live.NewStream(hub, func(int64) bool { return false }),
+		Refresh: refresher,
 	})
+}
+
+type stubRefresher struct {
+	propsSynced []string
+}
+
+func (s *stubRefresher) SyncGameProps(_ context.Context, gameID string) error {
+	s.propsSynced = append(s.propsSynced, gameID)
+	return nil
+}
+
+func (s *stubRefresher) SyncGameResearch(_ context.Context, _ string) error {
+	return nil
+}
+
+func (s *stubRefresher) SyncPlayerResearch(_ context.Context, _ string) error {
+	return nil
+}
+
+func TestGamePropsHandler(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	game := addGame(t, fixture, gameKickoff())
+	refresher := &stubRefresher{}
+	handler := gamesHandlerWithRefresher(t, fixture, fixture.user, refresher)
+
+	// 1. Unknown game ID returns 404
+	req404 := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/games/missing-game/props", nil)
+	rec404 := httptest.NewRecorder()
+	handler.ServeHTTP(rec404, req404)
+	assert.Equal(t, http.StatusNotFound, rec404.Code)
+
+	// 2. Empty props state returns empty message and research link
+	reqEmpty := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodGet,
+		"/games/"+game.ID+"/props",
+		nil,
+	)
+	recEmpty := httptest.NewRecorder()
+	handler.ServeHTTP(recEmpty, reqEmpty)
+	assert.Equal(t, http.StatusOK, recEmpty.Code)
+	bodyEmpty := recEmpty.Body.String()
+	assert.Contains(t, bodyEmpty, "/research?game_id="+game.ID)
+	assert.Contains(t, bodyEmpty, "No prop lines available yet.")
+	assert.Contains(t, refresher.propsSynced, game.ID)
+
+	// Add roster player for BUF
+	now := time.Now().UTC()
+	require.NoError(t, fixture.store.UpsertRosterPlayers(t.Context(), []db.RosterPlayer{
+		{
+			AthleteID:  "3918298",
+			Team:       "BUF",
+			ESPNTeamID: "2",
+			FullName:   "Josh Allen",
+			Position:   "QB",
+			UpdatedAt:  now,
+		},
+	}))
+
+	// Add prop odds for the game
+	oddsFetched := time.Date(2026, time.November, 9, 14, 0, 0, 0, time.UTC)
+	propOdds := []db.Odds{
+		// Team totals
+		{
+			GameID:     game.ID,
+			Book:       "draftkings",
+			MarketType: "TEAM_TOTAL",
+			Team:       "BUF",
+			Side:       "OVER",
+			Line:       new(24.5),
+			Price:      -110,
+			FetchedAt:  oddsFetched,
+		},
+		{
+			GameID:     game.ID,
+			Book:       "fanduel",
+			MarketType: "TEAM_TOTAL",
+			Team:       "BUF",
+			Side:       "OVER",
+			Line:       new(24.5),
+			Price:      -115,
+			FetchedAt:  oddsFetched,
+		},
+		{
+			GameID:     game.ID,
+			Book:       "draftkings",
+			MarketType: "TEAM_TOTAL",
+			Team:       "BUF",
+			Side:       "UNDER",
+			Line:       new(24.5),
+			Price:      -110,
+			FetchedAt:  oddsFetched,
+		},
+		// Player props for matched player (Josh Allen)
+		{
+			GameID:     game.ID,
+			Book:       "draftkings",
+			MarketType: "PASS_YDS",
+			Team:       "BUF",
+			PlayerName: "Josh Allen",
+			Side:       "OVER",
+			Line:       new(265.5),
+			Price:      -110,
+			FetchedAt:  oddsFetched,
+		},
+		{
+			GameID:     game.ID,
+			Book:       "draftkings",
+			MarketType: "ANYTIME_TD",
+			Team:       "BUF",
+			PlayerName: "Josh Allen",
+			Side:       "YES",
+			Line:       nil,
+			Price:      150,
+			FetchedAt:  oddsFetched,
+		},
+		// Player prop for unmatched player
+		{
+			GameID:     game.ID,
+			Book:       "draftkings",
+			MarketType: "REC_YDS",
+			Team:       "",
+			PlayerName: "Unknown Player",
+			Side:       "OVER",
+			Line:       new(35.5),
+			Price:      -115,
+			FetchedAt:  oddsFetched,
+		},
+	}
+	_, err := fixture.store.UpsertOdds(t.Context(), propOdds)
+	require.NoError(t, err)
+
+	// Request props
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf("/games/%s/props", game.ID), nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	body := rec.Body.String()
+
+	// Game research link
+	assert.Contains(t, body, "/research?game_id="+game.ID)
+	// Matched player research link
+	assert.Contains(t, body, `/research?player_id=3918298`)
+	// Unmatched player has pills but no player research link
+	assert.Contains(t, body, "Unknown Player")
+	assert.NotContains(t, body, `/research?player_id="`)
+
+	// Team totals
+	assert.Contains(t, body, "BUF Over 24.5")
+	assert.Contains(t, body, "BUF Under 24.5")
+
+	// Player props
+	assert.Contains(t, body, "Over 265.5 Pass Yds")
+	assert.Contains(t, body, "Anytime TD")
+	assert.Contains(t, body, "Over 35.5 Rec Yds")
+
+	// Quick add form attributes
+	assert.Contains(t, body, fmt.Sprintf(`hx-post="/slips/%d/legs"`, fixture.slip.ID))
+	assert.Contains(t, body, fmt.Sprintf(`hx-target="#quick-add-%s"`, game.ID))
+	assert.Contains(t, body, `name="player_name" value="Josh Allen"`)
+	assert.Contains(t, body, `name="player_id" value="3918298"`)
+
+	// 3. User with HomeBook fanduel gets FanDuel price (-115 for BUF Over 24.5)
+	fbUser := fixture.user
+	fbUser.HomeBook = new("fanduel")
+	fbHandler := gamesHandlerWithRefresher(t, fixture, fbUser, refresher)
+
+	recFB := httptest.NewRecorder()
+	fbHandler.ServeHTTP(recFB, req)
+	assert.Contains(t, recFB.Body.String(), "-115")
+
+	// 4. Locked slip renders non-interactive pills (no form)
+	require.NoError(t, fixture.store.SetSlipStatus(t.Context(), fixture.slip.ID, db.SlipLocked))
+
+	recLocked := httptest.NewRecorder()
+	handler.ServeHTTP(recLocked, req)
+	bodyLocked := recLocked.Body.String()
+	assert.NotContains(t, bodyLocked, `<form hx-post=`)
+	assert.Contains(t, bodyLocked, "BUF Over 24.5")
+	assert.Contains(t, bodyLocked, "Over 265.5 Pass Yds")
 }

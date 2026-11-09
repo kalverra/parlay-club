@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -651,4 +652,224 @@ func waitForEvent(t *testing.T, body io.Reader) string {
 		t.Fatal("timed out waiting for an SSE event")
 		return ""
 	}
+}
+
+func TestLegFormPlayerAutocompleteDatalist(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	now := time.Now().UTC()
+	game := addGame(t, fixture, gameKickoff())
+
+	// Add roster players
+	require.NoError(t, fixture.store.UpsertRosterPlayers(t.Context(), []db.RosterPlayer{
+		{
+			AthleteID:  "3918298",
+			Team:       "BUF",
+			ESPNTeamID: "2",
+			FullName:   "Josh Allen",
+			Position:   "QB",
+			UpdatedAt:  now,
+		},
+		{
+			AthleteID:  "4429013",
+			Team:       "MIA",
+			ESPNTeamID: "15",
+			FullName:   "De'Von Achane",
+			Position:   "RB",
+			UpdatedAt:  now,
+		},
+	}))
+
+	// Add prop odds player
+	_, err := fixture.store.UpsertOdds(t.Context(), []db.Odds{
+		{
+			GameID:     game.ID,
+			Book:       "draftkings",
+			MarketType: "REC_YDS",
+			Team:       "BUF",
+			PlayerName: "Dalton Kincaid",
+			Side:       "OVER",
+			Line:       new(45.5),
+			Price:      -110,
+			FetchedAt:  now,
+		},
+	})
+	require.NoError(t, err)
+
+	// GET /slips/{id}/legs/new
+	reqNew := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodGet,
+		fmt.Sprintf("/slips/%d/legs/new", fixture.slip.ID),
+		nil,
+	)
+	recNew := httptest.NewRecorder()
+	fixture.handler.ServeHTTP(recNew, reqNew)
+	assert.Equal(t, http.StatusOK, recNew.Code)
+	bodyNew := html.UnescapeString(recNew.Body.String())
+
+	assert.Contains(t, bodyNew, `list="player-names"`)
+	assert.Contains(t, bodyNew, `<datalist id="player-names">`)
+	assert.Contains(t, bodyNew, `<option value="Dalton Kincaid"></option>`)
+	assert.Contains(t, bodyNew, `<option value="De'Von Achane"></option>`)
+	assert.Contains(t, bodyNew, `<option value="Josh Allen"></option>`)
+
+	// Create a leg to test edit
+	leg, err := fixture.store.CreateLeg(t.Context(), db.Leg{
+		SlipID:     fixture.slip.ID,
+		UserID:     fixture.user.ID,
+		GameID:     &game.ID,
+		MarketType: "PASS_YDS",
+		Selection:  "Josh Allen Over 265.5 Pass Yds",
+		PlayerName: new("Josh Allen"),
+		Side:       new("OVER"),
+		Line:       new(265.5),
+		Odds:       -110,
+	})
+	require.NoError(t, err)
+
+	// GET /legs/{id}/edit
+	reqEdit := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodGet,
+		fmt.Sprintf("/legs/%d/edit", leg.ID),
+		nil,
+	)
+	recEdit := httptest.NewRecorder()
+	fixture.handler.ServeHTTP(recEdit, reqEdit)
+	assert.Equal(t, http.StatusOK, recEdit.Code)
+	bodyEdit := html.UnescapeString(recEdit.Body.String())
+
+	assert.Contains(t, bodyEdit, `list="player-names"`)
+	assert.Contains(t, bodyEdit, `<datalist id="player-names">`)
+	assert.Contains(t, bodyEdit, `<option value="Josh Allen"></option>`)
+}
+
+func TestAutomaticPlayerResolutionOnSave(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 5)
+	now := time.Now().UTC()
+	game := addGame(t, fixture, gameKickoff())
+
+	// Add roster players: Josh Allen on BUF
+	require.NoError(t, fixture.store.UpsertRosterPlayers(t.Context(), []db.RosterPlayer{
+		{
+			AthleteID:  "3918298",
+			Team:       "BUF",
+			ESPNTeamID: "2",
+			FullName:   "Josh Allen",
+			Position:   "QB",
+			UpdatedAt:  now,
+		},
+	}))
+
+	// 1. Post a new leg without player_id or team
+	form := url.Values{
+		"game_id":     {game.ID},
+		"market_type": {"PASS_YDS"},
+		"player_name": {"Josh Allen"},
+		"side":        {"OVER"},
+		"line":        {"265.5"},
+		"odds":        {"-110"},
+	}
+	req := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodPost,
+		fmt.Sprintf("/slips/%d/legs", fixture.slip.ID),
+		strings.NewReader(form.Encode()),
+	)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Hx-Request", "true")
+	rec := httptest.NewRecorder()
+	fixture.handler.ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	legs, err := fixture.store.LegsForSlip(t.Context(), fixture.slip.ID)
+	require.NoError(t, err)
+	require.Len(t, legs, 1)
+	assert.Equal(t, "3918298", *legs[0].PlayerID)
+	assert.Equal(t, "BUF", *legs[0].Team)
+
+	// 2. Post a leg where team is explicitly provided
+	form2 := url.Values{
+		"game_id":     {game.ID},
+		"market_type": {"PASS_YDS"},
+		"player_name": {"Josh Allen"},
+		"team":        {"MIA"}, // override team
+		"side":        {"OVER"},
+		"line":        {"265.5"},
+		"odds":        {"-110"},
+	}
+	req2 := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodPost,
+		fmt.Sprintf("/slips/%d/legs", fixture.slip.ID),
+		strings.NewReader(form2.Encode()),
+	)
+	req2.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req2.Header.Set("Hx-Request", "true")
+	rec2 := httptest.NewRecorder()
+	fixture.handler.ServeHTTP(rec2, req2)
+	assert.Equal(t, http.StatusOK, rec2.Code)
+
+	legs, err = fixture.store.LegsForSlip(t.Context(), fixture.slip.ID)
+	require.NoError(t, err)
+	require.Len(t, legs, 2)
+	assert.Equal(t, "MIA", *legs[1].Team)
+	assert.Equal(t, "3918298", *legs[1].PlayerID)
+
+	// 3. Update an existing leg via PUT
+	updateForm := url.Values{
+		"game_id":     {game.ID},
+		"market_type": {"PASS_YDS"},
+		"player_name": {"Josh Allen"},
+		"side":        {"UNDER"},
+		"line":        {"270.5"},
+		"odds":        {"-105"},
+	}
+	reqUpdate := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodPut,
+		fmt.Sprintf("/legs/%d", legs[0].ID),
+		strings.NewReader(updateForm.Encode()),
+	)
+	reqUpdate.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	reqUpdate.Header.Set("Hx-Request", "true")
+	recUpdate := httptest.NewRecorder()
+	fixture.handler.ServeHTTP(recUpdate, reqUpdate)
+	assert.Equal(t, http.StatusOK, recUpdate.Code)
+
+	updatedLeg, err := fixture.store.LegByID(t.Context(), legs[0].ID)
+	require.NoError(t, err)
+	assert.Equal(t, "3918298", *updatedLeg.PlayerID)
+	assert.Equal(t, "BUF", *updatedLeg.Team)
+	assert.Equal(t, "UNDER", *updatedLeg.Side)
+
+	// 4. Post an unmatched player leaves player_id nil
+	formUnknown := url.Values{
+		"game_id":     {game.ID},
+		"market_type": {"PASS_YDS"},
+		"player_name": {"Unknown Quarterback"},
+		"side":        {"OVER"},
+		"line":        {"200.5"},
+		"odds":        {"-110"},
+	}
+	reqUnknown := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodPost,
+		fmt.Sprintf("/slips/%d/legs", fixture.slip.ID),
+		strings.NewReader(formUnknown.Encode()),
+	)
+	reqUnknown.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	reqUnknown.Header.Set("Hx-Request", "true")
+	recUnknown := httptest.NewRecorder()
+	fixture.handler.ServeHTTP(recUnknown, reqUnknown)
+	assert.Equal(t, http.StatusOK, recUnknown.Code)
+
+	legs3, err := fixture.store.LegsForSlip(t.Context(), fixture.slip.ID)
+	require.NoError(t, err)
+	require.Len(t, legs3, 3)
+	assert.Nil(t, legs3[2].PlayerID)
 }

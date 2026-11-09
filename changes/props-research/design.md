@@ -217,7 +217,7 @@ Effort: medium (self-contained pure rule in `internal/analyzer` and store-to-ana
 
 ### Phase 4: Prop quick-add, player autocomplete, and Research tab
 
-- [ ] Add `GET /games/{id}/props` for on-demand prop quick-add pills on expanded game cards, player `<datalist>`
+- [x] Add `GET /games/{id}/props` for on-demand prop quick-add pills on expanded game cards, player `<datalist>`
       autocomplete in the leg form, and automatic `player_id`/`team` resolution when saving a leg in `internal/web`,
       with handler tests
 - [ ] Build `GET /research`, `GET /research/games/{id}`, `GET /research/players/{espnID}`, and `POST /research/matches`

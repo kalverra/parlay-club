@@ -189,6 +189,7 @@ type LegFormView struct {
 	GameID       string
 	GameOptional bool
 	Games        []GameOption
+	Players      []string
 }
 
 // GameOption is one choice in the leg form's game picker.
@@ -657,6 +658,13 @@ func (h *slipHandlers) withGames(
 			form.Games...,
 		)
 		form.GameOptional = false
+	}
+	if h.deps.Store != nil {
+		players, err := h.deps.Store.WeekPlayerNames(ctx, slip.WeekID)
+		if err != nil {
+			return LegFormView{}, err
+		}
+		form.Players = players
 	}
 	return form, nil
 }
@@ -1439,7 +1447,38 @@ func (h *slipHandlers) legFromForm(w http.ResponseWriter, r *http.Request, slipI
 		side := "YES"
 		leg.Side = &side
 	}
+
+	hasPlayer := leg.PlayerName != nil && *leg.PlayerName != ""
+	hasGame := leg.GameID != nil && *leg.GameID != ""
+	if (isPlayerMarket(market) || hasPlayer) && hasGame && hasPlayer && h.deps.Store != nil {
+		if game, err := h.deps.Store.GameByID(r.Context(), *leg.GameID); err == nil {
+			athleteID, team, err := h.deps.Store.ResolvePlayerMatch(
+				r.Context(),
+				*leg.PlayerName,
+				game.HomeTeam,
+				game.AwayTeam,
+			)
+			if err == nil {
+				if athleteID != "" && (leg.PlayerID == nil || *leg.PlayerID == "") {
+					leg.PlayerID = &athleteID
+				}
+				if team != "" && (leg.Team == nil || *leg.Team == "") {
+					leg.Team = &team
+				}
+			}
+		}
+	}
 	return leg, true
+}
+
+// isPlayerMarket reports whether a market type targets an athlete rather than a game or team.
+func isPlayerMarket(market string) bool {
+	switch market {
+	case "PASS_YDS", "PASS_TDS", "RUSH_YDS", "RUSH_ATT", "REC_YDS", "RECEPTIONS", "ANYTIME_TD", "KICKER_PTS":
+		return true
+	default:
+		return false
+	}
 }
 
 // buildSelection writes the display text the docs table shows.
