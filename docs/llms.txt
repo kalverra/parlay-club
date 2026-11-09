@@ -17,6 +17,7 @@
 ## Decision
 
 - [Sharp-friend analyzer](decisions/analyzer.md): Add a deterministic rules engine that reviews the whole slip and shows friendly, non-blocking heads-ups to everyone, including pairings across two people's legs.
+- [The Odds API fallback and enrichment](decisions/draftkings-links.md): Wrap Parlay API and The Odds API behind a composite odds provider that coordinates enrichment and fallback while keeping the rest of the refresh and export pipeline unchanged.
 - [Export locked slips to DraftKings and FanDuel](decisions/export-to-sportsbook.md): Once a slip is fully locked in, the slip page shows an export panel with a button for each sportsbook.
 - [Foundation](decisions/foundation.md): Build a bootable web server with a local database, a shared group passcode, and a "who are you?" picker that remembers each friend on their device.
 - [Google sign-in](decisions/google-oauth.md): Replace the passcode and the name picker with Google's OpenID Connect sign-in.
