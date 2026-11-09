@@ -2,9 +2,9 @@
 id: data-sources
 title: Data sources
 type: reference
-summary: The free sources behind the slate, the ESPN scoreboard endpoint and its Sunday and Monday filter, the Open-Meteo forecast behind a game's weather, Parlay API game lines and props with The Odds API enrichment and fallback, nfelo model projections, bookmakers, deep links, tiered credit floors, and the raw response archive every successful call leaves.
-tags: [data, espn, scoreboard, games, sync, fixtures, weather, open-meteo, venues, odds, parlay-api, the-odds-api, props, lines, bookmakers, links, credits, budget, enrichment, fallback, nfelo, projections, spreads, quarterbacks, archive, raw-responses, sqlite]
-sources: [internal/ingest/espn/client.go, internal/ingest/espn/scoreboard.go, internal/ingest/espn/roster.go, internal/ingest/espn/summary.go, internal/ingest/espn/gamelog.go, internal/db/weeks.go, internal/db/games.go, internal/ingest/weather/client.go, internal/ingest/weather/forecast.go, internal/ingest/weather/venues.go, internal/ingest/odds/client.go, internal/ingest/odds/events.go, internal/ingest/odds/lines.go, internal/ingest/odds/props.go, internal/ingest/odds/match.go, internal/ingest/nfelo/client.go, internal/ingest/nfelo/projections.go, internal/ingest/nfelo/teams.go, internal/db/nfelo.go, internal/refresh/nfelo.go, internal/ingest/archive/transport.go, internal/ingest/archive/labels.go, internal/db/archive.go, internal/refresh/refresh.go, internal/refresh/sources.go, cmd/server/main.go]
+summary: The free sources behind the slate, the ESPN scoreboard endpoint and its Sunday and Monday filter, the Open-Meteo forecast behind a game's weather, Parlay API game lines and props with The Odds API enrichment and fallback, ESPN rosters, game logs, and summary injuries, player matching, nfelo model projections, bookmakers, deep links, tiered credit floors, and the raw response archive every successful call leaves.
+tags: [data, espn, scoreboard, games, sync, fixtures, weather, open-meteo, venues, odds, parlay-api, the-odds-api, props, lines, bookmakers, links, credits, budget, enrichment, fallback, nfelo, projections, spreads, quarterbacks, archive, raw-responses, sqlite, rosters, gamelogs, injuries, player-matching]
+sources: [internal/ingest/espn/client.go, internal/ingest/espn/scoreboard.go, internal/ingest/espn/roster.go, internal/ingest/espn/summary.go, internal/ingest/espn/gamelog.go, internal/db/weeks.go, internal/db/games.go, internal/db/players.go, internal/ingest/weather/client.go, internal/ingest/weather/forecast.go, internal/ingest/weather/venues.go, internal/ingest/odds/client.go, internal/ingest/odds/events.go, internal/ingest/odds/lines.go, internal/ingest/odds/props.go, internal/ingest/odds/match.go, internal/ingest/nfelo/client.go, internal/ingest/nfelo/projections.go, internal/ingest/nfelo/teams.go, internal/db/nfelo.go, internal/refresh/nfelo.go, internal/refresh/research.go, internal/ingest/archive/transport.go, internal/ingest/archive/labels.go, internal/db/archive.go, internal/refresh/refresh.go, internal/refresh/sources.go, cmd/server/main.go]
 last_verified: 2026-11-09
 ---
 
@@ -221,9 +221,11 @@ no subject or book is skipped, so unpriced DFS rows never reach `refresh`.
 | `player_anytime_td`              | `player_anytime_touchdown_scorer`, `anytime_td`, `anytime_touchdown_scorer` | `ANYTIME_TD` |
 | `player_kicking_points`          |                                                                  | `KICKER_PTS` |
 
-Parlay API rows carry validated prop links and sids on FanDuel only today. `refresh` does not call `Client.Props` yet;
-`props-research` adds the `odds:props:{game}` sync that will use it. `odds.MergeProps` is ready to fill DraftKings prop
-links from The Odds API's per-event board when that sync lands.
+Parlay API rows carry validated prop links and sids on FanDuel only today. `odds:props:{game}` runs on demand
+when someone opens a game card or research view, stale after 2 hours and skipped after kickoff. Before matching
+players, it syncs rosters for both teams (`espn:roster:{team}`). It checks the Parlay API 150-credit floor
+(`OddsPropsFloor`), calls `Client.Props`, maps `TEAM_TOTAL` to the game's team abbreviation, and resolves player
+names through `ResolvePlayerMatch`.
 
 ## The Odds API (free tier: 500 credits/month)
 
@@ -277,9 +279,15 @@ GET /events/{id}/odds?regions=us&markets={prop markets}
 
 The call costs 1 credit per market returned, unlike Parlay API's flat 3-credit `/props`. It returns one event object
 whose `bookmakers[].markets[].outcomes[]` carry the prices. `Client.EventProps` maps them into the same `Prop` rows and
-copies `bookmakers[].sid` into `Prop.EventSid`. `odds.MergeProps` merges a Parlay API board with one of these boards
-using the same precedence as game lines. Refresh does not call it yet, and a caller must merge one event's board at a
-time because the event ID backfills by book.
+copies `bookmakers[].sid` into `Prop.EventSid`.
+
+In `odds:props:{game}`, `odds.MergeProps` merges a Parlay API board with a per-event board from The Odds API:
+
+- **Enrichment.** When Parlay API bought props and The Odds API has at least 100 credits (`TheOddsAPIEnrichFloor`),
+  refresh fetches The Odds API props too. Unlinked primary rows gain DraftKings `link`, `sid`, and `event_sid` (and adopt
+  the linked line and price if they differ). Secondary-only rows append missing books and markets.
+- **Fallback.** When Parlay API is unconfigured, errors, returns no props, or sits below 150 credits, The Odds API
+  serves the game's props if it has at least 25 credits (`TheOddsAPIFallbackFloor`).
 
 ## nfelo (free, no auth)
 
@@ -316,6 +324,25 @@ Refresh writes the current regular-season week's matching rows into `nfelo_games
 `source = "nfelo"`, so a format change leaves the raw bytes in the archive. The real file saved on 2026-11-09 is
 `internal/ingest/nfelo/testdata/historic_projected_spreads.csv`.
 
+## Player matching
+
+Sportsbooks format player names differently from ESPN and from each other. Parlay API also omits the player's team on
+prop quotes. Player matching normalizes names and matches each prop to an ESPN athlete ID and team:
+
+- **Normalization (`NormalizePlayerName`):** lowercases, strips `.`, `'`, `-`, and `,`, collapses spaces, and drops a
+  trailing generational suffix (`jr`, `sr`, `ii`, `iii`, `iv`, `v`) when preceded by a space.
+- **Resolution (`ResolvePlayerMatch`):**
+  1. Normalizes the sportsbook name. If empty, returns unmatched.
+  2. Checks `player_matches` for `(norm, homeTeam)` and `(norm, awayTeam)`. If a `manual = 1` row exists, it wins
+     immediately. If exactly one unambiguous match exists, returns `(espn_athlete_id, team)`. If conflicting matches
+     exist for both teams, returns unmatched.
+  3. On a miss, queries `roster_players` for `team IN (homeTeam, awayTeam) AND norm_name = norm`.
+  4. If exactly one athlete matches across both teams, upserts `player_matches(odds_name, team, espn_athlete_id, manual=0)`
+     and returns `(athlete_id, team)`. If zero or multiple athletes match, leaves `player_id` and `team` empty.
+- **Manual overrides (`SaveManualPlayerMatch`):** writes `manual = 1` in `player_matches`. Auto-matching never
+  overwrites a manual match. A manual save clears conflicting auto-matches for the opponent in that matchup, and
+  backfills `team` on matching `odds` rows and `team` and `player_id` on matching `legs` rows.
+
 ## Budget
 
 Two free tiers fund the odds data. Refresh checks each balance after that provider's free event list and before its paid
@@ -328,8 +355,9 @@ The free tier is 1,000 credits a month. Target at most 800, leaving room for tes
 - `odds:lines` is stale after 24 h Monday through Friday, 12 h on Saturday, and 45 min on Sunday until the last Sunday
   kickoff. After that it runs only before the Monday game, every 3 h. Skip the fetch once every game of the week has
   kicked off.
-- `odds:props:{game}` will run only when someone opens that game's quick-add, and only while at least 150 credits
-  remain. Each game is one flat 3-credit `/props` call for all nine markets, not one credit per market.
+- `odds:props:{game}` runs on demand when someone opens that game's card or research view, and only while at least 150
+  credits remain (`refresh.OddsPropsFloor`). Each game is one flat 3-credit `/props` call for all nine markets, not one
+  credit per market.
 - `odds:lines` runs only while at least 50 credits remain (`refresh.OddsLinesFloor`).
 - Below a floor, serve cached rows and show "lines paused until the monthly reset".
 - The rough split: lines are about 20 calls × 3 = 60 credits a week, and props about 6 games × 3 = 18 a week, or about
@@ -346,5 +374,6 @@ The free tier is 500 credits a month. Its `/odds` call costs 3 credits, the same
   unconfigured, errors, or sits below its floor.
 - Routine enrichment is about 20 line calls a week × 3 = 60 credits, or about 240 a month. Enrichment pauses at 100,
   so it never spends the reserve kept for fallback.
-- Per-event props cost 1 credit per market returned, so a nine-market call costs 9. Props are not wired into refresh
-  yet.
+- Per-event props cost 1 credit per market returned, so a nine-market call costs 9. In `odds:props:{game}`, enrichment
+  runs at or above 100 credits (`refresh.TheOddsAPIEnrichFloor`) and fallback runs at or above 25 credits
+  (`refresh.TheOddsAPIFallbackFloor`).

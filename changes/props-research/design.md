@@ -201,7 +201,7 @@ Effort: hard (spans three new ESPN endpoints, a schema migration, player normali
       `EventProps`/`MergeProps` enrichment and fallback, skipped after kickoff), `espn:roster:{team}` (24 h),
       `espn:gamelog:{id}` (12 h), and `espn:summary:{game}` (2 h, non-final), with fake-clock tests proving that opening
       the same game twice within the cache window spends credits once
-- [ ] Docs: update `docs/reference/data-sources.md`, `docs/concepts/data-refresh.md`, and `docs/reference/schema.md`
+- [x] Docs: update `docs/reference/data-sources.md`, `docs/concepts/data-refresh.md`, and `docs/reference/schema.md`
       with ESPN rosters, game logs, summary injuries, `odds:props:{game}`, and player matching, and delete those built
       sections from `plan/data-sources.md`
 

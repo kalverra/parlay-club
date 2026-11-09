@@ -2,9 +2,9 @@
 id: data-refresh
 title: Data refresh
 type: concept
-summary: How page loads drive lazy syncs of the slate, weather, game lines, and nfelo projections, with per-source staleness windows, single-flight, failure backoff, tiered Parlay API and The Odds API credit floors, and an archive of every successful response.
-tags: [refresh, sync, lazy, staleness, singleflight, backoff, credits, odds, parlay-api, the-odds-api, enrichment, fallback, props, weather, slate, live-window, nfelo, projections, archive, raw-responses]
-sources: [internal/refresh/refresh.go, internal/refresh/rules.go, internal/refresh/sources.go, internal/refresh/research.go, internal/refresh/nfelo.go, internal/refresh/publish.go, internal/refresh/live.go, internal/db/sync.go, internal/db/nfelo.go, internal/ingest/nfelo/client.go, internal/ingest/archive/transport.go, cmd/server/main.go]
+summary: How page loads and on-demand views drive lazy syncs of the slate, weather, game lines, props, rosters, injuries, game logs, and nfelo projections, with per-source staleness windows, single-flight, failure backoff, tiered Parlay API and The Odds API credit floors, and an archive of every successful response.
+tags: [refresh, sync, lazy, staleness, singleflight, backoff, credits, odds, parlay-api, the-odds-api, enrichment, fallback, props, weather, slate, live-window, nfelo, projections, archive, raw-responses, roster, gamelog, injuries, player-matching]
+sources: [internal/refresh/refresh.go, internal/refresh/rules.go, internal/refresh/sources.go, internal/refresh/research.go, internal/refresh/nfelo.go, internal/refresh/publish.go, internal/refresh/live.go, internal/db/sync.go, internal/db/players.go, internal/db/nfelo.go, internal/ingest/nfelo/client.go, internal/ingest/archive/transport.go, cmd/server/main.go]
 last_verified: 2026-11-09
 ---
 
@@ -33,12 +33,18 @@ credits. Health, static files, and the sign-in screens sit outside the wrapper.
 does not cancel a sync, and every source gets its own 30 second timeout. Tests wait for the background work through a
 `WaitGroup`; the server never waits.
 
+On-demand user actions also trigger syncs directly. Expanding a game card calls `SyncGameProps(ctx, gameID)`. Loading
+game research calls `SyncGameResearch(ctx, gameID)`. Loading player research calls `SyncPlayerResearch(ctx, athleteID)`.
+These run synchronously with a 10-second timeout, but share the same single-flight deduplication, staleness windows,
+and failure backoff as background syncs.
+
 ## One pass
 
 1. Read the latest week and its games. Before the first slate sync there is no week, which is not an error.
 2. Sync `espn:scoreboard` first, because it may add or change the week's games.
 3. Read the week's games again, then start one weather source per game, one odds source for the week, and the nfelo
-   projections source. Those run at the same time, each in its own goroutine.
+   projections source. Those run at the same time, each in its own goroutine. If ESPN is configured, `Kick()` also scans
+   slip legs in the current week and syncs stale game logs for any matched athletes.
 
 Within a source, `singleflight` keyed by its `sync_state` source key lets concurrent page loads share one fetch. The
 work inside the flight re-reads the staleness state before fetching, so a load that joined after the first run finished

@@ -2,8 +2,8 @@
 id: schema
 title: Database schema
 type: reference
-summary: SQLite tables, including groups and their members, the odds rows and their sportsbook deep links, nfelo's per-game projections, the raw external response archive, how migrations are tracked and applied, and the connection settings behind every query.
-tags: [database, sqlite, migrations, groups, archive, api, raw-responses, odds, links, nfelo, projections]
+summary: SQLite tables, including groups and their members, odds rows with sportsbook deep links, rosters and player game logs for props research, player name matching, nfelo model projections, the raw external response archive, how migrations are tracked and applied, and connection settings.
+tags: [database, sqlite, migrations, groups, archive, api, raw-responses, odds, links, nfelo, projections, roster, gamelog, player-matching, injuries]
 sources: [internal/db/migrations/*.sql, internal/db/migrate.go, internal/db/db.go, internal/db/odds.go, internal/db/groups.go, internal/db/nfelo.go, internal/db/players.go, internal/db/archive.go, internal/db/archive_read.go, internal/ingest/archive/transport.go]
 last_verified: 2026-11-09
 ---
@@ -346,5 +346,10 @@ how to read it.
 - A slip's reference odds are not stored; any view that shows them computes them.
 - `slips.status` and `slips.result` stay in step with lock and leg-result changes.
 - `groups`, `group_members`, `slips`, and the rows that hang off a slip are scoped to one group. Weeks, games, odds,
-  nfelo projections, player matches, and `sync_state` are global.
+  nfelo projections, player matches, rosters, player game logs, and `sync_state` are global.
+- `roster_players` stores team roster athletes with `norm_name` for fast matching.
+- `player_gamelogs.stats_json` stores parsed season market values as a JSON map of float arrays, ordered most recent first.
+- `player_matches` maps normalized sportsbook player names and teams to ESPN athlete IDs. A row with `manual = 1` was
+  corrected by a user and is never overwritten by automated matching.
+- `games.injuries_json` stores the raw ESPN summary injuries JSON array.
 - An invite token is a bearer secret. Do not log it or echo it in an error.
