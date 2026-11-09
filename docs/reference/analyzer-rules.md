@@ -2,10 +2,10 @@
 id: analyzer-rules
 title: Analyzer rules
 type: reference
-summary: The stable IDs, severities, triggers, and example messages for the correlation, weather, key-number, and chalk rules in internal/analyzer.
-tags: [analyzer, rules, warnings, correlation, severity, slips]
-sources: [internal/analyzer/analyzer.go, internal/analyzer/rules.go, internal/analyzer/analyzer_test.go]
-last_verified: 2026-11-07
+summary: The stable IDs, severities, triggers, and example messages for the correlation, weather, key-number, chalk, and nfelo model rules in internal/analyzer.
+tags: [analyzer, rules, warnings, correlation, severity, slips, nfelo, model, quarterback]
+sources: [internal/analyzer/analyzer.go, internal/analyzer/rules.go, internal/analyzer/analyzer_test.go, internal/web/analyzer.go]
+last_verified: 2026-11-09
 ---
 
 # Analyzer rules
@@ -15,6 +15,9 @@ last_verified: 2026-11-07
 `internal/analyzer` holds the sharp-friend checks that run under a slip. `AnalyzeSlip(legs, games, stats)` is pure and
 deterministic: no I/O, no clock, and no LLM calls. It returns warnings with a stable rule ID, a severity, a message, and
 the legs involved.
+
+When nfelo's model is fresh, `hook` and `chalk` add a sentence about it, and `qb_drag` reads it for a downgraded
+quarterback. A game without model data behaves exactly as it did before the model existed.
 
 Rule IDs are stable across releases. A warning's severity is `Info`, `Warn`, or `Danger`.
 
@@ -27,6 +30,9 @@ Rule IDs are stable across releases. A warning's severity is `Info`, `Warn`, or 
 - **Favorite**: a `SPREAD` with a line below 0, or an `ML` with negative odds. **Underdog**: a `SPREAD` with a line
   above 0, or an `ML` with positive odds.
 - **Passing/receiving over**: an `OVER` on `PASS_YDS`, `PASS_TDS`, `REC_YDS`, or `RECEPTIONS`.
+- **Model data**: nfelo's pre-game spread, win probability, and QB adjustments for the game. `internal/web` attaches it
+  only when the game is `SCHEDULED` and the last successful `nfelo:projections` fetch is under 72 hours old. Otherwise
+  the game has no model, and the model sentences and `qb_drag` stay quiet.
 - When a rule's legs belong to more than one person, the message names each owner.
 
 ## Rule Set A: Correlation
@@ -128,6 +134,14 @@ For a plus spread on the hook:
 
 > MIA +2.5 is on the hook. Landing on exactly 3 loses by the hook. Buying to +3 is worth a look.
 
+With fresh model data, `hook` appends one sentence. The cushion is the leg's line minus the model's spread for the same
+team. At +2 or more the model sits farther from the key number and the sentence says the hook matters less. At −2 or
+less the model is closer to the key number and the sentence says the leg asks for more than the model does. Between them
+the sentence says the model sees it near the number too, so the hook is live. The trigger and severity do not change.
+
+> BUF -7.5 is on the hook. Landing on exactly 7 loses by the hook. Buying to -7 or switching to the ML is worth a look.
+> nfelo has it nearer -10, so the hook matters less.
+
 ### `total_key_number` — Info
 
 A game total within half a point of a common NFL final total: 37, 41, 43, 44, 47, or 51. One warning per total leg. A
@@ -151,3 +165,28 @@ A heavy favorite adds little to the payout while still losing the slip often. On
 multiplier is `1 + 100/|odds|`, and the bust chance is `1 − |odds|/(|odds| + 100)`.
 
 > This -300 leg only bumps the payout 1.33× but still busts the slip about 25% of the time.
+
+On an `ML` leg with fresh model data, the message also gives nfelo's win probability for that team. Other markets keep
+the plain sentence.
+
+> This -300 leg only bumps the payout 1.33× but still busts the slip about 25% of the time. nfelo has BUF at about 76%
+> to win.
+
+## Model (nfelo)
+
+| Rule      | Severity | Fires when                                                                                                                       |
+| --------- | -------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `qb_drag` | `Info`   | nfelo marks a team's QB down by 30 Elo or more and the slip has that team's favorite spread or moneyline, or an over on its passing, receiving, or team total. |
+
+### `qb_drag` — Info
+
+nfelo's QB adjustment is in Elo points, and 25 Elo is about a point of spread, so −30 Elo is about 1.2 points. The rule
+reads the level of the adjustment, not a change: nfelo has no game-day feed, so the message never says a QB is out. It
+fires for that team's favorite `SPREAD` or `ML` and its `OVER` on `PASS_YDS`, `PASS_TDS`, `REC_YDS`, `RECEPTIONS`, or
+`TEAM_TOTAL`. An underdog spread, an underdog moneyline, a rush over, and an under stay quiet. One warning per game and
+team, naming the QB and every matching leg; when two people own legs, it names both.
+
+> nfelo marks down MIN's QB, Carson Wentz, by about 1.4 points. That drags on Adam's MIN -3 and Sam's MIN Team Total
+> Over 20.5.
+
+A game without fresh model data never triggers the rule.
