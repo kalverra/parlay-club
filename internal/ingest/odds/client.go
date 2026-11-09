@@ -112,6 +112,16 @@ func (c *Client) get(ctx context.Context, path string, query url.Values, out any
 func parseCredits(header http.Header) (Credits, error) {
 	remaining, err := requiredHeaderInt(header, "X-Requests-Remaining")
 	if err != nil {
+		var ratelimitErr error
+		remaining, ratelimitErr = requiredHeaderInt(header, "X-Ratelimit-Remaining")
+		if ratelimitErr != nil {
+			remaining, ratelimitErr = requiredHeaderInt(header, "Ratelimit-Remaining")
+		}
+		if ratelimitErr == nil {
+			err = nil
+		}
+	}
+	if err != nil {
 		return Credits{}, err
 	}
 	return Credits{
