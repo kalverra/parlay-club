@@ -21,6 +21,7 @@
 - [Foundation](decisions/foundation.md): Build a bootable web server with a local database, a shared group passcode, and a "who are you?" picker that remembers each friend on their device.
 - [Google sign-in](decisions/google-oauth.md): Replace the passcode and the name picker with Google's OpenID Connect sign-in.
 - [Groups and solo play](decisions/groups.md): Make the group the boundary for everything people share.
+- [History, manual grading, and deploy](decisions/history-and-deploy.md): Deploy to Cloud Run inside the free tier, with the database backed up to Cloud Storage and deploys blocked during game windows.
 - [Hot reload local dev](decisions/hot-reload-dev.md): Add [air](https://github.com/air-verse/air) as the dev runner, pinned in `mise.toml` from the mise registry.
 - [Archive every external response](decisions/raw-response-archive.md): Add one append-only archive of raw responses in SQLite, written by a single seam that every outside call passes through.
 - [Slate, weather, and lines](decisions/slate-and-lines.md): Pull the Sunday and Monday slate from ESPN, stadium weather from Open-Meteo, and game lines from The Odds API, fetched only when someone opens the app and the data is stale.
