@@ -2,10 +2,10 @@
 id: analyzer
 title: Analyzer
 type: concept
-summary: How the sharp-friend banner under a slip turns legs, games, and weather into plain-Go warnings, and the tone those warnings keep.
-tags: [analyzer, warnings, banner, severity, tone, slips, weather, rules]
-sources: [internal/analyzer/analyzer.go, internal/analyzer/rules.go, internal/web/analyzer.go, web/templates/partials.html]
-last_verified: 2026-11-07
+summary: How the sharp-friend banner under a slip turns legs, games, weather, and nfelo's model into plain-Go warnings, and the tone those warnings keep.
+tags: [analyzer, warnings, banner, severity, tone, slips, weather, rules, nfelo, model]
+sources: [internal/analyzer/analyzer.go, internal/analyzer/rules.go, internal/web/analyzer.go, internal/db/nfelo.go, web/templates/partials.html]
+last_verified: 2026-11-09
 ---
 
 # Analyzer
@@ -13,8 +13,8 @@ last_verified: 2026-11-07
 ## Summary
 
 The analyzer is the sharp-friend banner under a slip's legs. It reads the picks people already made and points out where
-they fight each other, the weather, the key numbers, or the price. It never blocks a pick. Every leg stays allowed, and
-the banner only adds a heads-up.
+they fight each other, the weather, the key numbers, the price, or nfelo's model. It never blocks a pick. Every leg stays
+allowed, and the banner only adds a heads-up.
 
 `internal/analyzer` is pure Go: no I/O, no clock, no network calls, and no LLM. It runs on every slip render, and its
 output is not stored. The rule list and example messages live in [Analyzer rules](../reference/analyzer-rules.md).
@@ -45,12 +45,17 @@ The tone rules live in `plan/analyzer.md`. Every message is checked against them
 | Input   | Fields the rules read                                                                    |
 | ------- | ---------------------------------------------------------------------------------------- |
 | `legs`  | owner name, game, market, team, player, side, line, American odds                        |
-| `games` | home and away teams, indoor flag, weather (wind, gusts, precipitation, temperature)      |
+| `games` | home and away teams, indoor flag, weather (wind, gusts, precipitation, temperature), nfelo model (spread, win probability, QB adjustments) |
 | `stats` | per-player game logs per market, most recent game first, this season only                |
 
 `internal/web` builds those values from the stored slip and the week's games when it renders the panel. It keys the
 games map by the same `GameID` each leg carries, so no leg loses its game. `stats` is passed through and unread until
 `props-research` adds player numbers; `nil` is fine.
+
+nfelo's model is an input, not a requirement. `internal/web` attaches it only when the game is `SCHEDULED` and a
+successful `nfelo:projections` fetch is under 72 hours old. A live or final game, a missing model row, and a stale fetch
+all leave the model nil, so the model sentences and `qb_drag` stay quiet while every other rule runs as before. The model
+rows come from [Data sources](../reference/data-sources.md) through [Data refresh](data-refresh.md).
 
 Legs the analyzer skips:
 
