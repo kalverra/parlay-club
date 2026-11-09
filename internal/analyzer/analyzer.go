@@ -69,10 +69,10 @@ type Weather struct {
 	WindMPH, GustMPH, PrecipIn, TempF float64
 }
 
-// modelSpread returns the model's spread for team in the same sign a spread
+// ModelSpread returns the model's spread for team in the same sign a spread
 // leg on that team uses. It reports false when there is no model or the team is
 // not in the game.
-func (g Game) modelSpread(team string) (float64, bool) {
+func (g Game) ModelSpread(team string) (float64, bool) {
 	if g.Nfelo == nil {
 		return 0, false
 	}
@@ -86,9 +86,9 @@ func (g Game) modelSpread(team string) (float64, bool) {
 	}
 }
 
-// modelWinProb returns the model's win probability for team. It reports false
+// ModelWinProb returns the model's win probability for team. It reports false
 // when there is no model or the team is not in the game.
-func (g Game) modelWinProb(team string) (float64, bool) {
+func (g Game) ModelWinProb(team string) (float64, bool) {
 	if g.Nfelo == nil {
 		return 0, false
 	}

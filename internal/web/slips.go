@@ -116,6 +116,7 @@ type LegView struct {
 	ID        int64
 	Selection string
 	Odds      string
+	Model     string // nfelo chip; "" when there is no fresh model
 	Result    string
 	OwnerName string
 	CanEdit   bool
@@ -1181,12 +1182,15 @@ func (h *slipHandlers) slipPageData(ctx context.Context, slip db.Slip) (SlipPage
 	}
 
 	open := slip.Status == db.SlipOpen
+	nfelo := h.nfeloForGames(ctx, games)
+	gamesByID := analyzerGameMap(games, nfelo)
 	for _, leg := range legs {
 		owner := names[leg.UserID]
 		legsByUser[leg.UserID] = append(legsByUser[leg.UserID], LegView{
 			ID:        leg.ID,
 			Selection: leg.Selection,
 			Odds:      formatOdds(leg.Odds),
+			Model:     legModel(leg, gamesByID),
 			Result:    string(leg.Result),
 			OwnerName: owner,
 			CanEdit:   open && hasUser && leg.UserID == user.ID,
@@ -1227,7 +1231,7 @@ func (h *slipHandlers) slipPageData(ctx context.Context, slip db.Slip) (SlipPage
 		MemberCount:   len(members),
 		Members:       memberViews,
 		Activity:      activity,
-		Analyzer:      analyzerView(legs, games, names, h.nfeloForGames(ctx, games)),
+		Analyzer:      analyzerView(legs, gamesByID, names),
 	}
 	if hasUser {
 		view.LegForm = LegFormView{
