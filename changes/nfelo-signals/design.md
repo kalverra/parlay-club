@@ -55,13 +55,13 @@ type Projection struct {
 
 It reads columns by header name, never by position. The first column is a nameless pandas index; ignore it. A missing
 required header is an error. An empty cell on a row drops that row; an unparseable number is an error. Team codes go
-through a small map (`OAK`→`LV`, `WAS`→`WSH`) and the test checks every output code against the venue map's teams.
+through a small map (`OAK`→`LV`, `WAS`→`WSH`) and the test checks every output code against the 32 ESPN abbreviations.
 
 **Which spread column.** In both sampled week 9 rows, `home_closing_line_rounded_nfelo` equals the market line, so it
 may already be pulled toward the market. `home_line_pre_regression` is the pure Elo number. The design uses
-`home_line_pre_regression` for `HomeSpread` and `home_probability_nfelo` for `HomeWinProb`. Task 1 of Phase 1 confirms
-the choice against the saved fixture before anything depends on it. If the two columns agree on every current row, keep
-the pre-regression one anyway.
+`home_line_pre_regression` for `HomeSpread` and `home_probability_nfelo` for `HomeWinProb`. The saved fixture confirms
+the choice: on the current season the closing column equals the market close on most rows, while the pre-regression
+column rarely does. A client test pins that result, so swapping back to the closing column fails.
 
 **Storage.** Migration `0006_nfelo_games.sql` adds `nfelo_games`, one row per game, keyed by `game_id` with
 `ON DELETE CASCADE` to `games`. Columns: `home_spread`, `home_win_prob`, `home_qb`, `away_qb`, `home_qb_adj`,
@@ -143,8 +143,8 @@ see nfelo data. Totals and props show nothing.
   permission before this ships. The agent does not do this.
 - **Archive growth.** The CSV is about 0.6 MB and changes about every two days. At a 12 hour window that is two fetches
   a day, with unchanged bodies stored once. Check the archive-size runbook after the first week.
-- **Team code gaps.** An unmapped code means a game gets no row. Test every mapped code against the venue map; log
-  unmatched rows at debug.
+- **Team code gaps.** An unmapped code means a game gets no row. Test every mapped code against the 32 ESPN
+  abbreviations; log unmatched rows at debug.
 - **Elo to points.** The 25 Elo per point factor comes from the author's code, not a published rule. It only shapes a
   sentence and one threshold.
 
@@ -159,7 +159,7 @@ Effort: medium (a new source, a migration, three rules, and a view change, all o
       is wrong
 - [x] Add migration `0006_nfelo_games.sql`, the store read and upsert, and the `nfelo:projections` refresh source with a
   12 hour window, the regular-season and all-kicked-off skips, backoff, and a publish on change, with the sync tests
-- [ ] Docs: add nfelo to `docs/reference/data-sources.md`, `docs/concepts/data-refresh.md`, and
+- [x] Docs: add nfelo to `docs/reference/data-sources.md`, `docs/concepts/data-refresh.md`, and
       `docs/reference/schema.md`; add the source to `plan/data-sources.md` only if that file lists sources
 
 ### Phase 2: Rules and slip view
