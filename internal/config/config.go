@@ -38,6 +38,7 @@ type Config struct {
 	GoogleClientSecret string
 	BaseURL            string
 	OddsAPIKey         string
+	TheOddsAPIKey      string
 	LogLevel           zerolog.Level
 }
 
@@ -65,6 +66,7 @@ func Load(env Env) (Config, error) {
 		GoogleClientSecret: devDefault(env, "GOOGLE_CLIENT_SECRET", "", prod),
 		BaseURL:            baseURLOr(env, port, prod),
 		OddsAPIKey:         env("ODDS_API_KEY"),
+		TheOddsAPIKey:      env("THE_ODDS_API_KEY"),
 		LogLevel:           levelOr(env, prod, &problems),
 	}
 

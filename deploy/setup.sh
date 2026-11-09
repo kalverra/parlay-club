@@ -51,7 +51,7 @@ DEPLOY_SA_NAME="parlay-deployer"
 RUNTIME_SA="${RUNTIME_SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
 DEPLOY_SA="${DEPLOY_SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
 
-SECRETS=(session-key google-client-id google-client-secret odds-api-key)
+SECRETS=(session-key google-client-id google-client-secret odds-api-key the-odds-api-key)
 
 say() { printf '\n==> %s\n' "$*"; }
 ok() { printf '    %s\n' "$*"; }
@@ -273,8 +273,8 @@ Or with the GitHub CLI, from a clone of the repo:
 
 Next:
   1. Add a version to each secret: session-key (32+ random bytes), the Google
-     client pair from the OAuth runbook, and odds-api-key. The deploy fails
-     until every secret has a version.
+     client pair from the OAuth runbook, odds-api-key, and the-odds-api-key.
+     The deploy fails until every secret has a version.
   2. Deploy once, then set BASE_URL to the Cloud Run URL it prints.
   3. Create a group in the app, then restart the service once so
      seed/history.yaml imports. It waits for a group and only runs at boot.

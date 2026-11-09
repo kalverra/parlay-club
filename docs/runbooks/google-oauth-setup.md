@@ -5,7 +5,7 @@ type: runbook
 summary: Create the Google Web client, register the local and prod redirect URIs, publish the consent screen, and set the client secrets.
 tags: [google, oauth, setup, secrets, deploy, runbook]
 sources: [internal/auth/provider.go, internal/auth/handlers.go, internal/auth/signin.go, internal/config/config.go, cmd/server/main.go]
-last_verified: 2026-11-07
+last_verified: 2026-11-09
 ---
 
 # Google OAuth setup
@@ -25,8 +25,8 @@ identity, and calls no other Google API.
   Manager.
 - The local app runs at `http://localhost:8080` unless you set another `PORT` and `BASE_URL`.
 - For prod, the Cloud Run service URL or custom domain, for example `https://parlay-club-abc123.us-central1.run.app`.
-- Secret Manager secrets for `session-key`, `google-client-id`, `google-client-secret`, and `odds-api-key`. The deploy
-  setup creates them empty; you add versions here.
+- Secret Manager secrets for `session-key`, `google-client-id`, `google-client-secret`, `odds-api-key`, and
+  `the-odds-api-key`. The deploy setup creates them empty; you add versions here.
 
 ## Steps
 
@@ -93,9 +93,10 @@ what a person sees.
 ```text
 GOOGLE_CLIENT_ID     from secret google-client-id
 GOOGLE_CLIENT_SECRET from secret google-client-secret
-BASE_URL             https://SERVICE_URL
+Base_URL             https://SERVICE_URL
 SESSION_KEY          from secret session-key
 ODDS_API_KEY         from secret odds-api-key
+THE_ODDS_API_KEY     from secret the-odds-api-key
 ```
 
 `BASE_URL` must match the redirect URI's scheme, host, and port exactly.
@@ -107,7 +108,8 @@ gcloud run deploy parlay-club ... \
   --set-env-vars APP_ENV=prod,DB_PATH=/data/parlay.db,LITESTREAM_BUCKET=BUCKET \
   --set-env-vars BASE_URL=https://SERVICE_URL \
   --set-secrets SESSION_KEY=session-key:latest,GOOGLE_CLIENT_ID=google-client-id:latest \
-  --set-secrets GOOGLE_CLIENT_SECRET=google-client-secret:latest,ODDS_API_KEY=odds-api-key:latest
+  --set-secrets GOOGLE_CLIENT_SECRET=google-client-secret:latest,ODDS_API_KEY=odds-api-key:latest \
+  --set-secrets THE_ODDS_API_KEY=the-odds-api-key:latest
 ```
 
 ### 5. Try local sign-in first
