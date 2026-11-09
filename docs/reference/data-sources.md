@@ -4,7 +4,7 @@ title: Data sources
 type: reference
 summary: The free sources behind the slate, the ESPN scoreboard endpoint and its Sunday and Monday filter, the Open-Meteo forecast behind a game's weather, Parlay API game lines and props with The Odds API enrichment and fallback, nfelo model projections, bookmakers, deep links, tiered credit floors, and the raw response archive every successful call leaves.
 tags: [data, espn, scoreboard, games, sync, fixtures, weather, open-meteo, venues, odds, parlay-api, the-odds-api, props, lines, bookmakers, links, credits, budget, enrichment, fallback, nfelo, projections, spreads, quarterbacks, archive, raw-responses, sqlite]
-sources: [internal/ingest/espn/client.go, internal/ingest/espn/scoreboard.go, internal/db/weeks.go, internal/db/games.go, internal/ingest/weather/client.go, internal/ingest/weather/forecast.go, internal/ingest/weather/venues.go, internal/ingest/odds/client.go, internal/ingest/odds/events.go, internal/ingest/odds/lines.go, internal/ingest/odds/props.go, internal/ingest/odds/match.go, internal/ingest/nfelo/client.go, internal/ingest/nfelo/projections.go, internal/ingest/nfelo/teams.go, internal/db/nfelo.go, internal/refresh/nfelo.go, internal/ingest/archive/transport.go, internal/ingest/archive/labels.go, internal/db/archive.go, internal/refresh/refresh.go, internal/refresh/sources.go, cmd/server/main.go]
+sources: [internal/ingest/espn/client.go, internal/ingest/espn/scoreboard.go, internal/ingest/espn/roster.go, internal/ingest/espn/summary.go, internal/ingest/espn/gamelog.go, internal/db/weeks.go, internal/db/games.go, internal/ingest/weather/client.go, internal/ingest/weather/forecast.go, internal/ingest/weather/venues.go, internal/ingest/odds/client.go, internal/ingest/odds/events.go, internal/ingest/odds/lines.go, internal/ingest/odds/props.go, internal/ingest/odds/match.go, internal/ingest/nfelo/client.go, internal/ingest/nfelo/projections.go, internal/ingest/nfelo/teams.go, internal/db/nfelo.go, internal/refresh/nfelo.go, internal/ingest/archive/transport.go, internal/ingest/archive/labels.go, internal/db/archive.go, internal/refresh/refresh.go, internal/refresh/sources.go, cmd/server/main.go]
 last_verified: 2026-11-09
 ---
 
@@ -62,6 +62,29 @@ With no params it returns the current week. For a specific week: `?seasontype={2
 - An unknown event state is an error, not a guess.
 - Upsert the week and each game; never delete them, so a flexed game keeps its ID. Rerunning a sync with the same
   response leaves every row, including `updated_at`, unchanged.
+
+### Summary (injuries)
+
+`GET https://site.api.espn.com/apis/site/v2/sports/football/nfl/summary?event={id}`
+
+- `SummaryInjuries(ctx, eventID)` returns the raw `injuries` JSON array or `"[]"` when absent.
+- `ParseInjuries(rawJSON)` parses per-team injury lists filtered to key positions (`QB`, `RB`, `WR`, `TE`, `LT`, `C`, `CB`, `S`, plus `OT`). Non-key positions are omitted.
+- Injuries include `AthleteID`, `FullName`, `Position`, `Status`, and a formatted `Detail` string.
+
+### Roster
+
+`GET https://site.api.espn.com/apis/site/v2/sports/football/nfl/teams/{espnTeamID}/roster`
+
+- `Roster(ctx, espnTeamID)` flattens position groups into `[]RosterPlayer{ID, FullName, Position}`, skipping entries without an athlete ID or full name.
+
+### Game log
+
+`GET https://site.web.api.espn.com/apis/common/v3/sports/football/nfl/athletes/{athleteID}/gamelog`
+
+- `GameLog(ctx, athleteID)` fetches game log data through `webBaseURL` (defaulting to `https://site.web.api.espn.com/apis/common/v3/sports/football/nfl`).
+- The parser matches header names dynamically (`names` and category-scoped `labels`, never positional indices).
+- Walks regular-season and postseason event rows for the current season, most recent first.
+- Counts `GamesPlayed` and populates `Markets map[string][]float64` for `PASS_YDS`, `PASS_TDS`, `RUSH_YDS`, `RUSH_ATT`, `REC_YDS`, `RECEPTIONS`, `ANYTIME_TD` (rushing + receiving + return TDs), and `KICKER_PTS` (`FG made * 3 + XP made`).
 
 ## Open-Meteo (free, no auth)
 

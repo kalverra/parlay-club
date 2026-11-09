@@ -1,8 +1,12 @@
 ---
 slug: props-research
-status: proposed
+status: implementing
 created: "2026-11-01"
-depends_on: [history-and-deploy]
+accepted_by:
+    - Adam Hamrick
+accepted_at: "2026-11-09T20:33:43Z"
+depends_on:
+    - history-and-deploy
 ---
 
 # Props and research
