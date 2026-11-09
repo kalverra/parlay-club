@@ -1227,7 +1227,7 @@ func (h *slipHandlers) slipPageData(ctx context.Context, slip db.Slip) (SlipPage
 		MemberCount:   len(members),
 		Members:       memberViews,
 		Activity:      activity,
-		Analyzer:      analyzerView(legs, games, names),
+		Analyzer:      analyzerView(legs, games, names, h.nfeloForGames(ctx, games)),
 	}
 	if hasUser {
 		view.LegForm = LegFormView{

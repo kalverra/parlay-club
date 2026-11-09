@@ -45,18 +45,61 @@ type Leg struct {
 }
 
 // Game is the slice of a game the analyzer needs: the two teams, whether it is
-// indoors, and the forecast when there is one.
+// indoors, the forecast when there is one, and nfelo's model when it is fresh.
 type Game struct {
 	ID      string
 	Home    string
 	Away    string
 	Indoor  bool
 	Weather *Weather // nil when unknown
+	Nfelo   *Nfelo   // nil when unknown or stale
+}
+
+// Nfelo is nfelo's pre-game model for one game. HomeSpread is from the home
+// side, so a negative number favors the home team. HomeWinProb is the home
+// team's win probability. The QB adjustments are Elo points.
+type Nfelo struct {
+	HomeSpread, HomeWinProb float64
+	HomeQB, AwayQB          string
+	HomeQBAdj, AwayQBAdj    float64
 }
 
 // Weather is the forecast for an outdoor game.
 type Weather struct {
 	WindMPH, GustMPH, PrecipIn, TempF float64
+}
+
+// modelSpread returns the model's spread for team in the same sign a spread
+// leg on that team uses. It reports false when there is no model or the team is
+// not in the game.
+func (g Game) modelSpread(team string) (float64, bool) {
+	if g.Nfelo == nil {
+		return 0, false
+	}
+	switch team {
+	case g.Home:
+		return g.Nfelo.HomeSpread, true
+	case g.Away:
+		return -g.Nfelo.HomeSpread, true
+	default:
+		return 0, false
+	}
+}
+
+// modelWinProb returns the model's win probability for team. It reports false
+// when there is no model or the team is not in the game.
+func (g Game) modelWinProb(team string) (float64, bool) {
+	if g.Nfelo == nil {
+		return 0, false
+	}
+	switch team {
+	case g.Home:
+		return g.Nfelo.HomeWinProb, true
+	case g.Away:
+		return 1 - g.Nfelo.HomeWinProb, true
+	default:
+		return 0, false
+	}
 }
 
 // PlayerStats holds a matched player's recent games per market, most recent
@@ -118,6 +161,7 @@ var rules = []rule{
 	hook,
 	totalKeyNumber,
 	chalk,
+	qbDrag,
 }
 
 // analysis is the filtered input shared by every rule.

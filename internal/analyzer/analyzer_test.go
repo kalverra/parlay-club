@@ -26,6 +26,14 @@ func weatherGames(weather *analyzer.Weather, indoor bool) map[string]analyzer.Ga
 	}
 }
 
+// nfeloGames is the shared slate with an nfelo model on BUF at MIA.
+func nfeloGames(nfelo *analyzer.Nfelo) map[string]analyzer.Game {
+	return map[string]analyzer.Game{
+		"buf-mia": {ID: "buf-mia", Home: "MIA", Away: "BUF", Nfelo: nfelo},
+		"dal-phi": {ID: "dal-phi", Home: "PHI", Away: "DAL"},
+	}
+}
+
 // leg builds one analyzer leg with the fields a rule reads.
 func leg(
 	id int64,
@@ -47,10 +55,11 @@ func withPlayerID(leg analyzer.Leg, id string) analyzer.Leg {
 
 // want is one expected warning.
 type want struct {
-	rule     string
-	severity analyzer.Severity
-	ids      []int64
-	contains []string
+	rule        string
+	severity    analyzer.Severity
+	ids         []int64
+	contains    []string
+	notContains []string
 }
 
 // assertWarnings checks the full warning list and the parts of each message
@@ -66,6 +75,9 @@ func assertWarnings(t *testing.T, got []analyzer.Warning, expected []want) {
 		assert.NotContains(t, got[i].Message, "don't")
 		for _, part := range want.contains {
 			assert.Contains(t, got[i].Message, part)
+		}
+		for _, part := range want.notContains {
+			assert.NotContains(t, got[i].Message, part)
 		}
 	}
 }
@@ -909,6 +921,65 @@ func TestHook(t *testing.T) {
 	}
 }
 
+// TestHookWithNfelo pins the three cushions on a favorite and an underdog. The
+// cushion is the leg line minus nfelo's spread for the same team.
+func TestHookWithNfelo(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		leg      analyzer.Leg
+		nfelo    *analyzer.Nfelo
+		contains []string
+	}{
+		{
+			name:     "favorite cushion plus two and a half",
+			leg:      leg(1, "Adam", "buf-mia", "SPREAD", "BUF", "", "TEAM", new(-7.5), -110),
+			nfelo:    &analyzer.Nfelo{HomeSpread: 10},
+			contains: []string{"nfelo has it nearer -10, so the hook matters less."},
+		},
+		{
+			name:     "favorite on the number",
+			leg:      leg(1, "Adam", "buf-mia", "SPREAD", "BUF", "", "TEAM", new(-7.5), -110),
+			nfelo:    &analyzer.Nfelo{HomeSpread: 7.5},
+			contains: []string{"nfelo sees it near the number too (-7.5), so the hook is live."},
+		},
+		{
+			name:     "favorite asking more than the model",
+			leg:      leg(1, "Adam", "buf-mia", "SPREAD", "BUF", "", "TEAM", new(-7.5), -110),
+			nfelo:    &analyzer.Nfelo{HomeSpread: 5},
+			contains: []string{"nfelo has it closer to -5, so this asks for more than the model does."},
+		},
+		{
+			name:     "underdog cushion plus two and a half",
+			leg:      leg(1, "Adam", "buf-mia", "SPREAD", "MIA", "", "TEAM", new(6.5), -110),
+			nfelo:    &analyzer.Nfelo{HomeSpread: 4},
+			contains: []string{"nfelo has it nearer +4, so the hook matters less."},
+		},
+		{
+			name:     "underdog on the number",
+			leg:      leg(1, "Adam", "buf-mia", "SPREAD", "MIA", "", "TEAM", new(6.5), -110),
+			nfelo:    &analyzer.Nfelo{HomeSpread: 6.5},
+			contains: []string{"nfelo sees it near the number too (+6.5), so the hook is live."},
+		},
+		{
+			name:     "underdog asking more than the model",
+			leg:      leg(1, "Adam", "buf-mia", "SPREAD", "MIA", "", "TEAM", new(6.5), -110),
+			nfelo:    &analyzer.Nfelo{HomeSpread: 9},
+			contains: []string{"nfelo has it closer to +9, so this asks for more than the model does."},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			got := analyzer.AnalyzeSlip([]analyzer.Leg{test.leg}, nfeloGames(test.nfelo), nil)
+			assertWarnings(t, got, []want{{
+				rule: "hook", severity: analyzer.Warn, ids: []int64{test.leg.ID},
+				contains: test.contains,
+			}})
+		})
+	}
+}
+
 func TestTotalKeyNumber(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -1073,6 +1144,193 @@ func TestChalk(t *testing.T) {
 			assertWarnings(t, analyzer.AnalyzeSlip(test.legs, games(), nil), test.want)
 		})
 	}
+}
+
+// TestChalkWithNfelo checks that only a moneyline leg picks up the model's win
+// probability. A spread at the same price keeps the plain chalk sentence.
+func TestChalkWithNfelo(t *testing.T) {
+	t.Parallel()
+	nfelo := &analyzer.Nfelo{HomeWinProb: 0.24}
+	tests := []struct {
+		name string
+		leg  analyzer.Leg
+		want []want
+	}{
+		{
+			name: "away moneyline shows the percentage",
+			leg:  leg(1, "Adam", "buf-mia", "ML", "BUF", "", "TEAM", nil, -300),
+			want: []want{{
+				rule: "chalk", severity: analyzer.Warn, ids: []int64{1},
+				contains: []string{"nfelo has BUF at about 76% to win."},
+			}},
+		},
+		{
+			name: "home moneyline shows the percentage",
+			leg:  leg(1, "Adam", "buf-mia", "ML", "MIA", "", "TEAM", nil, -300),
+			want: []want{{
+				rule: "chalk", severity: analyzer.Warn, ids: []int64{1},
+				contains: []string{"nfelo has MIA at about 24% to win."},
+			}},
+		},
+		{
+			name: "spread keeps the plain sentence",
+			leg:  leg(1, "Adam", "buf-mia", "SPREAD", "BUF", "", "TEAM", new(-3.0), -300),
+			want: []want{{
+				rule: "chalk", severity: analyzer.Warn, ids: []int64{1},
+				notContains: []string{"nfelo"},
+			}},
+		},
+		{
+			name: "prop keeps the plain sentence",
+			leg:  leg(1, "Adam", "buf-mia", "PASS_YDS", "BUF", "Josh Allen", "OVER", new(245.5), -300),
+			want: []want{{
+				rule: "chalk", severity: analyzer.Warn, ids: []int64{1},
+				notContains: []string{"nfelo"},
+			}},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			assertWarnings(t, analyzer.AnalyzeSlip([]analyzer.Leg{test.leg}, nfeloGames(nfelo), nil), test.want)
+		})
+	}
+}
+
+// TestQBDrag checks the threshold, the markets it covers, the legs it ignores,
+// and the single warning per game and team.
+func TestQBDrag(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		legs  []analyzer.Leg
+		nfelo *analyzer.Nfelo
+		want  []want
+	}{
+		{
+			name: "minus twenty nine point nine stays quiet",
+			legs: []analyzer.Leg{
+				leg(1, "Adam", "buf-mia", "SPREAD", "MIA", "", "TEAM", new(-3.0), -110),
+			},
+			nfelo: &analyzer.Nfelo{HomeQB: "Tua Tagovailoa", HomeQBAdj: -29.9},
+		},
+		{
+			name: "minus thirty fires",
+			legs: []analyzer.Leg{
+				leg(1, "Adam", "buf-mia", "SPREAD", "MIA", "", "TEAM", new(-3.0), -110),
+			},
+			nfelo: &analyzer.Nfelo{HomeQB: "Tua Tagovailoa", HomeQBAdj: -30},
+			want: []want{{
+				rule: "qb_drag", severity: analyzer.Info, ids: []int64{1},
+				contains: []string{
+					"nfelo marks down MIA's QB, Tua Tagovailoa, by about 1.2 points.",
+					"MIA -3",
+				},
+			}},
+		},
+		{
+			name: "a favorite spread and a passing over get one warning for both owners",
+			legs: []analyzer.Leg{
+				leg(1, "Adam", "buf-mia", "SPREAD", "MIA", "", "TEAM", new(-3.0), -110),
+				leg(2, "Sam", "buf-mia", "PASS_YDS", "MIA", "Tua Tagovailoa", "OVER", new(245.5), -110),
+			},
+			nfelo: &analyzer.Nfelo{HomeQB: "Tua Tagovailoa", HomeQBAdj: -35},
+			want: []want{{
+				rule: "qb_drag", severity: analyzer.Info, ids: []int64{1, 2},
+				contains: []string{
+					"by about 1.4 points.",
+					"Adam's MIA -3",
+					"Sam's Tua Tagovailoa Over 245.5 Pass Yds",
+				},
+			}},
+		},
+		{
+			name: "an away favorite and a receiving over fire",
+			legs: []analyzer.Leg{
+				leg(1, "Adam", "buf-mia", "ML", "BUF", "", "TEAM", nil, -200),
+				leg(2, "Sam", "buf-mia", "REC_YDS", "BUF", "Keon Coleman", "OVER", new(52.5), -110),
+			},
+			nfelo: &analyzer.Nfelo{AwayQB: "Josh Allen", AwayQBAdj: -40},
+			want: []want{{
+				rule: "qb_drag", severity: analyzer.Info, ids: []int64{1, 2},
+				contains: []string{
+					"nfelo marks down BUF's QB, Josh Allen, by about 1.6 points.",
+					"Adam's BUF ML",
+					"Sam's Keon Coleman Over 52.5 Rec Yds",
+				},
+			}},
+		},
+		{
+			name: "an underdog spread stays quiet",
+			legs: []analyzer.Leg{
+				leg(1, "Adam", "buf-mia", "SPREAD", "MIA", "", "TEAM", new(3.0), -110),
+			},
+			nfelo: &analyzer.Nfelo{HomeQB: "Tua Tagovailoa", HomeQBAdj: -35},
+		},
+		{
+			name: "an underdog moneyline stays quiet",
+			legs: []analyzer.Leg{
+				leg(1, "Adam", "buf-mia", "ML", "MIA", "", "TEAM", nil, 150),
+			},
+			nfelo: &analyzer.Nfelo{HomeQB: "Tua Tagovailoa", HomeQBAdj: -35},
+		},
+		{
+			name: "a team total under stays quiet",
+			legs: []analyzer.Leg{
+				leg(1, "Adam", "buf-mia", "TEAM_TOTAL", "MIA", "", "UNDER", new(20.5), -110),
+			},
+			nfelo: &analyzer.Nfelo{HomeQB: "Tua Tagovailoa", HomeQBAdj: -35},
+		},
+		{
+			name: "a team total over fires",
+			legs: []analyzer.Leg{
+				leg(1, "Adam", "buf-mia", "TEAM_TOTAL", "MIA", "", "OVER", new(20.5), -110),
+			},
+			nfelo: &analyzer.Nfelo{HomeQB: "Tua Tagovailoa", HomeQBAdj: -35},
+			want: []want{{
+				rule: "qb_drag", severity: analyzer.Info, ids: []int64{1},
+				contains: []string{"MIA Team Total Over 20.5"},
+			}},
+		},
+		{
+			name: "a rush over stays quiet",
+			legs: []analyzer.Leg{
+				leg(1, "Adam", "buf-mia", "RUSH_YDS", "MIA", "De'Von Achane", "OVER", new(60.5), -110),
+			},
+			nfelo: &analyzer.Nfelo{HomeQB: "Tua Tagovailoa", HomeQBAdj: -35},
+		},
+		{
+			name: "no nfelo stays quiet",
+			legs: []analyzer.Leg{
+				leg(1, "Adam", "buf-mia", "SPREAD", "MIA", "", "TEAM", new(-3.0), -110),
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			assertWarnings(t, analyzer.AnalyzeSlip(test.legs, nfeloGames(test.nfelo), nil), test.want)
+		})
+	}
+}
+
+// TestNilNfeloKeepsTheOldSentences pins the hook and chalk text for a game with
+// no model, so the new sentences never leak into a world without nfelo data.
+func TestNilNfeloKeepsTheOldSentences(t *testing.T) {
+	t.Parallel()
+	legs := []analyzer.Leg{
+		leg(1, "Adam", "buf-mia", "SPREAD", "BUF", "", "TEAM", new(-7.5), -110),
+		leg(2, "Adam", "buf-mia", "ML", "BUF", "", "TEAM", nil, -300),
+	}
+
+	got := analyzer.AnalyzeSlip(legs, games(), nil)
+	require.Len(t, got, 2)
+	assert.Equal(t, "hook", got[0].Rule)
+	assert.Equal(t, "BUF -7.5 is on the hook. Landing on exactly 7 loses by the hook. "+
+		"Buying to -7 or switching to the ML is worth a look.", got[0].Message)
+	assert.Equal(t, "chalk", got[1].Rule)
+	assert.Equal(t, "This -300 leg only bumps the payout 1.33× but still busts the slip "+
+		"about 25% of the time.", got[1].Message)
 }
 
 func TestOutputOrderAcrossRuleSets(t *testing.T) {

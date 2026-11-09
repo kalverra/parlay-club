@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -89,6 +90,85 @@ func TestSlipPanelBannerLooksCleanWithNoWarnings(t *testing.T) {
 	body := recorder.Body.String()
 	assert.Contains(t, body, "Looks clean")
 	assert.NotContains(t, body, "data-rule=")
+}
+
+// TestSlipPanelUsesNfeloOnlyWhenFreshAndScheduled checks the two guards that
+// keep an old model or a game already underway out of the banner.
+func TestSlipPanelUsesNfeloOnlyWhenFreshAndScheduled(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		fetchedAt time.Time
+		status    db.GameStatus
+		wantModel bool
+	}{
+		{name: "fresh and scheduled", fetchedAt: time.Now().UTC(), status: db.GameScheduled, wantModel: true},
+		{name: "four days old", fetchedAt: time.Now().UTC().Add(-96 * time.Hour), status: db.GameScheduled},
+		{name: "live game", fetchedAt: time.Now().UTC(), status: db.GameLive},
+		{name: "final game", fetchedAt: time.Now().UTC(), status: db.GameFinal},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			fixture := newSlipFixture(t, 1)
+			game := addGame(t, fixture, gameKickoff())
+			if test.status != db.GameScheduled {
+				game.Status = test.status
+				updated, err := fixture.store.UpsertGame(t.Context(), game)
+				require.NoError(t, err)
+				game = updated
+			}
+
+			changed, err := fixture.store.UpsertNfeloGames(t.Context(), []db.NfeloGame{{
+				GameID:      game.ID,
+				HomeSpread:  -10,
+				HomeWinProb: 0.76,
+				HomeQB:      "Josh Allen",
+				AwayQB:      "Tua Tagovailoa",
+				HomeQBAdj:   5,
+				AwayQBAdj:   -5,
+				UpdatedAt:   test.fetchedAt,
+			}})
+			require.NoError(t, err)
+			require.True(t, changed)
+			require.NoError(t, fixture.store.RecordSync(
+				t.Context(), "nfelo:projections", test.fetchedAt, nil))
+
+			addStoredLeg(t, fixture, db.Leg{
+				UserID:     fixture.user.ID,
+				GameID:     new(game.ID),
+				MarketType: "SPREAD",
+				Selection:  "BUF -7.5",
+				Team:       new("BUF"),
+				Side:       new("TEAM"),
+				Line:       new(-7.5),
+				Odds:       -110,
+			})
+
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequestWithContext(
+				t.Context(),
+				http.MethodGet,
+				fmt.Sprintf("/slips/%d/panel", fixture.slip.ID),
+				nil,
+			)
+			fixture.handler.ServeHTTP(recorder, request)
+
+			require.Equal(t, http.StatusOK, recorder.Code)
+			body := html.UnescapeString(recorder.Body.String())
+			require.Contains(t, body, `data-rule="hook"`, "the hook still fires without a model")
+
+			if test.wantModel {
+				assert.Contains(t, body, "nfelo has it nearer -10, so the hook matters less.")
+				return
+			}
+			assert.NotContains(t, body, "nfelo has it nearer")
+			assert.NotContains(t, body, "nfelo has it closer to")
+			assert.NotContains(t, body, "nfelo sees it near the number too")
+		})
+	}
 }
 
 // addStoredLeg writes one leg straight through the store so a test can give
