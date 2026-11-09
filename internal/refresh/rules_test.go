@@ -284,3 +284,179 @@ func TestWeatherStaleRules(t *testing.T) {
 		})
 	}
 }
+
+func TestOddsPropsStaleRules(t *testing.T) {
+	t.Parallel()
+
+	kickoff := novemberTime(8, 13, 0)
+	game := db.Game{ID: "401", Kickoff: kickoff}
+
+	tests := []struct {
+		name string
+		last time.Time
+		now  time.Time
+		game db.Game
+		want bool
+	}{
+		{
+			name: "never fetched before kickoff",
+			now:  novemberTime(8, 10, 0),
+			game: game,
+			want: true,
+		},
+		{
+			name: "props wait two hours",
+			last: novemberTime(8, 9, 0),
+			now:  novemberTime(8, 10, 59),
+			game: game,
+			want: false,
+		},
+		{
+			name: "props at two hours",
+			last: novemberTime(8, 9, 0),
+			now:  novemberTime(8, 11, 0),
+			game: game,
+			want: true,
+		},
+		{
+			name: "at kickoff is skipped",
+			last: novemberTime(8, 9, 0),
+			now:  kickoff,
+			game: game,
+			want: false,
+		},
+		{
+			name: "after kickoff is skipped",
+			now:  kickoff.Add(10 * time.Minute),
+			game: game,
+			want: false,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, test.want, oddsPropsStale(test.last, test.now, test.game))
+		})
+	}
+}
+
+func TestRosterStaleRules(t *testing.T) {
+	t.Parallel()
+
+	now := novemberTime(8, 12, 0)
+	tests := []struct {
+		name string
+		last time.Time
+		now  time.Time
+		want bool
+	}{
+		{
+			name: "never fetched",
+			now:  now,
+			want: true,
+		},
+		{
+			name: "roster waits 24 hours",
+			last: now.Add(-23 * time.Hour),
+			now:  now,
+			want: false,
+		},
+		{
+			name: "roster at 24 hours",
+			last: now.Add(-24 * time.Hour),
+			now:  now,
+			want: true,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, test.want, rosterStale(test.last, test.now))
+		})
+	}
+}
+
+func TestSummaryStaleRules(t *testing.T) {
+	t.Parallel()
+
+	now := novemberTime(8, 12, 0)
+	scheduledGame := db.Game{ID: "401", Status: db.GameScheduled}
+	finalGame := db.Game{ID: "402", Status: db.GameFinal}
+
+	tests := []struct {
+		name string
+		last time.Time
+		now  time.Time
+		game db.Game
+		want bool
+	}{
+		{
+			name: "never fetched scheduled game",
+			now:  now,
+			game: scheduledGame,
+			want: true,
+		},
+		{
+			name: "final game is skipped",
+			now:  now,
+			game: finalGame,
+			want: false,
+		},
+		{
+			name: "summary waits two hours",
+			last: now.Add(-1 * time.Hour),
+			now:  now,
+			game: scheduledGame,
+			want: false,
+		},
+		{
+			name: "summary at two hours",
+			last: now.Add(-2 * time.Hour),
+			now:  now,
+			game: scheduledGame,
+			want: true,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, test.want, summaryStale(test.last, test.now, test.game))
+		})
+	}
+}
+
+func TestGameLogStaleRules(t *testing.T) {
+	t.Parallel()
+
+	now := novemberTime(8, 12, 0)
+	tests := []struct {
+		name string
+		last time.Time
+		now  time.Time
+		want bool
+	}{
+		{
+			name: "never fetched",
+			now:  now,
+			want: true,
+		},
+		{
+			name: "gamelog waits 12 hours",
+			last: now.Add(-11 * time.Hour),
+			now:  now,
+			want: false,
+		},
+		{
+			name: "gamelog at 12 hours",
+			last: now.Add(-12 * time.Hour),
+			now:  now,
+			want: true,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, test.want, gameLogStale(test.last, test.now))
+		})
+	}
+}

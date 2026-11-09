@@ -59,6 +59,9 @@ func (s *Service) oddsSource(games []db.Game, now time.Time) source {
 // syncScoreboard writes the week and each game, and records the fetch. A rerun
 // of the same slate changes no rows.
 func (s *Service) syncScoreboard(ctx context.Context, now time.Time) (bool, error) {
+	if s.scoreboard == nil {
+		return false, nil
+	}
 	board, err := s.scoreboard.Scoreboard(ctx, espn.ScoreboardParams{})
 	if err != nil {
 		return false, fmt.Errorf("scoreboard: %w", err)
