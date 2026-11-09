@@ -2,9 +2,9 @@
 id: data-sources
 title: Data sources
 type: reference
-summary: The free sources behind the slate, the ESPN scoreboard endpoint and its Sunday and Monday filter, the Open-Meteo forecast behind a game's weather, Parlay API game lines and props with The Odds API enrichment and fallback, bookmakers, deep links, tiered credit floors, and the raw response archive every successful call leaves.
-tags: [data, espn, scoreboard, games, sync, fixtures, weather, open-meteo, venues, odds, parlay-api, the-odds-api, props, lines, bookmakers, links, credits, budget, enrichment, fallback, archive, raw-responses, sqlite]
-sources: [internal/ingest/espn/client.go, internal/ingest/espn/scoreboard.go, internal/db/weeks.go, internal/db/games.go, internal/ingest/weather/client.go, internal/ingest/weather/forecast.go, internal/ingest/weather/venues.go, internal/ingest/odds/client.go, internal/ingest/odds/events.go, internal/ingest/odds/lines.go, internal/ingest/odds/props.go, internal/ingest/odds/match.go, internal/ingest/archive/transport.go, internal/ingest/archive/labels.go, internal/db/archive.go, internal/refresh/refresh.go, internal/refresh/sources.go, cmd/server/main.go]
+summary: The free sources behind the slate, the ESPN scoreboard endpoint and its Sunday and Monday filter, the Open-Meteo forecast behind a game's weather, Parlay API game lines and props with The Odds API enrichment and fallback, nfelo model projections, bookmakers, deep links, tiered credit floors, and the raw response archive every successful call leaves.
+tags: [data, espn, scoreboard, games, sync, fixtures, weather, open-meteo, venues, odds, parlay-api, the-odds-api, props, lines, bookmakers, links, credits, budget, enrichment, fallback, nfelo, projections, spreads, quarterbacks, archive, raw-responses, sqlite]
+sources: [internal/ingest/espn/client.go, internal/ingest/espn/scoreboard.go, internal/db/weeks.go, internal/db/games.go, internal/ingest/weather/client.go, internal/ingest/weather/forecast.go, internal/ingest/weather/venues.go, internal/ingest/odds/client.go, internal/ingest/odds/events.go, internal/ingest/odds/lines.go, internal/ingest/odds/props.go, internal/ingest/odds/match.go, internal/ingest/nfelo/client.go, internal/ingest/nfelo/projections.go, internal/ingest/nfelo/teams.go, internal/db/nfelo.go, internal/refresh/nfelo.go, internal/ingest/archive/transport.go, internal/ingest/archive/labels.go, internal/db/archive.go, internal/refresh/refresh.go, internal/refresh/sources.go, cmd/server/main.go]
 last_verified: 2026-11-09
 ---
 
@@ -257,6 +257,41 @@ whose `bookmakers[].markets[].outcomes[]` carry the prices. `Client.EventProps` 
 copies `bookmakers[].sid` into `Prop.EventSid`. `odds.MergeProps` merges a Parlay API board with one of these boards
 using the same precedence as game lines. Refresh does not call it yet, and a caller must merge one event's board at a
 time because the event ID backfills by book.
+
+## nfelo (free, no auth)
+
+Base: `https://raw.githubusercontent.com/greerreNFL/nfelo/main/output_data`. The data comes from a public GitHub repo and
+needs no key or account. `nfelo.NewClient(baseURL, httpClient)` defaults an empty base URL to the root above and a nil
+client to a 10 second timeout. `Client.Projections(ctx)` fetches the one file the app uses:
+
+```text
+GET /historic_projected_spreads.csv
+```
+
+It holds about 1,550 rows from 2021 through the current week. The client reads every column by header name, never by
+position, and ignores the nameless pandas index in the first column. A missing required header is an error, a row with an
+empty required cell is dropped, and a non-numeric number is an error.
+
+| Field                          | Column                                          | Use                                                                |
+| ------------------------------ | ----------------------------------------------- | ------------------------------------------------------------------ |
+| `Season`, `Week`               | `season`, `week`                                | Match to a `weeks` row                                             |
+| `Home`, `Away`                 | `home_team`, `away_team`                        | Match to `games.home_team` and `games.away_team`, then map to ESPN |
+| `HomeSpread`                   | `home_line_pre_regression`                      | Model spread from the home side; negative favors the home team     |
+| `HomeWinProb`                  | `home_probability_nfelo`                        | Home win probability, 0 to 1                                       |
+| `HomeQB`, `AwayQB`             | `home_538_qb`, `away_538_qb`                    | The starting quarterback the model used                            |
+| `HomeQBAdj`, `AwayQBAdj`       | `home_538_qb_adj`, `away_538_qb_adj`            | Quarterback adjustment in Elo points                               |
+
+- The spread is from the home side: a negative number means the home team is favored. `home_line_close` is the market
+  line, and `home_closing_line_rounded_nfelo` echoes it on most current rows, so neither is the model number.
+  `home_line_pre_regression` is the pure pre-regression rating.
+- Team codes that differ from ESPN's are mapped: `OAK` → `LV` and `WAS` → `WSH`. Every other code already matches. An
+  unmapped code passes through unchanged, so the game gets no row and refresh logs the unmatched CSV row at debug.
+- The file has no played flag. A played game keeps its last pre-game projection.
+
+Refresh writes the current regular-season week's matching rows into `nfelo_games`; see
+[Data refresh](../concepts/data-refresh.md). The CSV is archived under the `nfelo:projections` key with
+`source = "nfelo"`, so a format change leaves the raw bytes in the archive. The real file saved on 2026-11-09 is
+`internal/ingest/nfelo/testdata/historic_projected_spreads.csv`.
 
 ## Budget
 

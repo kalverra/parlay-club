@@ -2,9 +2,9 @@
 id: data-refresh
 title: Data refresh
 type: concept
-summary: How page loads drive lazy syncs of the slate, weather, and game lines, with per-source staleness windows, single-flight, failure backoff, tiered Parlay API and The Odds API credit floors, and an archive of every successful response.
-tags: [refresh, sync, lazy, staleness, singleflight, backoff, credits, odds, parlay-api, the-odds-api, enrichment, fallback, props, weather, slate, live-window, archive, raw-responses]
-sources: [internal/refresh/refresh.go, internal/refresh/rules.go, internal/refresh/sources.go, internal/refresh/publish.go, internal/refresh/live.go, internal/db/sync.go, internal/ingest/archive/transport.go, cmd/server/main.go]
+summary: How page loads drive lazy syncs of the slate, weather, game lines, and nfelo projections, with per-source staleness windows, single-flight, failure backoff, tiered Parlay API and The Odds API credit floors, and an archive of every successful response.
+tags: [refresh, sync, lazy, staleness, singleflight, backoff, credits, odds, parlay-api, the-odds-api, enrichment, fallback, props, weather, slate, live-window, nfelo, projections, archive, raw-responses]
+sources: [internal/refresh/refresh.go, internal/refresh/rules.go, internal/refresh/sources.go, internal/refresh/nfelo.go, internal/refresh/publish.go, internal/refresh/live.go, internal/db/sync.go, internal/db/nfelo.go, internal/ingest/nfelo/client.go, internal/ingest/archive/transport.go, cmd/server/main.go]
 last_verified: 2026-11-09
 ---
 
@@ -37,8 +37,8 @@ does not cancel a sync, and every source gets its own 30 second timeout. Tests w
 
 1. Read the latest week and its games. Before the first slate sync there is no week, which is not an error.
 2. Sync `espn:scoreboard` first, because it may add or change the week's games.
-3. Read the week's games again, then start one weather source per game and one odds source for the week. Those run at
-   the same time, each in its own goroutine.
+3. Read the week's games again, then start one weather source per game, one odds source for the week, and the nfelo
+   projections source. Those run at the same time, each in its own goroutine.
 
 Within a source, `singleflight` keyed by its `sync_state` source key lets concurrent page loads share one fetch. The
 work inside the flight re-reads the staleness state before fetching, so a load that joined after the first run finished
@@ -63,6 +63,7 @@ Each source records its last successful sync in `sync_state.fetched_at`. A sourc
 | `espn:scoreboard`  | Latest week's slate, scores, and status | 10 min while any game is live; 30 min on Sunday or Monday; 6 h otherwise                                                 | Never                                                              |
 | `weather:{gameID}` | Kickoff-window forecast for one game    | 1 h                                                                                                                      | Indoor, unknown venue, more than 48 h before kickoff, or kicked off |
 | `odds:lines`       | The week's game lines                   | 24 h Monday–Friday; 12 h Saturday; 45 min Sunday before the last Sunday kickoff; 3 h after that and all day Monday      | No games, or every game has kicked off                             |
+| `nfelo:projections`| The week's model spreads, win probabilities, and QB adjustments | 12 h                                                                                                     | Not a regular-season week, no games, or every game has kicked off  |
 
 "Sunday" and "Monday" mean `America/New_York`. The zone database is embedded in the binary, so it resolves in the
 container without a separate `tzdata` package. The scoreboard's live flag comes from the stored games: any game with
@@ -74,6 +75,12 @@ their balance under that key so the next pass can enforce the fallback and enric
 Weather is per game, not per week. A game inside its window refreshes hourly until kickoff; an indoor game or one with
 no coordinates in the venue map never gets a forecast. See [Data sources](../reference/data-sources.md) for the endpoint
 and the venue map.
+
+nfelo is per week, not per game. One fetch of the whole CSV covers every NFL week since 2021, and refresh keeps only the
+rows that match the current week's games. A game with no matching row keeps its last projection, or has none. A
+non-regular-season week is skipped because the CSV's playoff week numbers are unverified, and a week whose games have all
+kicked off is skipped because the projections are pre-game numbers that no longer change. The source spends no Odds API
+credits, so it has no floor and does not wait on the odds sync.
 
 ## Odds credits
 
@@ -124,7 +131,7 @@ After a transaction commits and only when it changed rows, refresh publishes liv
 - `week:{weekID}` for the game board;
 - `slip:{id}` for every slip in that week.
 
-The scoreboard, weather, and odds syncs all use the same helper. Publishing after commit means a listener never
+The scoreboard, weather, odds, and nfelo syncs all use the same helper. Publishing after commit means a listener never
 refetches a write that might roll back. A no-op rerun publishes nothing. See [Live updates](live-updates.md) for the hub
 and the client.
 

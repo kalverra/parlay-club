@@ -1,9 +1,9 @@
 # Data sources
 
-Four free sources. Each has a client package under `internal/ingest/` behind a small interface, so `internal/refresh`
+Five free sources. Each has a client package under `internal/ingest/` behind a small interface, so `internal/refresh`
 and tests can swap in fakes. Clients take a base URL and an `*http.Client` (10 s timeout) in their constructor, and send
 `User-Agent: parlay-club`. Parlay API is the primary odds feed; The Odds API enriches its game lines and serves as
-fallback.
+fallback. nfelo adds model spreads, win probabilities, and quarterback adjustments.
 
 The field paths and market keys below come from memory of these APIs. Before writing each parser, save a real response
 into `testdata/` and confirm the paths against it; fix this doc where they differ.
@@ -21,6 +21,7 @@ into `testdata/` and confirm the paths against it; fix this doc where they diffe
 | `odds:lines`          | Game lines for the week                | see the budget in [docs/reference/data-sources.md](../docs/reference/data-sources.md) |
 | `odds:theoddsapi`     | The Odds API credit balance; enrichment and fallback lines | not scheduled; rides inside `odds:lines` |
 | `odds:props:{game}`   | Props for one game, on demand          | 2 h; skip after kickoff                                         |
+| `nfelo:projections`   | Model spreads, win probabilities, and QB adjustments for the week | 12 h; skip non-regular weeks and weeks where every game has kicked off |
 | `espn:roster:{team}`  | Team roster (`props-research`)                  | 24 h                                                            |
 | `espn:gamelog:{id}`   | Player game log (`props-research`)              | 12 h                                                            |
 | `grade`               | Auto-grading (`grading-record-book`)                 | runs whenever a FINAL game has PENDING legs                     |
@@ -153,6 +154,19 @@ time because the event ID backfills by book.
 or `FULL`; drop `1H`, `Q1`, and `UNKNOWN`. For player markets, `player` (or the legacy `player_name`) is the subject,
 `over_price` and `under_price` are the sides, and `line` is the line. An anytime touchdown is a single `YES` row with no
 line. `team_totals` puts the full team name in `player`.
+
+## nfelo (free, no auth)
+
+- Base: `https://raw.githubusercontent.com/greerreNFL/nfelo/main/output_data`. A public GitHub repo, no key.
+- One file: `GET /historic_projected_spreads.csv`, about 1,550 rows from 2021 through the current week.
+- Read columns by header name. The spread is `home_line_pre_regression`, from the home side; the win probability is
+  `home_probability_nfelo`; the QB names and adjustments are `home_538_qb`, `away_538_qb`, `home_538_qb_adj`, and
+  `away_538_qb_adj`. `home_closing_line_rounded_nfelo` echoes the market on most current rows, so it is not the model
+  number.
+- Map `OAK` to `LV` and `WAS` to `WSH`; every other code already matches ESPN.
+- Refresh keeps the current regular-season week's rows in `nfelo_games`. The endpoint, field table, and storage are in
+  [docs/reference/data-sources.md](../docs/reference/data-sources.md) and
+  [docs/reference/schema.md](../docs/reference/schema.md).
 
 ## Player matching (`props-research`)
 

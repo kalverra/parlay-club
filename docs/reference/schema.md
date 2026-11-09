@@ -2,9 +2,9 @@
 id: schema
 title: Database schema
 type: reference
-summary: SQLite tables, including groups and their members, the odds rows and their sportsbook deep links, the raw external response archive, how migrations are tracked and applied, and the connection settings behind every query.
-tags: [database, sqlite, migrations, groups, archive, api, raw-responses, odds, links]
-sources: [internal/db/migrations/*.sql, internal/db/migrate.go, internal/db/db.go, internal/db/odds.go, internal/db/groups.go, internal/db/archive.go, internal/db/archive_read.go, internal/ingest/archive/transport.go]
+summary: SQLite tables, including groups and their members, the odds rows and their sportsbook deep links, nfelo's per-game projections, the raw external response archive, how migrations are tracked and applied, and the connection settings behind every query.
+tags: [database, sqlite, migrations, groups, archive, api, raw-responses, odds, links, nfelo, projections]
+sources: [internal/db/migrations/*.sql, internal/db/migrate.go, internal/db/db.go, internal/db/odds.go, internal/db/groups.go, internal/db/nfelo.go, internal/db/archive.go, internal/db/archive_read.go, internal/ingest/archive/transport.go]
 last_verified: 2026-11-09
 ---
 
@@ -16,7 +16,8 @@ One SQLite file, opened by `internal/db.Open`, holds every table the app uses. `
 including groups, their members, and `slips.group_id`. `0002_google_identity.sql` rebuilds `users` to add Google
 identity columns and drop the unique name rule. `0003_api_archive.sql` adds the raw response archive, `api_bodies` and
 `api_responses`; see [Archive](../concepts/archive.md). `0004_odds_links.sql` adds each book's deep link and selection
-ID to `odds`, and `0005_odds_event_sid.sql` adds the book's own event ID.
+ID to `odds`, and `0005_odds_event_sid.sql` adds the book's own event ID. `0006_nfelo_games.sql` adds `nfelo_games`,
+one model projection per game.
 
 ## Connection settings
 
@@ -40,7 +41,7 @@ connection rules out `SQLITE_BUSY`.
 - `db.Migrate` applies every file whose number is greater than `PRAGMA user_version`, in number order.
 - Each file runs in its own transaction. The migration's statements and its `user_version` bump commit together, so a
   failed migration leaves neither behind.
-- A fresh database ends at version 5 with every table below.
+- A fresh database ends at version 6 with every table below.
 - `0001_init.sql` creates `groups`, `group_members`, and `slips.group_id`. A database created before groups existed has
   the old `slips` shape, so delete it and let the migrations rebuild.
 - `0002_google_identity.sql` rebuilds `users` in its transaction with the SQLite 12-step method and
@@ -51,7 +52,10 @@ connection rules out `SQLITE_BUSY`.
   keeps its row and gets NULL links until the next sync fills them.
 - `0005_odds_event_sid.sql` adds a nullable `event_sid` column to `odds`. It holds the bookmaker block's `sid`, the
   book's own ID for the event. Existing rows get NULL until the next sync.
-- Never edit an applied file. Add `0006_name.sql` and up.
+- `0006_nfelo_games.sql` creates `nfelo_games`, keyed by `game_id` with `ON DELETE CASCADE` to `games`. A game without a
+  matching nfelo row simply has no projection, and a game that drops out of the CSV keeps its last one. It changes no
+  existing table.
+- Never edit an applied file. Add `0007_name.sql` and up.
 - `PRAGMA user_version` on the database file is the only record of what ran.
 
 ## Tables
@@ -64,6 +68,7 @@ connection rules out `SQLITE_BUSY`.
 | `weeks`          | NFL weeks, keyed `season*1000 + season_type*100 + week_num`.  |
 | `games`          | One row per ESPN event: teams, kickoff, venue, weather, scores. |
 | `odds`           | Odds API prices and sportsbook deep links per game, book, market, and selection. |
+| `nfelo_games`    | nfelo's pre-game model spread, win probability, and QB adjustments per game. |
 | `slips`          | One shared parlay per group per week, with status and result.  |
 | `slip_members`   | Who is on a slip and when they locked in.                     |
 | `legs`           | Picks on a slip, with market, selection, line, odds, and result. |
@@ -170,6 +175,17 @@ CREATE TABLE games (
   updated_at     TEXT NOT NULL
 );
 CREATE INDEX games_week ON games(week_id, kickoff_utc);
+
+CREATE TABLE nfelo_games (
+  game_id       TEXT PRIMARY KEY REFERENCES games(id) ON DELETE CASCADE,
+  home_spread   REAL NOT NULL,                 -- home perspective; negative = home favored
+  home_win_prob REAL NOT NULL,                 -- 0..1
+  home_qb       TEXT NOT NULL,
+  away_qb       TEXT NOT NULL,
+  home_qb_adj   REAL NOT NULL,                 -- Elo points
+  away_qb_adj   REAL NOT NULL,
+  updated_at    TEXT NOT NULL                  -- RFC 3339 UTC
+);
 
 CREATE TABLE odds (
   game_id     TEXT NOT NULL REFERENCES games(id),
@@ -303,8 +319,10 @@ how to read it.
 - `odds.link`, `odds.sid`, and `odds.event_sid` belong to the outcome row, so they refresh in the same upsert as
   `price`. All stay NULL when the book returned no deep link or event ID; a missing link is normal. `event_sid` is the
   bookmaker block's own ID for the event, used by DraftKings' combined event-page link.
+- `nfelo_games` holds one global row per game. A sync upserts it, and `updated_at` moves only when a stored value
+  changes, so rerunning with the same CSV is a no-op.
 - A slip's reference odds are not stored; any view that shows them computes them.
 - `slips.status` and `slips.result` stay in step with lock and leg-result changes.
 - `groups`, `group_members`, `slips`, and the rows that hang off a slip are scoped to one group. Weeks, games, odds,
-  player matches, and `sync_state` are global.
+  nfelo projections, player matches, and `sync_state` are global.
 - An invite token is a bearer secret. Do not log it or echo it in an error.
