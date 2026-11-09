@@ -17,7 +17,7 @@ type SyncState struct {
 	// FetchedAt is when the source last synced successfully. A zero time means
 	// it has never run.
 	FetchedAt time.Time
-	// OddsCreditsRemaining is the last count The Odds API reported for this
+	// OddsCreditsRemaining is the last count Parlay API reported for this
 	// source. It is nil for sources that spend no credits.
 	OddsCreditsRemaining *int
 }

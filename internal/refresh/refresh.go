@@ -1,6 +1,6 @@
 // Package refresh decides when outside data is fetched and writes the results
 // through the store. It owns the per-source staleness rules, single-flight
-// keyed by source, the in-memory backoff after a failure, and the Odds API
+// keyed by source, the in-memory backoff after a failure, and the Parlay API
 // credit floors. Callers kick it from a page load; it returns at once and does
 // the work in the background.
 package refresh

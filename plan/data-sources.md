@@ -47,13 +47,14 @@ Athletes with `id`, `fullName`, and `position.abbreviation`, grouped by side of 
 Per-game stat rows for the season, keyed by `labels`/`names`. Extract, most recent first, the values each prop market
 uses (product.md "Grading" table names the stat).
 
-## The Odds API (free tier: 500 credits/month)
+## Parlay API (free tier: 1,000 credits/month)
 
-- Base: `https://api.the-odds-api.com/v4/sports/americanfootball_nfl`. Auth: `apiKey` query param.
-- Cost per call = markets returned × regions. Use `regions=us` and `oddsFormat=american`.
-- `includeLinks=true&includeSids=true` cost no extra credits. A 2026-11-07 probe measured `x-requests-last` at 3 with
-  and without the flags for `h2h,spreads,totals`, and at 1 with and without them for one prop market. The flags add
-  nothing to the lines-and-props budget, so the credit floors stay as they are.
+- Base: `https://parlay-api.com/v1/sports/americanfootball_nfl`. Auth: `apiKey` query param.
+- Game lines cost markets × regions: 3 credits for `regions=us` and `h2h,spreads,totals`. Bulk props cost a flat
+  3 credits per call for all nine markets. Use `oddsFormat=american`.
+- `includeLinks=true&includeSids=true` cost no extra credits on `/odds` and `/props`. Parlay API populates validated
+  links and sids on eligible FanDuel outcomes only; DraftKings and other books omit them. The flags add nothing to the
+  lines-and-props budget, so the credit floors stay as they are.
 - After every call, store `x-requests-remaining` in `sync_state.odds_credits_remaining`.
 
 Game lines, event matching, bookmakers, and the credit budget are documented in
@@ -61,55 +62,53 @@ Game lines, event matching, bookmakers, and the credit budget are documented in
 
 ### Endpoints
 
-- Props for one game: `GET /events/{eventId}/odds?regions=us&markets={prop keys}&oddsFormat=american`.
-- Event list: `GET /events` (free) gives `id`, `home_team`, `away_team`, `commence_time` for matching.
-- The per-event odds endpoint returns one event object, not an array like the all-events endpoint.
+- Game lines for the week: `GET /odds?regions=us&markets=h2h,spreads,totals&oddsFormat=american&includeLinks=true&includeSids=true`.
+- Props for one game: `GET /props?eventId={eventId}&markets={prop keys}&oddsFormat=american&includeLinks=true&includeSids=true&limit=10000`.
+  It costs a flat 3 credits and returns a flat array of quote rows, not one event object.
+- Event list: `GET /events` (free) gives `id`, `home_team`, `away_team`, `commence_time` for matching. Parlay API may
+  send `commence_time: null`, which the client skips.
+- The per-event `/events/{id}/odds` endpoint is no longer used for props.
 
 ### Deep-link flags
 
-A 2026-11-07 probe used Cincinnati Bengals at Atlanta Falcons (event `dc56d980f527ffeef89940133b211b13`, kickoff
-2026-11-08T14:30:00Z). It called the per-event endpoint once for `h2h,spreads,totals` and once for `player_pass_yds`,
-each with and without `includeLinks=true&includeSids=true`.
+An earlier 2026-11-07 probe of The Odds API established the link shapes below and confirmed that the flags cost no
+extra credits. Parlay API returns the same game-line shape and the same zero-cost flags.
 
-- **Cost:** zero extra credits. Game lines reported `x-requests-last: 3` with and without the flags; the prop reported
-  `1` with and without them. Remaining fell only by the base market cost each time.
-- **Fields:** with the flags, each bookmaker and each outcome gain `link` and `sid`. The market object keeps both as
-  NULL. Without the flags, the fields are absent.
-- **DraftKings and FanDuel:** both returned a link and sid on every game-line outcome (6 of 6 each) and every
-  `player_pass_yds` outcome (4 of 4 each).
-- **Other books:** coverage varies. BETUS, BetOnline.ag, Bovada, LowVig, and MyBookie.ag returned no outcome links for
-  these calls even with the flags, though some returned a book-level link. Treat a missing `link` as normal and store
-  NULL.
-- **Link shape:** both books put one selection in a link. DraftKings is
-  `https://sportsbook.draftkings.com/?outcomes={sid}`, where the sid is URL-encoded in the link (`#` becomes `%23`).
-  DraftKings game-line sids look like `0ML84695561_1`, `0HC84695561P300_1`, and `0OU84695561O5250_1`; a prop sid looks
-  like `0QA385017402#2346593166_13L88808Q1466938236Q20`. FanDuel is
-  `https://sportsbook.fanduel.com/addToBetslip?marketId={marketId}&selectionId={sid}`, where the sid is the numeric
-  selection ID. Book-level links point at the event page, not a betslip: DraftKings uses
-  `https://sportsbook.draftkings.com/event/{bookSid}` and FanDuel uses its game page. A 2026-11-07 phone check confirmed
-  that both books take several selections in one URL: DraftKings uses its event page with comma-separated sids in one
-  `outcomes` parameter, and FanDuel uses indexed `marketId`/`selectionId` pairs. The exact shapes are in
-  `docs/concepts/export.md`.
+- **Cost:** zero extra credits. Game lines stay at 3 credits with and without the flags; props stay at their flat
+  3-credit call. Remaining falls only by the base cost each time.
+- **Fields:** with the flags, each game-line outcome gains `link` and `sid`. On `/props`, each quote gains `over_link`,
+  `under_link`, `over_sid`, and `under_sid`. Without the flags, the fields are absent.
+- **FanDuel only:** Parlay API currently returns a validated link and sid on eligible FanDuel outcomes when a matching
+  native quote is open. DraftKings and other books omit them. Treat a missing link as normal and store NULL.
+- **Link shape:** FanDuel is `https://sportsbook.fanduel.com/addToBetslip?marketId={marketId}&selectionId={sid}`,
+  where the sid is the numeric selection ID. The FanDuel combiner reads `marketId` from the stored link and the
+  selection ID from `sid`, so single and combined links work unchanged. DraftKings' saved shape is
+  `https://sportsbook.draftkings.com/?outcomes={sid}`, but Parlay API currently sends no DraftKings link.
+- **Manual fallback:** a leg whose book sends no link renders as a manual checklist item (`no link`). The exact export
+  shapes are in `docs/concepts/export.md`.
 
 Saved fixtures: `internal/ingest/odds/testdata/odds_game_links.json` and
-`internal/ingest/odds/testdata/odds_prop_links.json`, both fetched with the flags on the same probe.
+`internal/ingest/odds/testdata/odds_prop_links.json` come from The Odds API probe. The Parlay API `/props` shape is in
+`internal/ingest/odds/testdata/props_sample.json`.
 
 ### Market keys
 
-| Odds API key            | Market       |
-| ----------------------- | ------------ |
-| `team_totals`           | `TEAM_TOTAL` |
-| `player_pass_yds`       | `PASS_YDS`   |
-| `player_pass_tds`       | `PASS_TDS`   |
-| `player_rush_yds`       | `RUSH_YDS`   |
-| `player_rush_attempts`  | `RUSH_ATT`   |
-| `player_reception_yds`  | `REC_YDS`    |
-| `player_receptions`     | `RECEPTIONS` |
-| `player_anytime_td`     | `ANYTIME_TD` |
-| `player_kicking_points` | `KICKER_PTS` |
+| Parlay API key            | Aliases                                                     | Market       |
+| ------------------------- | ----------------------------------------------------------- | ------------ |
+| `team_totals`             |                                                             | `TEAM_TOTAL` |
+| `player_pass_yds`         | `player_passing_yards`, `player_pass_yards`                 | `PASS_YDS`   |
+| `player_pass_tds`         | `player_passing_tds`, `player_passing_touchdowns`           | `PASS_TDS`   |
+| `player_rush_yds`         | `player_rushing_yards`, `player_rush_yards`                 | `RUSH_YDS`   |
+| `player_rush_attempts`    | `player_rushing_attempts`                                   | `RUSH_ATT`   |
+| `player_reception_yds`    | `player_receiving_yds`, `player_receiving_yards`             | `REC_YDS`    |
+| `player_receptions`       |                                                             | `RECEPTIONS` |
+| `player_anytime_td`       | `player_anytime_touchdown_scorer`, `anytime_td`, `anytime_touchdown_scorer` | `ANYTIME_TD` |
+| `player_kicking_points`   |                                                             | `KICKER_PTS` |
 
-`team_totals` and the player markets are only on the per-event endpoint, so they load with props. For player markets,
-outcome `description` is the player, `name` is Over/Under/Yes, and `point` is the line.
+`team_totals` and the player markets come from `/props`, so they load with props. Keep only rows whose `period` is empty
+or `FULL`; drop `1H`, `Q1`, and `UNKNOWN`. For player markets, `player` (or the legacy `player_name`) is the subject,
+`over_price` and `under_price` are the sides, and `line` is the line. An anytime touchdown is a single `YES` row with no
+line. `team_totals` puts the full team name in `player`.
 
 ## Player matching (`props-research`)
 
@@ -119,12 +118,12 @@ outcome `description` is the player, `name` is Over/Under/Yes, and `point` is th
   against both teams' ESPN rosters by normalized name. Exactly one hit → store it (manual = 0) and use it. Zero or
   several → leave `player_id` NULL.
 - Rows with `manual = 1` are never overwritten. A small form on the research view lets a user fix a match.
-- The Odds API doesn't say which team a player is on; the roster match supplies `team`.
+- The Parlay API doesn't say which team a player is on; the roster match supplies `team`.
 
 ## Fixtures and live tests
 
 - Save real responses as `internal/ingest/{source}/testdata/*.json`. Trim them only by removing whole events.
 - Unit tests serve fixtures with `httptest.NewServer` and point the client's base URL at it.
 - One `TestLive*` per source hits the real endpoint, checks that parsing returns sane data, and calls `t.Skip` under
-  `testing.Short()`. The Odds API live test uses only the free `/events` endpoint and skips when `ODDS_API_KEY` is
+  `testing.Short()`. The Parlay API live test uses only the free `/events` endpoint and skips when `ODDS_API_KEY` is
   unset.

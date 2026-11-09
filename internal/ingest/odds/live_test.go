@@ -10,7 +10,7 @@ import (
 	"github.com/kalverra/parlay-club/internal/ingest/odds"
 )
 
-// TestLiveEvents hits The Odds API's free event list and checks that the parser
+// TestLiveEvents hits Parlay API's free event list and checks that the parser
 // still recognizes the response. It skips in -short runs and without an API
 // key, and it never spends credits on game lines.
 func TestLiveEvents(t *testing.T) {

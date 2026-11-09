@@ -5,14 +5,14 @@ type: concept
 summary: How every successful external API response is kept raw in SQLite, how the source key labels it, and how to read the stored metadata and gzipped bodies.
 tags: [archive, raw-responses, api, sqlite, http, transport, gzip, sha256, labels, odds, credits]
 sources: [internal/ingest/archive/transport.go, internal/ingest/archive/labels.go, internal/ingest/archive/redact.go, internal/db/archive.go, internal/db/archive_read.go, internal/db/migrations/0003_api_archive.sql]
-last_verified: 2026-11-07
+last_verified: 2026-11-09
 ---
 
 # Response archive
 
 ## Summary
 
-Every successful call to ESPN, Open-Meteo, or The Odds API is saved before the client parses it. The archive keeps the
+Every successful call to ESPN, Open-Meteo, or Parlay API is saved before the client parses it. The archive keeps the
 raw bytes, not a guess at which fields a model will want later. It lives in the same SQLite file as the rest of the app,
 so Litestream backs it up with everything else.
 
@@ -50,7 +50,7 @@ Each kept call writes one `api_responses` row with:
 | `source`            | `espn`, `weather`, `odds`, or the host for an unknown source.     |
 | `key`               | The label from the request context, or `host + path` as a fallback. |
 | `method`            | The HTTP method.                                                   |
-| `url`               | The request URL with The Odds API's `apiKey` value replaced by `REDACTED`. |
+| `url`               | The request URL with the odds API's `apiKey` value replaced by `REDACTED`. |
 | `status`            | The 2xx code.                                                      |
 | `fetched_at`        | When the response finished being read, in RFC 3339 UTC.            |
 | `duration_ms`       | Time from sending the request to finishing the body read.          |
@@ -78,7 +78,8 @@ ctx = archive.WithKey(ctx, "odds:props:401")
 
 The key is the same string `sync_state.source` uses. `source` comes from the part before the first colon, lowercased.
 Without a label, the transport falls back to `host + path` and derives `source` from the host: `espn.com`,
-`open-meteo.com`, and `the-odds-api.com` map to `espn`, `weather`, and `odds`; any other host becomes its own source.
+`open-meteo.com`, and `parlay-api.com` (or the older `the-odds-api.com`) map to `espn`, `weather`, and `odds`; any other
+host becomes its own source.
 
 Labelled rows join cleanly with `sync_state`. Fallback rows are still kept but are harder to group, so every client
 should set a label. The constants `archive.SourceESPN`, `archive.SourceWeather`, and `archive.SourceOdds` name the three

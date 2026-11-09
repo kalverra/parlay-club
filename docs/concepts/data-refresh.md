@@ -2,10 +2,10 @@
 id: data-refresh
 title: Data refresh
 type: concept
-summary: How page loads drive lazy syncs of the slate, weather, and game lines, with per-source staleness windows, single-flight, failure backoff, Odds API credit floors, and an archive of every successful response.
-tags: [refresh, sync, lazy, staleness, singleflight, backoff, credits, odds, weather, slate, live-window, archive, raw-responses]
+summary: How page loads drive lazy syncs of the slate, weather, and game lines, with per-source staleness windows, single-flight, failure backoff, Parlay API credit floors, and an archive of every successful response.
+tags: [refresh, sync, lazy, staleness, singleflight, backoff, credits, odds, parlay-api, props, weather, slate, live-window, archive, raw-responses]
 sources: [internal/refresh/refresh.go, internal/refresh/rules.go, internal/refresh/sources.go, internal/refresh/publish.go, internal/refresh/live.go, internal/db/sync.go, internal/ingest/archive/transport.go, cmd/server/main.go]
-last_verified: 2026-11-07
+last_verified: 2026-11-09
 ---
 
 # Data refresh
@@ -14,7 +14,7 @@ last_verified: 2026-11-07
 
 Outside data comes in lazily. `internal/refresh` owns when. There is no cron, no Cloud Scheduler, and no background
 ticker. A full-page `GET` calls `Kick()` from middleware; it returns at once and does the work in the background. Each
-source has its own staleness window, its own single-flight, and its own failure backoff. The Odds API is the only
+source has its own staleness window, its own single-flight, and its own failure backoff. Parlay API is the only
 metered source, so a free balance check guards the paid call.
 
 ## What kicks a sync
@@ -51,7 +51,7 @@ Each source labels its requests with `archive.WithKey(ctx, src.key)` in `refresh
 response is saved under that key before the client parses it. See [Response archive](archive.md).
 
 The save sits beside the sync, not inside its transaction. A failed archive write is logged and dropped, so it never
-fails a sync or changes the parsed rows. Both Odds calls in one pass, the free `/events` list and the paid `/odds` call,
+fails a sync or changes the parsed rows. Both odds calls in one pass, the free `/events` list and the paid `/odds` call,
 use `odds:lines` today, so both rows carry that key.
 
 ## Staleness rules
@@ -74,7 +74,7 @@ and the venue map.
 
 ## Odds credits
 
-The Odds API budget is in [Data sources](../reference/data-sources.md). Refresh enforces it in this order:
+The Parlay API budget is in [Data sources](../reference/data-sources.md). Refresh enforces it in this order:
 
 1. Call the free `/events` list and match it to the week's games.
 2. Store the reported balance in `sync_state.odds_credits_remaining`, and store the matches even when no lines will be
@@ -85,10 +85,11 @@ The Odds API budget is in [Data sources](../reference/data-sources.md). Refresh 
 
 The paid response carries every upcoming event, not just the synced week. Refresh writes only lines for matched games
 and drops the rest, so the `odds` table never takes a row for a game that does not exist locally. Team names arrive as
-The Odds API display names and are converted to the game's ESPN abbreviation before the write.
+Parlay API display names and are converted to the game's ESPN abbreviation before the write.
 
-A missing or unreadable remaining count is a sync failure, not a guessed balance. Props get their own source and a 150
-credit floor later; only game lines exist today.
+A missing or unreadable remaining count is a sync failure, not a guessed balance. Props are not wired into refresh yet.
+When `props-research` adds them, each game gets its own `odds:props:{game}` source, a 150 credit floor, and one flat
+3-credit `/props` call that returns all nine markets instead of one credit per market.
 
 ## Failure and backoff
 
