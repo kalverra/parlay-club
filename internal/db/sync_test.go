@@ -43,6 +43,15 @@ func TestRecordSyncCreatesAndUpdatesTheRow(t *testing.T) {
 	assert.Equal(t, second, state.FetchedAt)
 	assert.Equal(t, 480, *state.OddsCreditsRemaining)
 
+	// A nil balance leaves the stored count alone: a sync that skipped the paid
+	// call cannot erase what the last paid call reported.
+	require.NoError(t, store.RecordSync(t.Context(), "odds:lines", second.Add(time.Hour), nil))
+	state, err = store.SyncState(t.Context(), "odds:lines")
+	require.NoError(t, err)
+	assert.Equal(t, second.Add(time.Hour), state.FetchedAt)
+	require.NotNil(t, state.OddsCreditsRemaining)
+	assert.Equal(t, 480, *state.OddsCreditsRemaining)
+
 	require.NoError(t, store.RecordSync(t.Context(), "espn:scoreboard", second, nil))
 	state, err = store.SyncState(t.Context(), "espn:scoreboard")
 	require.NoError(t, err)

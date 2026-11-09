@@ -431,6 +431,12 @@ func TestSyncOddsCommitsFallbackWhenPrimaryFails(t *testing.T) {
 			primary := primaryOdds(game)
 			primary.eventsErr = primaryErr
 			fallback := secondaryOdds(game)
+
+			// A known balance should survive a sync that never reached the
+			// primary's paid call.
+			seeded := 42
+			require.NoError(t, store.RecordSync(t.Context(), OddsLinesSource, now.Add(-48*time.Hour), &seeded))
+
 			service := New(Deps{
 				Store: store, Lines: primary, FallbackLines: fallback, Logger: zerolog.Nop(),
 			})
@@ -438,6 +444,12 @@ func TestSyncOddsCommitsFallbackWhenPrimaryFails(t *testing.T) {
 			changed, err := service.syncOdds(t.Context(), []db.Game{game}, now)
 			require.NoError(t, err, "the fallback serves the week")
 			assert.True(t, changed)
+
+			state, err := store.SyncState(t.Context(), OddsLinesSource)
+			require.NoError(t, err)
+			require.NotNil(t, state.OddsCreditsRemaining, "a primary outage must not erase the stored balance")
+			assert.Equal(t, seeded, *state.OddsCreditsRemaining)
+			assert.Equal(t, now, state.FetchedAt)
 
 			stored, err := store.GameByID(t.Context(), game.ID)
 			require.NoError(t, err)
