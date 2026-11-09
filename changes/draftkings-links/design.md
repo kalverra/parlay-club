@@ -153,7 +153,7 @@ Effort: medium (extends `internal/ingest/odds` with nested per-event props and p
 ### Phase 1: Add The Odds API prop endpoint and prop merging
 
 - [x] Add `TheOddsAPIBaseURL` to `internal/ingest/odds/client.go`, add `EventSid` to `odds.Prop`, and implement `Client.EventProps(ctx, eventID)` in `internal/ingest/odds/props.go` to fetch and parse The Odds API's nested `/events/{eventID}/odds` prop response, with unit tests against `testdata/odds_prop_links.json` and edge cases in `internal/ingest/odds/props_test.go`
-- [ ] Add `MergeProps(primary, secondary []Prop) []Prop` in `internal/ingest/odds/props.go` to backfill missing deep links (`Link`, `Sid`, `EventSid`) and missing selections while keeping newly linked lines consistent, with unit tests in `internal/ingest/odds/props_test.go`
+- [x] Add `MergeProps(primary, secondary []Prop) []Prop` in `internal/ingest/odds/props.go` to backfill missing deep links (`Link`, `Sid`, `EventSid`) and missing selections while keeping newly linked lines consistent, with unit tests in `internal/ingest/odds/props_test.go`
 
 ### Phase 2: Wire dual-provider game-line enrichment, fallback, and config
 
