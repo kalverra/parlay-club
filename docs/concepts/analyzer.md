@@ -2,9 +2,9 @@
 id: analyzer
 title: Analyzer
 type: concept
-summary: How the sharp-friend banner under a slip turns legs, games, weather, and nfelo's model into plain-Go warnings, and the tone those warnings keep.
-tags: [analyzer, warnings, banner, severity, tone, slips, weather, rules, nfelo, model]
-sources: [internal/analyzer/analyzer.go, internal/analyzer/rules.go, internal/web/analyzer.go, internal/db/nfelo.go, web/templates/partials.html]
+summary: How the sharp-friend banner under a slip turns legs, games, weather, player stats, and nfelo's model into plain-Go warnings, and the tone those warnings keep.
+tags: [analyzer, warnings, banner, severity, tone, slips, weather, rules, nfelo, model, props, player-stats]
+sources: [internal/analyzer/analyzer.go, internal/analyzer/rules.go, internal/web/analyzer.go, internal/db/nfelo.go, internal/db/players.go, web/templates/partials.html]
 last_verified: 2026-11-09
 ---
 
@@ -13,8 +13,8 @@ last_verified: 2026-11-09
 ## Summary
 
 The analyzer is the sharp-friend banner under a slip's legs. It reads the picks people already made and points out where
-they fight each other, the weather, the key numbers, the price, or nfelo's model. It never blocks a pick. Every leg stays
-allowed, and the banner only adds a heads-up.
+they fight each other, the weather, the key numbers, the price, player history, or nfelo's model. It never blocks a pick.
+Every leg stays allowed, and the banner only adds a heads-up.
 
 `internal/analyzer` is pure Go: no I/O, no clock, no network calls, and no LLM. It runs on every slip render, and its
 output is not stored. The rule list and example messages live in [Analyzer rules](../reference/analyzer-rules.md).
@@ -48,9 +48,13 @@ The tone rules live in `plan/analyzer.md`. Every message is checked against them
 | `games` | home and away teams, indoor flag, weather (wind, gusts, precipitation, temperature), nfelo model (spread, win probability, QB adjustments) |
 | `stats` | per-player game logs per market, most recent game first, this season only                |
 
-`internal/web` builds those values from the stored slip and the week's games when it renders the panel. It keys the
-games map by the same `GameID` each leg carries, so no leg loses its game. `stats` is passed through and unread until
-`props-research` adds player numbers; `nil` is fine.
+`internal/web` builds those values from the stored slip, the week's games, and stored player game logs when it renders
+the panel. It keys the games map by the same `GameID` each leg carries, so no leg loses its game.
+
+`stats` maps ESPN athlete IDs to season game logs across markets (`PASS_YDS`, `RUSH_YDS`, `REC_YDS`, `RECEPTIONS`,
+`PASS_TDS`, `RUSH_ATT`, `ANYTIME_TD`, `KICKER_PTS`). `internal/web` loads `player_gamelogs` for every distinct matched
+`PlayerID` on the slip. An unmatched player, a missing game log, or a market with fewer than 3 games leaves player-stat
+rules quiet.
 
 nfelo's model is an input, not a requirement. `internal/web` attaches it only when the game is `SCHEDULED` and a
 successful `nfelo:projections` fetch is under 72 hours old. A live or final game, a missing model row, and a stale fetch

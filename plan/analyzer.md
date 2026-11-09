@@ -67,14 +67,6 @@ Messages read like a sharp friend's heads-up: short, specific, names the people 
 alternative, never says "don't." When a rule involves two people's legs, name both ("Adam's BUF -7.5 + Sam's Josh Allen
 Over 245.5"). Each rule below gives a model message; keep the content and adjust the words freely.
 
-## Rules
-
-### D: Parlay math and props
-
-**`median_trap` (Warn, `props-research`).** A yardage OVER (`PASS_YDS`, `RUSH_YDS`, `REC_YDS`) with a matched player who
-has ≥ 3 games, where line > median of the last 5 games. When line < season mean, add the mean to the message.
-> Shakir's last-5 median is 41 yards, so 52.5 is a stretch. His 58-yard average is propped up by one big game.
-
 ## Tests
 
 Table-driven, one table per rule. Every threshold is tested on both sides:
