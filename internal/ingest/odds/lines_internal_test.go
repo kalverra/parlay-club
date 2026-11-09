@@ -28,26 +28,91 @@ func TestParseLinesIgnoresMarketsItDoesNotRead(t *testing.T) {
 	assert.Empty(t, lines)
 }
 
-func TestParseLinesRejectsAMalformedMarket(t *testing.T) {
+func TestParseLinesSkipsUnpricedAndOffTeamOutcomes(t *testing.T) {
+	t.Parallel()
+
+	lines, err := parseLines([]eventResponse{{
+		ID:       "evt-1",
+		HomeTeam: "Bills",
+		AwayTeam: "Jets",
+		Bookmakers: []bookmakerResponse{{
+			Key: "fanduel",
+			Sid: "34118128",
+			Markets: []marketResponse{
+				{
+					Key: marketH2H,
+					Outcomes: []outcomeResponse{
+						{Name: "Bills", Price: new(120)},
+						{Name: "Draw", Price: new(900)},
+						{Name: "Jets"},
+						{Name: "Jets", Price: new(-140)},
+					},
+				},
+				{
+					Key: marketSpreads,
+					Outcomes: []outcomeResponse{
+						{Name: "Bills", Price: new(-110)},
+						{Name: "Jets", Price: new(-110), Point: new(2.5)},
+					},
+				},
+				{
+					Key: marketTotals,
+					Outcomes: []outcomeResponse{
+						{Name: "Over", Price: new(-108)},
+						{Name: "Under", Point: new(44.5)},
+					},
+				},
+			},
+		}},
+	}})
+	require.NoError(t, err)
+
+	want := []Line{
+		{
+			EventID:    "evt-1",
+			Book:       "fanduel",
+			MarketType: MarketML,
+			Team:       "Bills",
+			Side:       SideTeam,
+			Price:      120,
+			EventSid:   "34118128",
+		},
+		{
+			EventID:    "evt-1",
+			Book:       "fanduel",
+			MarketType: MarketML,
+			Team:       "Jets",
+			Side:       SideTeam,
+			Price:      -140,
+			EventSid:   "34118128",
+		},
+		{
+			EventID:    "evt-1",
+			Book:       "fanduel",
+			MarketType: MarketSpread,
+			Team:       "Jets",
+			Side:       SideTeam,
+			Line:       new(2.5),
+			Price:      -110,
+			EventSid:   "34118128",
+		},
+	}
+	assert.Equal(t, want, lines)
+}
+
+func TestParseLinesRejectsAnUnreadableMarket(t *testing.T) {
 	t.Parallel()
 
 	tests := map[string]struct {
 		market marketResponse
 		want   string
 	}{
-		"spread without a point": {
-			market: marketResponse{
-				Key:      marketSpreads,
-				Outcomes: []outcomeResponse{{Name: "Bills", Price: new(-110)}},
-			},
-			want: "point is missing",
-		},
-		"moneyline without a price": {
+		"outcome without a name": {
 			market: marketResponse{
 				Key:      marketH2H,
-				Outcomes: []outcomeResponse{{Name: "Bills"}},
+				Outcomes: []outcomeResponse{{Price: new(-110)}},
 			},
-			want: "price is missing",
+			want: "has no name",
 		},
 		"total without a recognized side": {
 			market: marketResponse{

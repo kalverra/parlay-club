@@ -11,7 +11,7 @@ const (
 	SourceESPN = "espn"
 	// SourceWeather covers Open-Meteo forecasts.
 	SourceWeather = "weather"
-	// SourceOdds covers The Odds API event lists and lines.
+	// SourceOdds covers Parlay API and The Odds API event lists, lines, and props.
 	SourceOdds = "odds"
 )
 
@@ -49,7 +49,7 @@ func sourceForHost(host string) string {
 		return SourceESPN
 	case strings.Contains(host, "open-meteo.com"):
 		return SourceWeather
-	case strings.Contains(host, "the-odds-api.com"):
+	case strings.Contains(host, "parlay-api.com"), strings.Contains(host, "the-odds-api.com"):
 		return SourceOdds
 	default:
 		return host

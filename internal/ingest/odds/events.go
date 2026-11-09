@@ -3,10 +3,11 @@ package odds
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 )
 
-// Event is one NFL game in The Odds API's event list. It carries no odds; the
+// Event is one NFL game in Parlay API's event list. It carries no odds; the
 // next sync step matches it to an ESPN game by team names and kickoff.
 type Event struct {
 	ID           string
@@ -26,6 +27,11 @@ func (c *Client) Events(ctx context.Context) ([]Event, Credits, error) {
 
 	events := make([]Event, 0, len(raw))
 	for _, item := range raw {
+		// A fixture whose kickoff is not yet reported cannot match an ESPN
+		// game window, so skip it instead of failing the whole list.
+		if strings.TrimSpace(item.CommenceTime) == "" {
+			continue
+		}
 		commence, err := time.Parse(time.RFC3339, item.CommenceTime)
 		if err != nil {
 			return nil, Credits{}, fmt.Errorf("event %s commence time %q: %w", item.ID, item.CommenceTime, err)
@@ -40,7 +46,7 @@ func (c *Client) Events(ctx context.Context) ([]Event, Credits, error) {
 	return events, credits, nil
 }
 
-// eventResponse is the shared slice of The Odds API's event JSON used by both
+// eventResponse is the shared slice of Parlay API's event JSON used by both
 // the event list and the game-lines response. The event list has no bookmakers.
 type eventResponse struct {
 	ID           string              `json:"id"`

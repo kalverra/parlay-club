@@ -1,6 +1,6 @@
-// Package odds fetches NFL game lines from The Odds API. The client takes a
-// base URL, an API key, and an HTTP client, returns plain structs, and never
-// touches the database.
+// Package odds fetches NFL game lines from Parlay API, an Odds API-compatible
+// feed. The client takes a base URL, an API key, and an HTTP client, returns
+// plain structs, and never touches the database.
 package odds
 
 import (
@@ -16,15 +16,15 @@ import (
 )
 
 const (
-	// DefaultBaseURL is The Odds API's NFL root.
-	DefaultBaseURL = "https://api.the-odds-api.com/v4/sports/americanfootball_nfl"
+	// DefaultBaseURL is Parlay API's NFL root.
+	DefaultBaseURL = "https://parlay-api.com/v1/sports/americanfootball_nfl"
 	// eventsPath is the free event-list endpoint under the base URL.
 	eventsPath = "/events"
 	// oddsPath is the game-lines endpoint under the base URL.
 	oddsPath = "/odds"
 	// defaultTimeout bounds a request when the caller does not supply a client.
 	defaultTimeout = 10 * time.Second
-	// userAgent identifies this app to The Odds API.
+	// userAgent identifies this app to Parlay API.
 	userAgent = "parlay-club"
 )
 
@@ -39,7 +39,7 @@ type Credits struct {
 // ErrNoAPIKey reports a client built without an API key.
 var ErrNoAPIKey = errors.New("odds API key is empty")
 
-// Client talks to The Odds API. Create one with NewClient and share it.
+// Client talks to Parlay API. Create one with NewClient and share it.
 type Client struct {
 	baseURL    string
 	apiKey     string

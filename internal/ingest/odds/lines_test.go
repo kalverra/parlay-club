@@ -140,6 +140,81 @@ func TestLinesMapsDeepLinksFromTheSavedEvent(t *testing.T) {
 	}
 }
 
+func TestLinesSkipsUnpricedOutcomesAndNonTeamMoneylines(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/odds", r.URL.Path)
+		assert.Equal(t, linesQuery(), r.URL.Query())
+		w.Header().Set("X-Requests-Remaining", "497")
+		w.Header().Set("X-Requests-Used", "3")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[{
+			"id":"evt-1",
+			"commence_time":"2026-11-08T14:30:00Z",
+			"home_team":"Bills",
+			"away_team":"Jets",
+			"bookmakers":[{
+				"key":"fanduel",
+				"sid":"34118128",
+				"markets":[
+					{"key":"h2h","outcomes":[
+						{"name":"Bills","price":120,"link":"https://fanduel.test/ml","sid":"1"},
+						{"name":"Draw","price":900},
+						{"name":"Jets"}
+					]},
+					{"key":"spreads","outcomes":[
+						{"name":"Bills","price":-110},
+						{"name":"Jets","price":-110,"point":2.5}
+					]},
+					{"key":"totals","outcomes":[
+						{"name":"Over","price":-108},
+						{"name":"Under","price":-112,"point":44.5}
+					]}
+				]
+			}]
+		}]`))
+	}))
+	t.Cleanup(server.Close)
+
+	lines, _, err := odds.NewClient(server.URL, testAPIKey, server.Client()).Lines(t.Context())
+	require.NoError(t, err)
+
+	want := []odds.Line{
+		{
+			EventID:    "evt-1",
+			Book:       "fanduel",
+			MarketType: odds.MarketML,
+			Team:       "Bills",
+			Side:       odds.SideTeam,
+			Price:      120,
+			Link:       "https://fanduel.test/ml",
+			Sid:        "1",
+			EventSid:   "34118128",
+		},
+		{
+			EventID:    "evt-1",
+			Book:       "fanduel",
+			MarketType: odds.MarketSpread,
+			Team:       "Jets",
+			Side:       odds.SideTeam,
+			Line:       new(2.5),
+			Price:      -110,
+			EventSid:   "34118128",
+		},
+		{
+			EventID:    "evt-1",
+			Book:       "fanduel",
+			MarketType: odds.MarketTotal,
+			Side:       odds.SideUnder,
+			Line:       new(44.5),
+			Price:      -112,
+			EventSid:   "34118128",
+		},
+	}
+	assert.Equal(t, want, lines)
+}
+
 func TestLinesReportsAnHTTPFailure(t *testing.T) {
 	t.Parallel()
 
