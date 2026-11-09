@@ -23,6 +23,7 @@
 - [Groups and solo play](decisions/groups.md): Make the group the boundary for everything people share.
 - [History, manual grading, and deploy](decisions/history-and-deploy.md): Deploy to Cloud Run inside the free tier, with the database backed up to Cloud Storage and deploys blocked during game windows.
 - [Hot reload local dev](decisions/hot-reload-dev.md): Add [air](https://github.com/air-verse/air) as the dev runner, pinned in `mise.toml` from the mise registry.
+- [Parlay API for odds and props](decisions/parlay-api.md): Switch the odds client from The Odds API to Parlay API and add bulk per-game prop fetching on the same client.
 - [Archive every external response](decisions/raw-response-archive.md): Add one append-only archive of raw responses in SQLite, written by a single seam that every outside call passes through.
 - [Slate, weather, and lines](decisions/slate-and-lines.md): Pull the Sunday and Monday slate from ESPN, stadium weather from Open-Meteo, and game lines from The Odds API, fetched only when someone opens the app and the data is stale.
 - [Live shared slips](decisions/slips-live.md): Add shared slips: each week has one or more slips, each slip has members, and every member adds the same number of legs.
