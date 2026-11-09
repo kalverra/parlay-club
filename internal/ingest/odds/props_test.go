@@ -329,3 +329,449 @@ func TestPropsReportsAnHTTPFailure(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), strconv.Itoa(http.StatusServiceUnavailable))
 }
+
+// eventPropsQuery is the per-event prop query for one test event.
+func eventPropsQuery() url.Values {
+	query := apiKeyQuery()
+	query.Set("regions", "us")
+	query.Set("markets",
+		"team_totals,player_pass_yds,player_pass_tds,player_rush_yds,"+
+			"player_rush_attempts,player_reception_yds,player_receptions,"+
+			"player_anytime_td,player_kicking_points")
+	query.Set("oddsFormat", "american")
+	query.Set("includeLinks", "true")
+	query.Set("includeSids", "true")
+	return query
+}
+
+func TestEventPropsMapsTheSavedOddsAPIResponse(t *testing.T) {
+	t.Parallel()
+
+	const eventID = "dc56d980f527ffeef89940133b211b13"
+	credits := odds.Credits{Remaining: 489, Used: 11, Last: 1}
+	server := fixtureServer(t, "odds_prop_links.json", "/events/"+eventID+"/odds",
+		credits, eventPropsQuery())
+
+	props, gotCredits, err := odds.NewClient(server.URL, testAPIKey, server.Client()).
+		EventProps(t.Context(), eventID)
+	require.NoError(t, err)
+	assert.Equal(t, credits, gotCredits)
+	require.Len(t, props, 48, "one row per priced outcome in the saved response")
+
+	want := []odds.Prop{
+		{
+			EventID:    eventID,
+			Book:       "draftkings",
+			MarketType: odds.MarketPassYds,
+			PlayerName: "Joe Burrow",
+			Side:       odds.SideOver,
+			Line:       new(278.5),
+			Price:      -112,
+			Link:       "https://sportsbook.draftkings.com/?outcomes=0QA385017402%232346593166_13L88808Q1466938236Q20",
+			Sid:        "0QA385017402#2346593166_13L88808Q1466938236Q20",
+			EventSid:   "34118128",
+		},
+		{
+			EventID:    eventID,
+			Book:       "fanduel",
+			MarketType: odds.MarketPassYds,
+			PlayerName: "Joe Burrow",
+			Side:       odds.SideUnder,
+			Line:       new(276.5),
+			Price:      -113,
+			Link:       "https://sportsbook.fanduel.com/addToBetslip?marketId=42.622015396&selectionId=20452293",
+			Sid:        "20452293",
+			EventSid:   "35603243",
+		},
+		{
+			EventID:    eventID,
+			Book:       "betonlineag",
+			MarketType: odds.MarketPassYds,
+			PlayerName: "Michael Penix Jr.",
+			Side:       odds.SideOver,
+			Line:       new(224.5),
+			Price:      -111,
+			EventSid:   "491166250",
+		},
+	}
+	for _, expected := range want {
+		assert.Contains(t, props, expected)
+	}
+
+	for _, prop := range props {
+		assert.Equal(t, eventID, prop.EventID, "only the requested event's rows survive")
+		assert.Equal(t, odds.MarketPassYds, prop.MarketType)
+		assert.Empty(t, prop.Team, "player props carry PlayerName, not Team")
+		assert.NotEmpty(t, prop.PlayerName)
+		require.NotNil(t, prop.Line)
+	}
+}
+
+func TestEventPropsNormalizesPropMarketsAndSkipsIncompleteRows(t *testing.T) {
+	t.Parallel()
+
+	const eventID = "evt-1"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/events/"+eventID+"/odds", r.URL.Path)
+		assert.Equal(t, eventPropsQuery(), r.URL.Query())
+		w.Header().Set("X-Requests-Remaining", "489")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"evt-1",
+			"bookmakers":[
+				{"key":"draftkings","sid":"34118128","markets":[
+					{"key":"player_anytime_td","outcomes":[
+						{"name":"Yes","description":" Josh Allen ","price":150,
+						 "link":"https://draftkings.test/td","sid":"td-1"},
+						{"name":"No","description":"Josh Allen","price":-200},
+						{"name":"Yes","description":"No Price"},
+						{"name":"Yes","description":"   ","price":200},
+						{"name":"Yes","description":"No Point Needed","price":-110,"point":0.5}
+					]},
+					{"key":"team_totals","outcomes":[
+						{"name":"Over","description":"Buffalo Bills","price":-110,"point":24.5},
+						{"name":"Under","description":"Buffalo Bills","price":-110},
+						{"name":"Push","description":"Buffalo Bills","price":-110,"point":24.5}
+					]},
+					{"key":"player_pass_yds","outcomes":[
+						{"name":"Over","description":"Josh Allen","price":-115,"point":275.5,
+						 "link":"https://draftkings.test/over","sid":"over-1"},
+						{"name":"Under","description":"Josh Allen","point":275.5},
+						{"name":"Over","description":"Josh Allen","price":-115},
+						{"name":"Under","description":"","price":-105,"point":275.5}
+					]},
+					{"key":"player_sacks","outcomes":[
+						{"name":"Over","description":"Someone","price":200,"point":0.5}
+					]}
+				]},
+				{"key":"","sid":"no-book","markets":[
+					{"key":"player_pass_yds","outcomes":[
+						{"name":"Over","description":"No Book","price":-110,"point":200}
+					]}
+				]}
+			]
+		}`))
+	}))
+	t.Cleanup(server.Close)
+
+	props, _, err := odds.NewClient(server.URL, testAPIKey, server.Client()).
+		EventProps(t.Context(), eventID)
+	require.NoError(t, err)
+
+	want := []odds.Prop{
+		{
+			EventID:    eventID,
+			Book:       "draftkings",
+			MarketType: odds.MarketAnytimeTD,
+			PlayerName: "Josh Allen",
+			Side:       odds.SideYES,
+			Price:      150,
+			Link:       "https://draftkings.test/td",
+			Sid:        "td-1",
+			EventSid:   "34118128",
+		},
+		{
+			EventID:    eventID,
+			Book:       "draftkings",
+			MarketType: odds.MarketAnytimeTD,
+			PlayerName: "No Point Needed",
+			Side:       odds.SideYES,
+			Price:      -110,
+			EventSid:   "34118128",
+		},
+		{
+			EventID:    eventID,
+			Book:       "draftkings",
+			MarketType: odds.MarketTeamTotal,
+			Team:       "Buffalo Bills",
+			Side:       odds.SideOver,
+			Line:       new(24.5),
+			Price:      -110,
+			EventSid:   "34118128",
+		},
+		{
+			EventID:    eventID,
+			Book:       "draftkings",
+			MarketType: odds.MarketPassYds,
+			PlayerName: "Josh Allen",
+			Side:       odds.SideOver,
+			Line:       new(275.5),
+			Price:      -115,
+			Link:       "https://draftkings.test/over",
+			Sid:        "over-1",
+			EventSid:   "34118128",
+		},
+	}
+	assert.Equal(t, want, props,
+		"unpriced rows, missing points, empty subjects, unknown markets, and books without a key are skipped")
+}
+
+func TestEventPropsRequiresAnEventID(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		t.Error("request sent without an event ID")
+		http.Error(w, "unexpected", http.StatusInternalServerError)
+	}))
+	t.Cleanup(server.Close)
+
+	_, _, err := odds.NewClient(server.URL, testAPIKey, server.Client()).
+		EventProps(t.Context(), "  ")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "event ID")
+}
+
+func TestEventPropsReportsAnHTTPFailure(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "unavailable", http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(server.Close)
+
+	_, _, err := odds.NewClient(server.URL, testAPIKey, server.Client()).
+		EventProps(t.Context(), "evt-1")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), strconv.Itoa(http.StatusServiceUnavailable))
+}
+
+func TestMergePropsEnrichesTheSavedParlayAPIProps(t *testing.T) {
+	t.Parallel()
+
+	const eventID = "dc56d980f527ffeef89940133b211b13"
+	propsServer := fixtureServer(t, "props_sample.json", "/props",
+		odds.Credits{Remaining: 988, Used: 12, Last: 3}, propsQuery(eventID))
+	eventServer := fixtureServer(t, "odds_prop_links.json", "/events/"+eventID+"/odds",
+		odds.Credits{Remaining: 489, Used: 11, Last: 1}, eventPropsQuery())
+
+	primary, _, err := odds.NewClient(propsServer.URL, testAPIKey, propsServer.Client()).
+		Props(t.Context(), eventID)
+	require.NoError(t, err)
+	secondary, _, err := odds.NewClient(eventServer.URL, testAPIKey, eventServer.Client()).
+		EventProps(t.Context(), eventID)
+	require.NoError(t, err)
+
+	merged := odds.MergeProps(primary, secondary)
+	require.Greater(t, len(merged), len(primary), "selections only The Odds API priced are appended")
+
+	draftKingsOver := findProp(t, merged, "draftkings", odds.MarketPassYds, "Joe Burrow", odds.SideOver)
+	assert.Equal(t, new(278.5), draftKingsOver.Line,
+		"a newly linked DraftKings row adopts the line its deep link opens")
+	assert.Equal(t, -112, draftKingsOver.Price)
+	assert.Equal(t, "https://sportsbook.draftkings.com/?outcomes=0QA385017402%232346593166_13L88808Q1466938236Q20",
+		draftKingsOver.Link)
+	assert.Equal(t, "0QA385017402#2346593166_13L88808Q1466938236Q20", draftKingsOver.Sid)
+	assert.Equal(t, "34118128", draftKingsOver.EventSid)
+
+	draftKingsUnder := findProp(t, merged, "draftkings", odds.MarketPassYds, "Joe Burrow", odds.SideUnder)
+	assert.Equal(t, new(278.5), draftKingsUnder.Line)
+	assert.Equal(t, "0QA385017402#2346593167_13L88808Q1920164065Q20", draftKingsUnder.Sid)
+
+	fanDuelOver := findProp(t, merged, "fanduel", odds.MarketPassYds, "Joe Burrow", odds.SideOver)
+	assert.Equal(t, new(268.5), fanDuelOver.Line, "a linked primary row keeps its own number and price")
+	assert.Equal(t, -115, fanDuelOver.Price)
+	assert.Equal(t, "https://sportsbook.fanduel.com/addToBetslip?marketId=42.578189645&selectionId=20101",
+		fanDuelOver.Link)
+	assert.Equal(t, "20101", fanDuelOver.Sid)
+	assert.Equal(t, "35603243", fanDuelOver.EventSid, "FanDuel's event ID is backfilled")
+
+	draftKingsKicker := findProp(t, merged, "draftkings", odds.MarketKickerPts, "Evan McPherson", odds.SideUnder)
+	assert.Empty(t, draftKingsKicker.Link)
+	assert.Equal(t, "34118128", draftKingsKicker.EventSid,
+		"a book's event ID reaches rows the other provider did not price")
+
+	penix := findProp(t, merged, "draftkings", odds.MarketPassYds, "Michael Penix Jr.", odds.SideOver)
+	assert.Equal(t, new(224.5), penix.Line)
+	assert.Equal(t, -113, penix.Price)
+	assert.NotEmpty(t, penix.Link)
+	assert.NotEmpty(t, penix.Sid)
+	assert.Equal(t, "34118128", penix.EventSid)
+
+	assertProp := findProp(t, merged, "fanduel", odds.MarketAnytimeTD, "Ja'Marr Chase", odds.SideYES)
+	assert.Nil(t, assertProp.Line)
+	assert.Equal(t, "https://sportsbook.fanduel.com/addToBetslip?marketId=42.578189648&selectionId=20401",
+		assertProp.Link)
+	assert.Equal(t, "35603243", assertProp.EventSid)
+
+	teeHiggins := findProp(t, merged, "prizepicks", odds.MarketRecYds, "Tee Higgins", odds.SideOver)
+	assert.Equal(t, new(55.5), teeHiggins.Line, "primary rows with no secondary selection survive")
+}
+
+func TestMergePropsReturnsACopyOfAOneSidedBoard(t *testing.T) {
+	t.Parallel()
+
+	primary := []odds.Prop{{
+		Book:       "fanduel",
+		MarketType: odds.MarketPassYds,
+		PlayerName: "Josh Allen",
+		Side:       odds.SideOver,
+	}}
+	secondary := []odds.Prop{{
+		Book:       "draftkings",
+		MarketType: odds.MarketPassYds,
+		PlayerName: "Josh Allen",
+		Side:       odds.SideOver,
+	}}
+
+	onlyPrimary := odds.MergeProps(primary, nil)
+	assert.Equal(t, primary, onlyPrimary)
+	onlyPrimary[0].Book = "changed"
+	assert.Equal(t, "fanduel", primary[0].Book, "the result does not alias the input")
+
+	onlySecondary := odds.MergeProps(nil, secondary)
+	assert.Equal(t, secondary, onlySecondary)
+	onlySecondary[0].Book = "changed"
+	assert.Equal(t, "draftkings", secondary[0].Book)
+}
+
+func TestMergePropsLinkRules(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		primary   odds.Prop
+		secondary odds.Prop
+		want      odds.Prop
+		wantLen   int
+	}{
+		"same line keeps the primary price": {
+			primary: odds.Prop{
+				Book: "draftkings", MarketType: odds.MarketPassYds,
+				PlayerName: "Josh Allen", Side: odds.SideOver,
+				Line: new(275.5), Price: -110,
+			},
+			secondary: odds.Prop{
+				Book: "draftkings", MarketType: odds.MarketPassYds,
+				PlayerName: "Josh Allen", Side: odds.SideOver,
+				Line: new(275.5), Price: -125,
+				Link: "https://draftkings.test/over", Sid: "over-1", EventSid: "34118128",
+			},
+			want: odds.Prop{
+				Book: "draftkings", MarketType: odds.MarketPassYds,
+				PlayerName: "Josh Allen", Side: odds.SideOver,
+				Line: new(275.5), Price: -110,
+				Link: "https://draftkings.test/over", Sid: "over-1", EventSid: "34118128",
+			},
+		},
+		"different line adopts the secondary line and price": {
+			primary: odds.Prop{
+				Book: "draftkings", MarketType: odds.MarketPassYds,
+				PlayerName: "Josh Allen", Side: odds.SideOver,
+				Line: new(268.5), Price: -110,
+			},
+			secondary: odds.Prop{
+				Book: "draftkings", MarketType: odds.MarketPassYds,
+				PlayerName: "Josh Allen", Side: odds.SideOver,
+				Line: new(278.5), Price: -112,
+				Link: "https://draftkings.test/over", Sid: "over-1", EventSid: "34118128",
+			},
+			want: odds.Prop{
+				Book: "draftkings", MarketType: odds.MarketPassYds,
+				PlayerName: "Josh Allen", Side: odds.SideOver,
+				Line: new(278.5), Price: -112,
+				Link: "https://draftkings.test/over", Sid: "over-1", EventSid: "34118128",
+			},
+		},
+		"linked primary keeps its link and backfills a matching sid": {
+			primary: odds.Prop{
+				Book: "fanduel", MarketType: odds.MarketPassYds,
+				PlayerName: "Josh Allen", Side: odds.SideOver,
+				Line: new(275.5), Price: -110,
+				Link: "https://fanduel.test/primary",
+			},
+			secondary: odds.Prop{
+				Book: "fanduel", MarketType: odds.MarketPassYds,
+				PlayerName: "Josh Allen", Side: odds.SideOver,
+				Line: new(275.5), Price: -125,
+				Link: "https://fanduel.test/secondary", Sid: "sec-1", EventSid: "35603243",
+			},
+			want: odds.Prop{
+				Book: "fanduel", MarketType: odds.MarketPassYds,
+				PlayerName: "Josh Allen", Side: odds.SideOver,
+				Line: new(275.5), Price: -110,
+				Link: "https://fanduel.test/primary", Sid: "sec-1", EventSid: "35603243",
+			},
+		},
+		"linked primary does not borrow a sid from another line": {
+			primary: odds.Prop{
+				Book: "fanduel", MarketType: odds.MarketPassYds,
+				PlayerName: "Josh Allen", Side: odds.SideOver,
+				Line: new(275.5), Price: -110,
+				Link: "https://fanduel.test/primary",
+			},
+			secondary: odds.Prop{
+				Book: "fanduel", MarketType: odds.MarketPassYds,
+				PlayerName: "Josh Allen", Side: odds.SideOver,
+				Line: new(276.5), Price: -125,
+				Link: "https://fanduel.test/secondary", Sid: "sec-1", EventSid: "35603243",
+			},
+			want: odds.Prop{
+				Book: "fanduel", MarketType: odds.MarketPassYds,
+				PlayerName: "Josh Allen", Side: odds.SideOver,
+				Line: new(275.5), Price: -110,
+				Link: "https://fanduel.test/primary", EventSid: "35603243",
+			},
+		},
+		"secondary-only selection is appended": {
+			primary: odds.Prop{
+				Book: "fanduel", MarketType: odds.MarketPassYds,
+				PlayerName: "Josh Allen", Side: odds.SideOver,
+				Line: new(275.5), Price: -110,
+			},
+			secondary: odds.Prop{
+				Book: "draftkings", MarketType: odds.MarketPassYds,
+				PlayerName: "Josh Allen", Side: odds.SideOver,
+				Line: new(276.5), Price: -112,
+				Link: "https://draftkings.test/over", Sid: "over-1", EventSid: "34118128",
+			},
+			want: odds.Prop{
+				Book: "draftkings", MarketType: odds.MarketPassYds,
+				PlayerName: "Josh Allen", Side: odds.SideOver,
+				Line: new(276.5), Price: -112,
+				Link: "https://draftkings.test/over", Sid: "over-1", EventSid: "34118128",
+			},
+			wantLen: 2,
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			merged := odds.MergeProps([]odds.Prop{test.primary}, []odds.Prop{test.secondary})
+			wantLen := test.wantLen
+			if wantLen == 0 {
+				wantLen = 1
+			}
+			require.Len(t, merged, wantLen)
+			if wantLen == 1 {
+				assert.Equal(t, test.want, merged[0])
+				return
+			}
+			assert.Equal(t, test.primary, merged[0])
+			assert.Equal(t, test.want, merged[1])
+		})
+	}
+}
+
+// findProp returns the one merged row matching a selection, failing the test
+// when it is missing or duplicated.
+func findProp(
+	t *testing.T,
+	props []odds.Prop,
+	book, marketType, subject, side string,
+) odds.Prop {
+	t.Helper()
+
+	var found []odds.Prop
+	for _, prop := range props {
+		if prop.Book != book || prop.MarketType != marketType || prop.Side != side {
+			continue
+		}
+		if prop.PlayerName != subject && prop.Team != subject {
+			continue
+		}
+		found = append(found, prop)
+	}
+	require.Len(t, found, 1, "%s %s %s %s", book, marketType, subject, side)
+	return found[0]
+}
