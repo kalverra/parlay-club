@@ -60,8 +60,5 @@ columns and Record Book is a top-nav link.
   - reference odds and a payout calculator (stake default $10, boost % default 0), recomputed by the server on input
     with a 300 ms debounce;
   - activity feed, collapsed by default, newest first.
-- **Research tab (`props-research`):** opens from a game card or a player name. Player view: last-5 bars, green over the
-  line and red under, with median and mean marked, plus season games played. Game view: key injuries filtered to QB, RB,
-  WR, TE, LT, C, CB, S.
 - **Record Book tab (`grading-record-book`):** as described above.
 - Times render as `<time datetime="{UTC ISO}">` and `app.js` formats them in the browser's local zone.

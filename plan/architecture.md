@@ -55,8 +55,6 @@ come. They use Go 1.22+ method patterns and inherit the same sign-in and group s
 | Method + path                              | Purpose                                                  | Change |
 | ------------------------------------------ | -------------------------------------------------------- | ------ |
 | `PUT /legs/{id}/result`                    | Manual grade                                             | 5     |
-| `GET /research/players/{espnID}?leg_id=`   | Player research partial                                  | 6     |
-| `GET /research/games/{id}`                 | Game research partial                                    | 6     |
 | `GET /record?season=`                      | Record Book for the active group                          | 7     |
 | `PUT /slips/{id}/wagers/me`                | Log own wager                                            | 7     |
 

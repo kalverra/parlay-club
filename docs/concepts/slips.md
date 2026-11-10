@@ -2,10 +2,10 @@
 id: slips
 title: Slips
 type: concept
-summary: How a group builds one shared parlay a week from the slate, with members, legs, quick-add, create-slip defaults, grading, and the editing and locking rules.
-tags: [slips, weeks, legs, members, locking, grading, results, activity, groups, games, quick-add, nfelo]
-sources: [internal/slips/slips.go, internal/slips/rules.go, internal/db/slips.go, internal/db/legs.go, internal/db/weeks.go, internal/db/games.go, internal/web/games.go, internal/web/slips.go]
-last_verified: 2026-11-09
+summary: How a group builds one shared parlay a week from the slate, with members, legs, quick-add, create-slip defaults, grading, the editing and locking rules, and research.
+tags: [slips, weeks, legs, members, locking, grading, results, activity, groups, games, quick-add, nfelo, props, autocomplete, research]
+sources: [internal/slips/slips.go, internal/slips/rules.go, internal/db/slips.go, internal/db/legs.go, internal/db/players.go, internal/db/weeks.go, internal/db/games.go, internal/web/games.go, internal/web/slips.go, internal/web/research.go]
+last_verified: 2026-11-10
 ---
 
 # Slips
@@ -71,13 +71,15 @@ line, American odds, and a display `selection` generated from those fields.
   [Odds math](../reference/odds-math.md).
 - The game picker lists the week's games that have not kicked off. A current week requires a game; a past week lists
   every game and allows no game. `?game_id=` preselects one when a card opens the form.
+- The leg form provides a `<datalist>` of player names for autocomplete, drawn from the week's rosters and prop boards.
+  Saving a player market leg resolves the player's ESPN athlete ID and team automatically through player matching.
 - A leg needs a game, except on a slip for a past week, where the game is optional and `OTHER` is the usual market.
 - `OTHER` legs skip the analyzer and grade by hand.
 
-The slip panel draws each leg as a row: the selection, then the odds, the model chip, and the result. A `SPREAD` or
-`ML` leg with a fresh nfelo model shows it beside the odds, from that leg's team's side: `nfelo -5.0` for a spread or
-`nfelo 76%` for a moneyline. Totals and props show no chip, and a missing row, a fetch older than 72 hours, or a live
-game leaves it off.
+The slip panel draws each leg as a row: the selection, then the odds, a "Research &rarr;" link when the leg has a
+resolved player or game, the model chip, and the result. A `SPREAD` or `ML` leg with a fresh nfelo model shows it beside
+the odds, from that leg's team's side: `nfelo -5.0` for a spread or `nfelo 76%` for a moneyline. Totals and props show no
+chip, and a missing row, a fetch older than 72 hours, or a live game leaves it off.
 
 `db.Store.CreateLeg` starts every leg `PENDING` and treats an odds value of 0 as -110.
 
@@ -99,11 +101,30 @@ fetches; see [Data refresh](data-refresh.md).
 Weather badges: 🏠 Indoor for a dome, 💨 wind mph (amber from 15, red from 20), and 🌧 at 0.1 in/hr of precipitation or
 more. An indoor game, or one with no forecast yet, shows no weather.
 
-Tapping a card expands quick-add pills: both spreads, both moneylines, Over, Under, and "Custom leg". A pill adds the
-leg in one tap with the game and price set, then shows "Added BUF -3.5" in the card. It posts the normal add-leg route
-with `quick=1`, so every rule below still applies: membership, the per-member limit, the kickoff lock, and the lock in.
-The pills appear when the week's newest slip is `OPEN`. With no slip the card links to the create-slip page, and with a
-locked slip it says picks cannot be added. "Custom leg" opens the leg form with the game already chosen.
+Tapping a card expands quick-add pills: both spreads, both moneylines, Over, Under, and "Custom leg". Expanding also
+fetches props on demand through `GET /games/{id}/props`, displaying team total pills and player prop pills grouped by
+athlete (passing, rushing, receiving, anytime TD, kicking points). Each player header links to their research view, and
+the card header links to game research. A pill adds the leg in one tap with the game, player, line, and price set, then
+shows "Added {selection}" in the card. It posts the normal add-leg route with `quick=1`, so every rule below still
+applies: membership, the per-member limit, the kickoff lock, and the lock in. The pills appear when the week's newest
+slip is `OPEN`. With no slip the card links to the create-slip page, and with a locked slip it says picks cannot be
+added. "Custom leg" opens the leg form with the game already chosen.
+
+## Research
+
+The Research tab (`GET /research`) offers game injury reports and player hit bars. It opens from the bottom tab bar,
+a game card ("Game research &rarr;"), or a slip leg ("Research &rarr;").
+
+- **Game research (`GET /research/games/{id}`):** fetches ESPN summary injuries on demand and displays injuries
+  filtered to key positions (`QB`, `RB`, `WR`, `TE`, `LT`, `OT`, `C`, `CB`, `S`). A player-match section lists
+  sportsbook prop names against matched ESPN roster athletes, with a manual match form (`POST /research/matches`) to
+  fix unmatched names or corrections.
+- **Player research (`GET /research/players/{espnID}`):** fetches the player's ESPN game log on demand and displays
+  last-5 hit bars (green over the line, red under), callouts for the last-5 median and season mean, and total games
+  played this season. Opening from a slip leg or prop pill preselects that market and line; otherwise it picks the
+  player's primary prop line or the first available market.
+- **Responsive layout:** Phone screens show Research as a bottom tab. At `lg` width and up, Slip, Games, and Research
+  sit side by side.
 
 ## Grading
 
@@ -188,5 +209,7 @@ A person can belong to several slips in a week. The top bar switches between the
 
 - [Odds math](../reference/odds-math.md): conversions, combined odds, reference price, payout, and units.
 - [Database schema](../reference/schema.md): the `weeks`, `slips`, `slip_members`, `legs`, and `activity` tables.
+- [Routes](../reference/routes.md): endpoints for slips, games, props, and research.
+- [Data sources](../reference/data-sources.md): rosters, injuries, game logs, and player matching.
 - [Groups](groups.md): how the active group scopes slips, and how membership works.
 - [Product](../../plan/product.md): the auto-grading rules, the Record Book, and the screens.
