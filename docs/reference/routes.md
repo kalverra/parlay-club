@@ -3,9 +3,9 @@ id: routes
 title: Routes
 type: reference
 summary: Every HTTP route the server serves, the middleware in front of them, and the status codes, HTMX headers, and SSE frames handlers return.
-tags: [routes, http, handlers, middleware, htmx, sse]
-sources: [cmd/server/main.go, internal/auth/handlers.go, internal/groups/handlers.go, internal/web/routes.go, internal/web/games.go, internal/web/slips.go, internal/web/export.go, internal/live/stream.go]
-last_verified: 2026-11-08
+tags: [routes, http, handlers, middleware, htmx, sse, props, research]
+sources: [cmd/server/main.go, internal/auth/handlers.go, internal/groups/handlers.go, internal/web/routes.go, internal/web/games.go, internal/web/slips.go, internal/web/research.go, internal/web/export.go, internal/live/stream.go]
+last_verified: 2026-11-10
 ---
 
 # Routes
@@ -53,11 +53,11 @@ path. A slip or leg outside the active group answers 404, the same as a missing 
 | ----------------- | -------------------------------------------------------------------------------------- |
 | `GET /{$}`        | Slip tab: the newest slip of the latest week, or the create-slip form when there is none |
 | `GET /games`      | Games tab: the latest week's board with quick-add pills                                 |
-| `GET /research`   | Research tab placeholder                                                                |
+| `GET /research`   | Research tab: week games, player search, injury reports, and last-5 hit bars           |
 | `GET /record`     | Record Book placeholder                                                                 |
 
-The slip handler file also serves `/me` and the slip and leg routes below. `/research` and `/record` render their empty
-state until later changes fill them in. The Games tab is described under [Games](#games).
+The slip handler file also serves `/me` and the slip and leg routes below. `/record` renders its empty state until a
+later change fills it in. The Games and Research tabs are described below.
 
 ### Groups
 
@@ -93,9 +93,9 @@ All slip routes require the slip to belong to the active group.
 | `POST /slips/{id}/members`                 | Add a group member from `user_id`                               | Panel partial. |
 | `DELETE /slips/{id}/members/{userID}`      | Remove a member                                                 | Panel partial. |
 | `PATCH /slips/{id}`                        | Change `name` or `legs_per_member`                              | Panel partial. |
-| `GET /slips/{id}/legs/new`                 | Empty leg form with the game picker                             | Optional `?game_id=` and `?quick=`; leg form partial. |
+| `GET /slips/{id}/legs/new`                 | Empty leg form with the game picker and player autocomplete     | Optional `?game_id=` and `?quick=`; leg form partial. |
 | `POST /slips/{id}/legs`                    | Add the signed-in member's leg                                  | Panel partial, or the `leg-added` partial for a quick add; `Hx-Trigger: leg-saved`. |
-| `GET /legs/{id}/edit`                      | Edit form filled from the leg                                   | Leg form partial. |
+| `GET /legs/{id}/edit`                      | Edit form filled from the leg with player autocomplete          | Leg form partial. |
 | `PUT /legs/{id}`                           | Save the leg's pick fields                                      | Panel partial with `Hx-Trigger: leg-saved`. |
 | `PUT /legs/{id}/result`                    | Grade the leg from an upper-case `result`                       | Panel partial. Any member may grade any leg; an unknown result is 422. |
 | `DELETE /legs/{id}`                        | Delete the leg                                                  | Panel partial. |
@@ -104,9 +104,12 @@ All slip routes require the slip to belong to the active group.
 | `GET /slips/{id}/events`                   | Live updates for the slip and its week                          | `text/event-stream`; see below. |
 
 The leg form takes `market_type`, `selection`, `team`, `player_name`, `player_id`, `side`, `line`, `odds`, and
-`game_id`. The game picker lists the week's games that have not kicked off; a past week lists them all and allows no
-game. When `selection` is blank, the handler builds the display text from the market fields. An unreadable number is 422
-with "Odds need to be a number.", "Line needs to be a number.", or a similar short message.
+`game_id`. The form provides a `<datalist>` of player names (`WeekPlayerNames`) populated from the week's rosters and
+props boards. When a player market leg is saved, the handler automatically resolves `player_id` (ESPN athlete ID) and
+`team` via `ResolvePlayerMatch`. The game picker lists the week's games that have not kicked off; a past week lists
+them all and allows no game. When `selection` is blank, the handler builds the display text from the market fields.
+Each leg row on the slip panel includes a "Research &rarr;" link to `/research` when it has a resolved player or game.
+An unreadable number is 422 with "Odds need to be a number.", "Line needs to be a number.", or a similar short message.
 
 `?quick=1` turns the form into a quick add: the target becomes the game card's `#quick-add-{gameID}` element, and a
 successful `POST` answers with the `leg-added` partial instead of the slip panel.
@@ -123,6 +126,11 @@ without waiting for the SSE stream. See [Export](../concepts/export.md).
 
 ### Games
 
+| Method + path              | Purpose                                                      | Response |
+| -------------------------- | ------------------------------------------------------------ | -------- |
+| `GET /games`               | Games tab: the latest week's board                           | Full page |
+| `GET /games/{id}/props`    | Prop quick-add pills and research links for one game card    | Partial   |
+
 `GET /games` renders the latest week's board. It reads the week's games and each game's odds rows. Rows from an older
 sync are dropped, so a card never mixes prices from two fetches.
 
@@ -135,11 +143,38 @@ The "lines as of" note under the board uses the newest odds fetch time on the ga
 `sync_state` when that is newer. A week with no games shows the empty state. A missing store or week renders the same
 empty page, not an error.
 
-Expanding a card shows the quick-add forms. Each one posts to `POST /slips/{id}/legs` with `quick=1` and the game,
-market, team, side, line, and price prefilled, and swaps the "Added {selection}" partial into that card. The pills
-appear only when the newest slip in the week is `OPEN`. With no slip, the card links to `/slips/new`; with a locked
-slip, it says picks cannot be added. "Custom leg" opens the same leg form with `game_id` set and `quick=1`, so a saved
-custom leg lands in the card too.
+Expanding a card loads `GET /games/{id}/props` via HTMX (`hx-trigger="toggle once"`), syncing props on demand
+(`odds:props:{game}`). The partial renders team totals and player prop quick-add pills grouped by player for passing,
+rushing, receiving, anytime TD, and kicker points, alongside links to game research and each player's research view.
+Each pill posts to `POST /slips/{id}/legs` with `quick=1` and the game, market, team, player, side, line, and price
+prefilled, swapping the "Added {selection}" partial into that card. The pills appear only when the newest slip in the
+week is `OPEN`. With no slip, the card links to `/slips/new`; with a locked slip, it says picks cannot be added.
+"Custom leg" opens the same leg form with `game_id` set and `quick=1`, so a saved custom leg lands in the card too.
+
+### Research
+
+| Method + path                          | Purpose                                                              | Response |
+| -------------------------------------- | -------------------------------------------------------------------- | -------- |
+| `GET /research`                        | Full research page or target partial                                 | Full page or partial |
+| `GET /research/games/{id}`             | Game research: filtered injuries and prop player match list          | Partial |
+| `GET /research/players/{espnID}`       | Player research: last-5 hit bars, median, mean, and market stats      | Partial |
+| `POST /research/matches`               | Save manual player match from `odds_name`, `team`, and `athlete_id`  | Partial (refreshed game research) |
+
+`GET /research` renders the week's game selector and player autocomplete picker. It accepts optional `?game_id=`,
+`?player_id=`, `?leg_id=`, `?market=`, and `?line=`. When requested by HTMX targeting `#game-research` or
+`#player-research`, it delegates directly to the matching partial.
+
+`GET /research/games/{id}` syncs injuries on demand (`espn:summary:{game}`) and renders injuries filtered to key
+positions (`QB`, `RB`, `WR`, `TE`, `LT`, `OT`, `C`, `CB`, `S`). It also lists sportsbook prop names with their matched
+ESPN athlete, and provides a form to manually link unmatched players.
+
+`GET /research/players/{espnID}` syncs game logs on demand (`espn:gamelog:{id}`). It renders last-5 hit bars (green
+when over the line, red when under), the last-5 median, the season mean, and total games played. If `market` or `line`
+is omitted, it resolves them from `?leg_id=` or the player's stored odds.
+
+`POST /research/matches` accepts `odds_name`, `team`, and `espn_athlete_id`. It saves a manual player match (`manual=1`)
+in `player_matches`, removes conflicting non-manual matches for that game, backfills `player_id` and `team` on matching
+odds and legs, and returns the refreshed game research partial.
 
 ### Profile
 

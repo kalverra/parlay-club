@@ -223,6 +223,6 @@ Effort: medium (self-contained pure rule in `internal/analyzer` and store-to-ana
 - [x] Build `GET /research`, `GET /research/games/{id}`, `GET /research/players/{espnID}`, and `POST /research/matches`
       (last-5 hit bars with median and mean marked, season games played, position-filtered key injuries, manual match
       fixes, and links from game cards and slip legs), with handler and template tests
-- [ ] Docs: update `docs/concepts/slips.md` and `docs/reference/routes.md` with prop quick-add, player autocomplete, and
+- [x] Docs: update `docs/concepts/slips.md` and `docs/reference/routes.md` with prop quick-add, player autocomplete, and
       the research routes, and delete the built Research tab and route rows from `plan/product.md` and
       `plan/architecture.md`
