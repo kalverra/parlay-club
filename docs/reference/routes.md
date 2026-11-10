@@ -161,8 +161,8 @@ week is `OPEN`. With no slip, the card links to `/slips/new`; with a locked slip
 | `POST /research/matches`               | Save manual player match from `odds_name`, `team`, and `athlete_id`  | Partial (refreshed game research) |
 
 `GET /research` renders the week's game selector and player autocomplete picker. It accepts optional `?game_id=`,
-`?player_id=`, `?leg_id=`, `?market=`, and `?line=`. When requested by HTMX targeting `#game-research` or
-`#player-research`, it delegates directly to the matching partial.
+`?player_id=`, `?leg_id=`, `?market=`, and `?line=`. When requested with an `Hx-Request` header and `player_id` or
+`game_id`, it delegates directly to the matching partial for `#research-panel`.
 
 `GET /research/games/{id}` syncs injuries on demand (`espn:summary:{game}`) and renders injuries filtered to key
 positions (`QB`, `RB`, `WR`, `TE`, `LT`, `OT`, `C`, `CB`, `S`). It also lists sportsbook prop names with their matched
@@ -172,7 +172,7 @@ ESPN athlete, and provides a form to manually link unmatched players.
 when over the line, red when under), the last-5 median, the season mean, and total games played. If `market` or `line`
 is omitted, it resolves them from `?leg_id=` or the player's stored odds.
 
-`POST /research/matches` accepts `odds_name`, `team`, and `espn_athlete_id`. It saves a manual player match (`manual=1`)
+`POST /research/matches` accepts `odds_name`, `team`, and `athlete_id`. It saves a manual player match (`manual=1`)
 in `player_matches`, removes conflicting non-manual matches for that game, backfills `player_id` and `team` on matching
 odds and legs, and returns the refreshed game research partial.
 

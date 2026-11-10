@@ -419,6 +419,20 @@ func TestResearchMatchesHandler(t *testing.T) {
 			UpdatedAt:  now,
 		},
 	}))
+	_, err := fixture.store.UpsertOdds(t.Context(), []db.Odds{
+		{
+			GameID:     game.ID,
+			Book:       "draftkings",
+			MarketType: "REC_YDS",
+			Team:       "BUF",
+			PlayerName: "Gabe Davis",
+			Side:       "OVER",
+			Line:       new(45.5),
+			Price:      -110,
+			FetchedAt:  now,
+		},
+	})
+	require.NoError(t, err)
 
 	// 1. Missing required fields returns 400
 	formBad := url.Values{
@@ -476,6 +490,7 @@ func TestResearchMatchesHandler(t *testing.T) {
 	bodyHTMX := recHTMX.Body.String()
 	assert.NotContains(t, bodyHTMX, "<!doctype html>")
 	assert.Contains(t, bodyHTMX, "Key Injuries")
+	assert.Contains(t, bodyHTMX, "Manual")
 }
 
 func TestResearchLinksOnSlipLegs(t *testing.T) {

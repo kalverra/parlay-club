@@ -238,6 +238,23 @@ func TestExportCardIgnoresStaleOddsRows(t *testing.T) {
 	game := addGame(t, fixture, gameKickoff())
 	exportRows(t, fixture.store, game.ID)
 
+	// A newer prop sync at exportFetched carried a different prop, so the books stopped
+	// quoting PASS_YDS and the older PASS_YDS rows are left behind.
+	_, err := fixture.store.UpsertOdds(t.Context(), []db.Odds{
+		{
+			GameID:     game.ID,
+			Book:       "draftkings",
+			MarketType: "RUSH_YDS",
+			Team:       "BUF",
+			PlayerName: "James Cook",
+			Side:       "OVER",
+			Line:       new(65.5),
+			Price:      -110,
+			FetchedAt:  exportFetched,
+		},
+	})
+	require.NoError(t, err)
+
 	stale := exportFetched.Add(-time.Hour)
 	link := func() *string {
 		value := "https://sportsbook.draftkings.com/?outcomes=stale"

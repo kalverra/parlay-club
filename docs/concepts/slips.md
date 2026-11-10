@@ -123,8 +123,7 @@ a game card ("Game research &rarr;"), or a slip leg ("Research &rarr;").
   last-5 hit bars (green over the line, red under), callouts for the last-5 median and season mean, and total games
   played this season. Opening from a slip leg or prop pill preselects that market and line; otherwise it picks the
   player's primary prop line or the first available market.
-- **Responsive layout:** Phone screens show Research as a bottom tab. At `lg` width and up, Slip, Games, and Research
-  sit side by side.
+- **Responsive layout:** Phone and desktop screens show Research as a bottom tab in a single column.
 
 ## Grading
 
