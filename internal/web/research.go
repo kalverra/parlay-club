@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/kalverra/parlay-club/internal/analyzer"
 	"github.com/kalverra/parlay-club/internal/db"
 	"github.com/kalverra/parlay-club/internal/ingest/espn"
 )
@@ -407,6 +408,14 @@ func (h *researchHandlers) loadGameResearch(ctx context.Context, gameID string) 
 		})
 	}
 
+	playerMatches, err := h.deps.Store.PlayerMatchesForTeams(ctx, teams)
+	matchesByNormTeam := make(map[string]db.PlayerMatch)
+	if err == nil {
+		for _, m := range playerMatches {
+			matchesByNormTeam[m.OddsName+"|"+m.Team] = m
+		}
+	}
+
 	// Odds and player matches
 	oddsRows, err := h.deps.Store.OddsForGame(ctx, game.ID)
 	if err == nil {
@@ -435,6 +444,17 @@ func (h *researchHandlers) loadGameResearch(ctx context.Context, gameID string) 
 					mv.Position = rp.Position
 					if mv.Team == "" {
 						mv.Team = rp.Team
+					}
+				}
+			}
+			norm := db.NormalizePlayerName(name)
+			if m, ok := matchesByNormTeam[norm+"|"+mv.Team]; ok {
+				mv.Manual = m.Manual
+			} else {
+				for _, m := range playerMatches {
+					if m.OddsName == norm && (m.Team == mv.Team || m.ESPNAthleteID == aid) {
+						mv.Manual = m.Manual
+						break
 					}
 				}
 			}
@@ -600,8 +620,8 @@ func buildMarketOptions(
 func buildHitBars(games []float64, comparisonLine *float64) ([]HitBarView, string, string) {
 	l5Len := min(5, len(games))
 	l5 := games[:l5Len]
-	median := computeMedian(l5)
-	mean := computeMean(games)
+	median := analyzer.Median(l5)
+	mean := analyzer.Mean(games)
 	l5Median := formatNumber(median)
 	seasonMean := fmt.Sprintf("%.1f", mean)
 
@@ -721,30 +741,6 @@ func marketLabel(market string) string {
 	default:
 		return market
 	}
-}
-
-func computeMedian(values []float64) float64 {
-	if len(values) == 0 {
-		return 0
-	}
-	sorted := slices.Clone(values)
-	slices.Sort(sorted)
-	n := len(sorted)
-	if n%2 == 1 {
-		return sorted[n/2]
-	}
-	return (sorted[n/2-1] + sorted[n/2]) / 2.0
-}
-
-func computeMean(values []float64) float64 {
-	if len(values) == 0 {
-		return 0
-	}
-	var sum float64
-	for _, v := range values {
-		sum += v
-	}
-	return sum / float64(len(values))
 }
 
 func formatNumber(val float64) string {

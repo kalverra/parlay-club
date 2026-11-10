@@ -513,7 +513,7 @@ func medianTrap(a *analysis) []Warning {
 
 		l5Len := min(5, len(games))
 		l5 := games[:l5Len]
-		median := computeMedian(l5)
+		median := Median(l5)
 		if *leg.Line <= median {
 			continue
 		}
@@ -521,7 +521,7 @@ func medianTrap(a *analysis) []Warning {
 		name := playerName(leg)
 		message := fmt.Sprintf("%s's last-5 median is %s yards, so %s is a stretch.",
 			name, number(median), number(*leg.Line))
-		mean := computeMean(games)
+		mean := Mean(games)
 		if *leg.Line < mean {
 			message += fmt.Sprintf(" His %s-yard average is propped up by one big game.",
 				number(math.Round(mean)))
@@ -542,8 +542,8 @@ func isYardageMarket(market string) bool {
 	}
 }
 
-// computeMedian computes the median of values.
-func computeMedian(values []float64) float64 {
+// Median computes the median of values.
+func Median(values []float64) float64 {
 	if len(values) == 0 {
 		return 0
 	}
@@ -556,8 +556,8 @@ func computeMedian(values []float64) float64 {
 	return sorted[middle]
 }
 
-// computeMean computes the arithmetic mean of values.
-func computeMean(values []float64) float64 {
+// Mean computes the arithmetic mean of values.
+func Mean(values []float64) float64 {
 	if len(values) == 0 {
 		return 0
 	}

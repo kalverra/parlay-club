@@ -597,3 +597,69 @@ func TestGamePropsHandler(t *testing.T) {
 	assert.Contains(t, bodyLocked, "BUF Over 24.5")
 	assert.Contains(t, bodyLocked, "Over 265.5 Pass Yds")
 }
+
+func TestCurrentOddsIndependentSyncGroupsAndNewestOdds(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	game := addGame(t, fixture, gameKickoff())
+
+	gameLineTime := time.Date(2026, time.November, 7, 12, 0, 0, 0, time.UTC)
+	propTime := time.Date(2026, time.November, 7, 14, 0, 0, 0, time.UTC)
+
+	// Game lines fetched at 12:00
+	_, err := fixture.store.UpsertOdds(t.Context(), []db.Odds{
+		{
+			GameID:     game.ID,
+			Book:       "draftkings",
+			MarketType: "ML",
+			Team:       "BUF",
+			Side:       "TEAM",
+			Price:      -150,
+			FetchedAt:  gameLineTime,
+		},
+		{
+			GameID:     game.ID,
+			Book:       "draftkings",
+			MarketType: "SPREAD",
+			Team:       "BUF",
+			Side:       "TEAM",
+			Line:       new(-3.0),
+			Price:      -110,
+			FetchedAt:  gameLineTime,
+		},
+	})
+	require.NoError(t, err)
+
+	// Newer prop sync fetched at 14:00 (after gameLineTime)
+	_, err = fixture.store.UpsertOdds(t.Context(), []db.Odds{
+		{
+			GameID:     game.ID,
+			Book:       "draftkings",
+			MarketType: "PASS_YDS",
+			Team:       "BUF",
+			PlayerName: "Josh Allen",
+			Side:       "OVER",
+			Line:       new(245.5),
+			Price:      -110,
+			FetchedAt:  propTime,
+		},
+	})
+	require.NoError(t, err)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/games", nil)
+	fixture.handler.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	body := html.UnescapeString(recorder.Body.String())
+
+	// Newer prop sync does NOT drop game lines; card still has lines
+	assert.Contains(t, body, "BUF -3")
+	assert.Contains(t, body, "BUF ML")
+	assert.NotContains(t, body, "No lines yet.")
+
+	// Footer timestamp comes strictly from game-line rows (12:00 UTC), not prop sync (14:00 UTC)
+	assert.Contains(t, body, "datetime=\"2026-11-07T12:00:00Z\"")
+	assert.NotContains(t, body, "datetime=\"2026-11-07T14:00:00Z\"")
+}

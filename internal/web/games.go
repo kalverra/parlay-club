@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kalverra/parlay-club/internal/analyzer"
 	"github.com/kalverra/parlay-club/internal/db"
 	"github.com/kalverra/parlay-club/internal/parlay"
 )
@@ -137,7 +138,7 @@ func (h *gameHandlers) games(w http.ResponseWriter, r *http.Request) {
 		}
 		rows = currentOdds(rows)
 		for _, row := range rows {
-			if row.FetchedAt.After(newestOdds) {
+			if !isPropRow(row) && row.FetchedAt.After(newestOdds) {
 				newestOdds = row.FetchedAt
 			}
 		}
@@ -228,25 +229,43 @@ func cardView(game db.Game, rows []db.Odds, homeBook string) GameCardView {
 	return card
 }
 
-// currentOdds drops rows left behind by an earlier sync. UpsertOdds stamps
-// every row it writes with the same fetch time, so a book that stopped
-// carrying a market keeps an older time and must not join the current board.
+// isPropRow reports whether an odds row belongs to the prop sync group.
+func isPropRow(row db.Odds) bool {
+	return row.MarketType == "TEAM_TOTAL" || row.PlayerName != "" || isPlayerMarket(row.MarketType)
+}
+
+// currentOdds drops rows left behind by an earlier sync. Game lines and props
+// are fetched independently and stamped with different fetch times; currentOdds
+// computes the newest FetchedAt separately for game-line rows and prop rows,
+// keeping rows that match the newest timestamp of their own sync group.
 func currentOdds(rows []db.Odds) []db.Odds {
 	if len(rows) == 0 {
 		return rows
 	}
 
-	newest := rows[0].FetchedAt
+	var newestGameLine, newestProp time.Time
 	for _, row := range rows {
-		if row.FetchedAt.After(newest) {
-			newest = row.FetchedAt
+		if isPropRow(row) {
+			if row.FetchedAt.After(newestProp) {
+				newestProp = row.FetchedAt
+			}
+		} else {
+			if row.FetchedAt.After(newestGameLine) {
+				newestGameLine = row.FetchedAt
+			}
 		}
 	}
 
 	current := make([]db.Odds, 0, len(rows))
 	for _, row := range rows {
-		if row.FetchedAt.Equal(newest) {
-			current = append(current, row)
+		if isPropRow(row) {
+			if !newestProp.IsZero() && row.FetchedAt.Equal(newestProp) {
+				current = append(current, row)
+			}
+		} else {
+			if !newestGameLine.IsZero() && row.FetchedAt.Equal(newestGameLine) {
+				current = append(current, row)
+			}
 		}
 	}
 	return current
@@ -333,12 +352,7 @@ func medianLine(rows []db.Odds) *float64 {
 		return nil
 	}
 
-	slices.Sort(lines)
-	middle := len(lines) / 2
-	median := lines[middle]
-	if len(lines)%2 == 0 {
-		median = (lines[middle-1] + lines[middle]) / 2
-	}
+	median := analyzer.Median(lines)
 	return &median
 }
 
@@ -528,7 +542,7 @@ func (h *gameHandlers) props(w http.ResponseWriter, r *http.Request) {
 func filterPropOdds(rows []db.Odds) []db.Odds {
 	out := make([]db.Odds, 0, len(rows))
 	for _, row := range rows {
-		if row.MarketType == "TEAM_TOTAL" || row.PlayerName != "" || isPlayerMarket(row.MarketType) {
+		if isPropRow(row) {
 			out = append(out, row)
 		}
 	}
