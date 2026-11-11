@@ -188,7 +188,8 @@ changes nothing and publishes nothing. A change publishes `slip:{id}` and writes
 
 A changed pick loses its votes: `UpdateLeg` deletes them in the same transaction when the game, market, team, player,
 side, line, or selection changes. An odds-only edit keeps them, because it is the same pick at a new price. `DeleteLeg`
-clears them by cascade. Votes are kept after the week for the Record Book.
+clears them by cascade, and `RemoveMember` deletes the leaving member's votes on every leg of the slip in its own
+transaction, so the tally drops with them and rejoining starts clean. Votes are kept after the week for the Record Book.
 
 ## Research
 
