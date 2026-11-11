@@ -2,9 +2,9 @@
 id: sandbox-replay
 title: Sandbox replay
 type: reference
-summary: The fail-closed HTTP transport and named week 9 response registry behind the local Sunday sandbox, the requests they answer, and which fixtures are real captures versus derived snapshots.
-tags: [sandbox, replay, fixtures, testing, espn, weather, parlay-api, nfelo, provenance, offline]
-sources: [internal/sandbox/registry.go, internal/sandbox/transport.go, internal/sandbox/sandbox_test.go, internal/ingest/espn/testdata/README.md, internal/ingest/odds/testdata/README.md, internal/ingest/weather/testdata/README.md, internal/ingest/nfelo/testdata/README.md]
+summary: The fail-closed HTTP transport and named week 9 response registry behind the local Sunday sandbox, the requests they answer, which fixtures are real captures versus derived snapshots, and how server startup replays them.
+tags: [sandbox, replay, fixtures, testing, espn, weather, parlay-api, nfelo, provenance, offline, startup, clock]
+sources: [internal/sandbox/registry.go, internal/sandbox/transport.go, internal/sandbox/scenario.go, internal/sandbox/state.go, internal/sandbox/sandbox_test.go, internal/sandbox/state_test.go, cmd/server/sandbox.go, cmd/server/main.go, internal/config/config.go, internal/ingest/espn/testdata/README.md, internal/ingest/odds/testdata/README.md, internal/ingest/weather/testdata/README.md, internal/ingest/nfelo/testdata/README.md]
 last_verified: 2026-11-10
 ---
 
@@ -31,6 +31,22 @@ their `*http.Client` changes.
   `archive.Transport` wrapper, so replayed calls never enter `api_responses`.
 
 `SetStage` switches the snapshot set for later requests. Only the `morning` stage is registered today.
+
+## Server startup
+
+`SUNDAY_SANDBOX=1` makes `cmd/server` build `sandbox.Week9` from the checkout root before it mounts any route. One
+`http.Client` with the replay transport becomes the transport for the ordinary ESPN, weather, Parlay API, and nfelo
+clients. The Parlay API client gets a synthetic key and no fallback provider, so a real key from `.env` is never passed.
+Sandbox mode also skips Google provider construction and forces the dev sign-in form.
+
+A fresh `./data/sunday-sandbox.db` runs `refresh.Service.RunOnce` before the server listens: the scoreboard first, then
+the weather, lines, and projections sources, all synchronously. Startup then writes a `morning` row with the scenario
+clock to the sandbox-only `sandbox_state` table. A later boot reads that row, restores the stage and clock, and does not
+rebuild. The schema migrations stay untouched and ordinary dev keeps `./data/parlay.db`; sandbox mode ignores `DB_PATH`.
+See [Persistence](../concepts/persistence.md).
+
+The sandbox scenario clock is `2026-11-08T13:00:00Z`. Refresh, slips, and the web handlers share it; auth cookies and
+SSE timers stay on real time. See [Data refresh](../concepts/data-refresh.md).
 
 ## Week 9 registry
 
@@ -93,3 +109,8 @@ normal event, line, and lazy prop paths enforce their floors instead of silently
 - nfelo returns a week 9 projection for every slate game;
 - the featured prop board parses through Parlay API's flat `/props` shape;
 - an unknown week, an unregistered The Odds API request, an unknown stage, and a missing fixture file all fail closed.
+
+`internal/sandbox/state_test.go` covers the one-row stage record and the scenario clock. `cmd/server/sandbox_test.go`
+boots a fresh sandbox through the real clients and refresh, asserts the whole morning landed offline with no archive
+rows, proves a sentinel normal dev file is untouched, and reconstructs the runtime to show the stage and clock survive a
+restart without re-fetching.

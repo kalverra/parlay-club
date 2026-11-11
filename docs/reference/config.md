@@ -2,10 +2,10 @@
 id: config
 title: Configuration
 type: reference
-summary: Environment variables the server reads, their dev defaults, the odds provider keys they configure, and the values it rejects in prod.
-tags: [config, environment, startup, google, oauth, odds, parlay-api, the-odds-api]
-sources: [internal/config/config.go, cmd/server/main.go, internal/ingest/odds/client.go]
-last_verified: 2026-11-09
+summary: Environment variables the server reads, their dev defaults, the odds provider keys they configure, the offline sandbox switch, and the values it rejects in prod.
+tags: [config, environment, startup, google, oauth, odds, parlay-api, the-odds-api, sandbox, offline]
+sources: [internal/config/config.go, cmd/server/main.go, cmd/server/sandbox.go, internal/sandbox/*.go, internal/ingest/odds/client.go]
+last_verified: 2026-11-10
 ---
 
 # Configuration
@@ -29,11 +29,18 @@ exits with status 1 when any value is invalid.
 | `ODDS_API_KEY`         | empty                    | Parlay API key. Empty disables odds calls.                                    |
 | `THE_ODDS_API_KEY`     | empty                    | The Odds API key for enrichment and fallback lines. Empty disables that provider. |
 | `LOG_LEVEL`            | `debug`                  | A zerolog level: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `panic`, `disabled`. `prod` defaults to `info`. |
+| `SUNDAY_SANDBOX`       | empty                    | `1` runs the offline Sunday sandbox. It fixes the database at `./data/sunday-sandbox.db` and ignores `DB_PATH`. Rejected in prod. |
 | `LITESTREAM_BUCKET`    | unset                    | Read by Litestream, not by the app.                                           |
 
 Dev falls back to `http://localhost:{PORT}` for `BASE_URL` and a fixed `SESSION_KEY`. It never invents Google values. In
 prod, a missing `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `BASE_URL`, or `SESSION_KEY` fails startup instead of
 falling back.
+
+`SUNDAY_SANDBOX=1` is a development switch, not a deployment mode. It always uses `./data/sunday-sandbox.db`, skips
+history import and Google provider construction, and forces the dev sign-in form. Every ingest client reads the saved
+week 9 responses in `internal/sandbox` through a fail-closed replay transport, so `ODDS_API_KEY` and
+`THE_ODDS_API_KEY` are unused and no credits are spent. `mise run sandbox` sets the variable for the normal hot-reload
+loop; see [Local development](../guides/local-dev.md).
 
 `BASE_URL` is trimmed of trailing slashes. It must match the scheme, host, and port registered on the Google client, or
 sign-in stops at `redirect_uri_mismatch`. The app builds the redirect URI by appending `/auth/google/callback`.
@@ -60,6 +67,8 @@ The server prints every problem it finds, one per line, and exits 1. It does not
 | `GOOGLE_CLIENT_ID` is empty in prod      | `GOOGLE_CLIENT_ID is required in prod`                         |
 | `GOOGLE_CLIENT_SECRET` is empty in prod  | `GOOGLE_CLIENT_SECRET is required in prod`                     |
 | `BASE_URL` is empty in prod              | `BASE_URL is required in prod`                                 |
+| `SUNDAY_SANDBOX` is true in prod         | `SUNDAY_SANDBOX is not allowed in prod`                        |
+| `SUNDAY_SANDBOX` is not a boolean        | `SUNDAY_SANDBOX must be a boolean, got "..."`                  |
 | `LOG_LEVEL` is not a known level         | `LOG_LEVEL is not a known level, got "..."`                    |
 
 Dev accepts a short `SESSION_KEY` and no Google values, so a fresh checkout starts without secrets.

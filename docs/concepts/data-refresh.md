@@ -2,10 +2,10 @@
 id: data-refresh
 title: Data refresh
 type: concept
-summary: How page loads and on-demand views drive lazy syncs of the slate, weather, game lines, props, rosters, injuries, game logs, and nfelo projections, with per-source staleness windows, single-flight, failure backoff, tiered Parlay API and The Odds API credit floors, and an archive of every successful response.
-tags: [refresh, sync, lazy, staleness, singleflight, backoff, credits, odds, parlay-api, the-odds-api, enrichment, fallback, props, weather, slate, live-window, nfelo, projections, archive, raw-responses, roster, gamelog, injuries, player-matching]
-sources: [internal/refresh/refresh.go, internal/refresh/rules.go, internal/refresh/sources.go, internal/refresh/research.go, internal/refresh/nfelo.go, internal/refresh/publish.go, internal/refresh/live.go, internal/db/sync.go, internal/db/players.go, internal/db/nfelo.go, internal/ingest/nfelo/client.go, internal/ingest/archive/transport.go, cmd/server/main.go]
-last_verified: 2026-11-09
+summary: How page loads and on-demand views drive lazy syncs of the slate, weather, game lines, props, rosters, injuries, game logs, and nfelo projections, with per-source staleness windows, single-flight, failure backoff, tiered Parlay API and The Odds API credit floors, an archive of every successful response, and a synchronous sandbox bootstrap.
+tags: [refresh, sync, lazy, staleness, singleflight, backoff, credits, odds, parlay-api, the-odds-api, enrichment, fallback, props, weather, slate, live-window, nfelo, projections, archive, raw-responses, roster, gamelog, injuries, player-matching, sandbox, clock]
+sources: [internal/refresh/refresh.go, internal/refresh/rules.go, internal/refresh/sources.go, internal/refresh/research.go, internal/refresh/nfelo.go, internal/refresh/publish.go, internal/refresh/live.go, internal/sandbox/*.go, internal/db/sync.go, internal/db/players.go, internal/db/nfelo.go, internal/ingest/nfelo/client.go, internal/ingest/archive/transport.go, cmd/server/main.go, cmd/server/sandbox.go]
+last_verified: 2026-11-10
 ---
 
 # Data refresh
@@ -33,6 +33,10 @@ credits. Health, static files, and the sign-in screens sit outside the wrapper.
 does not cancel a sync, and every source gets its own 30 second timeout. Tests wait for the background work through a
 `WaitGroup`; the server never waits.
 
+`RunOnce(ctx)` is the synchronous counterpart. It runs the same scoreboard-first pass, waits for every source it starts,
+and returns the failures joined. Normal page loads still use `Kick()`; the sandbox bootstrap calls `RunOnce` so the app
+does not serve an empty database while the first morning sync is still running.
+
 On-demand user actions also trigger syncs directly. Expanding a game card calls `SyncGameProps(ctx, gameID)`. Loading
 game research calls `SyncGameResearch(ctx, gameID)`. Loading player research calls `SyncPlayerResearch(ctx, athleteID)`.
 These run synchronously with a 10-second timeout, but share the same single-flight deduplication, staleness windows,
@@ -49,6 +53,18 @@ and failure backoff as background syncs.
 Within a source, `singleflight` keyed by its `sync_state` source key lets concurrent page loads share one fetch. The
 work inside the flight re-reads the staleness state before fetching, so a load that joined after the first run finished
 does not fetch stale data twice.
+
+## Sandbox clock and replay
+
+Refresh reads its clock from an injected `Clock` rather than `time.Now`. The server passes the wall clock normally and
+the sandbox's scenario clock in sandbox mode. Slips and the web handlers read the same scenario clock, so staleness,
+kickoff locks, the game picker, the export card, and nfelo freshness all agree on the fixed Sunday morning. Auth cookies
+and SSE timers stay on real time.
+
+Sandbox ingest clients use the replay transport in `internal/sandbox` instead of the archived ingest client. A request
+that is not registered fails with the request and stage, with no network fallback. Replayed calls never enter
+`api_responses`, so the sandbox does not fill the archive with fixture traffic. A restart restores the saved stage and
+clock and does not rerun the morning. See [Sandbox replay](../reference/sandbox-replay.md).
 
 ## Archive
 
@@ -174,4 +190,5 @@ see [Live updates](live-updates.md).
 - Check each provider's credit floor after its free event list and before its paid call. Never buy lines on a stale or
   missing balance.
 - Publish once per committed change, never inside the transaction.
-- Keep one single-flight per source. A fake clock moves the windows in tests; the real clock is only in the server.
+- Keep one single-flight per source. The server injects the wall clock, tests inject a fixed clock, and sandbox mode injects
+  its scenario clock. Never read `time.Now` inside a staleness rule.

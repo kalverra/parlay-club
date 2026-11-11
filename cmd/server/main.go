@@ -58,7 +58,11 @@ func run() error {
 	}
 
 	logger := newLogger(cfg, os.Stdout)
-	logger.Info().Str("env", cfg.AppEnv).Int("port", cfg.Port).Msg("starting")
+	logger.Info().
+		Str("env", cfg.AppEnv).
+		Int("port", cfg.Port).
+		Bool("sandbox", cfg.Sandbox).
+		Msg("starting")
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -84,31 +88,48 @@ func run() error {
 
 	store := db.NewStore(database)
 	cookies := auth.NewCookies(cfg.SessionKey, cfg.IsProd())
+	hub := &live.Hub{}
 
-	provider, err := newProvider(ctx, cfg)
+	provider, devLogin, err := authSettings(ctx, cfg)
 	if err != nil {
 		return err
 	}
 
-	devLogin := !cfg.IsProd() && cfg.GoogleClientID == ""
+	var (
+		refresher *refresh.Service
+		appNow    func() time.Time
+	)
+	if cfg.Sandbox {
+		root, err := repoRoot()
+		if err != nil {
+			return err
+		}
+		runtime, err := newSandboxRuntime(ctx, database, store, hub, os.DirFS(root), logger)
+		if err != nil {
+			return err
+		}
+		refresher = runtime.refresher
+		appNow = runtime.scenario.Now
+	} else {
+		loadHistory(ctx, logger, store)
+		ingestClient := newIngestClient(store)
+		refresher = refresh.New(refresh.Deps{
+			Store:         store,
+			Scoreboard:    espn.NewClient("", ingestClient),
+			Forecast:      weather.NewClient("", ingestClient),
+			Lines:         odds.NewClient("", cfg.OddsAPIKey, ingestClient),
+			FallbackLines: odds.NewClient(odds.TheOddsAPIBaseURL, cfg.TheOddsAPIKey, ingestClient),
+			Projections:   nfelo.NewClient("", ingestClient),
+			Publisher:     hub,
+			Logger:        logger,
+		})
+	}
+
 	handlers := auth.NewHandlers(logger, store, cookies, renderer, provider, devLogin)
 	scope := groups.Scope(logger, store, auth.UserFrom, cookies)
 	groupHandlers := groups.NewHandlers(logger, store, auth.UserFrom, cookies, renderer)
 
-	hub := &live.Hub{}
-	slipService := slips.New(store, hub, nil)
-	loadHistory(ctx, logger, store)
-	ingestClient := newIngestClient(store)
-	refresher := refresh.New(refresh.Deps{
-		Store:         store,
-		Scoreboard:    espn.NewClient("", ingestClient),
-		Forecast:      weather.NewClient("", ingestClient),
-		Lines:         odds.NewClient("", cfg.OddsAPIKey, ingestClient),
-		FallbackLines: odds.NewClient(odds.TheOddsAPIBaseURL, cfg.TheOddsAPIKey, ingestClient),
-		Projections:   nfelo.NewClient("", ingestClient),
-		Publisher:     hub,
-		Logger:        logger,
-	})
+	slipService := slips.New(store, hub, appNow)
 	stream := live.NewStream(hub, refresher.LiveWindow)
 	shell := web.NewWithDeps(web.Dependencies{
 		Logger:     logger,
@@ -120,6 +141,7 @@ func run() error {
 		Slips:      slipService,
 		Stream:     stream,
 		Refresh:    refresher,
+		Now:        appNow,
 	})
 
 	server := &http.Server{

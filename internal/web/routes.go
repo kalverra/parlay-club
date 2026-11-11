@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"net/http"
+	"time"
 
 	"github.com/rs/zerolog"
 
@@ -51,6 +52,17 @@ type Dependencies struct {
 	Slips      *slips.Service
 	Stream     *live.Stream
 	Refresh    Refresher
+	// Now supplies the app's clock. A nil Now uses time.Now; the sandbox passes
+	// its scenario clock so pickers, exports, and freshness agree with refresh.
+	Now func() time.Time
+}
+
+// now returns the app clock, defaulting to real time.
+func (d Dependencies) now() time.Time {
+	if d.Now != nil {
+		return d.Now()
+	}
+	return time.Now()
 }
 
 // pageRoutes are the shell's pages without per-slip data. The slip screen owns

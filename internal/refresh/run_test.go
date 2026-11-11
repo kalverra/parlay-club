@@ -14,6 +14,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kalverra/parlay-club/internal/db"
+	"github.com/kalverra/parlay-club/internal/ingest/odds"
+	"github.com/kalverra/parlay-club/internal/ingest/weather"
 )
 
 // openTestStore opens a migrated database in a temp dir.
@@ -129,6 +131,76 @@ func TestRunSourcesNeverRunsOneSourceTwiceAtOnce(t *testing.T) {
 
 	assert.Equal(t, int32(1), maxRunning.Load(), "a source must never run twice at once")
 	assert.Equal(t, int32(1), runs.Load(), "callers join the in-flight run")
+}
+
+func TestRunOnceWaitsForEverySource(t *testing.T) {
+	t.Parallel()
+
+	now := novemberTime(7, 11, 0)
+	store := openTestStore(t)
+	game := storedGame(0, now)
+	lines := &fakeLines{
+		events: []odds.Event{{
+			ID: "evt-1", HomeTeam: game.HomeName, AwayTeam: game.AwayName,
+			CommenceTime: game.Kickoff,
+		}},
+		eventsCredits: odds.Credits{Remaining: 400},
+		lines: []odds.Line{{
+			EventID: "evt-1", Book: "draftkings", MarketType: odds.MarketML,
+			Team: game.HomeName, Side: odds.SideTeam, Price: -155,
+		}},
+		lineCredits: odds.Credits{Remaining: 397},
+	}
+	service := New(Deps{
+		Store:      store,
+		Scoreboard: fakeScoreboard{board: espnWeek()},
+		Forecast:   fakeForecast{forecast: weather.Forecast{TempF: 40, WindMPH: 8}},
+		Lines:      lines,
+		Now:        func() time.Time { return now },
+		Logger:     zerolog.Nop(),
+	})
+
+	require.NoError(t, service.RunOnce(t.Context()), "the pass returns after every source finishes")
+
+	week, err := store.LatestWeek(t.Context())
+	require.NoError(t, err)
+	games, err := store.GamesForWeek(t.Context(), week.ID)
+	require.NoError(t, err)
+	require.Len(t, games, 1)
+	assert.Equal(t, db.GameLive, games[0].Status)
+	require.NotNil(t, games[0].TempF)
+	assert.InDelta(t, 40.0, *games[0].TempF, 1e-9)
+
+	for _, key := range []string{ScoreboardSource, WeatherSource(games[0].ID), OddsLinesSource} {
+		state, err := store.SyncState(t.Context(), key)
+		require.NoError(t, err, key)
+		assert.Equal(t, now, state.FetchedAt, key)
+	}
+
+	rows, err := store.OddsForGame(t.Context(), games[0].ID)
+	require.NoError(t, err)
+	require.NotEmpty(t, rows)
+	assert.Equal(t, 1, lines.lineCalls)
+}
+
+func TestRunOnceReturnsJoinedFailures(t *testing.T) {
+	t.Parallel()
+
+	now := novemberTime(7, 11, 0)
+	store := openTestStore(t)
+	service := New(Deps{
+		Store:      store,
+		Scoreboard: fakeScoreboard{board: espnWeek()},
+		Forecast:   fakeForecast{err: errors.New("forecast is down")},
+		Lines:      &fakeLines{eventsErr: errors.New("odds are down")},
+		Now:        func() time.Time { return now },
+		Logger:     zerolog.Nop(),
+	})
+
+	err := service.RunOnce(t.Context())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "forecast is down")
+	assert.Contains(t, err.Error(), "odds are down")
 }
 
 func TestFailureBacksOffForFiveMinutes(t *testing.T) {

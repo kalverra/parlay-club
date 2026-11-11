@@ -627,7 +627,7 @@ func (h *slipHandlers) withGames(
 	form LegFormView,
 	slip db.Slip,
 ) (LegFormView, error) {
-	now := time.Now()
+	now := h.deps.now()
 	past, err := h.deps.Store.WeekPast(ctx, slip.WeekID, now)
 	if err != nil {
 		return LegFormView{}, err

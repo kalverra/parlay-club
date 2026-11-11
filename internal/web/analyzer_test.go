@@ -191,6 +191,50 @@ func TestSlipPanelUsesNfeloOnlyWhenFreshAndScheduled(t *testing.T) {
 // formats and its quiet cases. The chip shares the row's wrapping flex line
 // with the odds, so at 360 px it moves under the price instead of widening the
 // card; no rule here adds a fixed width.
+func TestNfeloFreshnessUsesTheScenarioClock(t *testing.T) {
+	t.Parallel()
+
+	fetchedAt := time.Now().UTC().Add(-96 * time.Hour)
+	scenarioNow := fetchedAt.Add(time.Hour)
+	fixture := newSlipFixtureAt(t, 2, func() time.Time { return scenarioNow })
+	game := addGame(t, fixture, gameKickoff())
+
+	changed, err := fixture.store.UpsertNfeloGames(t.Context(), []db.NfeloGame{{
+		GameID:      game.ID,
+		HomeSpread:  -10,
+		HomeWinProb: 0.76,
+		UpdatedAt:   fetchedAt,
+	}})
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.NoError(t, fixture.store.RecordSync(
+		t.Context(), "nfelo:projections", fetchedAt, nil))
+
+	addStoredLeg(t, fixture, db.Leg{
+		UserID:     fixture.user.ID,
+		GameID:     new(game.ID),
+		MarketType: "SPREAD",
+		Selection:  "BUF -7.5",
+		Team:       new("BUF"),
+		Side:       new("TEAM"),
+		Line:       new(-7.5),
+		Odds:       -110,
+	})
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodGet,
+		fmt.Sprintf("/slips/%d/panel", fixture.slip.ID),
+		nil,
+	)
+	fixture.handler.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	assert.Contains(t, recorder.Body.String(), "nfelo -10.0",
+		"a model that is fresh at scenario time still shows")
+}
+
 func TestSlipLegRowShowsModelOnlyForSpreadAndMoneyline(t *testing.T) {
 	t.Parallel()
 

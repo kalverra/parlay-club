@@ -206,7 +206,7 @@ func (h *slipHandlers) nfeloForGames(
 	games []db.Game,
 ) map[string]db.NfeloGame {
 	state, err := h.deps.Store.SyncState(ctx, nfeloSource)
-	if err != nil || time.Since(state.FetchedAt) > nfeloFreshFor {
+	if err != nil || h.deps.now().Sub(state.FetchedAt) > nfeloFreshFor {
 		return nil
 	}
 	rows := make(map[string]db.NfeloGame, len(games))

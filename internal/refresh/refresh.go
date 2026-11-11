@@ -285,6 +285,65 @@ func (s *Service) kick(ctx context.Context) {
 		return
 	}
 
+	sources, err := s.sourcesFor(ctx, week, games, now)
+	if err != nil {
+		s.logger.Error().Err(err).Msg("build refresh sources")
+	}
+	s.runSources(ctx, now, sources)
+}
+
+// RunOnce is the synchronous counterpart to Kick. It runs the same
+// scoreboard-first pass, waits for every source it starts, and returns the
+// failures joined. The sandbox bootstrap uses it so startup finishes with a
+// complete slate; normal page loads keep using Kick.
+func (s *Service) RunOnce(ctx context.Context) error {
+	now := s.now()
+
+	_, games, err := s.currentWeek(ctx)
+	if err != nil {
+		return fmt.Errorf("read current games: %w", err)
+	}
+
+	var errs []error
+	if err := s.refreshSync(ctx, s.scoreboardSource(games, now), now); err != nil {
+		errs = append(errs, err)
+	}
+
+	week, games, err := s.currentWeek(ctx)
+	if err != nil {
+		return errors.Join(append(errs, fmt.Errorf("read current games: %w", err))...)
+	}
+	sources, err := s.sourcesFor(ctx, week, games, now)
+	if err != nil {
+		errs = append(errs, err)
+	}
+
+	var (
+		wg     sync.WaitGroup
+		mu     sync.Mutex
+		runErr []error
+	)
+	for _, src := range sources {
+		wg.Go(func() {
+			if err := s.refreshSync(ctx, src, now); err != nil {
+				mu.Lock()
+				runErr = append(runErr, err)
+				mu.Unlock()
+			}
+		})
+	}
+	wg.Wait()
+	return errors.Join(append(errs, runErr...)...)
+}
+
+// sourcesFor builds the sources that depend on the slate. A store read failure
+// is joined but does not hide the sources that were built.
+func (s *Service) sourcesFor(
+	ctx context.Context,
+	week db.Week,
+	games []db.Game,
+	now time.Time,
+) ([]source, error) {
 	sources := make([]source, 0, len(games)+2)
 	for _, game := range games {
 		sources = append(sources, s.weatherSource(game, now))
@@ -293,30 +352,33 @@ func (s *Service) kick(ctx context.Context) {
 	if s.projections != nil && week.ID != 0 {
 		sources = append(sources, s.nfeloSource(week, games, now))
 	}
-	if s.espn != nil && week.ID != 0 {
-		slipIDs, err := s.store.SlipIDsForWeek(ctx, week.ID)
+	if s.espn == nil || week.ID == 0 {
+		return sources, nil
+	}
+
+	var errs []error
+	slipIDs, err := s.store.SlipIDsForWeek(ctx, week.ID)
+	if err != nil {
+		errs = append(errs, fmt.Errorf("list slips for gamelogs: %w", err))
+		return sources, errors.Join(errs...)
+	}
+	athletes := make(map[string]struct{})
+	for _, slipID := range slipIDs {
+		legs, err := s.store.LegsForSlip(ctx, slipID)
 		if err != nil {
-			s.logger.Error().Err(err).Int64("week", week.ID).Msg("list slips for gamelogs")
-		} else {
-			athletes := make(map[string]struct{})
-			for _, slipID := range slipIDs {
-				legs, err := s.store.LegsForSlip(ctx, slipID)
-				if err != nil {
-					s.logger.Error().Err(err).Int64("slip", slipID).Msg("read slip legs for gamelogs")
-					continue
-				}
-				for _, leg := range legs {
-					if leg.PlayerID != nil && *leg.PlayerID != "" {
-						athletes[*leg.PlayerID] = struct{}{}
-					}
-				}
-			}
-			for athleteID := range athletes {
-				sources = append(sources, s.gameLogSource(athleteID, now))
+			errs = append(errs, fmt.Errorf("read slip %d legs for gamelogs: %w", slipID, err))
+			continue
+		}
+		for _, leg := range legs {
+			if leg.PlayerID != nil && *leg.PlayerID != "" {
+				athletes[*leg.PlayerID] = struct{}{}
 			}
 		}
 	}
-	s.runSources(ctx, now, sources)
+	for athleteID := range athletes {
+		sources = append(sources, s.gameLogSource(athleteID, now))
+	}
+	return sources, errors.Join(errs...)
 }
 
 // currentWeek returns the latest week and its games. Before the first slate

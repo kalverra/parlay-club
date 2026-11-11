@@ -203,6 +203,55 @@ func TestLoadDevStartsWithNoSecrets(t *testing.T) {
 	assert.Equal(t, "http://localhost:8080", cfg.BaseURL)
 }
 
+func TestLoadSandboxUsesTheFixedDatabase(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := config.Load(envFrom(map[string]string{
+		"SUNDAY_SANDBOX": "1",
+		"DB_PATH":        "/tmp/normal-dev.db",
+	}))
+	require.NoError(t, err)
+
+	assert.True(t, cfg.Sandbox)
+	assert.False(t, cfg.IsProd())
+	assert.Equal(t, config.SandboxDBPath, cfg.DBPath, "sandbox mode ignores DB_PATH")
+}
+
+func TestLoadSandboxLeavesNormalDevDatabaseAlone(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := config.Load(envFrom(map[string]string{
+		"DB_PATH": "/tmp/normal-dev.db",
+	}))
+	require.NoError(t, err)
+
+	assert.False(t, cfg.Sandbox)
+	assert.Equal(t, "/tmp/normal-dev.db", cfg.DBPath)
+}
+
+func TestLoadRejectsSandboxInProd(t *testing.T) {
+	t.Parallel()
+
+	_, err := config.Load(envFrom(map[string]string{
+		"APP_ENV":              config.EnvProd,
+		"SUNDAY_SANDBOX":       "1",
+		"SESSION_KEY":          strings.Repeat("k", 32),
+		"GOOGLE_CLIENT_ID":     "client-id",
+		"GOOGLE_CLIENT_SECRET": "client-secret",
+		"BASE_URL":             "https://parlay.example.com",
+	}))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "SUNDAY_SANDBOX is not allowed in prod")
+}
+
+func TestLoadRejectsUnknownSandboxValue(t *testing.T) {
+	t.Parallel()
+
+	_, err := config.Load(envFrom(map[string]string{"SUNDAY_SANDBOX": "sometimes"}))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `SUNDAY_SANDBOX must be a boolean, got "sometimes"`)
+}
+
 func TestLoadOddsAPIKeysWithParlayAndOddsAPI(t *testing.T) {
 	t.Parallel()
 
