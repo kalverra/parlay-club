@@ -61,12 +61,16 @@ func New(store *db.Store, publish Publisher, now func() time.Time) *Service {
 }
 
 // AddMember puts userID on the slip. Members can change only while the slip is
-// OPEN, adding someone already there changes nothing, and the caller must be a
-// member.
+// OPEN, adding someone already there changes nothing, and a slip member or
+// group member adding themselves is allowed. Everyone else gets ErrNotMember.
 func (s *Service) AddMember(ctx context.Context, actorID, slipID, userID int64) error {
 	changed := false
 	err := s.store.Tx(ctx, func(tx *db.Store) error {
 		slip, actor, members, err := loadSlip(ctx, tx, slipID, actorID)
+		if errors.Is(err, ErrNotMember) && actorID == userID {
+			// A group member off the slip may join it themselves.
+			slip, actor, members, err = loadJoin(ctx, tx, slipID, actorID)
+		}
 		if err != nil {
 			return err
 		}
@@ -86,8 +90,11 @@ func (s *Service) AddMember(ctx context.Context, actorID, slipID, userID int64) 
 		if err := tx.AddSlipMember(ctx, slipID, userID); err != nil {
 			return err
 		}
-		if _, err := tx.AddActivity(ctx, slipID, &actorID,
-			fmt.Sprintf("%s added %s", actor.User.Name, added.Name)); err != nil {
+		message := fmt.Sprintf("%s added %s", actor.User.Name, added.Name)
+		if actorID == userID {
+			message = actor.User.Name + " joined"
+		}
+		if _, err := tx.AddActivity(ctx, slipID, &actorID, message); err != nil {
 			return err
 		}
 		changed = true
@@ -557,6 +564,35 @@ func loadSlip(
 		}
 	}
 	return db.Slip{}, db.SlipMember{}, nil, ErrNotMember
+}
+
+// loadJoin reads a slip for a group member who is not on it, so a person can
+// add themselves. A person outside the group still gets ErrNotMember.
+func loadJoin(
+	ctx context.Context,
+	store *db.Store,
+	slipID, actorID int64,
+) (db.Slip, db.SlipMember, []db.SlipMember, error) {
+	slip, err := store.SlipByID(ctx, slipID)
+	if err != nil {
+		return db.Slip{}, db.SlipMember{}, nil, err
+	}
+	member, err := store.IsMember(ctx, slip.GroupID, actorID)
+	if err != nil {
+		return db.Slip{}, db.SlipMember{}, nil, err
+	}
+	if !member {
+		return db.Slip{}, db.SlipMember{}, nil, ErrNotMember
+	}
+	actor, err := store.UserByID(ctx, actorID)
+	if err != nil {
+		return db.Slip{}, db.SlipMember{}, nil, err
+	}
+	members, err := store.SlipMembers(ctx, slipID)
+	if err != nil {
+		return db.Slip{}, db.SlipMember{}, nil, err
+	}
+	return slip, db.SlipMember{User: actor}, members, nil
 }
 
 // checkKickoff refuses a game that has kicked off, unless the slip is for a

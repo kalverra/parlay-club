@@ -94,7 +94,8 @@ stateDiagram-v2
   waiting --> pick: someone unlocks
 ```
 
-`join` offers "Join this slip" (the existing add-member route with the viewer's own ID). `closed` says picks are over
+`join` offers "Join this slip" (the existing add-member route with the viewer's own ID; the service now lets a group
+member add themselves, which it previously refused). `closed` says picks are over
 for you this week and still shows the slip. The deadline line reads "Picks close for BUF @ MIA at 1:00 PM" as a
 `<time>`, formatted by `app.js` like every other time.
 
@@ -229,6 +230,9 @@ CREATE TABLE leg_votes (
   today, and the credit floors still apply. The board never loops over games.
 - **Votes read as pressure.** A downvote on a friend's pick can sting. No names, no sorting by score, and no effect on
   anything keep it a tally; watch how the group uses it.
+- **The group list reads four queries per card.** Each summary needs the group's slips, members, legs, and games, so a
+  person in many groups pays that on every landing and every refetch-on-visible. The counts are small on one SQLite
+  instance; if it shows, read the week's slips once and group them in Go.
 
 ## TODO
 
@@ -243,7 +247,7 @@ Effort: medium (new routes and a pure step function over existing data)
       `SetGroup` seam, switch the active group when a member opens another group's slip, and change the bottom bar to
       Groups, This week, Record Book with Games still reachable from the hub; test landing, switching, and non-member
       404s, and update `groups.md`, `routes.md`, and `access.md` where they describe the landing page
-- [ ] Add `slips.NextStep` and reshape the hub around its banner, deadline, and one primary action (pick links to
+- [x] Add `slips.NextStep` and reshape the hub around its banner, deadline, and one primary action (pick links to
       `/games` until the board lands); test every step with an injected clock and update `slips.md`
 
 ### Phase 2: Build the pick board

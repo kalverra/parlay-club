@@ -129,6 +129,8 @@ func TestLandingListsEveryGroup(t *testing.T) {
 	assert.Contains(t, body, "Lake House")
 	assert.Contains(t, body, fmt.Sprintf(`href="/groups/%d/week"`, fixture.first.ID))
 	assert.Contains(t, body, fmt.Sprintf(`href="/groups/%d/week"`, fixture.second.ID))
+	assert.Contains(t, body, "Pick 2 more", "the card shows the viewer's next step")
+	assert.Contains(t, body, "No slip yet", "a group with no slip says so")
 	assert.Contains(t, body, "data-refresh-on-visible", "the list refetches when the tab is visible")
 	assert.NotContains(t, body, "data-live-url", "the group list holds no stream open")
 	assert.Empty(t, fixture.selections, "landing on the list chooses no group")
