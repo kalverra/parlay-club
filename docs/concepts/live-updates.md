@@ -4,8 +4,8 @@ title: Live updates
 type: concept
 summary: How a slip page hears about changes through one SSE stream, and how the hub, deadlines, and client reconnect keep that stream cheap.
 tags: [live, sse, hub, eventsource, deadlines, hub-topics]
-sources: [internal/live/hub.go, internal/live/stream.go, internal/refresh/live.go, internal/slips/rules.go, web/static/app.js]
-last_verified: 2026-11-07
+sources: [internal/live/hub.go, internal/live/stream.go, internal/refresh/live.go, internal/slips/rules.go, cmd/server/sandbox.go, web/static/app.js]
+last_verified: 2026-11-10
 ---
 
 # Live updates
@@ -47,6 +47,18 @@ Topics are plain strings:
 group id; the hub does not need to change.
 
 The hub lives in the process. It only works because the app runs as a single Cloud Run instance.
+
+## Sandbox stages
+
+The Sunday sandbox uses the same hub and the same signals. A stage change rebuilds the morning, runs the real refresh,
+and records its scripted grades; the refresh publishes `week:{weekID}` when games or odds change, and the slip service
+publishes `slip:{id}` for each committed lock or grade. The acting browser reloads from the route's `HX-Refresh`, while
+other connected clients refetch committed state after those signals.
+
+A reset publishes an explicit final `week:{weekID}` and `slip:{id}` after its writes commit. Deleting and recreating
+equivalent rows need not look like a source change, so the explicit signal tells every subscriber that the baseline is
+ready. The same explicit signal follows a stage that rebuilds the slip. Signals are still sent only after the writes
+commit; auth cookies and SSE deadlines stay on real time even while the stage clock moves.
 
 ## Stream (`GET /slips/{id}/events`)
 

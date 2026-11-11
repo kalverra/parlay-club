@@ -26,8 +26,20 @@ import (
 // without changing the clients or the database.
 type Stage string
 
-// Morning is the Sunday morning baseline: the full week 9 slate is scheduled.
-const Morning Stage = "morning"
+// The four scripted situations. Morning is the baseline; the other three are
+// independent stages that rebuild morning before applying their manifest.
+const (
+	// Morning is the Sunday morning baseline: the full week 9 slate is scheduled.
+	Morning Stage = "morning"
+	// EarlyLoss is a coherent live afternoon: the featured game is in progress
+	// and one scripted pick is already lost.
+	EarlyLoss Stage = "early-loss"
+	// AllClear is Sunday evening: every Sunday game is final and every scripted
+	// pick won, while the Monday game is still upcoming.
+	AllClear Stage = "all-clear"
+	// SundayComplete is Monday night: every Sunday and Monday game is final.
+	SundayComplete Stage = "sunday-complete"
+)
 
 // Provenance says where a fixture's bytes came from.
 type Provenance string
@@ -219,9 +231,27 @@ func Week9(fsys fs.FS) (*Registry, error) {
 	return NewRegistry(fsys, fixtures)
 }
 
-// week9Fixtures is the complete morning registry. The event and line fixtures
-// were captured from The Odds API, whose wire format Parlay API matches.
+// week9Fixtures is the complete registry. The event and line fixtures were
+// captured from The Odds API, whose wire format Parlay API matches. The morning
+// set answers the baseline refresh; each later stage replays the same supporting
+// responses with its own scoreboard snapshot.
 func week9Fixtures() ([]Fixture, error) {
+	morning, err := morningFixtures()
+	if err != nil {
+		return nil, err
+	}
+
+	fixtures := append([]Fixture(nil), morning...)
+	for _, scoreboard := range week9StageScoreboards {
+		fixtures = append(fixtures, stageFixtures(morning, scoreboard)...)
+	}
+	return fixtures, nil
+}
+
+// morningFixtures is the baseline response set: the full scheduled slate, game
+// lines, nfelo projections, every outdoor forecast, and the featured game's
+// lazy prop board.
+func morningFixtures() ([]Fixture, error) {
 	fixtures := []Fixture{
 		{
 			Name:       "espn-week-9-scoreboard",
@@ -291,6 +321,56 @@ func week9Fixtures() ([]Fixture, error) {
 		return nil, err
 	}
 	return append(fixtures, weatherFixtures...), nil
+}
+
+// week9StageScoreboards overrides the scoreboard for each later stage. Every
+// other supporting response is reused from the morning set, because a stage
+// refresh still needs lines, projections, and forecasts that are due at its
+// clock. The files are derived from the captured week 9 slate.
+var week9StageScoreboards = []Fixture{
+	{
+		Name:       "espn-week-9-scoreboard-early-loss",
+		Stage:      EarlyLoss,
+		Method:     http.MethodGet,
+		URL:        espn.DefaultBaseURL + "/scoreboard",
+		File:       "internal/ingest/espn/testdata/scoreboard_week9_live.json",
+		Provenance: Derived,
+		Note:       "Derived from the captured week 9 slate: the Madrid game is live at Atlanta 17, Cincinnati 10 and every other slate game is scheduled.",
+	},
+	{
+		Name:       "espn-week-9-scoreboard-all-clear",
+		Stage:      AllClear,
+		Method:     http.MethodGet,
+		URL:        espn.DefaultBaseURL + "/scoreboard",
+		File:       "internal/ingest/espn/testdata/scoreboard_week9_final_sunday.json",
+		Provenance: Derived,
+		Note:       "Derived from the captured week 9 slate: every Sunday game is final with a scripted score and the Monday game is scheduled.",
+	},
+	{
+		Name:       "espn-week-9-scoreboard-sunday-complete",
+		Stage:      SundayComplete,
+		Method:     http.MethodGet,
+		URL:        espn.DefaultBaseURL + "/scoreboard",
+		File:       "internal/ingest/espn/testdata/scoreboard_week9_complete.json",
+		Provenance: Derived,
+		Note:       "Derived from the captured week 9 slate: every Sunday and Monday game is final with a scripted score.",
+	},
+}
+
+// stageFixtures copies the morning supporting responses into one stage and adds
+// that stage's scoreboard. The registry keys include the stage, so the same URL
+// can answer with a different snapshot in each situation.
+func stageFixtures(morning []Fixture, scoreboard Fixture) []Fixture {
+	fixtures := make([]Fixture, 0, len(morning))
+	for _, fixture := range morning {
+		if fixture.Name == "espn-week-9-scoreboard" {
+			continue
+		}
+		fixture.Name = fixture.Name + "-" + string(scoreboard.Stage)
+		fixture.Stage = scoreboard.Stage
+		fixtures = append(fixtures, fixture)
+	}
+	return append(fixtures, scoreboard)
 }
 
 // week9PropMarkets mirrors the market filter in odds.Client.Props. A change

@@ -2,9 +2,9 @@
 id: sandbox-replay
 title: Sandbox replay
 type: reference
-summary: The fail-closed HTTP transport and named week 9 response registry behind the local Sunday sandbox, the requests they answer, which fixtures are real captures versus derived snapshots, and how startup, reset, and seeded people replay them.
-tags: [sandbox, replay, fixtures, testing, espn, weather, parlay-api, nfelo, provenance, offline, startup, clock, reset, seeding, personas]
-sources: [internal/sandbox/registry.go, internal/sandbox/transport.go, internal/sandbox/scenario.go, internal/sandbox/state.go, internal/sandbox/reset.go, internal/sandbox/seed.go, internal/sandbox/sandbox_test.go, internal/sandbox/state_test.go, cmd/server/sandbox.go, cmd/server/main.go, internal/config/config.go, internal/ingest/espn/testdata/README.md, internal/ingest/odds/testdata/README.md, internal/ingest/weather/testdata/README.md, internal/ingest/nfelo/testdata/README.md]
+summary: The fail-closed HTTP transport and named week 9 response registry behind the local Sunday sandbox, the requests they answer, which fixtures are real captures versus derived snapshots, and how startup, reset, stages, seeded people, and scripted grades replay them.
+tags: [sandbox, replay, fixtures, testing, espn, weather, parlay-api, nfelo, provenance, offline, startup, clock, reset, seeding, personas, stages, grading]
+sources: [internal/sandbox/registry.go, internal/sandbox/transport.go, internal/sandbox/scenario.go, internal/sandbox/state.go, internal/sandbox/reset.go, internal/sandbox/seed.go, internal/sandbox/plan.go, internal/sandbox/sandbox_test.go, internal/sandbox/state_test.go, cmd/server/sandbox.go, cmd/server/main.go, internal/config/config.go, internal/ingest/espn/testdata/README.md, internal/ingest/odds/testdata/README.md, internal/ingest/weather/testdata/README.md, internal/ingest/nfelo/testdata/README.md]
 last_verified: 2026-11-10
 ---
 
@@ -30,7 +30,9 @@ their `*http.Client` changes.
 - Nothing here touches the response archive. The sandbox client's transport is the replay transport, not an
   `archive.Transport` wrapper, so replayed calls never enter `api_responses`.
 
-`SetStage` switches the snapshot set for later requests. Only the `morning` stage is registered today.
+`SetStage` switches the snapshot set for later requests. Four stages are registered: `morning`, `early-loss`,
+`all-clear`, and `sunday-complete`. Each stage has a complete response set, including its own scoreboard snapshot and the
+supporting lines, projections, props, and forecasts that are due at its clock.
 
 ## Server startup
 
@@ -45,13 +47,38 @@ clock to the sandbox-only `sandbox_state` table. A later boot reads that row, re
 rebuild. The schema migrations stay untouched and ordinary dev keeps `./data/parlay.db`; sandbox mode ignores `DB_PATH`.
 See [Persistence](../concepts/persistence.md).
 
-The sandbox scenario clock is `2026-11-08T13:00:00Z`. Refresh, slips, and the web handlers share it; auth cookies and
-SSE timers stay on real time. See [Data refresh](../concepts/data-refresh.md).
+The sandbox scenario clock is `2026-11-08T13:00:00Z` on a first boot: the week 9 Sunday morning. Refresh, slips, and
+the web handlers share it; auth cookies and SSE timers stay on real time. See
+[Data refresh](../concepts/data-refresh.md). A later stage moves the same clock to its fixed instant.
+
+## Stages
+
+The controls page and `POST /dev/sandbox/stage` select one of four situations. Every stage rebuilds the morning baseline
+first, so each control works from any previous state. It then sets the scenario clock and replay stage, saves that
+state, runs the real refresh synchronously, locks every shared member, and records the manifest's scripted manual grades
+through `slips.Service.SetLegResult`. It never infers a grade from a score or writes a result column directly.
+
+| Stage | Clock | Visible state |
+| --- | --- | --- |
+| `morning` | `2026-11-08T13:00:00Z` | Full scheduled week, open slip, six pending picks. |
+| `early-loss` | `2026-11-08T15:30:00Z` | Madrid game live at Atlanta 17, Cincinnati 10; other games scheduled; slip locked; Ada's Bengals ML scripted `LOST`; other five picks pending; slip `LOST`. |
+| `all-clear` | `2026-11-09T00:30:00Z` | Every Sunday game final with a scripted score; Monday night upcoming; slip locked; all six picks scripted `WON`; slip `WON`. |
+| `sunday-complete` | `2026-11-10T04:30:00Z` | Every Sunday and Monday game final with scores; slip locked; all six picks scripted `WON`. |
+
+The scripted scores keep the declared outcomes coherent: Cincinnati wins 31-24 for a 55-point total, Kansas City wins
+by 13 against a 9.5 spread, Philadelphia wins, and the Rams win by 11 in a 51-point game. Those are manual scripted
+grades for the sandbox, not auto-grading behavior.
+
+A stage change removes and recreates the seeded people, so the handler reissues the same browser's real session and
+group cookies. The route answers `HX-Refresh`, and the controller publishes the normal week and slip signals after the
+writes commit. A page-load refresh and a stage change share one mutex, so a pass that began earlier finishes before the
+chosen stage and cannot put morning data back.
 
 ## Reset and seeded people
 
-`POST /dev/sandbox/reset` is mounted only while `SUNDAY_SANDBOX=1`. It sits inside the normal `RequireUser`, group
-scope, and HTMX CSRF checks, so it is an ordinary signed-in route. The response asks HTMX to refresh the page.
+`POST /dev/sandbox/reset` is mounted only while `SUNDAY_SANDBOX=1` and is the same operation as the `morning` stage. It
+sits inside the normal `RequireUser`, group scope, and HTMX CSRF checks, so it is an ordinary signed-in route. The
+response asks HTMX to refresh the page.
 
 One reset:
 
@@ -82,11 +109,16 @@ first full build succeeds, so a failed first boot retries instead of restoring a
 
 `sandbox.Week9(fsys)` preloads every fixture from an `fs.FS` rooted at the repository, so the registry references the
 saved source files instead of copying large bodies. The morning set is the full scheduled slate, game lines, nfelo
-projections, every outdoor forecast, and the featured game's lazy prop board.
+projections, every outdoor forecast, and the featured game's lazy prop board. Each later stage reuses those supporting
+files with its stage name and swaps in a same-week scoreboard snapshot, so lines, projections, and due forecasts still
+replay at that stage's clock.
 
 | Fixture | Request | File | Provenance |
 | --- | --- | --- | --- |
 | `espn-week-9-scoreboard` | `GET site.api.espn.com/.../scoreboard` | `internal/ingest/espn/testdata/scoreboard_week.json` | Captured 2026-11-07. |
+| `espn-week-9-scoreboard-early-loss` | `GET site.api.espn.com/.../scoreboard` | `internal/ingest/espn/testdata/scoreboard_week9_live.json` | **Derived.** Madrid game live at ATL 17, CIN 10; other slate games scheduled. |
+| `espn-week-9-scoreboard-all-clear` | `GET site.api.espn.com/.../scoreboard` | `internal/ingest/espn/testdata/scoreboard_week9_final_sunday.json` | **Derived.** All Sunday games final with scripted scores; Monday night scheduled. |
+| `espn-week-9-scoreboard-sunday-complete` | `GET site.api.espn.com/.../scoreboard` | `internal/ingest/espn/testdata/scoreboard_week9_complete.json` | **Derived.** All Sunday and Monday games final with scripted scores. |
 | `parlay-week-9-events` | `GET parlay-api.com/.../events` | `internal/ingest/odds/testdata/events_nfl.json` | Captured from The Odds API 2026-11-07; Parlay API serves the same shape. |
 | `parlay-week-9-lines` | `GET parlay-api.com/.../odds?regions=us&markets=h2h,spreads,totals...` | `internal/ingest/odds/testdata/odds_nfl.json` | Captured from The Odds API 2026-11-07; same shape. |
 | `parlay-week-9-featured-props` | `GET parlay-api.com/.../props?eventId=dc56d980...&markets=...` | `internal/ingest/odds/testdata/props_sample.json` | **Derived.** Hand-built Parlay API props shape, not a live capture. |
@@ -103,15 +135,16 @@ projections, every outdoor forecast, and the featured game's lazy prop board.
 | `weather-soldier` | Open-Meteo Soldier Field, `2026-11-09T01:00`–`03:00` | `internal/ingest/weather/testdata/forecast_soldier.json` | **Derived.** |
 
 The four indoor week 9 venues need no forecast. `forecast_highmark.json` remains a weather-client fixture, but the week 9
-sandbox does not register it because Buffalo plays at U.S. Bank Stadium, an indoor venue.
+sandbox does not register it because Buffalo plays at U.S. Bank Stadium, an indoor venue. The registry holds 60 fixtures:
+the 15 morning responses plus a 15-response set for each of the three later stages.
 
 ### Provenance
 
 Every fixture declares `Captured` or `Derived`. Captured bytes are real provider responses trimmed only by removing
 whole events or rows. Derived bytes are edited or synthesized snapshots, and the registry rejects a derived fixture
-without a note. The distinction is deliberate: the scoreboard, event list, line board, and projections exercise the real
-parsers on real provider shapes, while the hand-built props board and missing forecasts fill gaps without pretending a
-provider sent them.
+without a note. The distinction is deliberate: the captured event list, line board, projections, and morning scoreboard
+exercise the real parsers on real provider shapes, while the scripted live and final scoreboards, the hand-built props
+board, and the missing forecasts fill gaps without pretending a provider sent them.
 
 ### Credit headers
 
@@ -124,26 +157,35 @@ normal event, line, and lazy prop paths enforce their floors instead of silently
 
 1. Save the real body under the matching `internal/ingest/{source}/testdata/` directory. Trim it only by removing whole
    events or rows, and update that directory's README.
-2. Add a `sandbox.Fixture` to `week9Fixtures` or `week9Weather` with the exact method, URL, query, stage, and
-   provenance. A derived file must explain what it was built from in `Note`.
+2. Add a `sandbox.Fixture` to `morningFixtures`, `week9Weather`, or `week9StageScoreboards` with the exact method, URL,
+   query, stage, and provenance. A derived file must explain what it was built from in `Note`. A stage scoreboard is
+   picked up by `stageFixtures`, which reuses the morning supporting responses under that stage.
 3. Run `go test ./internal/sandbox`. The tests drive the real clients, so a changed query, week, team name, or kickoff
    fails visibly instead of falling through to a provider.
 
 ## Tests
 
-`internal/sandbox/sandbox_test.go` covers the morning replay end to end:
+`internal/sandbox/sandbox_test.go` covers the replay end to end:
 
 - the ESPN scoreboard parses 14 Sunday and Monday games for week 9;
+- each later stage parses its own coherent slate: one live game at early loss, 13 finals with the Monday game still
+  scheduled at all-clear, and 14 finals at Sunday completion;
 - Parlay API's event list matches all 14 games and the 3-credit line board parses every market with its saved credits;
 - every outdoor kickoff resolves a three-hour forecast, including the captured Lumen window and a derived one;
 - nfelo returns a week 9 projection for every slate game;
 - the featured prop board parses through Parlay API's flat `/props` shape;
 - an unknown week, an unregistered The Odds API request, an unknown stage, and a missing fixture file all fail closed.
 
-`internal/sandbox/state_test.go` covers the one-row stage record and the scenario clock. `cmd/server/sandbox_test.go`
-boots a fresh sandbox through the real clients and refresh, asserts the whole morning landed offline with no archive
-rows, and reconstructs the runtime to show the stage and clock survive a restart without re-fetching. It also resets
-twice and compares the people, memberships, slip, legs, results, activity, games, and sync state; proves the seeded
-people and slip are real service rows; checks that manual edits and a stale failure backoff disappear; shows a sentinel
-normal dev file is untouched; observes the post-commit week and slip signals; and proves the signed-in persona keeps a
-working session and shared group after reset.
+`internal/sandbox/state_test.go` covers the one-row stage record, rejects a stage the registry does not know, and checks
+the scenario clock and every stage name and time. `cmd/server/sandbox_test.go` boots a fresh sandbox through the real
+clients and refresh, asserts the whole morning landed offline with no archive rows, and reconstructs the runtime to show
+the stage and clock survive a restart without re-fetching. It also resets twice and compares the people, memberships,
+slip, legs, results, activity, games, and sync state; proves the seeded people and slip are real service rows; checks
+that manual edits and a stale failure backoff disappear; shows a sentinel normal dev file is untouched; observes the
+post-commit week and slip signals; and proves the signed-in persona keeps a working session and shared group after reset.
+
+For stages, the server tests select each target directly and in sequence, reset back to morning, and check that early loss
+settles the slip `LOST` while five legs stay pending, all-clear wins every leg with every Sunday game final, and Sunday
+completion makes all 14 games final. They exercise the HTTP stage route with real cookies and render the controls, games,
+and slip pages, reject unknown stages without changing rows, clock, or cookies, race a page-load kick against a stage
+change, and prove the stage route is absent outside sandbox mode.

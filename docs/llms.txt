@@ -44,7 +44,7 @@
 - [History file](reference/history-file.md): The seed/history.yaml format, its slip and leg fields and defaults, how boot imports it into the first group, which slips are skipped, and how errors and users are handled.
 - [Odds math](reference/odds-math.md): The formulas in internal/parlay for converting American and decimal odds, combining legs, picking a reference price, and computing payout and units.
 - [Routes](reference/routes.md): Every HTTP route the server serves, the middleware in front of them, and the status codes, HTMX headers, and SSE frames handlers return.
-- [Sandbox replay](reference/sandbox-replay.md): The fail-closed HTTP transport and named week 9 response registry behind the local Sunday sandbox, the requests they answer, which fixtures are real captures versus derived snapshots, and how startup, reset, and seeded people replay them.
+- [Sandbox replay](reference/sandbox-replay.md): The fail-closed HTTP transport and named week 9 response registry behind the local Sunday sandbox, the requests they answer, which fixtures are real captures versus derived snapshots, and how startup, reset, stages, seeded people, and scripted grades replay them.
 - [Database schema](reference/schema.md): SQLite tables, including groups and their members, odds rows with sportsbook deep links, rosters and player game logs for props research, player name matching, nfelo model projections, the raw external response archive, how migrations are tracked and applied, and connection settings.
 
 ## Runbook

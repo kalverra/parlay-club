@@ -4,7 +4,7 @@ title: Routes
 type: reference
 summary: Every HTTP route the server serves, the middleware in front of them, and the status codes, HTMX headers, and SSE frames handlers return.
 tags: [routes, http, handlers, middleware, htmx, sse, props, research]
-sources: [cmd/server/main.go, cmd/server/sandbox.go, internal/auth/handlers.go, internal/groups/handlers.go, internal/web/routes.go, internal/web/games.go, internal/web/slips.go, internal/web/research.go, internal/web/export.go, internal/sandbox/seed.go, internal/live/stream.go, web/templates/sandbox.html]
+sources: [cmd/server/main.go, cmd/server/sandbox.go, internal/auth/handlers.go, internal/groups/handlers.go, internal/web/routes.go, internal/web/games.go, internal/web/slips.go, internal/web/research.go, internal/web/export.go, internal/sandbox/seed.go, internal/sandbox/plan.go, internal/live/stream.go, web/templates/sandbox.html]
 last_verified: 2026-11-10
 ---
 
@@ -52,9 +52,16 @@ CSRF checks, so they are not public.
 
 | Method + path          | Purpose                                                    | Response |
 | ---------------------- | ---------------------------------------------------------- | -------- |
-| `GET /dev/sandbox`     | Controls page: stage, scenario time, persona, group, invite | Full page. Shows switch forms and the reset button. |
+| `GET /dev/sandbox`     | Controls page: stage, scenario time, persona, group, invite | Full page. Shows stage, persona, and reset controls. |
+| `POST /dev/sandbox/stage` | Rebuild morning and apply one scripted stage            | `stage` is `morning`, `early-loss`, `all-clear`, or `sunday-complete`. 200 with `HX-Refresh` and new `pc_session`/`pc_group` cookies. Unknown stage is 422 and changes nothing. |
 | `POST /dev/sandbox/persona` | Sign the browser in as a seeded persona               | `persona` names one of `ada`, `ben`, `cleo`, or `dex`. 200 with `HX-Refresh` and new `pc_session`/`pc_group` cookies. Unknown persona is 422 and changes nothing. |
 | `POST /dev/sandbox/reset` | Rebuild the fixed week 9 morning, people, and slip      | 200 with `HX-Refresh`, and reissued session and group cookies for the same persona |
+
+Every stage rebuilds the Sunday morning baseline, then sets its clock and replay snapshot, runs the real refresh, locks
+the shared slip, and calls the normal slip service for that stage's scripted manual grades. It never infers a result from
+a score. The stage publishes the normal week and slip signals after its writes commit; the acting browser reloads from
+`HX-Refresh`, and other connected clients refetch after the SSE signals. `POST /dev/sandbox/reset` is the same operation
+as the `morning` stage.
 
 The persona switch calls the normal sign-in code and then sets the real cookies; the request context is never given a
 user the middleware did not load. Ada, Ben, and Cleo land in the shared group; Dex lands in their own group until they

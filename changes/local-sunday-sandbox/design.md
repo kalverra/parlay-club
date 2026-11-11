@@ -181,7 +181,7 @@ but reuses the existing clients and domain services rather than adding productio
 
 ### Phase 4: Stage Sunday outcomes
 
-- [ ] Add coherent same-week live/final responses and deterministic early-loss, all-clear, and Sunday-complete controls
+- [x] Add coherent same-week live/final responses and deterministic early-loss, all-clear, and Sunday-complete controls
   using real refresh, locking, and manual grading. Test direct and sequential selection, scores/statuses, slip results,
   remaining pending legs, reset, SSE refetch signals, transition races, and production route absence; update local
   development, route, and live-update docs.
