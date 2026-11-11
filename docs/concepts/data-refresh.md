@@ -3,9 +3,9 @@ id: data-refresh
 title: Data refresh
 type: concept
 summary: How page loads and on-demand views drive lazy syncs of the slate, weather, game lines, props, rosters, injuries, game logs, and nfelo projections, with per-source staleness windows, single-flight, failure backoff, tiered Parlay API and The Odds API credit floors, an archive of every successful response, and a synchronous sandbox bootstrap.
-tags: [refresh, sync, lazy, staleness, singleflight, backoff, credits, odds, parlay-api, the-odds-api, enrichment, fallback, props, weather, slate, live-window, nfelo, projections, archive, raw-responses, roster, gamelog, injuries, player-matching, sandbox, clock]
-sources: [internal/refresh/refresh.go, internal/refresh/rules.go, internal/refresh/sources.go, internal/refresh/research.go, internal/refresh/nfelo.go, internal/refresh/publish.go, internal/refresh/live.go, internal/sandbox/*.go, internal/db/sync.go, internal/db/players.go, internal/db/nfelo.go, internal/ingest/nfelo/client.go, internal/ingest/archive/transport.go, cmd/server/main.go, cmd/server/sandbox.go]
-last_verified: 2026-11-10
+tags: [refresh, sync, lazy, staleness, singleflight, backoff, credits, odds, parlay-api, the-odds-api, enrichment, fallback, props, weather, slate, live-window, nfelo, projections, archive, raw-responses, roster, gamelog, injuries, player-matching, sandbox, clock, pick-board]
+sources: [internal/refresh/refresh.go, internal/refresh/rules.go, internal/refresh/sources.go, internal/refresh/research.go, internal/refresh/nfelo.go, internal/refresh/publish.go, internal/refresh/live.go, internal/sandbox/*.go, internal/board/board.go, internal/db/sync.go, internal/db/players.go, internal/db/odds.go, internal/db/nfelo.go, internal/web/pick.go, internal/web/games.go, internal/ingest/nfelo/client.go, internal/ingest/archive/transport.go, cmd/server/main.go, cmd/server/sandbox.go]
+last_verified: 2026-11-11
 ---
 
 # Data refresh
@@ -37,10 +37,11 @@ does not cancel a sync, and every source gets its own 30 second timeout. Tests w
 and returns the failures joined. Normal page loads still use `Kick()`; the sandbox bootstrap calls `RunOnce` so the app
 does not serve an empty database while the first morning sync is still running.
 
-On-demand user actions also trigger syncs directly. Expanding a game card calls `SyncGameProps(ctx, gameID)`. Loading
-game research calls `SyncGameResearch(ctx, gameID)`. Loading player research calls `SyncPlayerResearch(ctx, athleteID)`.
-These run synchronously with a 10-second timeout, but share the same single-flight deduplication, staleness windows,
-and failure backoff as background syncs.
+On-demand user actions also trigger syncs directly. Tapping "Load them" on the pick board calls
+`SyncGameProps(ctx, gameID)`. Loading game research calls `SyncGameResearch(ctx, gameID)`. Loading player research
+calls `SyncPlayerResearch(ctx, athleteID)`. These run synchronously with a 10-second timeout, but share the same
+single-flight deduplication, staleness windows, and failure backoff as background syncs. The pick board itself never
+syncs props: opening it, typing a search, filtering, and sorting read stored odds only, so they spend no credits.
 
 ## One pass
 
@@ -137,7 +138,8 @@ rows, so `odds:lines` does not enter backoff. If every configured provider fails
 the source backs off with cached rows still served.
 
 Props and research data run on demand through `SyncGameProps`, `SyncGameResearch`, and `SyncPlayerResearch`.
-Opening a game card or research partial triggers an on-demand sync with a short 10-second timeout:
+The pick board's "Load them" prompt, or a research partial, triggers an on-demand sync with a short 10-second timeout.
+The board never loops over games: each tap is a person asking for that one game.
 
 - `odds:props:{gameID}`: Stale after 2 hours, skipped once kickoff has passed. Before matching players, it syncs
   rosters (`espn:roster:{teamID}`) for both teams. It enforces the Parlay API 150-credit floor (`OddsPropsFloor`). When

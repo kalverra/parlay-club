@@ -2,9 +2,9 @@
 id: slips
 title: Slips
 type: concept
-summary: How a group builds one shared parlay a week from the slate, with the hub's next-step banner and deadline, members, legs, quick-add, create-slip defaults, grading, the editing and locking rules, and research.
-tags: [slips, weeks, legs, members, locking, grading, results, activity, groups, games, quick-add, nfelo, props, autocomplete, research, next-step, hub]
-sources: [internal/slips/slips.go, internal/slips/rules.go, internal/slips/next.go, internal/db/slips.go, internal/db/legs.go, internal/db/players.go, internal/db/weeks.go, internal/db/games.go, internal/web/games.go, internal/web/slips.go, internal/web/home.go, internal/web/research.go]
+summary: How a group builds one shared parlay a week from the slate, with the hub's next-step banner and deadline, the searchable pick board and its tray, members, legs, quick-add, create-slip defaults, grading, the editing and locking rules, and research.
+tags: [slips, weeks, legs, members, locking, grading, results, activity, groups, games, quick-add, nfelo, props, autocomplete, research, next-step, hub, pick-board, search, tray]
+sources: [internal/slips/slips.go, internal/slips/rules.go, internal/slips/next.go, internal/board/board.go, internal/db/slips.go, internal/db/legs.go, internal/db/odds.go, internal/db/players.go, internal/db/weeks.go, internal/db/games.go, internal/web/games.go, internal/web/pick.go, internal/web/slips.go, internal/web/home.go, internal/web/research.go]
 last_verified: 2026-11-11
 ---
 
@@ -33,7 +33,7 @@ result. The hub banner and each group card read its label, so the two always agr
 | Step      | When                                                      | Banner             | Primary action                                      |
 | --------- | --------------------------------------------------------- | ------------------ | --------------------------------------------------- |
 | `join`    | The viewer is in the group but not on the slip.           | Join this slip     | Adds the viewer through `POST /slips/{id}/members`. |
-| `pick`    | The viewer has fewer legs than `legs_per_member`.         | Pick N more        | Opens `/games`.                                     |
+| `pick`    | The viewer has fewer legs than `legs_per_member`.         | Pick N more        | Opens `/slips/{id}/pick`.                           |
 | `closed`  | The viewer needs legs and every game has kicked off.      | Picks are closed   | None; the slip stays visible.                       |
 | `lock_in` | The viewer has every leg and has not locked in.           | Ready to lock in   | Posts `/slips/{id}/lock`.                           |
 | `waiting` | The viewer is locked in and someone else is not.          | Waiting on {names} | None.                                               |
@@ -117,28 +117,45 @@ The slip's **reference odds** multiply each leg's reference price: the median of
 carry for the same game, market, player, side, and line, one price per book. A leg whose members' books do not price it
 keeps its own price. The formulas are in [Odds math](../reference/odds-math.md).
 
-## The Games tab
+## The pick board
 
-The hub's pick step opens `GET /games`. It lists the latest week's games, sorted by kickoff. Each card shows the matchup,
-the kickoff time, the two spreads, and the over and under. A live or final game also shows its score and a status chip.
-Times render as `<time datetime="{UTC ISO}">`, and `app.js` formats them in the browser's local zone.
+The hub's pick step opens `GET /slips/{id}/pick`, a focused screen with a back link to the hub and no bottom bar. A tray
+holds the viewer's own picks beside the list on wide screens and below it on a phone. The page carries the slip's
+`data-live-url`, so it still opens one stream per page.
 
-Prices come from the viewer's home book when it carries the selection, and the median across every book otherwise. A row
-left behind by an earlier odds sync is ignored, so a card never mixes old prices with new ones. The "lines as of" note
-under the board is the newest odds fetch time, or the `odds:lines` sync state when that is newer. Refresh owns those
-fetches; see [Data refresh](data-refresh.md).
+`internal/board` turns the week's stored odds into rows. It reads nothing itself. `board.Build` folds one row per
+selection, using the viewer's home book when it prices the selection and the median across every book otherwise. Rows
+from an older odds sync are dropped first, the same as the old Games board. A game that has kicked off is left out and
+counted. Each row carries its game, market, team, player, side, line, price, display text, a category, and a kickoff
+window.
 
-Weather badges: 🏠 Indoor for a dome, 💨 wind mph (amber from 15, red from 20), and 🌧 at 0.1 in/hr of precipitation or
-more. An indoor game, or one with no forecast yet, shows no weather.
+Search is case- and accent-insensitive over the row text, team abbreviation and name, player, and matchup. The input
+debounces at 250 ms and swaps the results partial. Chips filter by category (lines, team totals, passing, rushing,
+receiving, TDs, kicking) and by Eastern-time window (Sunday morning before noon, Sunday early before 4, Sunday late
+before 7, Sunday night, Monday). A Monday-night game that lands on Tuesday in UTC still reads Monday. Chips only appear
+for categories and windows with rows. Sorts are kickoff (default), player, category, and odds (shortest price first).
+Chips and sorts are links that swap the same partial and push the full page URL.
 
-Tapping a card expands quick-add pills: both spreads, both moneylines, Over, Under, and "Custom leg". Expanding also
-fetches props on demand through `GET /games/{id}/props`, displaying team total pills and player prop pills grouped by
-athlete (passing, rushing, receiving, anytime TD, kicking points). Each player header links to their research view, and
-the card header links to game research. A pill adds the leg in one tap with the game, player, line, and price set, then
-shows "Added {selection}" in the card. It posts the normal add-leg route with `quick=1`, so every rule below still
-applies: membership, the per-member limit, the kickoff lock, and the lock in. The pills appear when the week's newest
-slip is `OPEN`. With no slip the card links to the create-slip page, and with a locked slip it says picks cannot be
-added. "Custom leg" opens the leg form with the game already chosen.
+Tapping an unpicked row adds it with the normal add-leg route (`quick=1&from=board`), and tapping a picked row removes
+that leg. Both answer with the row and fire `tray-updated`, so the tray refreshes without a reload. At the limit, an
+unpicked row opens "Swap which pick?" and lists the viewer's legs that are not kickoff-locked. Choosing one sends
+`PUT /legs/{old}` with the new pick's fields. `UpdateLeg` already enforces the owner, the lock in, and kickoff on both
+games, and its activity entry reads "Adam changed X to Y".
+
+`?game=` shows one game with both sides of each line in one row, and a link returns to the whole week.
+
+A game whose props were never fetched appears as a prompt when the search matches its team, its matchup, or a roster
+player on it: "Props for BUF @ MIA aren't loaded yet." The "Load them" button calls `GET /games/{id}/props?slip=`, which
+runs `SyncGameProps` for that one game (credit floors and all) and then fires `board-updated`. The board itself never
+syncs props; opening, typing, filtering, and sorting spend no credits. See [Data refresh](data-refresh.md).
+
+The tray shows the viewer's legs with remove buttons, progress ("1 of 2"), the analyzer warnings that name one of the
+viewer's legs, and one action: "Done" back to the hub, or "Review and lock in" at the limit. It refreshes on
+`tray-updated` and `slip-updated`. A leg whose game has kicked off shows "Locked" instead of a remove button.
+
+`GET /games` is a 303 to the active group's week, so old links still land somewhere useful. `GET /games/{id}/props`
+without `?slip=` still renders the standalone prop partial for one game, with team totals and player props grouped
+under each athlete and links to game research and player research.
 
 ## Research
 
@@ -239,7 +256,7 @@ A person can belong to several slips in a week. The top bar switches between the
 
 - [Odds math](../reference/odds-math.md): conversions, combined odds, reference price, payout, and units.
 - [Database schema](../reference/schema.md): the `weeks`, `slips`, `slip_members`, `legs`, and `activity` tables.
-- [Routes](../reference/routes.md): endpoints for slips, games, props, and research.
+- [Routes](../reference/routes.md): endpoints for the pick board, slips, props, and research.
 - [Data sources](../reference/data-sources.md): rosters, injuries, game logs, and player matching.
 - [Groups](groups.md): how the active group scopes slips, and how membership works.
 - [Product](../../plan/product.md): the auto-grading rules, the Record Book, and the screens.

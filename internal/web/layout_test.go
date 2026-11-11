@@ -184,7 +184,6 @@ func TestPlaceholderPages(t *testing.T) {
 		message string
 	}{
 		{"slip", "slip", webui.TabWeek, "Slip", "Slip contents show up here once the season starts."},
-		{"games", "games", "", "Games", "Game lines show up here once the week is synced."},
 		{"research", "research", "", "Research", "Player and game research shows up here."},
 		{"record", "record", webui.TabRecord, "Record Book", "Season results show up here."},
 	}
@@ -216,8 +215,6 @@ func renderPage(t *testing.T, page string, data webui.Page) string {
 		value = webui.HomePage{Page: data}
 	case "slip":
 		value = webui.SlipPage{Page: data}
-	case "games":
-		value = webui.GamesPage{Page: data}
 	case "research":
 		value = webui.ResearchPage{Page: data}
 	}

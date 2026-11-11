@@ -168,6 +168,33 @@ func (s *Store) OddsForGame(ctx context.Context, gameID string) ([]Odds, error) 
 	return odds, nil
 }
 
+// OddsForWeek returns every stored price for one week's games, read in one
+// query so the pick board does not ask per game. Rows are ordered by game,
+// book, market, team, player, and side so callers get a stable list.
+func (s *Store) OddsForWeek(ctx context.Context, weekID int64) ([]Odds, error) {
+	rows, err := s.conn().QueryContext(ctx, "SELECT"+oddsColumns+`
+		FROM odds
+		WHERE game_id IN (SELECT id FROM games WHERE week_id = ?)
+		ORDER BY game_id, book, market_type, team, player_name, side`, weekID)
+	if err != nil {
+		return nil, fmt.Errorf("list odds for week %d: %w", weekID, err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	odds := make([]Odds, 0)
+	for rows.Next() {
+		row, err := scanOdds(rows)
+		if err != nil {
+			return nil, fmt.Errorf("list odds for week %d: %w", weekID, err)
+		}
+		odds = append(odds, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list odds for week %d: %w", weekID, err)
+	}
+	return odds, nil
+}
+
 // scanOdds reads the odds columns in oddsColumns order.
 func scanOdds(row rowScanner) (Odds, error) {
 	var (

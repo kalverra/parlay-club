@@ -58,6 +58,10 @@ func (h *slipHandlers) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /slips/new", h.newSlipForm)
 	mux.HandleFunc("POST /slips", h.createSlip)
 	mux.HandleFunc("GET /slips/{id}", h.slipPage)
+	mux.HandleFunc("GET /slips/{id}/pick", h.pickBoard)
+	mux.HandleFunc("GET /slips/{id}/pick/results", h.pickResults)
+	mux.HandleFunc("GET /slips/{id}/pick/swap", h.pickSwap)
+	mux.HandleFunc("GET /slips/{id}/tray", h.pickTray)
 	mux.HandleFunc("GET /slips/{id}/panel", h.panel)
 	mux.HandleFunc("GET /slips/{id}/export", h.export)
 	mux.HandleFunc("GET /slips/{id}/payout", h.payout)
@@ -681,6 +685,11 @@ func (h *slipHandlers) addLeg(w http.ResponseWriter, r *http.Request) {
 		h.respondError(w, err)
 		return
 	}
+	if r.PostForm.Get("from") == "board" {
+		w.Header().Set("Hx-Trigger", "tray-updated")
+		h.renderPartial(w, "pick-row", h.pickRowFromLeg(r.Context(), slip, created))
+		return
+	}
 	// Tell the browser the bottom sheet can close now that the leg landed.
 	w.Header().Set("Hx-Trigger", "leg-saved")
 	if r.PostForm.Get("quick") != "" {
@@ -706,12 +715,22 @@ func (h *slipHandlers) updateLeg(w http.ResponseWriter, r *http.Request) {
 		h.respondError(w, err)
 		return
 	}
-	w.Header().Set("Hx-Trigger", "leg-saved")
 	slip, err := h.deps.Store.SlipByID(r.Context(), existing.SlipID)
 	if err != nil {
 		h.respondError(w, err)
 		return
 	}
+	if r.PostForm.Get("from") == "board" {
+		data, err := h.pickPageData(r.Context(), slip, pickQuery(r, h.deps.now()))
+		if err != nil {
+			h.serverError(w, err)
+			return
+		}
+		w.Header().Set("Hx-Trigger", "tray-updated")
+		h.renderPartial(w, "pick-results", data.Results)
+		return
+	}
+	w.Header().Set("Hx-Trigger", "leg-saved")
 	h.renderPanel(w, r, slip)
 }
 
@@ -749,6 +768,23 @@ func (h *slipHandlers) deleteLeg(w http.ResponseWriter, r *http.Request) {
 	slip, err := h.deps.Store.SlipByID(r.Context(), leg.SlipID)
 	if err != nil {
 		h.respondError(w, err)
+		return
+	}
+	switch r.URL.Query().Get("from") {
+	case "tray":
+		tray, err := h.pickTrayData(r.Context(), slip)
+		if err != nil {
+			h.serverError(w, err)
+			return
+		}
+		w.Header().Set("Hx-Trigger", "board-updated")
+		h.renderPartial(w, "pick-tray", tray)
+		return
+	case "board":
+		row := h.pickRowFromLeg(r.Context(), slip, leg)
+		row.PickID = 0
+		w.Header().Set("Hx-Trigger", "tray-updated")
+		h.renderPartial(w, "pick-row", row)
 		return
 	}
 	h.renderPanel(w, r, slip)
@@ -1277,7 +1313,10 @@ func nextView(next slips.Next, slip db.Slip, viewerID int64, games []db.Game) Ne
 	switch next.Step {
 	case slips.StepPick:
 		view.Detail = "Fill your part of the slip, then lock in."
-		view.Action = &NextAction{Label: "Pick your legs", Href: "/games"}
+		view.Action = &NextAction{
+			Label: "Pick your legs",
+			Href:  fmt.Sprintf("/slips/%d/pick", slip.ID),
+		}
 	case slips.StepLockIn:
 		view.Detail = "All your legs are in."
 		view.Action = &NextAction{

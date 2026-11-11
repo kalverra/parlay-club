@@ -12,6 +12,7 @@ import (
 var pageFiles = map[string]string{
 	"home":      "templates/home.html",
 	"slip":      "templates/slip.html",
+	"pick":      "templates/pick.html",
 	"games":     "templates/games.html",
 	"research":  "templates/research.html",
 	"record":    "templates/record.html",
@@ -37,6 +38,10 @@ var partialFiles = map[string]string{
 	"leg-form":        partialsFile,
 	"leg-added":       partialsFile,
 	"game-props":      partialsFile,
+	"pick-results":    partialsFile,
+	"pick-row":        partialsFile,
+	"pick-tray":       partialsFile,
+	"pick-swap":       partialsFile,
 	"research-game":   partialsFile,
 	"research-player": partialsFile,
 }

@@ -4,7 +4,7 @@ title: Routes
 type: reference
 summary: Every HTTP route the server serves, the middleware in front of them, and the status codes, HTMX headers, and SSE frames handlers return.
 tags: [routes, http, handlers, middleware, htmx, sse, props, research]
-sources: [cmd/server/main.go, cmd/server/sandbox.go, internal/auth/handlers.go, internal/groups/handlers.go, internal/web/routes.go, internal/web/home.go, internal/web/games.go, internal/web/slips.go, internal/web/research.go, internal/web/export.go, internal/sandbox/seed.go, internal/sandbox/plan.go, internal/live/stream.go, web/templates/home.html, web/templates/sandbox.html]
+sources: [cmd/server/main.go, cmd/server/sandbox.go, internal/auth/handlers.go, internal/groups/handlers.go, internal/board/board.go, internal/web/routes.go, internal/web/home.go, internal/web/games.go, internal/web/pick.go, internal/web/slips.go, internal/web/research.go, internal/web/export.go, internal/sandbox/seed.go, internal/sandbox/plan.go, internal/live/stream.go, web/templates/home.html, web/templates/pick.html, web/templates/sandbox.html]
 last_verified: 2026-11-11
 ---
 
@@ -77,12 +77,12 @@ accept the shared invite. A forged group cookie still falls back to a real membe
 | ------------------------- | ------------------------------------------------------------------------------------------------ |
 | `GET /{$}`                | Landing page: one card per group; a person with one group is sent to that group's week            |
 | `GET /groups/{id}/week`   | Make the group active, then open its newest slip of the latest week or the create-slip form       |
-| `GET /games`              | Games board for the latest week, linked from the slip hub                                         |
+| `GET /games`              | 303 to the active group's week; the pick board owns the week                                     |
 | `GET /research`           | Research page: week games, player search, injury reports, and last-5 hit bars                     |
 | `GET /record`             | Record Book placeholder                                                                          |
 
-The bottom bar has three destinations: Groups (`/`), This week (`/groups/{active}/week`), and Record Book. Games and
-Research keep full pages but leave the bar; the hub links to Games and pick rows link to Research.
+The bottom bar has three destinations: Groups (`/`), This week (`/groups/{active}/week`), and Record Book. Research
+keeps a full page but leaves the bar; the hub links to the pick board, and pick rows link to Research.
 
 `GET /{$}` lists every group oldest first and carries `data-refresh-on-visible`, so the browser refetches the list when
 the tab becomes visible instead of holding a stream. A person in one group gets a 303 to `/groups/{id}/week`.
@@ -92,7 +92,7 @@ slip of the latest week or renders the create form. It uses the same group-switc
 group.
 
 The slip handler file also serves `/me` and the slip and leg routes below. `/record` renders its empty state until a
-later change fills it in. The Games and Research pages are described below.
+later change fills it in. The pick board and Research are described below.
 
 ### Groups
 
@@ -122,6 +122,10 @@ slip outside every group is 404.
 | `GET /slips/new`                           | Create-slip page                                                | Optional `?week=`; unknown week 404. Full page. |
 | `POST /slips`                              | Create the slip from `week_id` (or a typed `season`, `season_type`, and `week`), `name`, `legs_per_member`, and `member_id` | 303 to `/slips/{id}`; a fixable error re-renders the form. |
 | `GET /slips/{id}`                          | Full slip page                                                  | Full page, with the payout form at the default stake. |
+| `GET /slips/{id}/pick`                     | Focused pick board with search, chips, sorts, and the tray      | Full page; no bottom bar. |
+| `GET /slips/{id}/pick/results`             | Results partial for a search, filter, sort, or one-game view    | Optional `?q=`, `?cat=`, `?win=`, `?sort=`, and `?game=`; results partial. |
+| `GET /slips/{id}/pick/swap`                | Swap sheet for one unpicked row                                 | Row fields in the query; swap partial. |
+| `GET /slips/{id}/tray`                     | The viewer's picks, progress, warnings, and one action          | Tray partial. Refreshes on `tray-updated` and `slip-updated`. |
 | `GET /slips/{id}/panel`                    | Members, legs, odds, lock state, and banner                     | Panel partial. Refreshes on `slip-updated`. |
 | `GET /slips/{id}/export`                   | Export card for a `LOCKED` slip                                 | Export partial. Refreshes on `slip-updated`. |
 | `GET /slips/{id}/payout`                   | Payout calculator                                               | Optional `?stake=` and `?boost=`; defaults 10 and 0. Payout partial. |
@@ -130,11 +134,11 @@ slip outside every group is 404.
 | `DELETE /slips/{id}/members/{userID}`      | Remove a member                                                 | Panel partial. |
 | `PATCH /slips/{id}`                        | Change `name` or `legs_per_member`                              | Panel partial. |
 | `GET /slips/{id}/legs/new`                 | Empty leg form with the game picker and player autocomplete     | Optional `?game_id=` and `?quick=`; leg form partial. |
-| `POST /slips/{id}/legs`                    | Add the signed-in member's leg                                  | Panel partial, or the `leg-added` partial for a quick add; `Hx-Trigger: leg-saved`. |
+| `POST /slips/{id}/legs`                    | Add the signed-in member's leg                                  | Panel partial, the `leg-added` partial for a quick add, or the pick row for `from=board`; `Hx-Trigger: leg-saved` or `tray-updated`. |
 | `GET /legs/{id}/edit`                      | Edit form filled from the leg with player autocomplete          | Leg form partial. |
-| `PUT /legs/{id}`                           | Save the leg's pick fields                                      | Panel partial with `Hx-Trigger: leg-saved`. |
+| `PUT /legs/{id}`                           | Save the leg's pick fields                                      | Panel partial with `Hx-Trigger: leg-saved`, or the results partial for `from=board`. |
 | `PUT /legs/{id}/result`                    | Grade the leg from an upper-case `result`                       | Panel partial. Any member may grade any leg; an unknown result is 422. |
-| `DELETE /legs/{id}`                        | Delete the leg                                                  | Panel partial. |
+| `DELETE /legs/{id}`                        | Delete the leg                                                  | Panel partial; `?from=board` answers the row, `?from=tray` the tray. |
 | `POST /slips/{id}/lock`                    | Record the signed-in member's lock in                           | Panel partial with `Hx-Trigger: slip-updated`. |
 | `POST /slips/{id}/unlock`                  | Clear every member's lock                                       | Panel partial with `Hx-Trigger: slip-updated`. |
 | `GET /slips/{id}/events`                   | Live updates for the slip and its week                          | `text/event-stream`; see below. |
@@ -160,32 +164,51 @@ and never fetches or writes. The slip page includes it, and the wrapper refreshe
 the card. The lock and unlock responses carry `Hx-Trigger: slip-updated`, so the person who acts sees the card change
 without waiting for the SSE stream. See [Export](../concepts/export.md).
 
-### Games
+### Pick board
 
 | Method + path              | Purpose                                                      | Response |
 | -------------------------- | ------------------------------------------------------------ | -------- |
-| `GET /games`               | Games board for the latest week, linked from the slip hub     | Full page |
-| `GET /games/{id}/props`    | Prop quick-add pills and research links for one game card    | Partial   |
+| `GET /slips/{id}/pick`     | Focused pick board with search, chips, sorts, and the tray    | Full page, no bottom bar |
+| `GET /games`               | 303 to the active group's week                                | Redirect |
+| `GET /games/{id}/props`    | Load one game's props on demand, or render its prop partial   | 200 with `Hx-Trigger: board-updated` when `?slip=`, otherwise a partial |
 
-`GET /games` renders the latest week's board. It reads the week's games and each game's odds rows. Rows from an older
-sync are dropped, so a card never mixes prices from two fetches.
+`GET /slips/{id}/pick` is the hub's pick action. It reads the week's games, one `OddsForWeek` read, the week's rosters,
+and the viewer's legs, then hands them to `internal/board`. `board.Build` folds one row per selection, using the
+viewer's home-book price when it carries the pick and the median across books otherwise, and drops games that have
+kicked off. `board.Search` applies the query, category, window, sort, and one-game filter. It also names games that
+match the query but whose props were never fetched. The page sets the slip's `data-live-url`, so it opens one stream.
 
-Each card shows the matchup, the kickoff as a `<time datetime>` the client formats in the browser's zone, the two
-spreads, and the over and under. A selection shows the viewer's home-book price when that book carries it, and the
-median across books otherwise. A live or final game also shows its score and a status chip: Upcoming, Live, or Final.
-Weather badges are 🏠 Indoor, 💨 wind mph (amber from 15, red from 20), and 🌧 at 0.1 in/hr of precipitation or more.
+The search input debounces at 250 ms and swaps `GET /slips/{id}/pick/results`. Category chips are lines, team totals,
+passing, rushing, receiving, TDs, and kicking. Window chips are Sun morning (before noon Eastern), Sun early (before
+4), Sun late (before 7), Sun night, and Monday. Chips show a count and appear only when they have rows. Sorts are
+kickoff (default), player, category, and odds (shortest price first). Chips and sorts are links that swap the results
+partial and push the full page URL. `?game=` shows one game with both sides of each line in one row.
 
-The "lines as of" note under the board uses the newest odds fetch time on the games, or the `odds:lines` row in
-`sync_state` when that is newer. A week with no games shows the empty state. A missing store or week renders the same
-empty page, not an error.
+An unpicked row posts `POST /slips/{id}/legs` with `quick=1&from=board`; a picked row sends
+`DELETE /legs/{id}?from=board`. Both answer with the row and fire `Hx-Trigger: tray-updated`. At the limit, an unpicked
+row opens `GET /slips/{id}/pick/swap`, which lists the viewer's unlocked legs; a choice sends `PUT /legs/{old}` with
+`from=board` and the new pick's fields, and the handler answers with the refreshed results partial.
 
-Expanding a card loads `GET /games/{id}/props` via HTMX (`hx-trigger="toggle once"`), syncing props on demand
-(`odds:props:{game}`). The partial renders team totals and player prop quick-add pills grouped by player for passing,
-rushing, receiving, anytime TD, and kicker points, alongside links to game research and each player's research view.
-Each pill posts to `POST /slips/{id}/legs` with `quick=1` and the game, market, team, player, side, line, and price
-prefilled, swapping the "Added {selection}" partial into that card. The pills appear only when the newest slip in the
-week is `OPEN`. With no slip, the card links to `/slips/new`; with a locked slip, it says picks cannot be added. "Custom
-leg" opens the same leg form with `game_id` set and `quick=1`, so a saved custom leg lands in the card too.
+`GET /slips/{id}/tray` renders the viewer's legs with remove buttons (`DELETE /legs/{id}?from=tray`), progress, the
+analyzer warnings that name one of their legs, and one action back to the hub. It refreshes on `tray-updated` and
+`slip-updated`.
+
+A game with no prop rows offers "Load them". The button calls `GET /games/{id}/props?slip=`, which runs
+`SyncGameProps` for that one game and answers 200 with `Hx-Trigger: board-updated`; the board's results partial listens
+for that signal and re-runs its current search. Opening the board, typing, filtering, and sorting call no sync.
+
+`GET /games` uses the old Games link as a 303 to `/groups/{active}/week`, where the week route opens the group's newest
+slip. Without an active group it redirects to `/`.
+
+### Game props
+
+`GET /games/{id}/props` without `?slip=` renders the standalone prop partial for one game. It syncs props on demand
+(`odds:props:{game}`) and renders team totals and player prop quick-add pills grouped by player for passing, rushing,
+receiving, anytime TD, and kicker points, alongside links to game research and each player's research view. Each pill
+posts to `POST /slips/{id}/legs` with `quick=1` and the game, market, team, player, side, line, and price prefilled,
+swapping the "Added {selection}" partial into that card. The pills appear only when the newest slip in the week is
+`OPEN`. With no slip, the card links to `/slips/new`; with a locked slip, it says picks cannot be added. "Custom leg"
+opens the same leg form with `game_id` set and `quick=1`.
 
 ### Research
 
@@ -246,7 +269,7 @@ rest) answer 422 with the message from [Slips](../concepts/slips.md). The form s
 | ------------- | ------- |
 | `HX-Redirect` | Navigate the browser to a new page without swapping an empty body. |
 | `HX-Refresh`  | Reload the current page, used after a group switch, invite reset, or leave. |
-| `HX-Trigger`  | Fire a client event. `leg-saved` closes the leg form's bottom sheet. |
+| `HX-Trigger`  | Fire a client event. `leg-saved` closes the leg form's bottom sheet. `tray-updated` refreshes the pick tray, and `board-updated` refreshes the pick results. |
 
 Writes that change the slip return the refreshed panel, so the page reflects the new state without a reload. Partials
 listen with `hx-trigger="slip-updated from:body"` for live updates.

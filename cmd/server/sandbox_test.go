@@ -646,13 +646,18 @@ func TestSandboxControlsPageShowsScenarioAtPhoneWidth(t *testing.T) {
 	}
 
 	// The ordinary tabs share the same phone-first layout.
-	for _, path := range []string{"/", "/games"} {
+	for _, path := range []string{"/"} {
 		page := app.request(t, client, http.MethodGet, path, nil, false)
 		require.Equal(t, http.StatusOK, page.status, path)
 		assert.Contains(t, page.body,
 			`<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">`,
 			"%s keeps the phone viewport", path)
 	}
+
+	// Games is a redirect now; the pick board owns the week.
+	redirected := app.request(t, client, http.MethodGet, "/games", nil, false)
+	require.Equal(t, http.StatusSeeOther, redirected.status)
+	assert.Contains(t, redirected.header.Get("Location"), "/groups/")
 }
 
 func TestSandboxPersonaSwitchUsesRealSignInAndGroupScope(t *testing.T) {
@@ -1072,8 +1077,15 @@ func TestSandboxStageRouteReissuesSessionAndShowsTheState(t *testing.T) {
 	}
 
 	games := app.request(t, client, http.MethodGet, "/games", nil, false)
-	require.Equal(t, http.StatusOK, games.status, games.body)
-	assert.Contains(t, games.body, "Final", "the board shows final games at the scenario clock")
+	require.Equal(t, http.StatusSeeOther, games.status, games.body)
+	assert.Contains(t, games.header.Get("Location"), "/groups/",
+		"the old Games link lands on the active group's week")
+
+	picks := app.request(t, client, http.MethodGet,
+		fmt.Sprintf("/slips/%d/pick", staged.Slip.ID), nil, false)
+	require.Equal(t, http.StatusOK, picks.status, picks.body)
+	assert.Contains(t, picks.body, "already kicked off",
+		"the pick board hides games that kicked off at the scenario clock")
 
 	slip := app.request(t, client, http.MethodGet,
 		fmt.Sprintf("/slips/%d", staged.Slip.ID), nil, false)

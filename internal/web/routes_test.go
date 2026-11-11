@@ -26,7 +26,6 @@ func TestShellPages(t *testing.T) {
 		heading string
 	}{
 		{"/", "Groups"},
-		{"/games", "Games"},
 		{"/research", "Research"},
 		{"/record", "Record Book"},
 	}
@@ -60,7 +59,7 @@ func TestShellMarksTheCurrentTab(t *testing.T) {
 
 	games := httptest.NewRecorder()
 	handler.ServeHTTP(games, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/games", nil))
-	assert.NotContains(t, games.Body.String(), `aria-current="page"`, "Games leaves the bar off")
+	assert.Equal(t, http.StatusSeeOther, games.Code, "Games redirects to the active group's week")
 }
 
 func TestShellServesStatic(t *testing.T) {

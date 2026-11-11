@@ -42,6 +42,9 @@ document.addEventListener("htmx:afterSwap", (event) => {
   if (target && target.id === "leg-sheet-body") {
     openLegSheet();
   }
+  if (target && target.id === "pick-swap-body") {
+    openSwapSheet();
+  }
 });
 
 document.addEventListener("htmx:oobAfterSwap", (event) => {
@@ -95,6 +98,10 @@ document.addEventListener("click", (event) => {
     closeLegSheet();
     return;
   }
+  if (event.target.closest("[data-close-swap-sheet]")) {
+    closeSwapSheet();
+    return;
+  }
   closeGroupSwitcher(event);
 });
 
@@ -124,6 +131,30 @@ function clearLegSheet() {
 if (legSheet) {
   legSheet.addEventListener("close", clearLegSheet);
   document.body.addEventListener("leg-saved", closeLegSheet);
+}
+
+const swapSheet = document.getElementById("pick-swap");
+const swapSheetBody = document.getElementById("pick-swap-body");
+
+function openSwapSheet() {
+  if (swapSheet && !swapSheet.open) {
+    swapSheet.showModal();
+  }
+}
+
+function closeSwapSheet() {
+  if (swapSheet && swapSheet.open) {
+    swapSheet.close();
+  }
+}
+
+if (swapSheet) {
+  swapSheet.addEventListener("close", () => {
+    if (swapSheetBody) {
+      swapSheetBody.replaceChildren();
+    }
+  });
+  document.body.addEventListener("tray-updated", closeSwapSheet);
 }
 
 // HTMX leaves a 4xx response in place by default. Rule refusals answer 422

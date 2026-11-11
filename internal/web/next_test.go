@@ -82,7 +82,7 @@ func TestHubBannerPicksAndShowsTheDeadline(t *testing.T) {
 
 	assert.Contains(t, body, "Pick 2 more")
 	assert.Contains(t, body, "Pick your legs")
-	assert.Contains(t, body, `href="/games"`)
+	assert.Contains(t, body, fmt.Sprintf(`href="/slips/%d/pick"`, fixture.slip.ID))
 	assert.Contains(t, body, "Picks close for MIA @ BUF at")
 	assert.Contains(t, body, fmt.Sprintf(`datetime="%s"`, kickoff.Format(time.RFC3339)))
 }
@@ -149,7 +149,8 @@ func TestHubBannerShowsTheGrade(t *testing.T) {
 
 	assert.Contains(t, body, ">Won</h2>")
 	assert.Contains(t, body, "This slip is graded.")
-	assert.NotContains(t, body, `href="/games"`, "a graded slip has no pick action")
+	assert.NotContains(t, body, fmt.Sprintf(`href="/slips/%d/pick"`, fixture.slip.ID),
+		"a graded slip has no pick action")
 }
 
 func TestHubBannerClosesWhenEveryGameStarted(t *testing.T) {
@@ -162,7 +163,7 @@ func TestHubBannerClosesWhenEveryGameStarted(t *testing.T) {
 
 	assert.Contains(t, body, "Picks are closed")
 	assert.Contains(t, body, "Every game this week has kicked off.")
-	assert.NotContains(t, body, `href="/games"`)
+	assert.NotContains(t, body, fmt.Sprintf(`href="/slips/%d/pick"`, fixture.slip.ID))
 }
 
 func TestHubBannerLetsAGroupMemberJoin(t *testing.T) {
