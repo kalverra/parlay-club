@@ -69,6 +69,20 @@ func (s *Store) DeleteLegVotes(ctx context.Context, legID int64) error {
 	return nil
 }
 
+// DeleteUserVotesForSlip removes every vote one person cast on a slip's legs.
+// Removing a member calls it in the same transaction so their tally leaves with
+// them and rejoining does not bring the old votes back.
+func (s *Store) DeleteUserVotesForSlip(ctx context.Context, slipID, userID int64) error {
+	_, err := s.conn().ExecContext(ctx, `
+		DELETE FROM leg_votes
+		WHERE user_id = ? AND leg_id IN (SELECT id FROM legs WHERE slip_id = ?)`,
+		userID, slipID)
+	if err != nil {
+		return fmt.Errorf("delete user %d votes on slip %d: %w", userID, slipID, err)
+	}
+	return nil
+}
+
 // VotesForSlip returns every vote on a slip's legs, ordered by leg and voter.
 func (s *Store) VotesForSlip(ctx context.Context, slipID int64) ([]LegVote, error) {
 	rows, err := s.conn().QueryContext(ctx, `

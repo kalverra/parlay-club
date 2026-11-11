@@ -147,6 +147,9 @@ func (s *Service) RemoveMember(ctx context.Context, actorID, slipID, userID int6
 				return ErrMemberHasLegs
 			}
 		}
+		if err := tx.DeleteUserVotesForSlip(ctx, slipID, userID); err != nil {
+			return err
+		}
 		if err := tx.RemoveSlipMember(ctx, slipID, userID); err != nil {
 			return err
 		}

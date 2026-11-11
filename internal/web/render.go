@@ -13,7 +13,6 @@ var pageFiles = map[string]string{
 	"home":      "templates/home.html",
 	"slip":      "templates/slip.html",
 	"pick":      "templates/pick.html",
-	"games":     "templates/games.html",
 	"research":  "templates/research.html",
 	"record":    "templates/record.html",
 	"login":     "templates/login.html",

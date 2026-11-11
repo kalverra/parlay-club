@@ -36,6 +36,7 @@ type AnalyzerWarningView struct {
 
 // AnalyzerLegView is one leg a warning names, with the person who owns it.
 type AnalyzerLegView struct {
+	OwnerID   int64
 	Owner     string
 	Selection string
 }
@@ -86,6 +87,7 @@ func analyzerView(
 				continue
 			}
 			card.Legs = append(card.Legs, AnalyzerLegView{
+				OwnerID:   leg.UserID,
 				Owner:     names[leg.UserID],
 				Selection: leg.Selection,
 			})

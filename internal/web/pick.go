@@ -364,7 +364,7 @@ func (h *slipHandlers) trayFrom(
 	analysis := analyzerView(legs, gamesByID, stats, names)
 	for _, warning := range analysis.Warnings {
 		for _, leg := range warning.Legs {
-			if leg.Owner == user.Name {
+			if leg.OwnerID == viewerID {
 				view.Warnings = append(view.Warnings, warning)
 				break
 			}

@@ -610,6 +610,72 @@ func TestPickTrayShowsOnlyHeadsUpsOnYourLegs(t *testing.T) {
 	assert.Contains(t, body, "1 of 2")
 }
 
+func TestPickTrayMatchesTheViewerByIDNotName(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	game := addGame(t, fixture, gameKickoff())
+
+	// Two members share a display name. Names come from Google and can repeat.
+	owner, err := fixture.store.CreateUserWithIdentity(
+		t.Context(), "Chris", "chris-owner@example.com", "google-chris-owner", "")
+	require.NoError(t, err)
+	viewer, err := fixture.store.CreateUserWithIdentity(
+		t.Context(), "Chris", "chris-viewer@example.com", "google-chris-viewer", "")
+	require.NoError(t, err)
+	for _, chris := range []db.User{owner, viewer} {
+		_, err = fixture.store.JoinByToken(t.Context(), chris.ID, fixture.group.InviteToken)
+		require.NoError(t, err)
+		require.NoError(t, fixture.store.AddSlipMember(t.Context(), fixture.slip.ID, chris.ID))
+	}
+
+	require.NoError(t, fixture.store.UpsertPlayerGameLog(t.Context(), db.PlayerGameLog{
+		AthleteID:   "4430756",
+		GamesPlayed: 5,
+		StatsJSON:   `{"REC_YDS":[41.0,41.0,41.0,41.0,126.0]}`,
+		UpdatedAt:   time.Now().UTC(),
+	}))
+	addStoredLeg(t, fixture, db.Leg{
+		UserID:     owner.ID,
+		GameID:     new(game.ID),
+		MarketType: "REC_YDS",
+		Selection:  "Dawson Knox Over 52.5 Rec Yds",
+		Team:       new("BUF"),
+		PlayerID:   new("4430756"),
+		PlayerName: new("Dawson Knox"),
+		Side:       new("OVER"),
+		Line:       new(52.5),
+		Odds:       -110,
+	})
+	addStoredLeg(t, fixture, db.Leg{
+		UserID:     viewer.ID,
+		GameID:     new(game.ID),
+		MarketType: "ML",
+		Selection:  "BUF ML",
+		Team:       new("BUF"),
+		Odds:       -110,
+	})
+
+	getTray := func() string {
+		t.Helper()
+		tray := httptest.NewRecorder()
+		fixture.handler.ServeHTTP(tray, httptest.NewRequestWithContext(
+			t.Context(), http.MethodGet, fmt.Sprintf("/slips/%d/tray", fixture.slip.ID), nil))
+		require.Equal(t, http.StatusOK, tray.Code, tray.Body.String())
+		return html.UnescapeString(tray.Body.String())
+	}
+
+	fixture.as(viewer)
+	body := getTray()
+	assert.NotContains(t, body, `data-rule="median_trap"`,
+		"the other Chris's heads-up does not belong in this viewer's tray")
+	assert.NotContains(t, body, "Dawson Knox")
+
+	fixture.as(owner)
+	assert.Contains(t, getTray(), `data-rule="median_trap"`,
+		"the owner still sees the heads-up on their own leg")
+}
+
 func TestPickOneGameViewPairsBothSides(t *testing.T) {
 	t.Parallel()
 

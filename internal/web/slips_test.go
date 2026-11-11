@@ -38,6 +38,7 @@ type slipFixture struct {
 	group   db.Group
 	week    db.Week
 	slip    db.Slip
+	as      func(db.User)
 }
 
 func newSlipFixture(t *testing.T, legsPerMember int) *slipFixture {
@@ -72,11 +73,12 @@ func newSlipFixtureAt(t *testing.T, legsPerMember int, now func() time.Time) *sl
 	service := slips.New(store, hub, nil)
 	stream := live.NewStream(hub, func(int64) bool { return false })
 
+	signedIn := user
 	handler := webui.NewWithDeps(webui.Dependencies{
 		Logger:   zerolog.Nop(),
 		Renderer: renderer,
 		UserFrom: func(context.Context) (db.User, bool) {
-			return user, true
+			return signedIn, true
 		},
 		GroupsFrom: func(context.Context) []webui.GroupOption {
 			return []webui.GroupOption{{ID: group.ID, Name: group.Name, Current: true}}
@@ -98,6 +100,7 @@ func newSlipFixtureAt(t *testing.T, legsPerMember int, now func() time.Time) *sl
 		group:   group,
 		week:    week,
 		slip:    slip,
+		as:      func(u db.User) { signedIn = u },
 	}
 }
 

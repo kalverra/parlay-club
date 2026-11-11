@@ -150,6 +150,20 @@ func TestVoteStaysOpenWhileTheSlipIsOpen(t *testing.T) {
 	assert.Len(t, votesOn(t, f), 1)
 }
 
+func TestRemoveMemberClearsTheirVotes(t *testing.T) {
+	t.Parallel()
+
+	f := newFixture(t)
+	voteOnSamVotes(t, f)
+	require.Len(t, votesOn(t, f), 1)
+
+	require.NoError(t, f.service.RemoveMember(t.Context(), f.ada.ID, f.slip.ID, f.sam.ID))
+	assert.Empty(t, votesOn(t, f), "the tally drops when the voter leaves the slip")
+
+	require.NoError(t, f.service.AddMember(t.Context(), f.ada.ID, f.slip.ID, f.sam.ID))
+	assert.Empty(t, votesOn(t, f), "rejoining does not revive the old votes")
+}
+
 func TestVoteDoesNotCloseAtKickoff(t *testing.T) {
 	t.Parallel()
 
