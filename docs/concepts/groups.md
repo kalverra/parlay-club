@@ -4,8 +4,8 @@ title: Groups
 type: concept
 summary: How groups split people into shared clubs, how invites and leaving work, and how the active group scopes what a person sees.
 tags: [groups, membership, invites, solo, scope, cookies]
-sources: [internal/groups/groups.go, internal/groups/handlers.go, internal/db/groups.go, internal/db/migrations/0001_init.sql, internal/auth/signin.go, internal/auth/cookies.go, internal/auth/middleware.go, cmd/server/main.go, web/templates/groups.html, web/templates/join.html, web/templates/layout.html, web/static/app.js]
-last_verified: 2026-11-07
+sources: [internal/groups/groups.go, internal/groups/handlers.go, internal/db/groups.go, internal/db/migrations/0001_init.sql, internal/auth/signin.go, internal/auth/cookies.go, internal/auth/middleware.go, internal/web/home.go, internal/web/slips.go, cmd/server/main.go, web/templates/home.html, web/templates/groups.html, web/templates/join.html, web/templates/layout.html, web/static/app.js]
+last_verified: 2026-11-11
 ---
 
 # Groups
@@ -51,6 +51,10 @@ Handlers read the chosen group with `groups.From` and pass its ID into queries. 
 themselves. The top bar reads `groups.Options`, which lists the person's groups from what `Scope` already loaded, with
 the active one marked.
 
+Opening `/groups/{id}/week` makes that group active and then opens the group's newest slip of the latest week, or its
+create-slip form. The route refuses a group the person does not belong to with a 404. Opening a slip from another of
+their groups switches the active group the same way, so a shared link always lands in the right club.
+
 Logging out clears `pc_group` with the session, so a shared browser forgets the choice. Leaving the active group moves
 the cookie to another group.
 
@@ -66,8 +70,8 @@ page shows the full link with a copy button. Resetting the link mints a new toke
 - `POST /join/{token}` adds the membership and makes the group active. Joining twice changes nothing.
 - An unknown or reset token gets a 404.
 
-`POST /groups/{id}/reset-invite` and `POST /groups/{id}/leave` check that the caller belongs to the group in the path, so
-a stranger cannot learn which groups exist.
+`POST /groups/{id}/reset-invite` and `POST /groups/{id}/leave` check that the caller belongs to the group in the path,
+so a stranger cannot learn which groups exist.
 
 ## Leaving
 
@@ -79,10 +83,9 @@ gets a 404.
 
 The group is the filter for shared data:
 
-- The home list and the Record Book read the active group.
-- A route that names a slip resolves that slip's group and requires membership, whatever `pc_group` says. A non-member
-  gets a 404, the same as a missing slip. A member opening a slip from another of their groups switches the active
-  group.
+- The landing page lists every group the person belongs to. The slip screens and the Record Book read the active group.
+- A route that names a group or slip requires membership, whatever `pc_group` says. A non-member gets a 404, the same as
+  a missing slip. A member opening a slip from another of their groups switches the active group.
 - Live streams check membership before subscribing, so a stream never carries another group's slip. `slip:{id}` topics
   stay private; `week:{weekID}` topics are signals with no group data.
 
@@ -94,9 +97,12 @@ the schema, the scope check, and the group screens.
 
 ## Screens
 
-`/groups` lists the caller's groups with the active one marked. Each card shows the invite link with copy and reset, a
-leave button when the person has more than one group, and a note when they do not. A create form names and starts a new
-group.
+`/` is the landing page. It lists one card per group, oldest first, and each card opens that group's week. A person with
+one group skips the list: `/` sends them straight to `/groups/{id}/week`. The list holds no live stream; the browser
+refetches it when the tab becomes visible.
+
+`/groups` manages the caller's groups. Each card shows the invite link with copy and reset, a leave button when the
+person has more than one group, and a note when they do not. A create form names and starts a new group.
 
 The top bar hides the switcher while a person has one group and shows that group's name as a link to `/groups`. With
 more than one group it shows the active name; tapping it opens a bottom sheet of groups, and picking one sets `pc_group`
@@ -106,7 +112,8 @@ and reloads the page.
 
 - No roles or permissions. Every member can invite, reset the link, and leave. A group is a boundary for what people
   see, not a permission system.
-- Invite links are bearer secrets. 128-bit tokens, one-click reset, and a join page that shows only names limit the harm.
+- Invite links are bearer secrets. 128-bit tokens, one-click reset, and a join page that shows only names limit the
+  harm.
 - Open sign-up means a stranger can reach the app. The shared cache and the credit floors bound the cost, and a stranger
   sees only their own solo group.
 - You cannot leave your last group, so there is always somewhere for a slip to live.

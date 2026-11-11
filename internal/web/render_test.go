@@ -20,7 +20,7 @@ func TestRendererReloadsFromDisk(t *testing.T) {
 	renderer, err := webui.NewRenderer(os.DirFS(dir), true)
 	require.NoError(t, err)
 
-	page := webui.Page{Title: "Slip", Tab: webui.TabSlip}
+	page := webui.Page{Title: "Slip", Tab: webui.TabWeek}
 
 	first, err := renderer.Render("slip", page)
 	require.NoError(t, err)
@@ -43,7 +43,7 @@ func TestRendererCachesWhenNotReloading(t *testing.T) {
 
 	writeTemplate(t, dir, "slip.html", `{{define "content"}}second{{end}}`)
 
-	out, err := renderer.Render("slip", webui.Page{Title: "Slip", Tab: webui.TabSlip})
+	out, err := renderer.Render("slip", webui.Page{Title: "Slip", Tab: webui.TabWeek})
 	require.NoError(t, err)
 	assert.Contains(t, string(out), "first")
 	assert.NotContains(t, string(out), "second")
@@ -78,7 +78,7 @@ func writeTemplates(t *testing.T, content string) string {
 	writeTemplate(t, dir, "layout.html", `{{define "layout"}}<main>{{template "content" .}}</main>{{end}}`)
 	writeTemplate(t, dir, "avatar.html", `{{define "avatar"}}{{end}}`)
 	writeTemplate(t, dir, "partials.html", "")
-	for _, page := range []string{"slip", "games", "research", "record", "login", "dev-login", "join", "groups", "profile", "sandbox"} {
+	for _, page := range []string{"home", "slip", "games", "research", "record", "login", "dev-login", "join", "groups", "profile", "sandbox"} {
 		writeTemplate(t, dir, page+".html", `{{define "content"}}`+content+`{{end}}`)
 	}
 

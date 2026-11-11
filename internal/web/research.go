@@ -684,7 +684,7 @@ func buildHitBars(games []float64, comparisonLine *float64) ([]HitBarView, strin
 }
 
 func (h *researchHandlers) page(r *http.Request) Page {
-	p := Page{Title: "Research", Tab: TabResearch}
+	p := Page{Title: "Research"}
 	if h.deps.UserFrom != nil {
 		if user, ok := h.deps.UserFrom(r.Context()); ok {
 			view := NewUser(user)

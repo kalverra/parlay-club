@@ -245,6 +245,21 @@ if (liveRoot) {
   openLive();
 }
 
+// A glance page like the group list carries data-refresh-on-visible instead of
+// a live stream, so it costs nothing while hidden. Refetch it when the tab
+// comes back into view.
+function refreshOnVisible() {
+  if (document.hidden) {
+    return;
+  }
+
+  for (const element of document.querySelectorAll("[data-refresh-on-visible]")) {
+    if (window.htmx) {
+      htmx.trigger(element, "refresh-on-visible");
+    }
+  }
+}
+
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) {
     closeLive();
@@ -253,9 +268,11 @@ document.addEventListener("visibilitychange", () => {
 
   openLive();
   refreshLive();
+  refreshOnVisible();
 });
 
 window.addEventListener("focus", () => {
   openLive();
   refreshLive();
+  refreshOnVisible();
 });

@@ -50,6 +50,7 @@ type slipHandlers struct {
 // scope, so the signed-in person and active group are already on the context.
 func (h *slipHandlers) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /{$}", h.home)
+	mux.HandleFunc("GET /groups/{id}/week", h.groupWeek)
 	mux.HandleFunc("GET /me", h.profile)
 	mux.HandleFunc("POST /me", h.updateProfile)
 	mux.HandleFunc("POST /users/{id}/active", h.toggleActive)
@@ -220,50 +221,6 @@ type ProfileMember struct {
 	Avatar User
 	Active bool
 	Self   bool
-}
-
-// home opens the newest slip of the latest week, or the create form when the
-// group has none. Until the slate sync names a current week, the latest week on
-// record stands in.
-func (h *slipHandlers) home(w http.ResponseWriter, r *http.Request) {
-	page := h.page(r, "Slip")
-	if h.deps.Store == nil {
-		h.renderPage(w, "slip", SlipPage{Page: page})
-		return
-	}
-
-	user, ok := h.user(r.Context())
-	if !ok {
-		h.renderPage(w, "slip", SlipPage{Page: page})
-		return
-	}
-	group, ok := h.group(r.Context())
-	if !ok {
-		h.renderPage(w, "slip", SlipPage{Page: page})
-		return
-	}
-
-	week, err := h.deps.Store.LatestWeek(r.Context())
-	if errors.Is(err, db.ErrWeekNotFound) {
-		h.renderCreate(w, r, page, user, group, nil, nil)
-		return
-	}
-	if err != nil {
-		h.serverError(w, err)
-		return
-	}
-
-	groupSlips, err := h.deps.Store.SlipsForWeek(r.Context(), group.ID, week.ID)
-	if err != nil {
-		h.serverError(w, err)
-		return
-	}
-	if len(groupSlips) == 0 {
-		h.renderCreate(w, r, page, user, group, &week, nil)
-		return
-	}
-
-	h.renderSlip(w, r, page, groupSlips[0], defaultStake, 0)
 }
 
 // newSlipForm shows the create form for a chosen or latest week.
@@ -452,7 +409,7 @@ func (h *slipHandlers) slipPage(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	page := h.page(r, slip.Name)
+	page := h.pageForGroup(r, slip.Name, slip.GroupID)
 	h.renderSlip(w, r, page, slip, defaultStake, 0)
 }
 
@@ -827,7 +784,7 @@ func (h *slipHandlers) profile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	page := h.page(r, "Profile")
+	page := h.pageWithTab(r, "Profile", "")
 	memberViews := make([]ProfileMember, 0, len(members))
 	for _, member := range members {
 		memberViews = append(memberViews, ProfileMember{
@@ -1566,7 +1523,9 @@ var marketLabels = map[string]string{
 	"KICKER_PTS": "Kicking Pts",
 }
 
-// loadSlip parses the path id and refuses a slip outside the active group.
+// loadSlip parses the path id, then resolves the slip's group. A slip in
+// another of the viewer's groups makes that group active; a slip outside every
+// group they belong to answers 404, the same as a missing slip.
 func (h *slipHandlers) loadSlip(
 	w http.ResponseWriter,
 	r *http.Request,
@@ -1596,8 +1555,25 @@ func (h *slipHandlers) loadSlip(
 		return db.Slip{}, db.User{}, db.Group{}, false
 	}
 	if slip.GroupID != group.ID {
-		http.NotFound(w, r)
-		return db.Slip{}, db.User{}, db.Group{}, false
+		member, err := h.deps.Store.IsMember(r.Context(), slip.GroupID, user.ID)
+		if err != nil {
+			h.serverError(w, err)
+			return db.Slip{}, db.User{}, db.Group{}, false
+		}
+		if !member {
+			http.NotFound(w, r)
+			return db.Slip{}, db.User{}, db.Group{}, false
+		}
+		group, err = h.deps.Store.GroupByID(r.Context(), slip.GroupID)
+		if errors.Is(err, db.ErrGroupNotFound) {
+			http.NotFound(w, r)
+			return db.Slip{}, db.User{}, db.Group{}, false
+		}
+		if err != nil {
+			h.serverError(w, err)
+			return db.Slip{}, db.User{}, db.Group{}, false
+		}
+		h.setGroup(w, slip.GroupID)
 	}
 	return slip, user, group, true
 }
@@ -1668,9 +1644,15 @@ func (h *slipHandlers) group(ctx context.Context) (db.Group, bool) {
 	return h.deps.GroupFrom(ctx)
 }
 
-// page builds the shell's data for a slip screen.
+// page builds the shell's data for a This week screen.
 func (h *slipHandlers) page(r *http.Request, title string) Page {
-	page := Page{Title: title, Tab: TabSlip}
+	return h.pageWithTab(r, title, TabWeek)
+}
+
+// pageWithTab builds the shell's data for a page with an explicit tab. An empty
+// tab leaves the bottom bar off.
+func (h *slipHandlers) pageWithTab(r *http.Request, title string, tab Tab) Page {
+	page := Page{Title: title, Tab: tab}
 	if r == nil {
 		return page
 	}
@@ -1680,6 +1662,17 @@ func (h *slipHandlers) page(r *http.Request, title string) Page {
 	}
 	if h.deps.GroupsFrom != nil {
 		page.Groups = h.deps.GroupsFrom(r.Context())
+	}
+	return page
+}
+
+// pageForGroup marks groupID as the active group in the top bar. Opening a
+// slip or week from another of the viewer's groups switches the group, so the
+// shell must show the one the page acts in.
+func (h *slipHandlers) pageForGroup(r *http.Request, title string, groupID int64) Page {
+	page := h.page(r, title)
+	for i := range page.Groups {
+		page.Groups[i].Current = page.Groups[i].ID == groupID
 	}
 	return page
 }

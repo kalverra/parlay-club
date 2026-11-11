@@ -10,6 +10,7 @@ import (
 // pageFiles maps a page name to the template file that defines its content.
 // The shell and the auth screens share the layout, so they share this map.
 var pageFiles = map[string]string{
+	"home":      "templates/home.html",
 	"slip":      "templates/slip.html",
 	"games":     "templates/games.html",
 	"research":  "templates/research.html",
@@ -28,6 +29,7 @@ const partialsFile = "templates/partials.html"
 
 // partialFiles names the fragments the slip screen can render on its own.
 var partialFiles = map[string]string{
+	"group-list":      partialsFile,
 	"slip-panel":      partialsFile,
 	"slip-export":     partialsFile,
 	"slip-activity":   partialsFile,

@@ -429,7 +429,7 @@ func gameBadges(game db.Game) []GameBadgeView {
 
 // page builds the shell's data for the Games tab.
 func (h *gameHandlers) page(r *http.Request) Page {
-	page := Page{Title: "Games", Tab: TabGames}
+	page := Page{Title: "Games"}
 	if user, ok := h.user(r.Context()); ok {
 		view := NewUser(user)
 		page.User = &view
