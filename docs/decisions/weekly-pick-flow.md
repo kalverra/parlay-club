@@ -1,11 +1,9 @@
 ---
-slug: weekly-pick-flow
-status: implementing
-created: "2026-11-11"
-accepted_by:
-    - adam
-accepted_at: "2026-11-11T19:24:27Z"
-effort: hard
+id: adr-weekly-pick-flow
+title: Make the weekly pick flow the center of the app
+type: decision
+summary: Land on your groups, see what the week needs on the hub, pick on a searchable board, lock in, vote, and export.
+last_verified: "2026-11-11"
 ---
 
 # Make the weekly pick flow the center of the app
@@ -145,3 +143,100 @@ Games tab keeps the rules, routes, live updates, and tests that already work, an
 
 The effort is `hard`. It touches navigation, three screens, a new vote concept, and live updates, while holding the
 credit and single-instance limits. Each decision depends on the others, so it needs a careful design before any code.
+
+## Consequences
+
+The app now has one path a person can walk without explanation: groups, group hub, pick board, hub, lock in, vote,
+export. The bottom bar follows the task (Groups, This week, Record Book) instead of naming data. Games is a redirect,
+and Research is a link from the rows that need it rather than a tab.
+
+The group hub is the center. One pure function, `slips.NextStep`, decides what a person should do next on both the hub
+banner and every group card, so the two cannot disagree. Every dead end has a screen: a new sign-up with only "Just me",
+a group with no slip, a week with no games or no lines, every game kicked off, a search that matches nothing, and a
+member who never finished before the first kickoff.
+
+Picking moved to a focused board with search, category and window chips, four sorts, a one-game view, and a tray that
+stays visible. Reaching the leg limit now offers a swap instead of an error. The board reads stored odds only: opening
+it, typing, filtering, and sorting spend no credits, and each "Load them" tap is one person asking for one game through
+the same floors and cache as before.
+
+Votes give the group a way to react without making the product heavy. They are a tally, never a gate, and the app
+records them so a later Record Book can use them. A vote writes no activity entry, so the feed stays a feed of picks.
+
+What got harder:
+
+- There are more surfaces to keep in step: the board page and its results partial, the tray, the swap sheet, the vote
+  route, and four kinds of empty state. Empty-state copy now lives in four places.
+- The group list costs four queries per card on every landing and every refetch-on-visible. Fine on one SQLite instance
+  with a handful of groups, unmeasured at scale.
+- The board rebuilds a week of odds rows on every keystroke, filter, and sort. The 250 ms debounce and one `OddsForWeek`
+  read keep it cheap, but it is the first place to look if latency shows.
+- Votes carry one deliberate exception to the editing rules: no activity entry, and removal from the activity story.
+  `slips.md` rule 9 records it.
+
+We would revisit chip counts (they follow the whole week, not the current search), the past-week tray, and whether vote
+tallies belong on the pick board so a person can see what the group liked while choosing.
+
+## Alternatives considered
+
+- **Polish each existing tab.** Rejected: the problem was between screens, not inside them. The tabs were kinds of data,
+  not steps, so improving each one left the path broken.
+- **A new wizard beside the current tabs.** Rejected: two apps to maintain, two sets of rules to keep true. Reshaping
+  the existing slip page and Games tab kept the routes, rules, live updates, and tests that already worked.
+- **Client-side search over a JSON blob.** Rejected: it would put a second rendering path in `app.js` and move logic out
+  of Go, where the tests are. Server-side partials keep one implementation.
+- **A live stream on the group list.** Rejected: a list that watched every group would hold an instance open for a page
+  people glance at and leave. Refetch on visible is enough.
+- **A separate `ReplaceLeg` method.** Rejected: `UpdateLeg` already enforces owner, lock in, and kickoff on both the old
+  and the new game. Replace is an edit, and a second method would drift from the first.
+- **Votes as activity entries.** Rejected: a feed of thumbs would bury the picks, and it would make the feed the source
+  of truth for a tally.
+- **Searching props for the whole week.** Rejected: it would break the credit floors. The board searches what is loaded
+  and offers to load one game when the search names it.
+
+## Implementation notes
+
+- **Join needed a new rule, not just a route.** The design assumed a group member could add themselves through the
+  existing add-member path, but `AddMember` required the caller to already be on the slip. It now falls through to
+  `loadJoin` when the actor is the target and belongs to the group, and writes an activity entry.
+- **`currentOdds` was wrong across a week.** It kept only the newest prop fetch across every game, so loading one game
+  later hid another game's props and made the board offer "Load them" for stored data. It now keeps the newest fetch per
+  game and sync group. This was a real bug the week read exposed, not a rename.
+- **The export card is a wrapper that is always first and empty until the slip locks.** Moving the card above the banner
+  on a live lock would need out-of-band swapping. The wrapper gives the same order without a reorder.
+- **`?slip=` is additive.** `/games/{id}/props` takes an optional slip for board loads but keeps its standalone partial
+  for old game and Research links. It never guesses a slip.
+- **The board has five empty states, not four.** "No games stored", "games with no lines yet", "every game kicked off",
+  a search that matches nothing, and a week with no odds rows suppress the per-game prompts. One week-level note beats a
+  "Load them" button per game.
+- **`closed` outranks `waiting`.** A locked viewer whose week is over and whose slip still has someone short of legs
+  sees the member named and no nudge, so nobody is asked to chase a pick that cannot arrive.
+- **Small decisions the design did not name:** selection counts as part of "a different pick" for vote clearing, so a
+  relabeled manual leg loses its votes; `ErrVoteInvalid` is a new typed error for values outside -1/0/1; the vote route
+  answers with the refreshed panel so the voter's tally changes without waiting for their own stream event; and the
+  tally is drawn only when the viewer can vote or the leg already has votes, so an owner's unvoted leg shows nothing.
+- **Limits a maintainer will hit:** search covers only loaded props, so an honest miss offers one game to load; the
+  nudge is client-only via `navigator.share` with a clipboard fallback and has no automated test; live updates stay one
+  stream per page, so the group list deliberately has none; and the app still assumes one process writing SQLite.
+- **The shell marks the group the page acts in.** `/groups/{id}/week` and a slip link from another group switch the
+  active group through `Dependencies.SetGroup`, so the Record Book and the bar follow the page rather than the cookie
+  that was there a moment ago.
+
+## Follow-ups
+
+- **Clear a removed member's votes.** `leg_votes.user_id` references the user, so removing someone from an open slip
+  leaves their votes on other members' legs, and adding them back revives the old votes. Delete that person's votes for
+  the slip inside `RemoveMember` in the same transaction, with a service test.
+- **Make chip counts follow the search.** `categoryChips` and `windowChips` count the whole week's rows, so a filtered
+  board can show a count that includes hidden rows and an active chip at zero. Count the rows `board.Search` returned
+  and keep the active chip visible.
+- **Close the tray for a past week.** `trayFrom` skips the kickoff lock when `WeekPast` is true, so a past week's tray
+  still draws remove buttons the service then refuses. Show "Picks are closed for this week" instead.
+- **Delete the dead Games template.** `web/templates/games.html`, the `games` entry in `render.go`, and the `games` name
+  in `render_test.go` remain though nothing routes to them.
+- **Cache built board rows.** If keystroke latency shows, cache `board.Build` output per (week, odds fetch time) rather
+  than rebuilding it. The design left this open.
+- **Batch the group list read.** If a person in many groups sees slow landings, read the week's slips once and group
+  them in Go instead of four queries per card.
+- **Cover the nudge in a browser test.** The server side is tested, but the share-sheet call, the clipboard fallback,
+  and the "Nudge copied" label are only checked by hand.
