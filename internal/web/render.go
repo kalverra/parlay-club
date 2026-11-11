@@ -19,6 +19,7 @@ var pageFiles = map[string]string{
 	"join":      "templates/join.html",
 	"groups":    "templates/groups.html",
 	"profile":   "templates/profile.html",
+	"sandbox":   "templates/sandbox.html",
 }
 
 // partialsFile holds the fragments HTMX swaps into a page. Each fragment is a

@@ -3,12 +3,16 @@ package main
 import (
 	"database/sql"
 	"fmt"
+	"io"
 	"io/fs"
 	"net/http"
+	"net/http/cookiejar"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -24,6 +28,8 @@ import (
 	"github.com/kalverra/parlay-club/internal/parlay"
 	"github.com/kalverra/parlay-club/internal/refresh"
 	"github.com/kalverra/parlay-club/internal/sandbox"
+	webui "github.com/kalverra/parlay-club/internal/web"
+	assets "github.com/kalverra/parlay-club/web"
 )
 
 const sandboxTestSessionKey = "test-session-key-long-enough-for-anything"
@@ -63,6 +69,152 @@ func openSandbox(t *testing.T, hub *live.Hub, cookies *auth.Cookies) (
 	require.NoError(t, err)
 	runtime.cookies = cookies
 	return database, store, runtime
+}
+
+// sandboxApp is the full server wiring the sandbox tests drive: the real
+// templates, auth middleware, group scope, and the sandbox routes.
+type sandboxApp struct {
+	server  *httptest.Server
+	base    *url.URL
+	store   *db.Store
+	runtime *sandboxRuntime
+	cookies *auth.Cookies
+}
+
+// sandboxHTTPResponse is one request's status, headers, and body.
+type sandboxHTTPResponse struct {
+	status int
+	header http.Header
+	body   string
+}
+
+// openSandboxApp boots the sandbox and mounts it the way main does, with the
+// real middleware and templates instead of a test stub.
+func openSandboxApp(t *testing.T) *sandboxApp {
+	t.Helper()
+
+	_, store, runtime := openSandbox(t, &live.Hub{}, sandboxCookies())
+	renderer, err := webui.NewRenderer(assets.Templates, false)
+	require.NoError(t, err)
+	runtime.renderer = renderer
+
+	handlers := auth.NewHandlers(zerolog.Nop(), store, runtime.cookies, renderer, nil, true)
+	scope := groups.Scope(zerolog.Nop(), store, auth.UserFrom, runtime.cookies)
+	groupHandlers := groups.NewHandlers(
+		zerolog.Nop(), store, auth.UserFrom, runtime.cookies, renderer)
+	shell := webui.NewWithDeps(webui.Dependencies{
+		Logger:     zerolog.Nop(),
+		Renderer:   renderer,
+		UserFrom:   auth.UserFrom,
+		GroupsFrom: groups.Options,
+		GroupFrom:  groups.From,
+		Store:      store,
+		Slips:      runtime.slips,
+		Now:        runtime.scenario.Now,
+	})
+	mux := newMux(
+		shell,
+		http.NotFoundHandler(),
+		handlers,
+		groupHandlers,
+		scope,
+		nil,
+		runtime.MountRoutes,
+	)
+
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	base, err := url.Parse(server.URL)
+	require.NoError(t, err)
+	return &sandboxApp{
+		server:  server,
+		base:    base,
+		store:   store,
+		runtime: runtime,
+		cookies: runtime.cookies,
+	}
+}
+
+// client returns a browser with its own cookie jar. Redirects are returned to
+// the test instead of followed, so the middleware's responses stay visible.
+func (a *sandboxApp) client(t *testing.T) *http.Client {
+	t.Helper()
+
+	jar, err := cookiejar.New(nil)
+	require.NoError(t, err)
+	return &http.Client{
+		Jar: jar,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+}
+
+// signInAsAda gives a browser the real session and group cookies for the first
+// shared persona. Tests that need another view switch through the real route.
+func (a *sandboxApp) signInAsAda(t *testing.T, client *http.Client) sandbox.Seed {
+	t.Helper()
+
+	seed := a.runtime.Seed()
+	person, ok := seed.Person(sandbox.PersonaAda)
+	require.True(t, ok, "persona %s is seeded", sandbox.PersonaAda)
+
+	recorder := httptest.NewRecorder()
+	a.cookies.SetSession(recorder, person.User.ID)
+	a.cookies.SetGroup(recorder, person.GroupID)
+	client.Jar.SetCookies(a.base, recorder.Result().Cookies())
+	return seed
+}
+
+// request sends one form request. A nil form sends no body.
+func (a *sandboxApp) request(
+	t *testing.T,
+	client *http.Client,
+	method, path string,
+	form url.Values,
+	htmx bool,
+) sandboxHTTPResponse {
+	t.Helper()
+
+	var body io.Reader
+	if form != nil {
+		body = strings.NewReader(form.Encode())
+	}
+	request, err := http.NewRequestWithContext(
+		t.Context(), method, a.server.URL+path, body)
+	require.NoError(t, err)
+	if form != nil {
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	}
+	if htmx {
+		request.Header.Set("Hx-Request", "true")
+	}
+
+	response, err := client.Do(request)
+	require.NoError(t, err)
+	defer func() { _ = response.Body.Close() }()
+	content, err := io.ReadAll(response.Body)
+	require.NoError(t, err)
+	return sandboxHTTPResponse{
+		status: response.StatusCode,
+		header: response.Header,
+		body:   string(content),
+	}
+}
+
+// cookieIDs reads the signed session and group the browser currently carries.
+func (a *sandboxApp) cookieIDs(t *testing.T, client *http.Client) (int64, int64) {
+	t.Helper()
+
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
+	for _, cookie := range client.Jar.Cookies(a.base) {
+		request.AddCookie(cookie)
+	}
+	userID, ok := a.cookies.SessionID(request)
+	require.True(t, ok, "the browser carries a signed session")
+	groupID, ok := a.cookies.GroupID(request)
+	require.True(t, ok, "the browser carries a signed group")
+	return userID, groupID
 }
 
 func TestSandboxBootstrapReplaysTheMorningOffline(t *testing.T) {
@@ -417,6 +569,215 @@ func TestSandboxResetRecoversTheCurrentSession(t *testing.T) {
 	assert.Equal(t, 1, countRows(t, database, "slips"))
 }
 
+func TestSandboxControlsPageShowsScenarioAtPhoneWidth(t *testing.T) {
+	t.Parallel()
+
+	app := openSandboxApp(t)
+	client := app.client(t)
+	app.signInAsAda(t, client)
+
+	response := app.request(t, client, http.MethodGet, "/dev/sandbox", nil, false)
+	require.Equal(t, http.StatusOK, response.status, response.body)
+	assert.Equal(t, "no-store", response.header.Get("Cache-Control"))
+	assert.Contains(t, response.header.Get("Content-Type"), "text/html")
+
+	for _, want := range []string{
+		"Sandbox controls",
+		"morning",
+		sandbox.MorningTime().UTC().Format(time.RFC3339),
+		"Ada",
+		"ada@sandbox.test",
+		"Ben",
+		"Cleo",
+		"Dex",
+		"dex@sandbox.test",
+		sandbox.SharedGroupName,
+		"Reset to Sunday morning",
+		`hx-post="/dev/sandbox/reset"`,
+		`hx-post="/dev/sandbox/persona"`,
+		"Open shared invite",
+		`<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">`,
+		"grid-cols-1",
+		"sm:grid-cols-2",
+		"sm:flex-row",
+	} {
+		assert.Contains(t, response.body, want)
+	}
+
+	// The ordinary tabs share the same phone-first layout.
+	for _, path := range []string{"/", "/games"} {
+		page := app.request(t, client, http.MethodGet, path, nil, false)
+		require.Equal(t, http.StatusOK, page.status, path)
+		assert.Contains(t, page.body,
+			`<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">`,
+			"%s keeps the phone viewport", path)
+	}
+}
+
+func TestSandboxPersonaSwitchUsesRealSignInAndGroupScope(t *testing.T) {
+	t.Parallel()
+
+	app := openSandboxApp(t)
+	client := app.client(t)
+	seed := app.signInAsAda(t, client)
+
+	for _, id := range []sandbox.PersonaID{sandbox.PersonaBen, sandbox.PersonaCleo} {
+		person, ok := seed.Person(id)
+		require.True(t, ok)
+		group, err := sandbox.PersonaGroup(t.Context(), app.store, person.Persona, person.User.ID)
+		require.NoError(t, err)
+
+		response := app.request(t, client, http.MethodPost, "/dev/sandbox/persona",
+			url.Values{"persona": {string(id)}}, true)
+		require.Equal(t, http.StatusOK, response.status, response.body)
+		assert.Equal(t, "true", response.header.Get("Hx-Refresh"))
+
+		userID, groupID := app.cookieIDs(t, client)
+		assert.Equal(t, person.User.ID, userID, "the session cookie names the real signed-in person")
+		assert.Equal(t, group.ID, groupID, "the group cookie names the shared group")
+		assert.Equal(t, sandbox.SharedGroupName, group.Name)
+
+		// The shared slip is visible from every shared persona's perspective.
+		slip := app.request(t, client, http.MethodGet,
+			fmt.Sprintf("/slips/%d", seed.Slip.ID), nil, false)
+		require.Equal(t, http.StatusOK, slip.status, slip.body)
+		assert.Contains(t, slip.body, seed.Slip.Name)
+
+		profile := app.request(t, client, http.MethodGet, "/me", nil, false)
+		require.Equal(t, http.StatusOK, profile.status, profile.body)
+		assert.Contains(t, profile.body, person.User.Name)
+		assert.Contains(t, profile.body, "Ada")
+		assert.Contains(t, profile.body, "Ben")
+		assert.Contains(t, profile.body, "Cleo")
+	}
+}
+
+func TestSandboxActivityNamesTheActingPersona(t *testing.T) {
+	t.Parallel()
+
+	app := openSandboxApp(t)
+	client := app.client(t)
+	seed := app.signInAsAda(t, client)
+
+	response := app.request(t, client, http.MethodPost, "/dev/sandbox/persona",
+		url.Values{"persona": {string(sandbox.PersonaBen)}}, true)
+	require.Equal(t, http.StatusOK, response.status, response.body)
+
+	ben, ok := seed.Person(sandbox.PersonaBen)
+	require.True(t, ok)
+	legID := seed.Legs[sandbox.LegBenEaglesML]
+	graded := app.request(t, client, http.MethodPut,
+		fmt.Sprintf("/legs/%d/result", legID),
+		url.Values{"result": {string(parlay.Lost)}}, true)
+	require.Equal(t, http.StatusOK, graded.status, graded.body)
+
+	entries, err := app.store.ActivityForSlip(t.Context(), seed.Slip.ID)
+	require.NoError(t, err)
+	require.NotEmpty(t, entries)
+	newest := entries[0]
+	require.NotNil(t, newest.UserID)
+	assert.Equal(t, ben.User.ID, *newest.UserID, "the activity line belongs to the acting persona")
+	assert.Contains(t, newest.Message, "Ben set")
+
+	leg, err := app.store.LegByID(t.Context(), legID)
+	require.NoError(t, err)
+	require.NotNil(t, leg.GradedBy)
+	assert.Equal(t, "Ben", *leg.GradedBy)
+}
+
+func TestSandboxOutsiderIsolationAndInviteJoin(t *testing.T) {
+	t.Parallel()
+
+	app := openSandboxApp(t)
+	client := app.client(t)
+	seed := app.signInAsAda(t, client)
+
+	switchResponse := app.request(t, client, http.MethodPost, "/dev/sandbox/persona",
+		url.Values{"persona": {string(sandbox.PersonaDex)}}, true)
+	require.Equal(t, http.StatusOK, switchResponse.status, switchResponse.body)
+
+	dex, ok := seed.Person(sandbox.PersonaDex)
+	require.True(t, ok)
+	userID, groupID := app.cookieIDs(t, client)
+	assert.Equal(t, dex.User.ID, userID)
+	assert.Equal(t, dex.GroupID, groupID, "the outsider keeps their own group")
+
+	sharedSlip := fmt.Sprintf("/slips/%d", seed.Slip.ID)
+	blocked := app.request(t, client, http.MethodGet, sharedSlip, nil, false)
+	assert.Equal(t, http.StatusNotFound, blocked.status,
+		"the outsider gets the normal 404 for a shared slip")
+
+	blockedGrade := app.request(t, client, http.MethodPut,
+		fmt.Sprintf("/legs/%d/result", seed.Legs[sandbox.LegAdaBengalsML]),
+		url.Values{"result": {string(parlay.Won)}}, true)
+	assert.Equal(t, http.StatusNotFound, blockedGrade.status)
+
+	// A forged group cookie is only a preference: scope falls back to the
+	// outsider's own group and the shared slip stays hidden.
+	forged := httptest.NewRecorder()
+	app.cookies.SetGroup(forged, seed.SharedGroup.ID)
+	client.Jar.SetCookies(app.base, forged.Result().Cookies())
+	stillBlocked := app.request(t, client, http.MethodGet, sharedSlip, nil, false)
+	assert.Equal(t, http.StatusNotFound, stillBlocked.status,
+		"the group cookie cannot grant membership")
+	_, recoveredGroup := app.cookieIDs(t, client)
+	assert.Equal(t, dex.GroupID, recoveredGroup, "scope rewrites the forged cookie to a real group")
+
+	joinPath := "/join/" + seed.SharedGroup.InviteToken
+	joinPage := app.request(t, client, http.MethodGet, joinPath, nil, false)
+	require.Equal(t, http.StatusOK, joinPage.status, joinPage.body)
+	assert.Contains(t, joinPage.body, sandbox.SharedGroupName)
+
+	joined := app.request(t, client, http.MethodPost, joinPath, nil, true)
+	require.Equal(t, http.StatusOK, joined.status, joined.body)
+	assert.Equal(t, "/", joined.header.Get("Hx-Redirect"))
+
+	_, joinedGroup := app.cookieIDs(t, client)
+	assert.Equal(t, seed.SharedGroup.ID, joinedGroup, "the normal join sets the shared group active")
+
+	visible := app.request(t, client, http.MethodGet, sharedSlip, nil, false)
+	assert.Equal(t, http.StatusOK, visible.status, "the invite join makes shared state visible")
+}
+
+func TestSandboxControlsObeyCSRFAndAuth(t *testing.T) {
+	t.Parallel()
+
+	app := openSandboxApp(t)
+	seed := app.runtime.Seed()
+
+	signedOut := app.client(t)
+	page := app.request(t, signedOut, http.MethodGet, "/dev/sandbox", nil, false)
+	assert.Equal(t, http.StatusFound, page.status)
+	assert.Equal(t, "/login", page.header.Get("Location"))
+
+	signedOutPOST := app.request(t, signedOut, http.MethodPost, "/dev/sandbox/persona",
+		url.Values{"persona": {string(sandbox.PersonaBen)}}, true)
+	assert.Equal(t, http.StatusOK, signedOutPOST.status)
+	assert.Equal(t, "/login", signedOutPOST.header.Get("Hx-Redirect"))
+
+	client := app.client(t)
+	app.signInAsAda(t, client)
+	ada, ok := seed.Person(sandbox.PersonaAda)
+	require.True(t, ok)
+
+	plainReset := app.request(t, client, http.MethodPost, "/dev/sandbox/reset", nil, false)
+	assert.Equal(t, http.StatusForbidden, plainReset.status)
+
+	plainSwitch := app.request(t, client, http.MethodPost, "/dev/sandbox/persona",
+		url.Values{"persona": {string(sandbox.PersonaBen)}}, false)
+	assert.Equal(t, http.StatusForbidden, plainSwitch.status)
+
+	unknown := app.request(t, client, http.MethodPost, "/dev/sandbox/persona",
+		url.Values{"persona": {"malory"}}, true)
+	assert.Equal(t, http.StatusUnprocessableEntity, unknown.status)
+
+	userID, groupID := app.cookieIDs(t, client)
+	assert.Equal(t, ada.User.ID, userID, "a refused action changes no session")
+	assert.Equal(t, ada.GroupID, groupID, "a refused action changes no group")
+	assert.Equal(t, 1, countRows(t, app.runtime.database, "slips"),
+		"a refused reset changes no domain rows")
+}
+
 func TestSandboxControlRoutesStayOffOutsideSandbox(t *testing.T) {
 	t.Parallel()
 
@@ -436,7 +797,7 @@ func TestSandboxControlRoutesStayOffOutsideSandbox(t *testing.T) {
 	handlers := auth.NewHandlers(zerolog.Nop(), store, cookies, nil, nil, true)
 	scope := groups.Scope(zerolog.Nop(), store, auth.UserFrom, cookies)
 	shell := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/dev/sandbox/reset" {
+		if strings.HasPrefix(r.URL.Path, "/dev/sandbox") {
 			http.NotFound(w, r)
 			return
 		}
@@ -446,15 +807,30 @@ func TestSandboxControlRoutesStayOffOutsideSandbox(t *testing.T) {
 
 	signed := httptest.NewRecorder()
 	cookies.SetSession(signed, user.ID)
+	sessionCookie := responseCookie(t, signed, auth.SessionCookie)
 
-	recorder := httptest.NewRecorder()
-	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/dev/sandbox/reset", nil)
-	request.Header.Set("Hx-Request", "true")
-	request.AddCookie(responseCookie(t, signed, auth.SessionCookie))
-	mux.ServeHTTP(recorder, request)
+	tests := []struct {
+		method string
+		path   string
+	}{
+		{method: http.MethodGet, path: "/dev/sandbox"},
+		{method: http.MethodPost, path: "/dev/sandbox/reset"},
+		{method: http.MethodPost, path: "/dev/sandbox/persona"},
+	}
+	for _, test := range tests {
+		t.Run(test.method+" "+test.path, func(t *testing.T) {
+			t.Parallel()
 
-	assert.Equal(t, http.StatusNotFound, recorder.Code,
-		"sandbox routes are mounted only when SUNDAY_SANDBOX=1")
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequestWithContext(t.Context(), test.method, test.path, nil)
+			request.Header.Set("Hx-Request", "true")
+			request.AddCookie(sessionCookie)
+			mux.ServeHTTP(recorder, request)
+
+			assert.Equal(t, http.StatusNotFound, recorder.Code,
+				"sandbox routes are mounted only when SUNDAY_SANDBOX=1")
+		})
+	}
 }
 
 // sandboxSnapshot is the domain state a reset should reproduce, with numeric

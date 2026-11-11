@@ -112,6 +112,7 @@ func run() error {
 			return err
 		}
 		runtime.cookies = cookies
+		runtime.renderer = renderer
 		refresher = runtime.refresher
 		slipService = runtime.slips
 		appNow = runtime.scenario.Now
