@@ -61,7 +61,27 @@ const (
 	FeaturedGameID = "401873038"
 	// FeaturedEventID is Parlay API's event ID for the same game.
 	FeaturedEventID = "dc56d980f527ffeef89940133b211b13"
+	// FeaturedHomeESPNID and FeaturedAwayESPNID are ESPN's team IDs for the
+	// featured game. The props sync reads both rosters before it matches
+	// player names, so both are registered.
+	FeaturedHomeESPNID = "1"
+	FeaturedAwayESPNID = "4"
 )
+
+// week9PropAthletes are the ESPN athletes behind the featured prop board. Each
+// one's game log is registered so the player research page has last-5 stats
+// instead of failing closed. Joe Mixon has props but is not on the captured
+// Bengals roster, so his lines stay unmatched until someone uses manual match.
+var week9PropAthletes = []struct {
+	Name      string
+	AthleteID string
+	Slug      string
+}{
+	{Name: "Joe Burrow", AthleteID: "3915511", Slug: "burrow"},
+	{Name: "Ja'Marr Chase", AthleteID: "4362628", Slug: "chase"},
+	{Name: "Tee Higgins", AthleteID: "4239993", Slug: "higgins"},
+	{Name: "Evan McPherson", AthleteID: "4360234", Slug: "mcpherson"},
+}
 
 // Fixture describes one registered replay response.
 type Fixture struct {
@@ -316,11 +336,66 @@ func morningFixtures() ([]Fixture, error) {
 		},
 	}
 
+	researchFixtures := week9FeaturedResearch()
+	fixtures = append(fixtures, researchFixtures...)
+
 	weatherFixtures, err := week9Weather()
 	if err != nil {
 		return nil, err
 	}
 	return append(fixtures, weatherFixtures...), nil
+}
+
+// week9FeaturedResearch answers the featured game's research surface: both team
+// rosters, the game summary's injury report, and the game logs behind the prop
+// board's players. The props sync reads the rosters before it matches names, so
+// opening the featured game's props spends no errors and resolves its players.
+func week9FeaturedResearch() []Fixture {
+	fixtures := []Fixture{
+		{
+			Name:       "espn-featured-home-roster",
+			Stage:      Morning,
+			Method:     http.MethodGet,
+			URL:        espn.DefaultBaseURL + "/teams/" + FeaturedHomeESPNID + "/roster",
+			File:       "internal/ingest/espn/testdata/roster_falcons.json",
+			Provenance: Captured,
+			Note:       "Captured from ESPN on 2026-11-11. Atlanta's roster, read by the props sync before it matches player names.",
+		},
+		{
+			Name:       "espn-featured-away-roster",
+			Stage:      Morning,
+			Method:     http.MethodGet,
+			URL:        espn.DefaultBaseURL + "/teams/" + FeaturedAwayESPNID + "/roster",
+			File:       "internal/ingest/espn/testdata/roster_bengals.json",
+			Provenance: Captured,
+			Note:       "Captured from ESPN on 2026-11-11. Cincinnati's roster, which resolves the featured prop board's players.",
+		},
+		{
+			Name:   "espn-week-9-featured-summary",
+			Stage:  Morning,
+			Method: http.MethodGet,
+			URL: endpoint(espn.DefaultBaseURL, "/summary", url.Values{
+				"event": {FeaturedGameID},
+			}),
+			File:       "internal/ingest/espn/testdata/summary_week9_featured.json",
+			Provenance: Captured,
+			Note:       "Captured from ESPN on 2026-11-11. The featured game's summary, whose injury report the research page shows.",
+		},
+	}
+
+	for _, athlete := range week9PropAthletes {
+		fixtures = append(fixtures, Fixture{
+			Name:       "espn-gamelog-" + athlete.Slug,
+			Stage:      Morning,
+			Method:     http.MethodGet,
+			URL:        espn.DefaultWebBaseURL + "/athletes/" + athlete.AthleteID + "/gamelog",
+			File:       "internal/ingest/espn/testdata/gamelog_" + athlete.Slug + ".json",
+			Provenance: Captured,
+			Note:       "Captured from ESPN on 2026-11-11. " + athlete.Name + "'s game log, behind the featured prop board's player research page.",
+		})
+	}
+
+	return fixtures
 }
 
 // week9StageScoreboards overrides the scoreboard for each later stage. Every
