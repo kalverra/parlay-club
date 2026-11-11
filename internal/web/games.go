@@ -249,37 +249,33 @@ func isPropRow(row db.Odds) bool {
 }
 
 // currentOdds drops rows left behind by an earlier sync. Game lines and props
-// are fetched independently and stamped with different fetch times; currentOdds
-// computes the newest FetchedAt separately for game-line rows and prop rows,
-// keeping rows that match the newest timestamp of their own sync group.
+// are fetched independently and stamped with different fetch times, and props
+// are synced one game at a time, so currentOdds computes the newest FetchedAt
+// separately for each game's game-line rows and prop rows. Keeping the game in
+// the key means loading one game's props later does not hide another game's
+// props.
 func currentOdds(rows []db.Odds) []db.Odds {
 	if len(rows) == 0 {
 		return rows
 	}
 
-	var newestGameLine, newestProp time.Time
+	type syncGroup struct {
+		gameID string
+		props  bool
+	}
+	newest := make(map[syncGroup]time.Time, len(rows))
 	for _, row := range rows {
-		if isPropRow(row) {
-			if row.FetchedAt.After(newestProp) {
-				newestProp = row.FetchedAt
-			}
-		} else {
-			if row.FetchedAt.After(newestGameLine) {
-				newestGameLine = row.FetchedAt
-			}
+		group := syncGroup{row.GameID, isPropRow(row)}
+		if row.FetchedAt.After(newest[group]) {
+			newest[group] = row.FetchedAt
 		}
 	}
 
 	current := make([]db.Odds, 0, len(rows))
 	for _, row := range rows {
-		if isPropRow(row) {
-			if !newestProp.IsZero() && row.FetchedAt.Equal(newestProp) {
-				current = append(current, row)
-			}
-		} else {
-			if !newestGameLine.IsZero() && row.FetchedAt.Equal(newestGameLine) {
-				current = append(current, row)
-			}
+		group := syncGroup{row.GameID, isPropRow(row)}
+		if !newest[group].IsZero() && row.FetchedAt.Equal(newest[group]) {
+			current = append(current, row)
 		}
 	}
 	return current

@@ -173,10 +173,18 @@ func (h *slipHandlers) pickSwap(w http.ResponseWriter, r *http.Request) {
 		h.serverError(w, err)
 		return
 	}
+	// Only unlocked legs can be swapped out. A kicked-off leg stays visible in
+	// the tray, but it is not a choice here.
+	legs := make([]TrayLegView, 0, len(tray.Legs))
+	for _, leg := range tray.Legs {
+		if !leg.Locked {
+			legs = append(legs, leg)
+		}
+	}
 	view := PickSwapView{
 		SlipID: slip.ID,
 		Text:   r.URL.Query().Get("text"),
-		Legs:   tray.Legs,
+		Legs:   legs,
 		Q:      r.URL.Query().Get("q"),
 		Cat:    r.URL.Query().Get("cat"),
 		Win:    r.URL.Query().Get("win"),

@@ -4,8 +4,8 @@ title: Analyzer
 type: concept
 summary: How the sharp-friend banner under a slip turns legs, games, weather, player stats, and nfelo's model into plain-Go warnings, and the tone those warnings keep.
 tags: [analyzer, warnings, banner, severity, tone, slips, weather, rules, nfelo, model, props, player-stats]
-sources: [internal/analyzer/analyzer.go, internal/analyzer/rules.go, internal/web/analyzer.go, internal/db/nfelo.go, internal/db/players.go, web/templates/partials.html]
-last_verified: 2026-11-09
+sources: [internal/analyzer/analyzer.go, internal/analyzer/rules.go, internal/web/analyzer.go, internal/web/pick.go, internal/db/nfelo.go, internal/db/players.go, web/templates/partials.html]
+last_verified: 2026-11-11
 ---
 
 # Analyzer
@@ -28,6 +28,16 @@ message, the severity, and a chip for every leg involved with its owner's name.
 The banner is part of the slip panel, so it refreshes with the panel on `slip-updated` and `board-updated`. A weather
 change needs no separate wiring: the next board refresh re-renders the slip, and the rules see the new forecast. See
 [Live updates](live-updates.md).
+
+## The pick tray
+
+The pick board's tray repeats only the warnings that name one of your own legs. `internal/web/pick.go` runs the same
+analyzer over the whole slip, then keeps a card when any leg it names belongs to the viewer. A heads-up about a
+friend's pick stays on the hub and out of your tray, where it would only be noise while you pick. A warning that names
+both your leg and theirs still appears, because it bears on the pick you are making.
+
+The tray refreshes with the pick board on `tray-updated` and `slip-updated`, so a new leg or a fresh forecast brings
+its warning without a reload. See [Slips](slips.md#the-pick-board).
 
 ## Tone
 

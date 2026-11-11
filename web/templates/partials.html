@@ -1186,38 +1186,32 @@
 
   <div class="space-y-2">
     {{range .Legs}}
-      {{if .Locked}}
-        <p class="rounded-lg border border-slate-800 px-3 py-2 text-sm text-slate-500">
-          {{.Selection}} &middot; locked
-        </p>
-      {{else}}
-        <form
-          hx-put="/legs/{{.ID}}"
-          hx-target="#pick-results"
-          hx-swap="outerHTML"
+      <form
+        hx-put="/legs/{{.ID}}"
+        hx-target="#pick-results"
+        hx-swap="outerHTML"
+      >
+        <input type="hidden" name="from" value="board">
+        <input type="hidden" name="q" value="{{$.Q}}">
+        <input type="hidden" name="cat" value="{{$.Cat}}">
+        <input type="hidden" name="win" value="{{$.Win}}">
+        <input type="hidden" name="sort" value="{{$.Sort}}">
+        <input type="hidden" name="game" value="{{$.Game}}">
+        <input type="hidden" name="game_id" value="{{$.Fields.GameID}}">
+        <input type="hidden" name="market_type" value="{{$.Fields.Market}}">
+        <input type="hidden" name="team" value="{{$.Fields.Team}}">
+        <input type="hidden" name="side" value="{{$.Fields.Side}}">
+        <input type="hidden" name="player_name" value="{{$.Fields.PlayerName}}">
+        {{if $.Fields.PlayerID}}<input type="hidden" name="player_id" value="{{$.Fields.PlayerID}}">{{end}}
+        {{if $.Fields.Line}}<input type="hidden" name="line" value="{{$.Fields.Line}}">{{end}}
+        <input type="hidden" name="odds" value="{{$.Fields.Odds}}">
+        <button
+          type="submit"
+          class="w-full rounded-lg border border-slate-700 bg-slate-800/60 px-3 py-2 text-left text-sm font-medium text-slate-200 hover:bg-slate-800"
         >
-          <input type="hidden" name="from" value="board">
-          <input type="hidden" name="q" value="{{$.Q}}">
-          <input type="hidden" name="cat" value="{{$.Cat}}">
-          <input type="hidden" name="win" value="{{$.Win}}">
-          <input type="hidden" name="sort" value="{{$.Sort}}">
-          <input type="hidden" name="game" value="{{$.Game}}">
-          <input type="hidden" name="game_id" value="{{$.Fields.GameID}}">
-          <input type="hidden" name="market_type" value="{{$.Fields.Market}}">
-          <input type="hidden" name="team" value="{{$.Fields.Team}}">
-          <input type="hidden" name="side" value="{{$.Fields.Side}}">
-          <input type="hidden" name="player_name" value="{{$.Fields.PlayerName}}">
-          {{if $.Fields.PlayerID}}<input type="hidden" name="player_id" value="{{$.Fields.PlayerID}}">{{end}}
-          {{if $.Fields.Line}}<input type="hidden" name="line" value="{{$.Fields.Line}}">{{end}}
-          <input type="hidden" name="odds" value="{{$.Fields.Odds}}">
-          <button
-            type="submit"
-            class="w-full rounded-lg border border-slate-700 bg-slate-800/60 px-3 py-2 text-left text-sm font-medium text-slate-200 hover:bg-slate-800"
-          >
-            Swap out {{.Selection}}
-          </button>
-        </form>
-      {{end}}
+          Swap out {{.Selection}}
+        </button>
+      </form>
     {{else}}
       <p class="text-sm text-slate-500">Every one of your picks has kicked off.</p>
     {{end}}
