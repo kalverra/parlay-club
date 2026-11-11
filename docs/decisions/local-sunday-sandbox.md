@@ -134,8 +134,9 @@ feature has to respect.
   fresh seed, and the controls page reads personas and groups from the database.
 - Replayed credit headers are static per response, so a repeated call sees the same balance. Both balances stay above
   the floors, which is what the guards need.
-- Only the featured game's prop board is registered. Opening another game's props fails visibly; the scenario is not a
-  tour of every props surface.
+- Only the featured game's card and research surface is registered: its prop board, both rosters, its summary, and the
+  game logs of its props players. Opening another game's props or research fails visibly; the scenario is not a tour of
+  every props surface.
 - With the outsider, the shared invite join works but leaves Dex in their own group, so switching back to Dex after
   joining hides the shared slip again until a reset. That is deliberate for the control and is not the ordinary member
   experience.

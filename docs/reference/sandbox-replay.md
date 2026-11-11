@@ -5,7 +5,7 @@ type: reference
 summary: The fail-closed HTTP transport and named week 9 response registry behind the local Sunday sandbox, the requests they answer, which fixtures are real captures versus derived snapshots, and how startup, reset, stages, seeded people, and scripted grades replay them.
 tags: [sandbox, replay, fixtures, testing, espn, weather, parlay-api, nfelo, provenance, offline, startup, clock, reset, seeding, personas, stages, grading]
 sources: [internal/sandbox/registry.go, internal/sandbox/transport.go, internal/sandbox/scenario.go, internal/sandbox/state.go, internal/sandbox/reset.go, internal/sandbox/seed.go, internal/sandbox/plan.go, internal/sandbox/sandbox_test.go, internal/sandbox/state_test.go, cmd/server/sandbox.go, cmd/server/main.go, internal/config/config.go, internal/ingest/espn/testdata/README.md, internal/ingest/odds/testdata/README.md, internal/ingest/weather/testdata/README.md, internal/ingest/nfelo/testdata/README.md]
-last_verified: 2026-11-10
+last_verified: 2026-11-11
 ---
 
 # Sandbox replay
@@ -22,17 +22,17 @@ their `*http.Client` changes.
 - A request matches on method, host, path, stage, and normalized query. Query parameters are sorted, and credential
   parameters (`apiKey`, `token`, `access_token`, in any capitalization or `-`/`_` spelling) are ignored. The synthetic
   key passed to `odds.NewClient` therefore never has to match the key in a capture.
-- The transport has no base transport and no network fallback. An unregistered request returns
-  `sandbox.ErrNoResponse` with the method, credential-free URL, and stage. Missing files, duplicate requests, and
-  incomplete fixtures fail `NewRegistry` before startup.
+- The transport has no base transport and no network fallback. An unregistered request returns `sandbox.ErrNoResponse`
+  with the method, credential-free URL, and stage. Missing files, duplicate requests, and incomplete fixtures fail
+  `NewRegistry` before startup.
 - Responses carry the saved status, headers, and body bytes. Each call gets a fresh body reader, so the transport is
   safe for the concurrent source goroutines.
 - Nothing here touches the response archive. The sandbox client's transport is the replay transport, not an
   `archive.Transport` wrapper, so replayed calls never enter `api_responses`.
 
 `SetStage` switches the snapshot set for later requests. Four stages are registered: `morning`, `early-loss`,
-`all-clear`, and `sunday-complete`. Each stage has a complete response set, including its own scoreboard snapshot and the
-supporting lines, projections, props, and forecasts that are due at its clock.
+`all-clear`, and `sunday-complete`. Each stage has a complete response set, including its own scoreboard snapshot and
+the supporting lines, projections, props, and forecasts that are due at its clock.
 
 ## Server startup
 
@@ -47,9 +47,9 @@ clock to the sandbox-only `sandbox_state` table. A later boot reads that row, re
 rebuild. The schema migrations stay untouched and ordinary dev keeps `./data/parlay.db`; sandbox mode ignores `DB_PATH`.
 See [Persistence](../concepts/persistence.md).
 
-The sandbox scenario clock is `2026-11-08T13:00:00Z` on a first boot: the week 9 Sunday morning. Refresh, slips, and
-the web handlers share it; auth cookies and SSE timers stay on real time. See
-[Data refresh](../concepts/data-refresh.md). A later stage moves the same clock to its fixed instant.
+The sandbox scenario clock is `2026-11-08T13:00:00Z` on a first boot: the week 9 Sunday morning. Refresh, slips, and the
+web handlers share it; auth cookies and SSE timers stay on real time. See [Data refresh](../concepts/data-refresh.md). A
+later stage moves the same clock to its fixed instant.
 
 ## Stages
 
@@ -65,9 +65,9 @@ through `slips.Service.SetLegResult`. It never infers a grade from a score or wr
 | `all-clear` | `2026-11-09T00:30:00Z` | Every Sunday game final with a scripted score; Monday night upcoming; slip locked; all six picks scripted `WON`; slip `WON`. |
 | `sunday-complete` | `2026-11-10T04:30:00Z` | Every Sunday and Monday game final with scores; slip locked; all six picks scripted `WON`. |
 
-The scripted scores keep the declared outcomes coherent: Cincinnati wins 31-24 for a 55-point total, Kansas City wins
-by 13 against a 9.5 spread, Philadelphia wins, and the Rams win by 11 in a 51-point game. Those are manual scripted
-grades for the sandbox, not auto-grading behavior.
+The scripted scores keep the declared outcomes coherent: Cincinnati wins 31-24 for a 55-point total, Kansas City wins by
+13 against a 9.5 spread, Philadelphia wins, and the Rams win by 11 in a 51-point game. Those are manual scripted grades
+for the sandbox, not auto-grading behavior.
 
 A stage change removes and recreates the seeded people, so the handler reissues the same browser's real session and
 group cookies. The route answers `HX-Refresh`, and the controller publishes the normal week and slip signals after the
@@ -95,8 +95,8 @@ One reset:
    commits.
 
 The schema, the migration version, and the sandbox-only `sandbox_state` row survive. The seeded people are Ada
-(`ada@sandbox.test`), Ben (`ben@sandbox.test`), and Cleo (`cleo@sandbox.test`) in the shared `Sunday Sandbox` group, plus
-Dex (`dex@sandbox.test`) outside it. The `Week 9 Sandbox` slip stays `OPEN` with six `PENDING` legs, two per shared
+(`ada@sandbox.test`), Ben (`ben@sandbox.test`), and Cleo (`cleo@sandbox.test`) in the shared `Sunday Sandbox` group,
+plus Dex (`dex@sandbox.test`) outside it. The `Week 9 Sandbox` slip stays `OPEN` with six `PENDING` legs, two per shared
 person. Stages refer to people and legs by symbolic IDs, not the numeric row IDs a reset creates.
 
 A reset removes and recreates the signed-in persona, so the handler reissues that browser's real session and group
@@ -109,7 +109,8 @@ first full build succeeds, so a failed first boot retries instead of restoring a
 
 `sandbox.Week9(fsys)` preloads every fixture from an `fs.FS` rooted at the repository, so the registry references the
 saved source files instead of copying large bodies. The morning set is the full scheduled slate, game lines, nfelo
-projections, every outdoor forecast, and the featured game's lazy prop board. Each later stage reuses those supporting
+projections, every outdoor forecast, the featured game's lazy prop board, and the research answers that board needs:
+both team rosters, the game summary, and the game logs behind its players. Each later stage reuses those supporting
 files with its stage name and swaps in a same-week scoreboard snapshot, so lines, projections, and due forecasts still
 replay at that stage's clock.
 
@@ -123,6 +124,13 @@ replay at that stage's clock.
 | `parlay-week-9-lines` | `GET parlay-api.com/.../odds?regions=us&markets=h2h,spreads,totals...` | `internal/ingest/odds/testdata/odds_nfl.json` | Captured from The Odds API 2026-11-07; same shape. |
 | `parlay-week-9-featured-props` | `GET parlay-api.com/.../props?eventId=dc56d980...&markets=...` | `internal/ingest/odds/testdata/props_sample.json` | **Derived.** Hand-built Parlay API props shape, not a live capture. |
 | `nfelo-week-9-projections` | `GET raw.githubusercontent.com/.../historic_projected_spreads.csv` | `internal/ingest/nfelo/testdata/historic_projected_spreads.csv` | Captured 2026-11-09, unedited. |
+| `espn-featured-home-roster` | `GET site.api.espn.com/.../teams/1/roster` | `internal/ingest/espn/testdata/roster_falcons.json` | Captured 2026-11-11. Read before the props sync matches player names. |
+| `espn-featured-away-roster` | `GET site.api.espn.com/.../teams/4/roster` | `internal/ingest/espn/testdata/roster_bengals.json` | Captured 2026-11-11. Resolves the featured prop board's players. |
+| `espn-week-9-featured-summary` | `GET site.api.espn.com/.../summary?event=401873038` | `internal/ingest/espn/testdata/summary_week9_featured.json` | Captured 2026-11-11. The research page's injury report. |
+| `espn-gamelog-burrow` | `GET site.web.api.espn.com/.../athletes/3915511/gamelog` | `internal/ingest/espn/testdata/gamelog_burrow.json` | Captured 2026-11-11. Player research last-5 games. |
+| `espn-gamelog-chase` | `GET site.web.api.espn.com/.../athletes/4362628/gamelog` | `internal/ingest/espn/testdata/gamelog_chase.json` | Captured 2026-11-11. Player research last-5 games. |
+| `espn-gamelog-higgins` | `GET site.web.api.espn.com/.../athletes/4239993/gamelog` | `internal/ingest/espn/testdata/gamelog_higgins.json` | Captured 2026-11-11. Player research last-5 games. |
+| `espn-gamelog-mcpherson` | `GET site.web.api.espn.com/.../athletes/4360234/gamelog` | `internal/ingest/espn/testdata/gamelog_mcpherson.json` | Captured 2026-11-11. Player research last-5 games. |
 | `weather-lumen` | Open-Meteo Lumen Field, `2026-11-08T21:00`–`23:00` | `internal/ingest/weather/testdata/forecast_lumen.json` | Captured 2026-11-07. |
 | `weather-arrowhead` | Open-Meteo Arrowhead, `2026-11-08T18:00`–`20:00` | `internal/ingest/weather/testdata/forecast_arrowhead.json` | **Derived.** |
 | `weather-hard-rock` | Open-Meteo Hard Rock, `2026-11-08T18:00`–`20:00` | `internal/ingest/weather/testdata/forecast_hard_rock.json` | **Derived.** |
@@ -134,9 +142,15 @@ replay at that stage's clock.
 | `weather-levis` | Open-Meteo Levi's, `2026-11-08T21:00`–`23:00` | `internal/ingest/weather/testdata/forecast_levis.json` | **Derived.** |
 | `weather-soldier` | Open-Meteo Soldier Field, `2026-11-09T01:00`–`03:00` | `internal/ingest/weather/testdata/forecast_soldier.json` | **Derived.** |
 
-The four indoor week 9 venues need no forecast. `forecast_highmark.json` remains a weather-client fixture, but the week 9
-sandbox does not register it because Buffalo plays at U.S. Bank Stadium, an indoor venue. The registry holds 60 fixtures:
-the 15 morning responses plus a 15-response set for each of the three later stages.
+The four indoor week 9 venues need no forecast. `forecast_highmark.json` remains a weather-client fixture, but the week
+9 sandbox does not register it because Buffalo plays at U.S. Bank Stadium, an indoor venue. The registry holds 88
+fixtures: the 22 morning responses plus a 22-response set for each of the three later stages.
+
+The featured game is the one game whose whole card and research surface is replayed. Opening its props syncs both
+rosters, so its prop board resolves real players instead of logging a replay miss, and the research page and player
+pages have an injury report and last-5 game logs. Joe Mixon has prop lines but is not on the captured Bengals roster, so
+his lines stay unmatched and exercise the manual-match flow. Every other game still fails closed on props and research,
+which is the intended visible error.
 
 ### Provenance
 
@@ -148,8 +162,8 @@ board, and the missing forecasts fill gaps without pretending a provider sent th
 
 ### Credit headers
 
-The three Parlay API fixtures carry `X-Requests-Remaining`, `X-Requests-Used`, and `X-Requests-Last`. Remaining starts at
-620 after the free event list, falls to 617 when the 3-credit line call is bought, and falls to 614 when the featured
+The three Parlay API fixtures carry `X-Requests-Remaining`, `X-Requests-Used`, and `X-Requests-Last`. Remaining starts
+at 620 after the free event list, falls to 617 when the 3-credit line call is bought, and falls to 614 when the featured
 props call is bought. Those balances sit above `refresh.OddsLinesFloor` (50) and `refresh.OddsPropsFloor` (150), so the
 normal event, line, and lazy prop paths enforce their floors instead of silently skipping work.
 
@@ -174,6 +188,8 @@ normal event, line, and lazy prop paths enforce their floors instead of silently
 - every outdoor kickoff resolves a three-hour forecast, including the captured Lumen window and a derived one;
 - nfelo returns a week 9 projection for every slate game;
 - the featured prop board parses through Parlay API's flat `/props` shape;
+- the featured game's rosters parse, its summary yields key-position injuries, and its four prop-board players have game
+  logs with games played;
 - an unknown week, an unregistered The Odds API request, an unknown stage, and a missing fixture file all fail closed.
 
 `internal/sandbox/state_test.go` covers the one-row stage record, rejects a stage the registry does not know, and checks
@@ -182,10 +198,13 @@ clients and refresh, asserts the whole morning landed offline with no archive ro
 the stage and clock survive a restart without re-fetching. It also resets twice and compares the people, memberships,
 slip, legs, results, activity, games, and sync state; proves the seeded people and slip are real service rows; checks
 that manual edits and a stale failure backoff disappear; shows a sentinel normal dev file is untouched; observes the
-post-commit week and slip signals; and proves the signed-in persona keeps a working session and shared group after reset.
+post-commit week and slip signals; and proves the signed-in persona keeps a working session and shared group after
+reset. One server test opens the featured game the way a browser does: it syncs props, resolves Joe Burrow against the
+replayed roster, reads the injury report, and fetches his game log, so a missing research fixture fails the suite
+instead of only showing up in the logs.
 
-For stages, the server tests select each target directly and in sequence, reset back to morning, and check that early loss
-settles the slip `LOST` while five legs stay pending, all-clear wins every leg with every Sunday game final, and Sunday
-completion makes all 14 games final. They exercise the HTTP stage route with real cookies and render the controls, games,
-and slip pages, reject unknown stages without changing rows, clock, or cookies, race a page-load kick against a stage
-change, and prove the stage route is absent outside sandbox mode.
+For stages, the server tests select each target directly and in sequence, reset back to morning, and check that early
+loss settles the slip `LOST` while five legs stay pending, all-clear wins every leg with every Sunday game final, and
+Sunday completion makes all 14 games final. They exercise the HTTP stage route with real cookies and render the
+controls, games, and slip pages, reject unknown stages without changing rows, clock, or cookies, race a page-load kick
+against a stage change, and prove the stage route is absent outside sandbox mode.

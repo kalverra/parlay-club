@@ -286,6 +286,47 @@ func TestSandboxBootstrapReplaysTheMorningOffline(t *testing.T) {
 	assert.Equal(t, len(seed.Legs), countRows(t, database, "legs"))
 }
 
+func TestSandboxFeaturedGameResearchReplaysWithoutAMiss(t *testing.T) {
+	t.Parallel()
+
+	_, store, runtime := openSandbox(t, &live.Hub{}, sandboxCookies())
+
+	// Opening the featured game's card syncs both rosters before the prop board.
+	require.NoError(t, runtime.refresher.SyncGameProps(t.Context(), sandbox.FeaturedGameID))
+	for _, team := range []string{"ATL", "CIN"} {
+		roster, err := store.RosterForTeam(t.Context(), team)
+		require.NoError(t, err, team)
+		assert.NotEmpty(t, roster, team)
+	}
+
+	athleteID, team, err := store.ResolvePlayerMatch(t.Context(), "Joe Burrow", "ATL", "CIN")
+	require.NoError(t, err)
+	assert.Equal(t, "3915511", athleteID, "the props board's players resolve against the replayed roster")
+	assert.Equal(t, "CIN", team)
+
+	rows, err := store.OddsForGame(t.Context(), sandbox.FeaturedGameID)
+	require.NoError(t, err)
+	matched := 0
+	for _, row := range rows {
+		if row.PlayerName != "" && row.Team != "" {
+			matched++
+		}
+	}
+	assert.Positive(t, matched, "prop lines carry the team their player plays for")
+
+	// The research page syncs the summary, props, and the player's game log.
+	require.NoError(t, runtime.refresher.SyncGameResearch(t.Context(), sandbox.FeaturedGameID))
+	game, err := store.GameByID(t.Context(), sandbox.FeaturedGameID)
+	require.NoError(t, err)
+	require.NotNil(t, game.InjuriesJSON)
+	assert.NotEqual(t, "[]", *game.InjuriesJSON, "the research page has an injury report")
+
+	require.NoError(t, runtime.refresher.SyncPlayerResearch(t.Context(), athleteID))
+	log, err := store.PlayerGameLog(t.Context(), athleteID)
+	require.NoError(t, err)
+	assert.Positive(t, log.GamesPlayed, "player research has last-5 games")
+}
+
 func TestSandboxRestartRestoresStageAndClock(t *testing.T) {
 	t.Parallel()
 
@@ -1343,6 +1384,8 @@ func syncKeys(t *testing.T, store *db.Store, week db.Week) []string {
 		refresh.OddsLinesSource,
 		refresh.NfeloProjectionsSource,
 		refresh.OddsPropsSource(sandbox.FeaturedGameID),
+		refresh.RosterSource(sandbox.FeaturedHomeESPNID),
+		refresh.RosterSource(sandbox.FeaturedAwayESPNID),
 	}
 	games, err := store.GamesForWeek(t.Context(), week.ID)
 	require.NoError(t, err)

@@ -29,7 +29,7 @@ func TestWeek9RegistryPreloadsEveryResponse(t *testing.T) {
 	t.Parallel()
 
 	fixtures := week9Registry(t).Fixtures()
-	require.Len(t, fixtures, 60, "the morning set plus a full response set for each later stage")
+	require.Len(t, fixtures, 88, "the morning set plus a full response set for each later stage")
 
 	names := make(map[string]bool, len(fixtures))
 	byStage := make(map[sandbox.Stage][]sandbox.Fixture, len(sandbox.Stages()))
@@ -52,11 +52,11 @@ func TestWeek9RegistryPreloadsEveryResponse(t *testing.T) {
 		}
 	}
 
-	assert.Equal(t, 17, captured,
-		"morning captures plus the reused events, lines, projections, and Lumen forecast in each stage")
+	assert.Equal(t, 45, captured,
+		"morning captures plus the reused events, lines, projections, Lumen forecast, and research in each stage")
 	assert.Equal(t, 43, derived, "scripted scoreboards, the hand-built props board, and derived forecasts")
 	for _, stage := range sandbox.Stages() {
-		assert.Len(t, byStage[stage], 15, "stage %s has a complete response set", stage)
+		assert.Len(t, byStage[stage], 22, "stage %s has a complete response set", stage)
 		scoreboards := 0
 		for _, fixture := range byStage[stage] {
 			assert.Equal(t, stage, fixture.Stage, fixture.Name)
@@ -296,6 +296,55 @@ func TestWeek9FeaturedPropsReplayThroughParlayAPI(t *testing.T) {
 	}
 	assert.Contains(t, markets, odds.MarketPassYds)
 	assert.Contains(t, markets, odds.MarketTeamTotal)
+}
+
+func TestWeek9FeaturedResearchReplaysRostersSummaryAndLogs(t *testing.T) {
+	t.Parallel()
+
+	client := espn.NewClient("", replayClient(t))
+
+	rosters := []struct{ teamID, abbreviation, player string }{
+		{teamID: sandbox.FeaturedHomeESPNID, abbreviation: "ATL", player: "Matthew Bergeron"},
+		{teamID: sandbox.FeaturedAwayESPNID, abbreviation: "CIN", player: "Joe Burrow"},
+	}
+	for _, team := range rosters {
+		roster, err := client.Roster(t.Context(), team.teamID)
+		require.NoError(t, err, team.abbreviation)
+		assert.NotEmpty(t, roster, team.abbreviation)
+
+		names := make([]string, 0, len(roster))
+		for _, player := range roster {
+			names = append(names, player.FullName)
+		}
+		assert.Contains(t, names, team.player, team.abbreviation)
+	}
+
+	// The props sync reads both rosters before it matches player names, so the
+	// featured game's away roster has to resolve the prop board's players.
+	rawInjuries, err := client.SummaryInjuries(t.Context(), sandbox.FeaturedGameID)
+	require.NoError(t, err)
+	teams, err := espn.ParseInjuries(rawInjuries)
+	require.NoError(t, err)
+	require.Len(t, teams, 2, "the summary reports both teams")
+	reported := 0
+	for _, team := range teams {
+		reported += len(team.Injuries)
+	}
+	assert.Positive(t, reported, "the research page has key-position injuries to show")
+
+	logs := []struct{ name, athleteID string }{
+		{name: "Joe Burrow", athleteID: "3915511"},
+		{name: "Ja'Marr Chase", athleteID: "4362628"},
+		{name: "Tee Higgins", athleteID: "4239993"},
+		{name: "Evan McPherson", athleteID: "4360234"},
+	}
+	for _, log := range logs {
+		got, err := client.GameLog(t.Context(), log.athleteID)
+		require.NoError(t, err, log.name)
+		assert.Equal(t, log.athleteID, got.AthleteID)
+		assert.Positive(t, got.GamesPlayed, log.name)
+		assert.NotEmpty(t, got.Markets, log.name)
+	}
 }
 
 func TestReplayTransportFailsClosed(t *testing.T) {
