@@ -39,6 +39,9 @@ type PickResultsView struct {
 	Unloaded   []board.UnloadedGame
 	Started    int
 	Empty      bool
+	NoGames    bool
+	NoLines    bool
+	AllStarted bool
 	AtLimit    bool
 	Categories []PickChip
 	Windows    []PickChip
@@ -274,7 +277,16 @@ func (h *slipHandlers) pickPageData(
 	if q.GameID != "" {
 		results.GameGroups = groupByGame(results.Rows)
 	}
-	results.Empty = len(result.Rows) == 0 && len(result.Unloaded) == 0
+	results.NoGames = len(games) == 0
+	results.AllStarted = len(games) > 0 && result.Started == len(games)
+	results.NoLines = !results.NoGames && !results.AllStarted && len(rows) == 0
+	if results.NoLines {
+		// With no lines at all, one "Load them" prompt per game is noise. The
+		// week's empty state says what is missing once.
+		results.Unloaded = nil
+	}
+	results.Empty = len(result.Rows) == 0 && len(result.Unloaded) == 0 &&
+		!results.NoGames && !results.NoLines && !results.AllStarted
 	return PickPage{
 		SlipID:   slip.ID,
 		SlipName: slip.Name,

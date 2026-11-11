@@ -206,5 +206,5 @@ instead of only showing up in the logs.
 For stages, the server tests select each target directly and in sequence, reset back to morning, and check that early
 loss settles the slip `LOST` while five legs stay pending, all-clear wins every leg with every Sunday game final, and
 Sunday completion makes all 14 games final. They exercise the HTTP stage route with real cookies and render the
-controls, games, and slip pages, reject unknown stages without changing rows, clock, or cookies, race a page-load kick
+controls, pick board, and hub pages, reject unknown stages without changing rows, clock, or cookies, race a page-load kick
 against a stage change, and prove the stage route is absent outside sandbox mode.

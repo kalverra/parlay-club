@@ -154,6 +154,37 @@ func TestNextStepCoversEveryState(t *testing.T) {
 			wantLabel: "Picks are closed",
 		},
 		{
+			name: "a locked viewer sees closed when someone never finished",
+			slip: open,
+			members: []db.SlipMember{
+				nextMember(ada, true),
+				nextMember(sam, false),
+			},
+			legs:      []db.Leg{nextLeg(ada.ID), nextLeg(ada.ID), nextLeg(sam.ID)},
+			games:     []db.Game{kickedOff},
+			viewerID:  ada.ID,
+			wantStep:  slips.StepClosed,
+			wantOn:    []string{"Sam"},
+			wantLabel: "Picks are closed",
+		},
+		{
+			name: "a locked viewer still waits when everyone has their legs",
+			slip: open,
+			members: []db.SlipMember{
+				nextMember(ada, true),
+				nextMember(sam, false),
+			},
+			legs: []db.Leg{
+				nextLeg(ada.ID), nextLeg(ada.ID),
+				nextLeg(sam.ID), nextLeg(sam.ID),
+			},
+			games:     []db.Game{kickedOff},
+			viewerID:  ada.ID,
+			wantStep:  slips.StepWaiting,
+			wantOn:    []string{"Sam"},
+			wantLabel: "Waiting on Sam",
+		},
+		{
 			name:      "unlocking returns a full viewer to lock in",
 			slip:      open,
 			members:   []db.SlipMember{nextMember(ada, false)},

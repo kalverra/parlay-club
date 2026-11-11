@@ -281,7 +281,7 @@ Effort: medium (copy, states, and a full walk through the sandbox)
 
 - [x] Put export first in the `export` step with the prices note, and add the share-sheet nudge in the `waiting` step;
       test both and update `export.md`
-- [ ] Give each empty state a real screen (only "Just me", a group with no slip, a week with no lines, a member still
+- [x] Give each empty state a real screen (only "Just me", a group with no slip, a week with no lines, a member still
       missing at the deadline) and walk the full flow in the sandbox as two personas at phone width; update
       `local-dev.md` and `sandbox-replay.md` where they name `/` or `/games`
 - [ ] Docs: rewrite `plan/product.md#Screens` for the new flow, delete what `docs/` now covers, and run

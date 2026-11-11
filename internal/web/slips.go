@@ -193,6 +193,7 @@ type ActivityView struct {
 
 // SlipCreateView is the create-slip form. Season, SeasonType, and WeekNum hold
 // a past week the slate sync never stored; filling them overrides WeekID.
+// Solo says the group has only the viewer so far.
 type SlipCreateView struct {
 	Weeks         []WeekOption
 	WeekID        int64
@@ -203,6 +204,7 @@ type SlipCreateView struct {
 	LegsPerMember int
 	Members       []MemberOption
 	Selected      []int64
+	Solo          bool
 	Error         string
 }
 
@@ -1125,6 +1127,7 @@ func (h *slipHandlers) createView(
 		SeasonType:    2,
 		LegsPerMember: slips.DefaultLegsPerMember,
 		Members:       memberOptions,
+		Solo:          len(memberOptions) == 1,
 	}
 	if week == nil {
 		return view, nil
@@ -1458,7 +1461,12 @@ func nextView(next slips.Next, slip db.Slip, viewerID int64, games []db.Game) Ne
 	case slips.StepDone:
 		view.Detail = "This slip is graded."
 	case slips.StepClosed:
-		view.Detail = "Every game this week has kicked off."
+		if len(next.WaitingOn) > 0 {
+			view.Detail = slips.NameList(next.WaitingOn) +
+				" never finished picking, so this slip can't lock in this week."
+		} else {
+			view.Detail = "Every game this week has kicked off."
+		}
 	case slips.StepJoin:
 		view.Detail = "You're in this group, but not on this slip yet."
 		view.Action = &NextAction{

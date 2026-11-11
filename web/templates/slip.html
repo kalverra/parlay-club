@@ -1,7 +1,25 @@
 {{define "content"}}
 <section class="space-y-3"{{if .Slip}} data-live-url="/slips/{{.Slip.ID}}/events"{{end}}>
   {{if .Creating}}
-    <h1 class="text-xl font-semibold">Slip</h1>
+    <div class="space-y-1">
+      <h1 class="text-xl font-semibold">
+        {{if .Create.WeekID}}Start {{.Page.WeekLabel}}&rsquo;s slip{{else}}Start a slip{{end}}
+      </h1>
+      {{if .Create.WeekID}}
+        <p class="text-sm text-slate-400">
+          No slip for {{.Page.WeekLabel}} yet. Check who&rsquo;s picking, then everyone adds their legs.
+        </p>
+      {{else}}
+        <p class="text-sm text-slate-400">
+          No week is loaded yet. Add a past week below to start a slip.
+        </p>
+      {{end}}
+      {{if .Create.Solo}}
+        <p class="text-sm text-slate-500">
+          It&rsquo;s just you for now. Invite friends from Groups whenever you like.
+        </p>
+      {{end}}
+    </div>
     <form
       class="space-y-4 rounded-xl border border-slate-800 bg-slate-900 p-4"
       hx-post="/slips"
@@ -13,14 +31,16 @@
           {{.Create.Error}}
         </p>
       {{end}}
-      <label class="block text-sm text-slate-300">
-        Week
-        <select name="week_id" class="mt-1 w-full rounded-md border border-slate-700 bg-slate-800 px-3 py-2">
-          {{range .Create.Weeks}}
-            <option value="{{.ID}}"{{if eq .ID $.Create.WeekID}} selected{{end}}>{{.Label}}</option>
-          {{end}}
-        </select>
-      </label>
+      {{if .Create.Weeks}}
+        <label class="block text-sm text-slate-300">
+          Week
+          <select name="week_id" class="mt-1 w-full rounded-md border border-slate-700 bg-slate-800 px-3 py-2">
+            {{range .Create.Weeks}}
+              <option value="{{.ID}}"{{if eq .ID $.Create.WeekID}} selected{{end}}>{{.Label}}</option>
+            {{end}}
+          </select>
+        </label>
+      {{end}}
       <fieldset class="space-y-2 rounded-lg border border-slate-800 p-3">
         <legend class="px-1 text-sm text-slate-300">Or add a past week</legend>
         <p class="text-xs text-slate-500">

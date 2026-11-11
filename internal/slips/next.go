@@ -19,7 +19,8 @@ const (
 	StepJoin Step = "join"
 	// StepPick means the viewer still needs legs.
 	StepPick Step = "pick"
-	// StepClosed means the viewer still needs legs but every game has kicked off.
+	// StepClosed means the week's picks are over, either because the viewer
+	// still needs legs or because someone else never finished theirs.
 	StepClosed Step = "closed"
 	// StepLockIn means the viewer has every leg and can lock in.
 	StepLockIn Step = "lock_in"
@@ -82,6 +83,16 @@ func NextStep(
 			next.Step = StepExport
 			return next
 		}
+		// A member who never finished picking can no longer catch up once every
+		// game has kicked off. The slip cannot lock in this week, so say so
+		// instead of waiting on a pick that cannot arrive.
+		if noGamesLeft(games, now) {
+			if short := membersShort(members, legs, slip.LegsPerMember); len(short) > 0 {
+				next.Step = StepClosed
+				next.WaitingOn = short
+				return next
+			}
+		}
 		next.Step = StepWaiting
 		next.WaitingOn = waitingOn(members, viewerID)
 		return next
@@ -108,7 +119,7 @@ func (n Next) Label() string {
 	case StepLockIn:
 		return "Ready to lock in"
 	case StepWaiting:
-		return "Waiting on " + nameList(n.WaitingOn)
+		return "Waiting on " + NameList(n.WaitingOn)
 	case StepExport:
 		return "Ready to place"
 	case StepDone:
@@ -164,6 +175,23 @@ func waitingOn(members []db.SlipMember, viewerID int64) []string {
 	return names
 }
 
+// membersShort names the members with fewer legs than the slip requires, in
+// member order. A locked member always has every leg, so this normally names
+// the people who never finished picking.
+func membersShort(members []db.SlipMember, legs []db.Leg, limit int) []string {
+	counts := make(map[int64]int, len(members))
+	for _, leg := range legs {
+		counts[leg.UserID]++
+	}
+	names := make([]string, 0, len(members))
+	for _, member := range members {
+		if counts[member.User.ID] < limit {
+			names = append(names, member.User.Name)
+		}
+	}
+	return names
+}
+
 // firstKickoff is the earliest game still ahead of now, or nil when the week
 // has none left.
 func firstKickoff(games []db.Game, now time.Time) *time.Time {
@@ -195,9 +223,9 @@ func noGamesLeft(games []db.Game, now time.Time) bool {
 	return true
 }
 
-// nameList joins names the way a sentence does: "Ben", "Ben and Sam", or
+// NameList joins names the way a sentence does: "Ben", "Ben and Sam", or
 // "Ben, Sam, and Kim".
-func nameList(names []string) string {
+func NameList(names []string) string {
 	switch len(names) {
 	case 0:
 		return "everyone"
