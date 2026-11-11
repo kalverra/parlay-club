@@ -898,3 +898,329 @@
   </div>
 </div>
 {{end}}
+
+{{define "pick-option"}}
+  {{if .PickID}}
+    <form
+      hx-delete="/legs/{{.PickID}}?from=board"
+      hx-target="closest .pick-row"
+      hx-swap="outerHTML"
+    >
+      <button
+        type="submit"
+        class="w-full rounded-lg border border-emerald-700 bg-emerald-950/50 px-3 py-2 text-left text-sm font-medium text-emerald-300 hover:bg-emerald-900/60"
+      >
+        <span class="block truncate">{{.Text}}</span>
+        <span class="text-xs font-normal text-emerald-400/80">{{.Price}} &middot; tap to remove</span>
+      </button>
+    </form>
+  {{else if .AtLimit}}
+    <button
+      type="button"
+      class="w-full rounded-lg border border-slate-700 bg-slate-800/60 px-3 py-2 text-left text-sm font-medium text-slate-200 hover:bg-slate-800"
+      hx-get="{{.SwapURL}}"
+      hx-target="#pick-swap-body"
+      hx-swap="innerHTML"
+    >
+      <span class="block truncate">{{.Text}}</span>
+      <span class="text-xs font-normal text-slate-400">{{.Price}} &middot; swap in</span>
+    </button>
+  {{else}}
+    <form
+      hx-post="/slips/{{.SlipID}}/legs"
+      hx-target="closest .pick-row"
+      hx-swap="outerHTML"
+    >
+      <input type="hidden" name="quick" value="1">
+      <input type="hidden" name="from" value="board">
+      <input type="hidden" name="game_id" value="{{.GameID}}">
+      <input type="hidden" name="market_type" value="{{.Market}}">
+      <input type="hidden" name="team" value="{{.Team}}">
+      <input type="hidden" name="side" value="{{.Side}}">
+      <input type="hidden" name="player_name" value="{{.PlayerName}}">
+      {{if .PlayerID}}<input type="hidden" name="player_id" value="{{.PlayerID}}">{{end}}
+      {{if .Line}}<input type="hidden" name="line" value="{{.Line}}">{{end}}
+      <input type="hidden" name="odds" value="{{.Odds}}">
+      <button
+        type="submit"
+        class="w-full rounded-lg border border-slate-700 bg-slate-800/60 px-3 py-2 text-left text-sm font-medium text-slate-200 hover:bg-slate-800"
+      >
+        <span class="block truncate">{{.Text}}</span>
+        <span class="text-xs font-normal text-slate-400">{{.Price}} &middot; tap to add</span>
+      </button>
+    </form>
+  {{end}}
+{{end}}
+
+{{define "pick-row"}}
+<div class="pick-row flex items-center justify-between gap-3 rounded-lg border border-slate-800 bg-slate-950/40 px-3 py-2">
+  <div class="min-w-0">
+    <p class="truncate text-sm font-medium">{{.Text}}</p>
+    <p class="mt-0.5 text-xs text-slate-500">
+      <a
+        href="/slips/{{.SlipID}}/pick?game={{.GameID}}"
+        class="hover:text-slate-300"
+        >{{.Matchup}}</a
+      >{{if .KickoffISO}} &middot;
+        <time datetime="{{.KickoffISO}}">{{.KickoffISO}}</time>
+      {{end}}
+    </p>
+  </div>
+  <div class="w-40 shrink-0">{{template "pick-option" .}}</div>
+</div>
+{{end}}
+
+{{define "pick-results"}}
+<div
+  id="pick-results"
+  class="space-y-3"
+  hx-get="{{.SelfURL}}"
+  hx-trigger="board-updated from:body"
+  hx-swap="outerHTML"
+>
+  <form
+    class="rounded-xl border border-slate-800 bg-slate-900 p-3"
+    hx-get="/slips/{{.SlipID}}/pick/results"
+    hx-target="#pick-results"
+    hx-swap="outerHTML"
+    hx-trigger="input changed delay:250ms, submit"
+  >
+    <label for="pick-q" class="sr-only">Search picks</label>
+    <input
+      id="pick-q"
+      type="search"
+      name="q"
+      value="{{.Search}}"
+      hx-preserve
+      placeholder="Search a player, team, or market"
+      autocomplete="off"
+      class="w-full rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500"
+    >
+    <input type="hidden" name="cat" value="{{.Category}}">
+    <input type="hidden" name="win" value="{{.Window}}">
+    <input type="hidden" name="sort" value="{{.Sort}}">
+    <input type="hidden" name="game" value="{{.Game}}">
+  </form>
+
+  <div class="flex flex-wrap items-center gap-1.5">
+    {{range .Categories}}
+      <a
+        href="{{.PushURL}}"
+        hx-get="{{.Href}}"
+        hx-target="#pick-results"
+        hx-swap="outerHTML"
+        hx-push-url="{{.PushURL}}"
+        class="rounded-full px-2.5 py-1 text-xs font-medium {{if .Active}}bg-sky-600 text-white{{else}}border border-slate-700 bg-slate-800 text-slate-300 hover:bg-slate-700{{end}}"
+        >{{.Label}}{{if .Count}} <span class="opacity-70">{{.Count}}</span>{{end}}</a
+      >
+    {{end}}
+  </div>
+
+  <div class="flex flex-wrap items-center gap-1.5">
+    {{range .Windows}}
+      <a
+        href="{{.PushURL}}"
+        hx-get="{{.Href}}"
+        hx-target="#pick-results"
+        hx-swap="outerHTML"
+        hx-push-url="{{.PushURL}}"
+        class="rounded-full px-2.5 py-1 text-xs font-medium {{if .Active}}bg-sky-600 text-white{{else}}border border-slate-700 bg-slate-800 text-slate-300 hover:bg-slate-700{{end}}"
+        >{{.Label}}{{if .Count}} <span class="opacity-70">{{.Count}}</span>{{end}}</a
+      >
+    {{end}}
+  </div>
+
+  <div class="flex flex-wrap items-center justify-between gap-2">
+    <div class="flex flex-wrap items-center gap-1.5">
+      <span class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Sort</span>
+      {{range .Sorts}}
+        <a
+          href="{{.PushURL}}"
+          hx-get="{{.Href}}"
+          hx-target="#pick-results"
+          hx-swap="outerHTML"
+          hx-push-url="{{.PushURL}}"
+          class="rounded-full px-2 py-0.5 text-xs font-medium {{if .Active}}text-sky-300 underline{{else}}text-slate-400 hover:text-slate-200{{end}}"
+          >{{.Label}}</a
+        >
+      {{end}}
+    </div>
+    {{if .Game}}
+      <a
+        href="/slips/{{.SlipID}}/pick"
+        class="text-xs font-medium text-slate-400 hover:text-slate-200"
+        >Show the whole week &rarr;</a
+      >
+    {{end}}
+  </div>
+
+  {{if .GameGroups}}
+    {{range .GameGroups}}
+      <section class="rounded-xl border border-slate-800 bg-slate-900 p-3">
+        <div class="flex items-start justify-between gap-3">
+          <div class="min-w-0">
+            <p class="truncate font-semibold">{{.Matchup}}</p>
+            <p class="mt-0.5 text-xs text-slate-500">
+              {{if .KickoffISO}}<time datetime="{{.KickoffISO}}">{{.KickoffISO}}</time>{{end}}
+            </p>
+          </div>
+          <a
+            href="/research?game_id={{.GameID}}"
+            class="shrink-0 text-xs font-medium text-sky-400 hover:text-sky-300"
+            >Research &rarr;</a
+          >
+        </div>
+        <div class="mt-2 grid grid-cols-2 gap-2">
+          {{range .Options}}
+            <div class="pick-row">{{template "pick-option" .}}</div>
+          {{end}}
+        </div>
+      </section>
+    {{end}}
+  {{else if .Rows}}
+    <div class="space-y-1.5">
+      {{range .Rows}}{{template "pick-row" .}}{{end}}
+    </div>
+  {{end}}
+
+  {{range .Unloaded}}
+    <div class="flex items-center justify-between gap-3 rounded-xl border border-sky-800 bg-sky-950/40 p-3">
+      <p class="min-w-0 text-sm text-sky-200">
+        Props for {{.Matchup}} aren&rsquo;t loaded yet.
+      </p>
+      <button
+        type="button"
+        class="shrink-0 rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-sky-500"
+        hx-get="/games/{{.GameID}}/props?slip={{$.SlipID}}"
+        hx-swap="none"
+      >
+        Load them
+      </button>
+    </div>
+  {{end}}
+
+  {{if .Empty}}
+    <p class="rounded-xl border border-dashed border-slate-700 bg-slate-900 p-4 text-sm text-slate-400">
+      Nothing matches that search. Try a team, a player, or a market.
+    </p>
+  {{end}}
+
+  {{if .Started}}
+    <p class="px-1 text-xs text-slate-500">
+      {{.Started}} game{{if ne .Started 1}}s{{end}} already kicked off and {{if eq .Started 1}}is{{else}}are{{end}} hidden.
+    </p>
+  {{end}}
+</div>
+{{end}}
+
+{{define "pick-tray"}}
+<div
+  id="pick-tray"
+  class="space-y-3 rounded-xl border border-slate-800 bg-slate-900 p-4"
+  hx-get="/slips/{{.SlipID}}/tray"
+  hx-trigger="tray-updated from:body, slip-updated from:body"
+  hx-swap="outerHTML"
+>
+  <div class="flex items-center justify-between gap-3">
+    <h2 class="text-sm font-semibold text-slate-300">Your picks</h2>
+    <span class="text-xs text-slate-400">{{.Picked}} of {{.Limit}}</span>
+  </div>
+
+  <ul class="space-y-2">
+    {{range .Legs}}
+      <li class="flex items-start justify-between gap-2 rounded-lg border border-slate-800 px-3 py-2">
+        <div class="min-w-0">
+          <p class="truncate text-sm font-medium">{{.Selection}}</p>
+          <p class="text-xs text-slate-400">{{.Odds}}</p>
+        </div>
+        {{if .Locked}}
+          <span class="shrink-0 text-xs text-slate-500">Locked</span>
+        {{else}}
+          <form
+            hx-delete="/legs/{{.ID}}?from=tray"
+            hx-target="#pick-tray"
+            hx-swap="outerHTML"
+          >
+            <button type="submit" class="text-xs text-rose-400 hover:underline">Remove</button>
+          </form>
+        {{end}}
+      </li>
+    {{else}}
+      <li class="text-sm text-slate-500">No picks yet.</li>
+    {{end}}
+  </ul>
+
+  {{if .Warnings}}
+    <div class="space-y-2">
+      {{range .Warnings}}
+        <div class="rounded-lg border px-3 py-2 {{.Class}}" data-rule="{{.Rule}}">
+          <p class="text-[11px] font-semibold uppercase tracking-wide">{{.Severity}}</p>
+          <p class="mt-1 text-sm font-medium">{{.Message}}</p>
+        </div>
+      {{end}}
+    </div>
+  {{end}}
+
+  <a
+    href="{{.ActionHref}}"
+    class="block w-full rounded-lg bg-sky-600 px-3 py-2 text-center text-sm font-semibold text-white hover:bg-sky-500"
+  >
+    {{.ActionLabel}}
+  </a>
+</div>
+{{end}}
+
+{{define "pick-swap"}}
+<div class="space-y-3">
+  <div class="flex items-center justify-between gap-3">
+    <h2 class="text-lg font-semibold">Swap which pick?</h2>
+    <button
+      type="button"
+      class="rounded-md border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800"
+      data-close-swap-sheet
+    >
+      Close
+    </button>
+  </div>
+  <p class="text-sm text-slate-400">For {{.Text}}</p>
+
+  <div class="space-y-2">
+    {{range .Legs}}
+      {{if .Locked}}
+        <p class="rounded-lg border border-slate-800 px-3 py-2 text-sm text-slate-500">
+          {{.Selection}} &middot; locked
+        </p>
+      {{else}}
+        <form
+          hx-put="/legs/{{.ID}}"
+          hx-target="#pick-results"
+          hx-swap="outerHTML"
+        >
+          <input type="hidden" name="from" value="board">
+          <input type="hidden" name="q" value="{{$.Q}}">
+          <input type="hidden" name="cat" value="{{$.Cat}}">
+          <input type="hidden" name="win" value="{{$.Win}}">
+          <input type="hidden" name="sort" value="{{$.Sort}}">
+          <input type="hidden" name="game" value="{{$.Game}}">
+          <input type="hidden" name="game_id" value="{{$.Fields.GameID}}">
+          <input type="hidden" name="market_type" value="{{$.Fields.Market}}">
+          <input type="hidden" name="team" value="{{$.Fields.Team}}">
+          <input type="hidden" name="side" value="{{$.Fields.Side}}">
+          <input type="hidden" name="player_name" value="{{$.Fields.PlayerName}}">
+          {{if $.Fields.PlayerID}}<input type="hidden" name="player_id" value="{{$.Fields.PlayerID}}">{{end}}
+          {{if $.Fields.Line}}<input type="hidden" name="line" value="{{$.Fields.Line}}">{{end}}
+          <input type="hidden" name="odds" value="{{$.Fields.Odds}}">
+          <button
+            type="submit"
+            class="w-full rounded-lg border border-slate-700 bg-slate-800/60 px-3 py-2 text-left text-sm font-medium text-slate-200 hover:bg-slate-800"
+          >
+            Swap out {{.Selection}}
+          </button>
+        </form>
+      {{end}}
+    {{else}}
+      <p class="text-sm text-slate-500">Every one of your picks has kicked off.</p>
+    {{end}}
+  </div>
+</div>
+{{end}}

@@ -254,7 +254,7 @@ Effort: medium (new routes and a pure step function over existing data)
 
 Parallel: surfaces
 
-- [ ] Add `internal/board` (`Build`, `Search`) and `Store.OddsForWeek`, serve `GET /slips/{id}/pick` and its results
+- [x] Add `internal/board` (`Build`, `Search`) and `Store.OddsForWeek`, serve `GET /slips/{id}/pick` and its results
       partial with search, category and window chips, sorts, the one-game view, toggle add and remove, and the "Load
       them" prompt; point the hub's pick action at it, make `/games` a 303, take `?slip=` on `/games/{id}/props`, and
       test search, sorts, windows, and zero prop syncs; update `slips.md`, `routes.md`, and `data-refresh.md`

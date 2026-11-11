@@ -1,0 +1,26 @@
+{{define "content"}}
+<section class="space-y-3" data-live-url="/slips/{{.SlipID}}/events">
+  <div class="flex items-center justify-between gap-3">
+    <a
+      href="/slips/{{.SlipID}}"
+      class="rounded-md border border-slate-700 px-2 py-1 text-sm text-slate-200 hover:bg-slate-800"
+      >&larr; Slip</a
+    >
+    <h1 class="min-w-0 truncate text-lg font-semibold">{{.SlipName}}</h1>
+  </div>
+
+  <div class="grid gap-3 lg:grid-cols-[minmax(0,1fr)_20rem]">
+    <div class="min-w-0">{{template "pick-results" .Results}}</div>
+    <aside class="min-w-0 lg:sticky lg:top-20 lg:self-start">
+      {{template "pick-tray" .Tray}}
+    </aside>
+  </div>
+
+  <dialog id="pick-swap" class="leg-sheet" aria-label="Swap a pick">
+    <div
+      id="pick-swap-body"
+      class="rounded-t-2xl border border-slate-800 bg-slate-900 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-2xl"
+    ></div>
+  </dialog>
+</section>
+{{end}}

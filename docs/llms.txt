@@ -12,7 +12,7 @@
 - [Groups](concepts/groups.md): How groups split people into shared clubs, how invites and leaving work, and how the active group scopes what a person sees.
 - [Live updates](concepts/live-updates.md): How a slip page hears about changes through one SSE stream, and how the hub, deadlines, and client reconnect keep that stream cheap.
 - [Persistence](concepts/persistence.md): How one SQLite file holds every slip and every cached response, how Litestream restores and replicates it on Cloud Run, why only one process may write to it, and how the local sandbox keeps its own file and stage row.
-- [Slips](concepts/slips.md): How a group builds one shared parlay a week from the slate, with the hub's next-step banner and deadline, members, legs, quick-add, create-slip defaults, grading, the editing and locking rules, and research.
+- [Slips](concepts/slips.md): How a group builds one shared parlay a week from the slate, with the hub's next-step banner and deadline, the searchable pick board and its tray, members, legs, quick-add, create-slip defaults, grading, the editing and locking rules, and research.
 
 ## Decision
 

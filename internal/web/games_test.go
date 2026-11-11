@@ -52,7 +52,7 @@ func addGame(t *testing.T, fixture *slipFixture, kickoff time.Time) db.Game {
 }
 
 // addGameOdds writes three books with deliberately different lines and prices.
-func addGameOdds(t *testing.T, store *db.Store, gameID string) time.Time {
+func addGameOdds(t *testing.T, store *db.Store, gameID string) {
 	t.Helper()
 
 	fetched := time.Date(2026, time.November, 7, 15, 42, 0, 0, time.UTC)
@@ -94,174 +94,6 @@ func addGameOdds(t *testing.T, store *db.Store, gameID string) time.Time {
 	changed, err := store.UpsertOdds(t.Context(), rows)
 	require.NoError(t, err)
 	require.True(t, changed)
-	return fetched
-}
-
-func TestGamesPageShowsCardsLinesWeatherAndNote(t *testing.T) {
-	t.Parallel()
-
-	fixture := newSlipFixture(t, 2)
-	kickoff := gameKickoff()
-	game := addGame(t, fixture, kickoff)
-	fetched := addGameOdds(t, fixture.store, game.ID)
-	_, err := fixture.store.SetGameWeather(t.Context(), game.ID, 55, 22, 30, 0.2, time.Now().UTC())
-	require.NoError(t, err)
-
-	recorder := httptest.NewRecorder()
-	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/games", nil)
-	fixture.handler.ServeHTTP(recorder, request)
-
-	require.Equal(t, http.StatusOK, recorder.Code)
-	body := html.UnescapeString(recorder.Body.String())
-
-	assert.Contains(t, body, "MIA @ BUF")
-	assert.Contains(t, body, fmt.Sprintf(`datetime="%s"`, kickoff.UTC().Format(time.RFC3339)))
-	assert.Contains(t, body, "Upcoming")
-	assert.Contains(t, body, "💨 22 mph")
-	assert.Contains(t, body, "🌧")
-	assert.Contains(t, body, "BUF -3")
-	assert.Contains(t, body, "MIA +3")
-	assert.Contains(t, body, "BUF ML")
-	assert.Contains(t, body, "MIA ML")
-	assert.Contains(t, body, "Over 47.5")
-	assert.Contains(t, body, "Under 47.5")
-	assert.Contains(t, body, "Custom leg")
-	assert.Contains(t, body, fmt.Sprintf(`hx-get="/games/%s/props"`, game.ID))
-	assert.Contains(t, body, `hx-trigger="toggle once"`)
-	assert.Contains(t, body, fmt.Sprintf(`hx-target="#game-props-%s"`, game.ID))
-	assert.Contains(t, body, "Lines as of")
-	assert.Contains(t, body, fetched.Format("3:04 PM")+" UTC")
-}
-
-func TestGamesPageShowsLiveAndFinalStatus(t *testing.T) {
-	t.Parallel()
-
-	fixture := newSlipFixture(t, 2)
-	kickoff := gameKickoff()
-	base := db.Game{
-		WeekID:     fixture.week.ID,
-		HomeTeam:   "BUF",
-		AwayTeam:   "MIA",
-		HomeName:   "Buffalo Bills",
-		AwayName:   "Miami Dolphins",
-		HomeESPNID: "2",
-		AwayESPNID: "15",
-		Kickoff:    kickoff,
-		VenueID:    new("3915"),
-		VenueName:  new("Highmark Stadium"),
-		Indoor:     true,
-		UpdatedAt:  time.Now().UTC(),
-	}
-	live := base
-	live.ID = "401700001"
-	live.Status = db.GameLive
-	live.HomeScore = new(14)
-	live.AwayScore = new(7)
-	_, err := fixture.store.UpsertGame(t.Context(), live)
-	require.NoError(t, err)
-
-	final := base
-	final.ID = "401700002"
-	final.Status = db.GameFinal
-	final.HomeScore = new(24)
-	final.AwayScore = new(17)
-	_, err = fixture.store.UpsertGame(t.Context(), final)
-	require.NoError(t, err)
-
-	recorder := httptest.NewRecorder()
-	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/games", nil)
-	fixture.handler.ServeHTTP(recorder, request)
-
-	require.Equal(t, http.StatusOK, recorder.Code)
-	body := html.UnescapeString(recorder.Body.String())
-	assert.Contains(t, body, "Live")
-	assert.Contains(t, body, "Final")
-	assert.Contains(t, body, "MIA 7 - BUF 14")
-	assert.Contains(t, body, "MIA 17 - BUF 24")
-	assert.Contains(t, body, "🏠 Indoor")
-}
-
-func TestGamesPageIgnoresRowsFromAnOlderSync(t *testing.T) {
-	t.Parallel()
-
-	fixture := newSlipFixture(t, 2)
-	game := addGame(t, fixture, gameKickoff())
-	fetched := addGameOdds(t, fixture.store, game.ID)
-
-	stale := fetched.Add(-time.Hour)
-	_, err := fixture.store.UpsertOdds(t.Context(), []db.Odds{{
-		GameID:     game.ID,
-		Book:       "betrivers",
-		MarketType: "ML",
-		Team:       "BUF",
-		Side:       "TEAM",
-		Price:      1000,
-		FetchedAt:  stale,
-	}})
-	require.NoError(t, err)
-
-	recorder := httptest.NewRecorder()
-	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/games", nil)
-	fixture.handler.ServeHTTP(recorder, request)
-
-	require.Equal(t, http.StatusOK, recorder.Code)
-	body := html.UnescapeString(recorder.Body.String())
-	assert.Contains(t, body, "-150", "the current median moneyline still shows")
-	assert.NotContains(t, body, "+1000", "a price from an older sync is left off the board")
-}
-
-func TestGamesPageCountsMoneylineOnlyBoardsAsHavingLines(t *testing.T) {
-	t.Parallel()
-
-	fixture := newSlipFixture(t, 2)
-	game := addGame(t, fixture, gameKickoff())
-
-	fetched := time.Date(2026, time.November, 7, 15, 42, 0, 0, time.UTC)
-	_, err := fixture.store.UpsertOdds(t.Context(), []db.Odds{{
-		GameID:     game.ID,
-		Book:       "draftkings",
-		MarketType: "ML",
-		Team:       "BUF",
-		Side:       "TEAM",
-		Price:      -150,
-		FetchedAt:  fetched,
-	}})
-	require.NoError(t, err)
-
-	recorder := httptest.NewRecorder()
-	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/games", nil)
-	fixture.handler.ServeHTTP(recorder, request)
-
-	require.Equal(t, http.StatusOK, recorder.Code)
-	body := html.UnescapeString(recorder.Body.String())
-	assert.Contains(t, body, "BUF ML")
-	assert.NotContains(t, body, "No lines yet.")
-}
-
-func TestGamesPageUsesTheHomeBookFirst(t *testing.T) {
-	t.Parallel()
-
-	fixture := newSlipFixture(t, 2)
-	game := addGame(t, fixture, gameKickoff())
-	addGameOdds(t, fixture.store, game.ID)
-
-	user, err := fixture.store.SetUserHomeBook(t.Context(), fixture.user.ID, new("fanduel"))
-	require.NoError(t, err)
-	handler := gamesHandler(t, fixture, user)
-
-	recorder := httptest.NewRecorder()
-	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/games", nil)
-	handler.ServeHTTP(recorder, request)
-
-	require.Equal(t, http.StatusOK, recorder.Code)
-	body := html.UnescapeString(recorder.Body.String())
-
-	assert.Contains(t, body, "BUF -3.5")
-	assert.Contains(t, body, "MIA +3.5")
-	assert.Contains(t, body, "Over 48.5")
-	assert.Contains(t, body, "Under 48.5")
-	assert.Contains(t, body, "-105")
-	assert.Contains(t, body, "-115")
 }
 
 func TestQuickAddCreatesTheSelectedLeg(t *testing.T) {
@@ -379,10 +211,6 @@ func TestCustomLegFormTargetsTheGameCard(t *testing.T) {
 
 // gamesHandler rebuilds the web routes for a different signed-in user, which
 // is how the home-book test changes the profile after the fixture is built.
-func gamesHandler(t *testing.T, fixture *slipFixture, user db.User) http.Handler {
-	t.Helper()
-	return gamesHandlerWithRefresher(t, fixture, user, nil)
-}
 
 func gamesHandlerWithRefresher(
 	t *testing.T,
@@ -596,70 +424,4 @@ func TestGamePropsHandler(t *testing.T) {
 	assert.NotContains(t, bodyLocked, `<form hx-post=`)
 	assert.Contains(t, bodyLocked, "BUF Over 24.5")
 	assert.Contains(t, bodyLocked, "Over 265.5 Pass Yds")
-}
-
-func TestCurrentOddsIndependentSyncGroupsAndNewestOdds(t *testing.T) {
-	t.Parallel()
-
-	fixture := newSlipFixture(t, 2)
-	game := addGame(t, fixture, gameKickoff())
-
-	gameLineTime := time.Date(2026, time.November, 7, 12, 0, 0, 0, time.UTC)
-	propTime := time.Date(2026, time.November, 7, 14, 0, 0, 0, time.UTC)
-
-	// Game lines fetched at 12:00
-	_, err := fixture.store.UpsertOdds(t.Context(), []db.Odds{
-		{
-			GameID:     game.ID,
-			Book:       "draftkings",
-			MarketType: "ML",
-			Team:       "BUF",
-			Side:       "TEAM",
-			Price:      -150,
-			FetchedAt:  gameLineTime,
-		},
-		{
-			GameID:     game.ID,
-			Book:       "draftkings",
-			MarketType: "SPREAD",
-			Team:       "BUF",
-			Side:       "TEAM",
-			Line:       new(-3.0),
-			Price:      -110,
-			FetchedAt:  gameLineTime,
-		},
-	})
-	require.NoError(t, err)
-
-	// Newer prop sync fetched at 14:00 (after gameLineTime)
-	_, err = fixture.store.UpsertOdds(t.Context(), []db.Odds{
-		{
-			GameID:     game.ID,
-			Book:       "draftkings",
-			MarketType: "PASS_YDS",
-			Team:       "BUF",
-			PlayerName: "Josh Allen",
-			Side:       "OVER",
-			Line:       new(245.5),
-			Price:      -110,
-			FetchedAt:  propTime,
-		},
-	})
-	require.NoError(t, err)
-
-	recorder := httptest.NewRecorder()
-	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/games", nil)
-	fixture.handler.ServeHTTP(recorder, request)
-
-	require.Equal(t, http.StatusOK, recorder.Code)
-	body := html.UnescapeString(recorder.Body.String())
-
-	// Newer prop sync does NOT drop game lines; card still has lines
-	assert.Contains(t, body, "BUF -3")
-	assert.Contains(t, body, "BUF ML")
-	assert.NotContains(t, body, "No lines yet.")
-
-	// Footer timestamp comes strictly from game-line rows (12:00 UTC), not prop sync (14:00 UTC)
-	assert.Contains(t, body, "datetime=\"2026-11-07T12:00:00Z\"")
-	assert.NotContains(t, body, "datetime=\"2026-11-07T14:00:00Z\"")
 }

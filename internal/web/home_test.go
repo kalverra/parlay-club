@@ -225,7 +225,7 @@ func TestOpeningASlipFromAnotherGroupSwitchesTheActiveGroup(t *testing.T) {
 	assert.Contains(t, body, "Lake House Week 9")
 	assert.Equal(t, []int64{fixture.second.ID}, fixture.selections)
 	assert.Contains(t, body, fmt.Sprintf(`href="/groups/%d/week"`, fixture.second.ID))
-	assert.Contains(t, body, `href="/games"`, "the hub keeps Games reachable")
+	assert.Contains(t, body, fmt.Sprintf(`href="/slips/%d/pick"`, created.ID), "the hub keeps the pick board reachable")
 }
 
 func TestOpeningASlipOutsideEveryGroupIs404(t *testing.T) {
