@@ -4,7 +4,7 @@ title: Persistence
 type: concept
 summary: How one SQLite file holds every slip and every cached response, how Litestream restores and replicates it on Cloud Run, why only one process may write to it, and how the local sandbox keeps its own file and stage row.
 tags: [persistence, sqlite, litestream, gcs, backup, restore, cloud-run, single-instance, wal, sandbox]
-sources: [Dockerfile, deploy/entrypoint.sh, deploy/litestream.yml, internal/db/db.go, internal/sandbox/state.go, internal/sandbox/scenario.go, cmd/server/main.go, cmd/server/sandbox.go]
+sources: [Dockerfile, deploy/entrypoint.sh, deploy/litestream.yml, internal/db/db.go, internal/sandbox/state.go, internal/sandbox/scenario.go, internal/sandbox/reset.go, internal/sandbox/seed.go, cmd/server/main.go, cmd/server/sandbox.go]
 last_verified: 2026-11-10
 ---
 
@@ -44,6 +44,12 @@ The sandbox adds one table of its own: `sandbox_state`, a single row holding the
 first boot runs the morning sync and then writes the `morning` row. A later boot reads the row, restores the stage and
 clock, and leaves the domain rows alone, which is why an Air restart keeps manual edits. Delete
 `data/sunday-sandbox.db*` to rebuild from the morning.
+
+`POST /dev/sandbox/reset` is the in-app rebuild. It deletes the disposable domain, sync, and archive rows in one
+transaction but keeps the schema, the migration version, and `sandbox_state`. It then runs the morning ingest again and
+recreates the fixed personas, shared group, outsider, editable slip, and named legs through the real sign-in, group,
+slip, and leg services. The stage row is saved before the rebuild so the app and data agree while it runs; a failed
+rebuild answers an error and the next reset can try again. The normal `./data/parlay.db` is never opened.
 
 ## Boot in the container
 

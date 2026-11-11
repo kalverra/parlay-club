@@ -90,7 +90,7 @@ func TestHealthz(t *testing.T) {
 	t.Parallel()
 
 	recorder := httptest.NewRecorder()
-	newMux(http.NotFoundHandler(), http.NotFoundHandler(), newTestHandlers(), nil, passthrough, nil).
+	newMux(http.NotFoundHandler(), http.NotFoundHandler(), newTestHandlers(), nil, passthrough, nil, nil).
 		ServeHTTP(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/healthz", nil))
 
 	assert.Equal(t, http.StatusOK, recorder.Code)
@@ -104,7 +104,7 @@ func TestMuxProtectsShell(t *testing.T) {
 	shell := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	})
-	mux := newMux(shell, http.NotFoundHandler(), newTestHandlers(), nil, passthrough, nil)
+	mux := newMux(shell, http.NotFoundHandler(), newTestHandlers(), nil, passthrough, nil, nil)
 
 	recorder := httptest.NewRecorder()
 	mux.ServeHTTP(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/games", nil))
@@ -119,7 +119,7 @@ func TestMuxServesStaticWithoutAuth(t *testing.T) {
 	static := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	})
-	mux := newMux(http.NotFoundHandler(), static, newTestHandlers(), nil, passthrough, nil)
+	mux := newMux(http.NotFoundHandler(), static, newTestHandlers(), nil, passthrough, nil, nil)
 
 	recorder := httptest.NewRecorder()
 	mux.ServeHTTP(recorder, httptest.NewRequestWithContext(
@@ -166,7 +166,7 @@ func TestMuxScopesShellToActiveGroup(t *testing.T) {
 		w.WriteHeader(http.StatusNoContent)
 	})
 	kicks := 0
-	mux := newMux(shell, http.NotFoundHandler(), handlers, nil, scope, func() { kicks++ })
+	mux := newMux(shell, http.NotFoundHandler(), handlers, nil, scope, func() { kicks++ }, nil)
 
 	signed := httptest.NewRecorder()
 	cookies.SetSession(signed, user.ID)
