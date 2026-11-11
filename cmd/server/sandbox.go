@@ -144,10 +144,79 @@ func (r *sandboxRuntime) bootstrap(ctx context.Context) error {
 // people and legs the browser can use. One reset at a time, and page-load kicks
 // wait their turn behind it.
 func (r *sandboxRuntime) Reset(ctx context.Context) (sandbox.Seed, error) {
+	return r.Stage(ctx, sandbox.Morning)
+}
+
+// Stage selects one scripted situation. Every stage rebuilds the morning first,
+// so each control works from any previous state, then runs the real refresh and
+// the manifest's locking and manual grades. One stage or reset at a time, and
+// page-load kicks wait their turn so an older snapshot cannot land after the
+// chosen stage.
+func (r *sandboxRuntime) Stage(ctx context.Context, stage sandbox.Stage) (sandbox.Seed, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	return r.rebuildMorning(ctx, true)
+	plan, ok := sandbox.PlanFor(stage)
+	if !ok {
+		return sandbox.Seed{}, fmt.Errorf("sandbox: unknown stage %q", stage)
+	}
+	if stage == sandbox.Morning {
+		return r.rebuildMorning(ctx, true)
+	}
+
+	seed, err := r.rebuildMorning(ctx, true)
+	if err != nil {
+		return seed, err
+	}
+
+	// Set the clock and replay stage before saving and refreshing, so the
+	// scoreboard, weather, lines, pickers, and slip all read the same instant.
+	state := sandbox.State{Stage: stage, Now: plan.Now}
+	r.scenario.Set(state)
+	r.transport.SetStage(stage)
+	if err := r.state.Save(ctx, state); err != nil {
+		return seed, err
+	}
+	if err := r.refresher.RunOnce(ctx); err != nil {
+		return seed, fmt.Errorf("sandbox %s refresh: %w", stage, err)
+	}
+	if err := r.applyPlan(ctx, seed, plan); err != nil {
+		return seed, err
+	}
+
+	r.publishSeed(seed)
+	return seed, nil
+}
+
+// applyPlan locks the shared slip and records the manifest's scripted manual
+// grades through the ordinary slip service. It never writes result columns or
+// infers an outcome from a score.
+func (r *sandboxRuntime) applyPlan(ctx context.Context, seed sandbox.Seed, plan sandbox.StagePlan) error {
+	if plan.Lock {
+		for _, person := range seed.People {
+			if !person.Persona.Shared {
+				continue
+			}
+			if err := r.slips.LockIn(ctx, person.User.ID, seed.Slip.ID); err != nil {
+				return fmt.Errorf("sandbox %s: lock in %s: %w", plan.Stage, person.Persona.ID, err)
+			}
+		}
+	}
+
+	for _, grade := range plan.Grades {
+		legID, ok := seed.Legs[grade.Leg]
+		if !ok {
+			return fmt.Errorf("sandbox %s: no seeded leg %q", plan.Stage, grade.Leg)
+		}
+		actor, ok := seed.Person(grade.Actor)
+		if !ok {
+			return fmt.Errorf("sandbox %s: no seeded persona %q", plan.Stage, grade.Actor)
+		}
+		if _, err := r.slips.SetLegResult(ctx, actor.User.ID, legID, grade.Result); err != nil {
+			return fmt.Errorf("sandbox %s: grade %s: %w", plan.Stage, grade.Leg, err)
+		}
+	}
+	return nil
 }
 
 // Seed returns the people and legs the last build created. It is empty after a
@@ -249,6 +318,44 @@ type sandboxPersonaView struct {
 	GroupName string
 }
 
+// sandboxStageView is one situation control on the sandbox page.
+type sandboxStageView struct {
+	ID          sandbox.Stage
+	Name        string
+	Description string
+	Current     bool
+}
+
+// sandboxStageViews names the four scripted situations in baseline-first order.
+func sandboxStageViews(current sandbox.Stage) []sandboxStageView {
+	return []sandboxStageView{
+		{
+			ID:          sandbox.Morning,
+			Name:        "Sunday morning",
+			Description: "Full scheduled week, open slip, every pick pending.",
+			Current:     current == sandbox.Morning,
+		},
+		{
+			ID:          sandbox.EarlyLoss,
+			Name:        "Early loss",
+			Description: "Live Madrid game, locked slip, one scripted losing pick.",
+			Current:     current == sandbox.EarlyLoss,
+		},
+		{
+			ID:          sandbox.AllClear,
+			Name:        "All clear",
+			Description: "Every Sunday game final, every scripted pick won, Monday still upcoming.",
+			Current:     current == sandbox.AllClear,
+		},
+		{
+			ID:          sandbox.SundayComplete,
+			Name:        "Sunday complete",
+			Description: "Every Sunday and Monday game final with scores.",
+			Current:     current == sandbox.SundayComplete,
+		},
+	}
+}
+
 // sandboxControlsPage is the standalone sandbox screen. It names the live
 // scenario and every seeded person so a tester can move between them without
 // editing cookies by hand.
@@ -260,6 +367,7 @@ type sandboxControlsPage struct {
 	CurrentName  string
 	CurrentEmail string
 	GroupName    string
+	Stages       []sandboxStageView
 	Personas     []sandboxPersonaView
 	InviteToken  string
 }
@@ -270,6 +378,7 @@ type sandboxControlsPage struct {
 func (r *sandboxRuntime) MountRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /dev/sandbox", r.controls)
 	mux.HandleFunc("POST /dev/sandbox/reset", r.reset)
+	mux.HandleFunc("POST /dev/sandbox/stage", r.selectStage)
 	mux.HandleFunc("POST /dev/sandbox/persona", r.switchPersona)
 }
 
@@ -300,6 +409,7 @@ func (r *sandboxRuntime) controls(w http.ResponseWriter, req *http.Request) {
 		WhenLabel:    state.Now.UTC().Format("Mon Jan 2, 3:04 PM MST"),
 		CurrentName:  user.Name,
 		CurrentEmail: user.Email,
+		Stages:       sandboxStageViews(state.Stage),
 	}
 	if group, ok := groups.From(req.Context()); ok {
 		page.GroupName = group.Name
@@ -397,7 +507,40 @@ func (r *sandboxRuntime) reset(w http.ResponseWriter, req *http.Request) {
 		http.Error(w, "Sandbox reset failed. Check the server log and try again.", http.StatusInternalServerError)
 		return
 	}
+	r.finishRebuild(w, user, seed)
+}
 
+// selectStage rebuilds the morning and applies one scripted situation. An
+// unknown stage changes nothing and answers 422.
+func (r *sandboxRuntime) selectStage(w http.ResponseWriter, req *http.Request) {
+	user, ok := auth.UserFrom(req.Context())
+	if !ok {
+		http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+		return
+	}
+	if err := req.ParseForm(); err != nil {
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+	stage, ok := sandbox.StageByName(req.PostForm.Get("stage"))
+	if !ok {
+		http.Error(w, "Unknown sandbox stage.", http.StatusUnprocessableEntity)
+		return
+	}
+
+	seed, err := r.Stage(req.Context(), stage)
+	if err != nil {
+		r.logger.Error().Err(err).Str("stage", string(stage)).Msg("sandbox stage")
+		http.Error(w, "Sandbox stage failed. Check the server log and try again.", http.StatusInternalServerError)
+		return
+	}
+	r.finishRebuild(w, user, seed)
+}
+
+// finishRebuild reissues the acting browser's session and group after a rebuild
+// that removed and recreated the seeded people. A signed-in person who was not
+// part of the seed is cleared and sent back to sign-in.
+func (r *sandboxRuntime) finishRebuild(w http.ResponseWriter, user db.User, seed sandbox.Seed) {
 	if person, found := seed.PersonByEmail(user.Email); found {
 		r.cookies.SetSession(w, person.User.ID)
 		r.cookies.SetGroup(w, person.GroupID)
@@ -406,8 +549,8 @@ func (r *sandboxRuntime) reset(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// The signed-in person was not one of the seeded personas, so reset removed
-	// them. Clear the stale cookies and let the browser sign in again.
+	// The signed-in person was not one of the seeded personas, so the rebuild
+	// removed them. Clear the stale cookies and let the browser sign in again.
 	r.cookies.ClearSession(w)
 	r.cookies.ClearGroup(w)
 	w.Header().Set("Hx-Redirect", "/login")

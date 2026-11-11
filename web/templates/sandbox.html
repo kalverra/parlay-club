@@ -36,6 +36,42 @@
 
   <section class="rounded-xl border border-slate-800 bg-slate-900 p-4">
     <div>
+      <h2 class="text-sm font-semibold text-slate-300">Stages</h2>
+      <p class="mt-1 text-xs text-slate-500">
+        Every stage rebuilds Sunday morning, runs the real refresh, locks the shared slip, and records scripted manual
+        grades. The analyzer never infers a result from a score.
+      </p>
+    </div>
+
+    <ul class="mt-3 space-y-2">
+      {{range .Stages}}
+        <li class="flex flex-col gap-2 rounded-lg border border-slate-800 px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
+          <div class="min-w-0">
+            <p class="truncate text-sm font-medium text-slate-200">{{.Name}}</p>
+            <p class="text-xs text-slate-500">{{.Description}}</p>
+          </div>
+          {{if .Current}}
+            <span class="shrink-0 self-start rounded-full border border-emerald-800 bg-emerald-950/40 px-2 py-1 text-xs font-medium text-emerald-300 sm:self-auto">
+              Current
+            </span>
+          {{else}}
+            <form class="shrink-0 self-start sm:self-auto" hx-post="/dev/sandbox/stage" hx-swap="none">
+              <input type="hidden" name="stage" value="{{.ID}}">
+              <button
+                type="submit"
+                class="w-full rounded-lg border border-slate-700 px-3 py-2 text-sm font-medium text-slate-200 hover:bg-slate-800 sm:w-auto"
+              >
+                Select {{.Name}}
+              </button>
+            </form>
+          {{end}}
+        </li>
+      {{end}}
+    </ul>
+  </section>
+
+  <section class="rounded-xl border border-slate-800 bg-slate-900 p-4">
+    <div>
       <h2 class="text-sm font-semibold text-slate-300">Personas</h2>
       <p class="mt-1 text-xs text-slate-500">
         Ada, Ben, and Cleo share the sandbox slip. Dex stays outside it until they accept the invite.

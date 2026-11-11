@@ -70,13 +70,20 @@ func (s *StateStore) Load(ctx context.Context) (State, error) {
 	if strings.TrimSpace(stage) == "" {
 		return State{}, errors.New("sandbox state has no stage")
 	}
-	return State{Stage: Stage(stage), Now: parsed}, nil
+	parsedStage := Stage(stage)
+	if !parsedStage.Valid() {
+		return State{}, fmt.Errorf("sandbox state has unknown stage %q", stage)
+	}
+	return State{Stage: parsedStage, Now: parsed}, nil
 }
 
 // Save writes the current stage and clock. It replaces the one row.
 func (s *StateStore) Save(ctx context.Context, state State) error {
 	if strings.TrimSpace(string(state.Stage)) == "" {
 		return errors.New("sandbox state needs a stage")
+	}
+	if !state.Stage.Valid() {
+		return fmt.Errorf("sandbox state has unknown stage %q", state.Stage)
 	}
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO sandbox_state (id, stage, now) VALUES (1, ?, ?)

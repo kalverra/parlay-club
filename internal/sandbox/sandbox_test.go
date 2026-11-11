@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -28,17 +29,18 @@ func TestWeek9RegistryPreloadsEveryResponse(t *testing.T) {
 	t.Parallel()
 
 	fixtures := week9Registry(t).Fixtures()
-	require.Len(t, fixtures, 15)
+	require.Len(t, fixtures, 60, "the morning set plus a full response set for each later stage")
 
 	names := make(map[string]bool, len(fixtures))
+	byStage := make(map[sandbox.Stage][]sandbox.Fixture, len(sandbox.Stages()))
 	captured, derived := 0, 0
 	for _, fixture := range fixtures {
 		assert.NotEmpty(t, fixture.Name)
 		assert.NotEmpty(t, fixture.URL)
 		assert.NotEmpty(t, fixture.Note, fixture.Name)
 		assert.False(t, names[fixture.Name], "fixture name %q is reused", fixture.Name)
-		assert.Equal(t, sandbox.Morning, fixture.Stage, fixture.Name)
 		names[fixture.Name] = true
+		byStage[fixture.Stage] = append(byStage[fixture.Stage], fixture)
 
 		switch fixture.Provenance {
 		case sandbox.Captured:
@@ -50,8 +52,88 @@ func TestWeek9RegistryPreloadsEveryResponse(t *testing.T) {
 		}
 	}
 
-	assert.Equal(t, 5, captured, "scoreboard, events, lines, projections, and Lumen are captures")
-	assert.Equal(t, 10, derived, "the hand-built props board and nine forecasts are derived")
+	assert.Equal(t, 17, captured,
+		"morning captures plus the reused events, lines, projections, and Lumen forecast in each stage")
+	assert.Equal(t, 43, derived, "scripted scoreboards, the hand-built props board, and derived forecasts")
+	for _, stage := range sandbox.Stages() {
+		assert.Len(t, byStage[stage], 15, "stage %s has a complete response set", stage)
+		scoreboards := 0
+		for _, fixture := range byStage[stage] {
+			assert.Equal(t, stage, fixture.Stage, fixture.Name)
+			if strings.HasSuffix(fixture.URL, "/scoreboard") {
+				scoreboards++
+			}
+		}
+		assert.Equal(t, 1, scoreboards, "stage %s answers exactly one scoreboard request", stage)
+	}
+}
+
+func TestWeek9StageScoreboardsReplayCoherentGames(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		stage          sandbox.Stage
+		wantLive       int
+		wantFinal      int
+		wantScheduled  int
+		featuredStatus espn.Status
+		homeScore      int
+		awayScore      int
+	}{
+		{
+			stage: sandbox.EarlyLoss, wantLive: 1, wantFinal: 0, wantScheduled: 13,
+			featuredStatus: espn.Live, homeScore: 17, awayScore: 10,
+		},
+		{
+			stage: sandbox.AllClear, wantLive: 0, wantFinal: 13, wantScheduled: 1,
+			featuredStatus: espn.Final, homeScore: 24, awayScore: 31,
+		},
+		{
+			stage: sandbox.SundayComplete, wantLive: 0, wantFinal: 14, wantScheduled: 0,
+			featuredStatus: espn.Final, homeScore: 24, awayScore: 31,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(string(test.stage), func(t *testing.T) {
+			t.Parallel()
+
+			client := replayClientAt(t, test.stage)
+			board, err := espn.NewClient("", client).Scoreboard(t.Context(), espn.ScoreboardParams{})
+			require.NoError(t, err)
+			require.Len(t, board.Games, 14)
+
+			counts := map[espn.Status]int{}
+			for _, game := range board.Games {
+				counts[game.Status]++
+			}
+			// The Thursday game is already final in the capture and is dropped
+			// from the slate, so final counts here are Sunday and Monday games.
+			assert.Equal(t, test.wantLive, counts[espn.Live], "live games")
+			assert.Equal(t, test.wantFinal, counts[espn.Final], "final games")
+			assert.Equal(t, test.wantScheduled, counts[espn.Scheduled], "scheduled games")
+
+			featured := byID(board.Games, sandbox.FeaturedGameID)
+			assert.Equal(t, test.featuredStatus, featured.Status)
+			require.NotNil(t, featured.Home.Score)
+			require.NotNil(t, featured.Away.Score)
+			assert.Equal(t, test.homeScore, *featured.Home.Score)
+			assert.Equal(t, test.awayScore, *featured.Away.Score)
+
+			if test.stage == sandbox.SundayComplete {
+				for _, game := range board.Games {
+					assert.Equal(t, espn.Final, game.Status, game.ID)
+					require.NotNil(t, game.Home.Score, game.ID)
+					require.NotNil(t, game.Away.Score, game.ID)
+				}
+			}
+			if test.stage == sandbox.AllClear {
+				monday := byID(board.Games, "401873051")
+				assert.Equal(t, espn.Scheduled, monday.Status,
+					"the Monday night game stays upcoming at all-clear")
+			}
+		})
+	}
 }
 
 func TestWeek9ScoreboardReplaysThroughESPN(t *testing.T) {
@@ -321,7 +403,14 @@ func week9Registry(t *testing.T) *sandbox.Registry {
 func replayClient(t *testing.T) *http.Client {
 	t.Helper()
 
-	return &http.Client{Transport: sandbox.NewTransport(week9Registry(t), sandbox.Morning)}
+	return replayClientAt(t, sandbox.Morning)
+}
+
+// replayClientAt builds one HTTP client replaying a named stage.
+func replayClientAt(t *testing.T, stage sandbox.Stage) *http.Client {
+	t.Helper()
+
+	return &http.Client{Transport: sandbox.NewTransport(week9Registry(t), stage)}
 }
 
 // week9Board reads the replayed ESPN slate.

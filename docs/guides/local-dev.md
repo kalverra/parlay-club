@@ -58,15 +58,31 @@ The hot-reload loop is unchanged. The differences are all in startup:
 - A fresh sandbox runs the morning sync synchronously before it serves, so the slate, lines, projections, and forecasts
   are there on the first page load. Later restarts restore the saved stage and scenario clock instead of rebuilding.
 
-The scenario clock is the week 9 Sunday morning. Game pickers, kickoff locks, the export card, and nfelo freshness all
-read it, so the app agrees with the data it shows. Auth cookies and SSE timers keep real time so sessions and open
-streams behave normally.
+The scenario clock starts on the week 9 Sunday morning. Game pickers, kickoff locks, the export card, and nfelo
+freshness all read it, so the app agrees with the data it shows. Auth cookies and SSE timers keep real time so sessions
+and open streams behave normally.
 
 ### Sandbox controls
 
 Sign in, then open [http://localhost:8080/dev/sandbox](http://localhost:8080/dev/sandbox). The page shows the active
-stage, the scenario time, who the browser is signed in as, and the active group. It also lists the four seeded people
-and lets you become any of them.
+stage, the scenario time, who the browser is signed in as, and the active group. It also lists the four stages and the
+four seeded people.
+
+The stage buttons post to `/dev/sandbox/stage`. Each one rebuilds the Sunday morning baseline first, so every button
+works from any previous state, then runs the real refresh at that stage's clock:
+
+- **Sunday morning** is the baseline. The full week is scheduled, the shared slip is open, and every pick is pending.
+- **Early loss** puts the Madrid game in the third quarter with Atlanta leading 17-10. It locks the shared slip and
+  records a scripted `LOST` grade on Ada's Bengals pick. The other five picks stay pending, and the normal slip rules
+  settle the slip `LOST` at once.
+- **All clear** makes every Sunday game final with a scripted score and leaves the Monday night game upcoming. Every
+  shared member locks in, and all six picks are scripted `WON`, so the slip settles `WON`.
+- **Sunday complete** makes every Sunday and Monday game final with scores. The slip keeps its scripted wins, and no
+  upcoming-game flow treats the week as Sunday morning.
+
+The stage grades are manual scripted outcomes, not analyzer or score-derived results. A stage change removes and
+recreates the seeded people, so the browser's real session and group cookies are reissued for the same persona. The
+reset button is the same operation as the **Sunday morning** stage.
 
 - Ada, Ben, and Cleo are in the shared **Sunday Sandbox** group. Each has two picks on the **Week 9 Sandbox** slip.
 - Dex is the outsider. Dex has their own group, cannot see the shared slip, and gets the normal 404 on its URL.

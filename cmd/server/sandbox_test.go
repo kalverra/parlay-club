@@ -815,6 +815,7 @@ func TestSandboxControlRoutesStayOffOutsideSandbox(t *testing.T) {
 	}{
 		{method: http.MethodGet, path: "/dev/sandbox"},
 		{method: http.MethodPost, path: "/dev/sandbox/reset"},
+		{method: http.MethodPost, path: "/dev/sandbox/stage"},
 		{method: http.MethodPost, path: "/dev/sandbox/persona"},
 	}
 	for _, test := range tests {
@@ -830,6 +831,335 @@ func TestSandboxControlRoutesStayOffOutsideSandbox(t *testing.T) {
 			assert.Equal(t, http.StatusNotFound, recorder.Code,
 				"sandbox routes are mounted only when SUNDAY_SANDBOX=1")
 		})
+	}
+}
+
+func TestSandboxStagesApplyDirectly(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		stage sandbox.Stage
+		check func(t *testing.T, store *db.Store, seed sandbox.Seed)
+	}{
+		{
+			stage: sandbox.EarlyLoss,
+			check: func(t *testing.T, store *db.Store, seed sandbox.Seed) {
+				t.Helper()
+
+				featured, err := store.GameByID(t.Context(), sandbox.FeaturedGameID)
+				require.NoError(t, err)
+				assert.Equal(t, db.GameLive, featured.Status)
+				require.NotNil(t, featured.HomeScore)
+				require.NotNil(t, featured.AwayScore)
+				assert.Equal(t, 17, *featured.HomeScore)
+				assert.Equal(t, 10, *featured.AwayScore)
+
+				slip, err := store.SlipByID(t.Context(), seed.Slip.ID)
+				require.NoError(t, err)
+				assert.Equal(t, db.SlipGraded, slip.Status)
+				assert.Equal(t, parlay.Lost, slip.Result,
+					"one lost leg settles the slip even while other legs are pending")
+
+				legs, err := store.LegsForSlip(t.Context(), seed.Slip.ID)
+				require.NoError(t, err)
+				lost, pending := 0, 0
+				for _, leg := range legs {
+					switch leg.Result {
+					case parlay.Lost:
+						lost++
+					case parlay.Pending:
+						pending++
+					}
+				}
+				assert.Equal(t, 1, lost)
+				assert.Equal(t, 5, pending, "the other five picks stay unresolved")
+			},
+		},
+		{
+			stage: sandbox.AllClear,
+			check: func(t *testing.T, store *db.Store, seed sandbox.Seed) {
+				t.Helper()
+
+				games, err := store.GamesForWeek(t.Context(), seed.Week.ID)
+				require.NoError(t, err)
+				final, scheduled := 0, 0
+				for _, game := range games {
+					switch game.Status {
+					case db.GameFinal:
+						final++
+						require.NotNil(t, game.HomeScore, game.ID)
+						require.NotNil(t, game.AwayScore, game.ID)
+					case db.GameScheduled:
+						scheduled++
+					}
+				}
+				assert.Equal(t, 13, final, "every Sunday game is final")
+				assert.Equal(t, 1, scheduled, "the Monday night game is still upcoming")
+
+				slip, err := store.SlipByID(t.Context(), seed.Slip.ID)
+				require.NoError(t, err)
+				assert.Equal(t, db.SlipGraded, slip.Status)
+				assert.Equal(t, parlay.Won, slip.Result)
+			},
+		},
+		{
+			stage: sandbox.SundayComplete,
+			check: func(t *testing.T, store *db.Store, seed sandbox.Seed) {
+				t.Helper()
+
+				games, err := store.GamesForWeek(t.Context(), seed.Week.ID)
+				require.NoError(t, err)
+				require.Len(t, games, 14)
+				for _, game := range games {
+					assert.Equal(t, db.GameFinal, game.Status, game.ID)
+					require.NotNil(t, game.HomeScore, game.ID)
+					require.NotNil(t, game.AwayScore, game.ID)
+				}
+
+				slip, err := store.SlipByID(t.Context(), seed.Slip.ID)
+				require.NoError(t, err)
+				assert.Equal(t, parlay.Won, slip.Result)
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(string(test.stage), func(t *testing.T) {
+			t.Parallel()
+
+			_, store, runtime := openSandbox(t, &live.Hub{}, sandboxCookies())
+			seed, err := runtime.Stage(t.Context(), test.stage)
+			require.NoError(t, err, "selecting a stage directly from a fresh morning")
+			assertStageApplied(t, store, runtime, seed, test.stage)
+			test.check(t, store, seed)
+		})
+	}
+}
+
+func TestSandboxStagesApplyInSequenceAndReset(t *testing.T) {
+	t.Parallel()
+
+	_, store, runtime := openSandbox(t, &live.Hub{}, sandboxCookies())
+	seed := runtime.Seed()
+
+	for _, stage := range []sandbox.Stage{
+		sandbox.EarlyLoss,
+		sandbox.AllClear,
+		sandbox.SundayComplete,
+	} {
+		updated, err := runtime.Stage(t.Context(), stage)
+		require.NoError(t, err, stage)
+		assertStageApplied(t, store, runtime, updated, stage)
+		seed = updated
+	}
+
+	// Reset removes every manual edit and returns to the open morning slip.
+	morning, err := runtime.Reset(t.Context())
+	require.NoError(t, err)
+	assertStageApplied(t, store, runtime, morning, sandbox.Morning)
+
+	slip, err := store.SlipByID(t.Context(), morning.Slip.ID)
+	require.NoError(t, err)
+	assert.Equal(t, db.SlipOpen, slip.Status)
+	assert.Equal(t, parlay.Pending, slip.Result)
+	legs, err := store.LegsForSlip(t.Context(), morning.Slip.ID)
+	require.NoError(t, err)
+	for _, leg := range legs {
+		assert.Equal(t, parlay.Pending, leg.Result, leg.ID)
+	}
+	assert.Equal(t, seed.Slip.Name, slip.Name)
+}
+
+func TestSandboxStagePublishesCommittedSignals(t *testing.T) {
+	t.Parallel()
+
+	hub := &live.Hub{}
+	_, store, runtime := openSandbox(t, hub, sandboxCookies())
+	seed := runtime.Seed()
+
+	weekSignals, unsubscribeWeek := hub.Subscribe(fmt.Sprintf("week:%d", seed.Week.ID))
+	t.Cleanup(unsubscribeWeek)
+	slipSignals, unsubscribeSlip := hub.Subscribe(fmt.Sprintf("slip:%d", seed.Slip.ID))
+	t.Cleanup(unsubscribeSlip)
+
+	staged, err := runtime.Stage(t.Context(), sandbox.AllClear)
+	require.NoError(t, err)
+	requireSignal(t, weekSignals, "week")
+	requireSignal(t, slipSignals, "slip")
+
+	// The signals name committed rows a subscriber can refetch.
+	slip, err := store.SlipByID(t.Context(), staged.Slip.ID)
+	require.NoError(t, err)
+	assert.Equal(t, parlay.Won, slip.Result)
+	games, err := store.GamesForWeek(t.Context(), staged.Week.ID)
+	require.NoError(t, err)
+	assert.NotEmpty(t, games)
+}
+
+func TestSandboxStageRouteReissuesSessionAndShowsTheState(t *testing.T) {
+	t.Parallel()
+
+	app := openSandboxApp(t)
+	client := app.client(t)
+	app.signInAsAda(t, client)
+
+	response := app.request(t, client, http.MethodPost, "/dev/sandbox/stage",
+		url.Values{"stage": {"all-clear"}}, true)
+	require.Equal(t, http.StatusOK, response.status, response.body)
+	assert.Equal(t, "true", response.header.Get("Hx-Refresh"))
+
+	staged := app.runtime.Seed()
+	ada, ok := staged.Person(sandbox.PersonaAda)
+	require.True(t, ok)
+	userID, groupID := app.cookieIDs(t, client)
+	assert.Equal(t, ada.User.ID, userID, "the stage reissues the same persona's real session")
+	assert.Equal(t, ada.GroupID, groupID)
+
+	controls := app.request(t, client, http.MethodGet, "/dev/sandbox", nil, false)
+	require.Equal(t, http.StatusOK, controls.status, controls.body)
+	assert.Contains(t, controls.body, "all-clear")
+	for _, want := range []string{
+		"Sunday morning",
+		"Early loss",
+		"All clear",
+		"Sunday complete",
+		`hx-post="/dev/sandbox/stage"`,
+		`name="stage" value="early-loss"`,
+		"scripted manual",
+	} {
+		assert.Contains(t, controls.body, want)
+	}
+
+	games := app.request(t, client, http.MethodGet, "/games", nil, false)
+	require.Equal(t, http.StatusOK, games.status, games.body)
+	assert.Contains(t, games.body, "Final", "the board shows final games at the scenario clock")
+
+	slip := app.request(t, client, http.MethodGet,
+		fmt.Sprintf("/slips/%d", staged.Slip.ID), nil, false)
+	require.Equal(t, http.StatusOK, slip.status, slip.body)
+	assert.Contains(t, slip.body, "WON")
+}
+
+func TestSandboxUnknownStageChangesNothing(t *testing.T) {
+	t.Parallel()
+
+	app := openSandboxApp(t)
+	client := app.client(t)
+	seed := app.signInAsAda(t, client)
+	beforeUser, beforeGroup := app.cookieIDs(t, client)
+	beforeState := app.runtime.scenario.State()
+	beforeSlips := countRows(t, app.runtime.database, "slips")
+	beforeLegs := countRows(t, app.runtime.database, "legs")
+	beforeActivity := countRows(t, app.runtime.database, "activity")
+
+	response := app.request(t, client, http.MethodPost, "/dev/sandbox/stage",
+		url.Values{"stage": {"playoffs"}}, true)
+	assert.Equal(t, http.StatusUnprocessableEntity, response.status)
+
+	assert.Equal(t, beforeState, app.runtime.scenario.State(), "an unknown stage changes no clock or stage")
+	assert.Equal(t, sandbox.Morning, app.runtime.transport.Stage())
+	afterUser, afterGroup := app.cookieIDs(t, client)
+	assert.Equal(t, beforeUser, afterUser, "an unknown stage changes no session")
+	assert.Equal(t, beforeGroup, afterGroup, "an unknown stage changes no group")
+	assert.Equal(t, beforeSlips, countRows(t, app.runtime.database, "slips"))
+	assert.Equal(t, beforeLegs, countRows(t, app.runtime.database, "legs"))
+	assert.Equal(t, beforeActivity, countRows(t, app.runtime.database, "activity"))
+	assert.Equal(t, seed.Slip.ID, app.runtime.Seed().Slip.ID)
+
+	errResponse := app.request(t, client, http.MethodPost, "/dev/sandbox/stage",
+		url.Values{"stage": {""}}, true)
+	assert.Equal(t, http.StatusUnprocessableEntity, errResponse.status)
+
+	_, err := app.runtime.Stage(t.Context(), sandbox.Stage("playoffs"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `unknown stage "playoffs"`)
+	assert.Equal(t, beforeState, app.runtime.scenario.State())
+}
+
+func TestSandboxStageChangeWinsOverPageLoadKick(t *testing.T) {
+	t.Parallel()
+
+	_, store, runtime := openSandbox(t, &live.Hub{}, sandboxCookies())
+
+	// Hold the transition lock while a page-load kick and a stage change queue
+	// behind it. Whichever acquires it first, the chosen stage is the state a
+	// later reader sees; an old morning refresh cannot overwrite it.
+	runtime.mu.Lock()
+	started := make(chan struct{}, 2)
+	done := make(chan error, 1)
+	go func() {
+		runtime.Kick()
+		started <- struct{}{}
+	}()
+	go func() {
+		started <- struct{}{}
+		_, err := runtime.Stage(t.Context(), sandbox.SundayComplete)
+		done <- err
+	}()
+	<-started
+	<-started
+	runtime.mu.Unlock()
+
+	require.NoError(t, <-done)
+	require.Eventually(t, func() bool { return !runtime.kickPending.Load() },
+		2*time.Second, 5*time.Millisecond, "the page-load pass finishes")
+
+	assertStageApplied(t, store, runtime, runtime.Seed(), sandbox.SundayComplete)
+	games, err := store.GamesForWeek(t.Context(), runtime.Seed().Week.ID)
+	require.NoError(t, err)
+	for _, game := range games {
+		assert.Equal(t, db.GameFinal, game.Status,
+			"a late page-load pass cannot put a scheduled morning game back")
+	}
+}
+
+// assertStageApplied checks the clock, replay stage, stage row, slip lock
+// state, and every scripted result for one stage.
+func assertStageApplied(
+	t *testing.T,
+	store *db.Store,
+	runtime *sandboxRuntime,
+	seed sandbox.Seed,
+	stage sandbox.Stage,
+) {
+	t.Helper()
+
+	plan, ok := sandbox.PlanFor(stage)
+	require.True(t, ok, stage)
+	want := sandbox.State{Stage: stage, Now: plan.Now}
+	assert.Equal(t, want, runtime.scenario.State())
+	assert.Equal(t, stage, runtime.transport.Stage())
+
+	saved, err := runtime.state.Load(t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, want, saved)
+
+	wantResults := make(map[sandbox.LegID]parlay.Result, len(seed.Legs))
+	for id := range seed.Legs {
+		wantResults[id] = parlay.Pending
+	}
+	for _, grade := range plan.Grades {
+		wantResults[grade.Leg] = grade.Result
+	}
+	for id, legID := range seed.Legs {
+		leg, err := store.LegByID(t.Context(), legID)
+		require.NoError(t, err)
+		assert.Equal(t, wantResults[id], leg.Result, "%s %s", stage, id)
+		if wantResults[id] == parlay.Pending {
+			assert.Nil(t, leg.GradedBy, "%s %s", stage, id)
+		} else {
+			require.NotNil(t, leg.GradedBy, "%s %s", stage, id)
+		}
+	}
+
+	members, err := store.SlipMembers(t.Context(), seed.Slip.ID)
+	require.NoError(t, err)
+	for _, member := range members {
+		if plan.Lock {
+			assert.NotNil(t, member.LockedAt, "%s locks %s", stage, member.User.Name)
+		} else {
+			assert.Nil(t, member.LockedAt, "%s leaves the slip editable", stage)
+		}
 	}
 }
 

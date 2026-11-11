@@ -56,6 +56,62 @@ func TestStateStoreRejectsABlankStage(t *testing.T) {
 	assert.Contains(t, err.Error(), "needs a stage")
 }
 
+func TestStateStoreRejectsAnUnknownStage(t *testing.T) {
+	t.Parallel()
+
+	database, err := db.Open(filepath.Join(t.TempDir(), "sunday-sandbox.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { assert.NoError(t, database.Close()) })
+	require.NoError(t, db.Migrate(t.Context(), database))
+
+	state := sandbox.NewStateStore(database)
+	require.NoError(t, state.Ensure(t.Context()))
+
+	err = state.Save(t.Context(), sandbox.State{
+		Stage: sandbox.Stage("playoffs"),
+		Now:   sandbox.MorningTime(),
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `unknown stage "playoffs"`)
+
+	_, err = database.ExecContext(t.Context(),
+		"INSERT INTO sandbox_state (id, stage, now) VALUES (1, ?, ?)",
+		"playoffs", sandbox.MorningTime().Format(time.RFC3339Nano))
+	require.NoError(t, err)
+	_, err = state.Load(t.Context())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `unknown stage "playoffs"`)
+}
+
+func TestStageNamesAndTimesAreClosed(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, []sandbox.Stage{
+		sandbox.Morning, sandbox.EarlyLoss, sandbox.AllClear, sandbox.SundayComplete,
+	}, sandbox.Stages())
+	for _, stage := range sandbox.Stages() {
+		byName, ok := sandbox.StageByName(string(stage))
+		assert.True(t, ok, stage)
+		assert.Equal(t, stage, byName)
+
+		when, ok := sandbox.StageTime(stage)
+		require.True(t, ok, stage)
+		assert.False(t, when.IsZero(), stage)
+
+		plan, ok := sandbox.PlanFor(stage)
+		require.True(t, ok, stage)
+		assert.Equal(t, stage, plan.Stage)
+		assert.Equal(t, when, plan.Now)
+	}
+
+	_, ok := sandbox.StageByName(" playoffs ")
+	assert.False(t, ok)
+	_, ok = sandbox.StageTime(sandbox.Stage("playoffs"))
+	assert.False(t, ok)
+	_, ok = sandbox.PlanFor(sandbox.Stage("playoffs"))
+	assert.False(t, ok)
+}
+
 func TestScenarioReadsAndWritesOneClock(t *testing.T) {
 	t.Parallel()
 

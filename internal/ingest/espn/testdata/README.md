@@ -5,6 +5,9 @@ Real scoreboard, roster, gamelog, and summary responses from ESPN's public site 
 | File | Source |
 | --- | --- |
 | `scoreboard_week.json` | `GET https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard` on 2026-11-07. Week 9, 15 events including the Thursday game and the Madrid game. |
+| `scoreboard_week9_live.json` | **Derived** from `scoreboard_week.json` for the sandbox's early-loss stage: the Madrid game is in the third quarter at ATL 17, CIN 10, and every other slate game is still scheduled. |
+| `scoreboard_week9_final_sunday.json` | **Derived** from `scoreboard_week.json` for the sandbox's all-clear stage: every Sunday game is final with a scripted score, while the Monday night game is still scheduled. |
+| `scoreboard_week9_complete.json` | **Derived** from `scoreboard_week.json` for the sandbox's Sunday-complete stage: every Sunday and Monday game is final with a scripted score. |
 | `scoreboard_live.json` | The same endpoint, captured from a web archive snapshot at 2026-10-04 15:18 ET during the week 4 Sunday afternoon games: 8 live, 1 final, 6 scheduled, plus the Thursday game. |
 | `scoreboard_international.json` | `GET .../scoreboard?seasontype=2&week=5&dates=2026`, trimmed to the London game. |
 | `roster.json` | `GET https://site.api.espn.com/apis/site/v2/sports/football/nfl/teams/2/roster` on 2026-11-09. Buffalo Bills roster. |
