@@ -1,0 +1,116 @@
+{{define "content"}}
+<section class="space-y-4">
+  <div class="flex flex-wrap items-start justify-between gap-2">
+    <div>
+      <h1 class="text-xl font-semibold">Sandbox controls</h1>
+      <p class="text-xs text-slate-500">
+        Development only. Every switch uses the real sign-in, group scope, and services.
+      </p>
+    </div>
+    <span class="rounded-full border border-amber-700 bg-amber-950/40 px-2 py-1 text-xs font-medium text-amber-300">
+      Offline replay
+    </span>
+  </div>
+
+  <dl class="grid grid-cols-1 gap-2 sm:grid-cols-2">
+    <div class="rounded-xl border border-slate-800 bg-slate-900 p-4">
+      <dt class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Stage</dt>
+      <dd class="mt-1 font-medium text-slate-100">{{.Stage}}</dd>
+    </div>
+    <div class="rounded-xl border border-slate-800 bg-slate-900 p-4">
+      <dt class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Scenario time</dt>
+      <dd class="mt-1 font-medium text-slate-100">
+        <time datetime="{{.WhenISO}}">{{.WhenLabel}}</time>
+      </dd>
+    </div>
+    <div class="rounded-xl border border-slate-800 bg-slate-900 p-4">
+      <dt class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Signed in as</dt>
+      <dd class="mt-1 font-medium text-slate-100">{{.CurrentName}}</dd>
+      <dd class="text-xs break-all text-slate-500">{{.CurrentEmail}}</dd>
+    </div>
+    <div class="rounded-xl border border-slate-800 bg-slate-900 p-4">
+      <dt class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Active group</dt>
+      <dd class="mt-1 font-medium text-slate-100">{{if .GroupName}}{{.GroupName}}{{else}}None{{end}}</dd>
+    </div>
+  </dl>
+
+  <section class="rounded-xl border border-slate-800 bg-slate-900 p-4">
+    <div>
+      <h2 class="text-sm font-semibold text-slate-300">Personas</h2>
+      <p class="mt-1 text-xs text-slate-500">
+        Ada, Ben, and Cleo share the sandbox slip. Dex stays outside it until they accept the invite.
+      </p>
+    </div>
+
+    <ul class="mt-3 space-y-2">
+      {{range .Personas}}
+        <li class="flex flex-col gap-2 rounded-lg border border-slate-800 px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
+          <div class="min-w-0">
+            <p class="truncate text-sm font-medium text-slate-200">
+              {{.Name}}
+              <span class="text-xs font-normal text-slate-500">
+                {{if .Shared}}shared group{{else}}outsider{{end}}
+              </span>
+            </p>
+            <p class="text-xs break-all text-slate-500">{{.Email}}</p>
+            <p class="text-xs text-slate-500">
+              {{if .GroupName}}{{.GroupName}}{{else}}Not seeded yet{{end}}
+            </p>
+          </div>
+          {{if .Current}}
+            <span class="shrink-0 self-start rounded-full border border-sky-800 bg-sky-950/40 px-2 py-1 text-xs font-medium text-sky-300 sm:self-auto">
+              Current
+            </span>
+          {{else}}
+            <form class="shrink-0 self-start sm:self-auto" hx-post="/dev/sandbox/persona" hx-swap="none">
+              <input type="hidden" name="persona" value="{{.ID}}">
+              <button
+                type="submit"
+                class="w-full rounded-lg border border-slate-700 px-3 py-2 text-sm font-medium text-slate-200 hover:bg-slate-800 sm:w-auto"
+              >
+                Sign in as {{.Name}}
+              </button>
+            </form>
+          {{end}}
+        </li>
+      {{end}}
+    </ul>
+  </section>
+
+  {{if .InviteToken}}
+    <section class="rounded-xl border border-slate-800 bg-slate-900 p-4">
+      <h2 class="text-sm font-semibold text-slate-300">Shared invite</h2>
+      <p class="mt-1 text-xs text-slate-500">
+        Switch to Dex, then open this link to exercise the normal join flow. Joining makes them a shared member, so
+        reset when you want the outsider view again.
+      </p>
+      <a
+        href="/join/{{.InviteToken}}"
+        class="mt-3 block w-full rounded-lg border border-slate-700 px-3 py-2 text-center text-sm font-medium text-slate-200 hover:bg-slate-800"
+      >
+        Open shared invite
+      </a>
+    </section>
+  {{end}}
+
+  <section class="rounded-xl border border-rose-900/60 bg-slate-900 p-4">
+    <h2 class="text-sm font-semibold text-slate-300">Reset</h2>
+    <p class="mt-1 text-xs text-slate-500">
+      Deletes every sandbox person, group, slip, pick, activity line, cache row, and manual edit, then rebuilds Sunday
+      morning and signs this browser back in as the same persona. The normal dev database is never touched.
+    </p>
+    <form class="mt-3" hx-post="/dev/sandbox/reset" hx-swap="none">
+      <button
+        type="submit"
+        class="w-full rounded-lg bg-sky-600 px-3 py-2 text-sm font-semibold text-white hover:bg-sky-500"
+      >
+        Reset to Sunday morning
+      </button>
+    </form>
+  </section>
+
+  <p class="text-center text-sm">
+    <a href="/" class="text-sky-400 hover:text-sky-300">Back to the app</a>
+  </p>
+</section>
+{{end}}

@@ -4,8 +4,8 @@ title: Access
 type: concept
 summary: How Google sign-in, open sign-up, and signed session and group cookies decide who is using the app and which group they see.
 tags: [auth, google, oauth, cookies, middleware, csrf, groups]
-sources: [internal/auth/cookies.go, internal/auth/handlers.go, internal/auth/middleware.go, internal/auth/signin.go, internal/auth/provider.go, internal/db/users.go, internal/groups/groups.go, internal/groups/handlers.go, cmd/server/main.go, web/templates/login.html, web/templates/dev-login.html, web/templates/avatar.html]
-last_verified: 2026-11-07
+sources: [internal/auth/cookies.go, internal/auth/handlers.go, internal/auth/middleware.go, internal/auth/signin.go, internal/auth/provider.go, internal/db/users.go, internal/groups/groups.go, internal/groups/handlers.go, internal/sandbox/seed.go, cmd/server/main.go, cmd/server/sandbox.go, web/templates/login.html, web/templates/dev-login.html, web/templates/sandbox.html, web/templates/avatar.html]
+last_verified: 2026-11-10
 ---
 
 # Access
@@ -114,6 +114,23 @@ group, and the invite return path all run the same code as Google.
 
 A dev with real client values uses the real Google flow, and the dev routes are not registered. Prod requires the Google
 values and never registers them, so a misdeploy cannot expose a local sign-in form.
+
+## Sandbox personas
+
+`SUNDAY_SANDBOX=1` adds fixed people so a tester can move between perspectives without typing emails. Their addresses
+end in `.test` and never look real: Ada, Ben, and Cleo share the **Sunday Sandbox** group, and Dex stays outside it with
+their own group. The sandbox creates them through `auth.SignIn` with `dev:{email}` subjects, so they are ordinary user
+rows with ordinary session cookies. The shared members join through the real invite operation, and the outsider joins
+only when a tester opens the invite themselves.
+
+`GET /dev/sandbox` shows the current persona, active group, stage, scenario time, and a switch button for each person.
+`POST /dev/sandbox/persona` calls `auth.SignIn` again and sets both `pc_session` and `pc_group`. It does not inject a
+user into the request context or grant extra permissions. `Scope` still checks the group against live membership, so a
+forged group cookie falls back to a real group. Activity and grading therefore name the selected person, shared personas
+see the slip, and the outsider gets the normal 404 until they accept the shared invite.
+
+The controls page and its reset and persona posts are mounted only in sandbox mode. They sit inside `RequireUser`,
+`Scope`, and the HTMX CSRF check like every other authenticated route. Normal dev and prod do not register them.
 
 ## Trade-offs
 

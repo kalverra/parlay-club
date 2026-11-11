@@ -62,6 +62,27 @@ The scenario clock is the week 9 Sunday morning. Game pickers, kickoff locks, th
 read it, so the app agrees with the data it shows. Auth cookies and SSE timers keep real time so sessions and open
 streams behave normally.
 
+### Sandbox controls
+
+Sign in, then open [http://localhost:8080/dev/sandbox](http://localhost:8080/dev/sandbox). The page shows the active
+stage, the scenario time, who the browser is signed in as, and the active group. It also lists the four seeded people
+and lets you become any of them.
+
+- Ada, Ben, and Cleo are in the shared **Sunday Sandbox** group. Each has two picks on the **Week 9 Sandbox** slip.
+- Dex is the outsider. Dex has their own group, cannot see the shared slip, and gets the normal 404 on its URL.
+- **Sign in as** posts to `/dev/sandbox/persona`. It calls the same sign-in code as `/dev/login`, then sets the real
+  session and group cookies. Activity and grading name the person you chose, and the group switcher follows the same
+  membership rules as any other browser.
+- **Open shared invite** is the shared group's normal join link. Switching to Dex and opening it exercises the real
+  invite flow; reset restores the outsider view.
+- **Reset to Sunday morning** posts to `/dev/sandbox/reset`. It deletes every sandbox person, group, slip, pick,
+  activity line, cache row, and manual edit, rebuilds the morning through the real services, and signs the browser back
+  in as the same persona. It never touches `./data/parlay.db`.
+
+The controls page and its forms exist only while `SUNDAY_SANDBOX=1`. They sit inside the ordinary sign-in, group scope,
+and HTMX CSRF checks, so a signed-out browser lands on `/login` and a plain form post is refused. In normal dev the paths
+are not registered.
+
 To start from a clean sandbox, stop the server and delete its file:
 
 ```sh

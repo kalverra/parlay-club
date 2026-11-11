@@ -40,7 +40,8 @@ const (
 )
 
 const (
-	sharedGroupName = "Sunday Sandbox"
+	// SharedGroupName names the one group the shared personas belong to.
+	SharedGroupName = "Sunday Sandbox"
 	slipName        = "Week 9 Sandbox"
 	legsPerMember   = 2
 )
@@ -116,6 +117,53 @@ func Outsider() Persona {
 func Personas() []Persona {
 	people := SharedPersonas()
 	return append(people, Outsider())
+}
+
+// PersonaByID returns the persona with the symbolic ID used by the controls
+// and the stage manifests.
+func PersonaByID(id PersonaID) (Persona, bool) {
+	for _, persona := range Personas() {
+		if persona.ID == id {
+			return persona, true
+		}
+	}
+	return Persona{}, false
+}
+
+// PersonaGroup returns the group a persona should act in: the shared sandbox
+// group for a shared member, or their own group for the outsider. It reads the
+// live memberships, so it works after a restart that did not rebuild the seed.
+func PersonaGroup(
+	ctx context.Context,
+	store *db.Store,
+	persona Persona,
+	userID int64,
+) (db.Group, error) {
+	memberships, err := store.ForUser(ctx, userID)
+	if err != nil {
+		return db.Group{}, fmt.Errorf("persona %s groups: %w", persona.ID, err)
+	}
+	if len(memberships) == 0 {
+		return db.Group{}, fmt.Errorf("persona %s belongs to no group", persona.ID)
+	}
+
+	if persona.Shared {
+		for _, group := range memberships {
+			if group.Name == SharedGroupName {
+				return group, nil
+			}
+		}
+		return db.Group{}, fmt.Errorf("persona %s: no %q group", persona.ID, SharedGroupName)
+	}
+
+	// The outsider keeps their own group even after accepting an invite, so the
+	// controls can always return them to the isolated view.
+	for _, group := range memberships {
+		if group.Name != SharedGroupName {
+			return group, nil
+		}
+	}
+	return memberships[0], nil
 }
 
 // LegDefinition is one scripted pick before it gets a numeric leg ID.
@@ -202,7 +250,7 @@ func SeedScenario(
 		users[persona.ID] = user
 
 		if i == 0 {
-			shared, err = store.Create(ctx, user.ID, sharedGroupName)
+			shared, err = store.Create(ctx, user.ID, SharedGroupName)
 			if err != nil {
 				return Seed{}, fmt.Errorf("seed shared group: %w", err)
 			}

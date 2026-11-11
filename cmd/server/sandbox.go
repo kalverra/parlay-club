@@ -9,14 +9,17 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/rs/zerolog"
 
 	"github.com/kalverra/parlay-club/internal/auth"
 	"github.com/kalverra/parlay-club/internal/config"
 	"github.com/kalverra/parlay-club/internal/db"
+	"github.com/kalverra/parlay-club/internal/groups"
 	"github.com/kalverra/parlay-club/internal/ingest/espn"
 	"github.com/kalverra/parlay-club/internal/ingest/nfelo"
 	"github.com/kalverra/parlay-club/internal/ingest/odds"
@@ -25,6 +28,7 @@ import (
 	"github.com/kalverra/parlay-club/internal/refresh"
 	"github.com/kalverra/parlay-club/internal/sandbox"
 	"github.com/kalverra/parlay-club/internal/slips"
+	webui "github.com/kalverra/parlay-club/internal/web"
 )
 
 // sandboxOddsKey is the fake Parlay API key sandbox clients carry. The replay
@@ -40,7 +44,10 @@ type sandboxRuntime struct {
 	hub      *live.Hub
 	// cookies is set by the composition root after construction; reset uses
 	// it to reissue the browser's real session and group.
-	cookies   *auth.Cookies
+	cookies *auth.Cookies
+	// renderer draws the standalone controls page. The composition root sets it
+	// after construction, like cookies.
+	renderer  *webui.Renderer
 	logger    zerolog.Logger
 	refresher *refresh.Service
 	slips     *slips.Service
@@ -232,11 +239,147 @@ func (r *sandboxRuntime) Kick() {
 	}()
 }
 
+// sandboxPersonaView is one switch control on the sandbox page.
+type sandboxPersonaView struct {
+	ID        sandbox.PersonaID
+	Name      string
+	Email     string
+	Shared    bool
+	Current   bool
+	GroupName string
+}
+
+// sandboxControlsPage is the standalone sandbox screen. It names the live
+// scenario and every seeded person so a tester can move between them without
+// editing cookies by hand.
+type sandboxControlsPage struct {
+	webui.Page
+	Stage        string
+	WhenISO      string
+	WhenLabel    string
+	CurrentName  string
+	CurrentEmail string
+	GroupName    string
+	Personas     []sandboxPersonaView
+	InviteToken  string
+}
+
 // MountRoutes adds the sandbox-only controls. The caller mounts it inside the
 // normal signed-in and group-scoped middleware, so CSRF and auth behave exactly
 // as they do for the rest of the app.
 func (r *sandboxRuntime) MountRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("GET /dev/sandbox", r.controls)
 	mux.HandleFunc("POST /dev/sandbox/reset", r.reset)
+	mux.HandleFunc("POST /dev/sandbox/persona", r.switchPersona)
+}
+
+// controls renders the current persona, group, stage, scenario time, and the
+// switch and reset forms.
+func (r *sandboxRuntime) controls(w http.ResponseWriter, req *http.Request) {
+	if r.renderer == nil {
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+	user, ok := auth.UserFrom(req.Context())
+	if !ok {
+		http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+		return
+	}
+
+	state := r.scenario.State()
+	view := webui.NewUser(user)
+	//nolint:modernize // naming the embedded layout field keeps the data readable.
+	page := sandboxControlsPage{
+		Page: webui.Page{
+			Title:  "Sandbox",
+			User:   &view,
+			Groups: groups.Options(req.Context()),
+		},
+		Stage:        string(state.Stage),
+		WhenISO:      state.Now.UTC().Format(time.RFC3339),
+		WhenLabel:    state.Now.UTC().Format("Mon Jan 2, 3:04 PM MST"),
+		CurrentName:  user.Name,
+		CurrentEmail: user.Email,
+	}
+	if group, ok := groups.From(req.Context()); ok {
+		page.GroupName = group.Name
+	}
+
+	for _, persona := range sandbox.Personas() {
+		personaView := sandboxPersonaView{
+			ID:     persona.ID,
+			Name:   persona.Name,
+			Email:  persona.Email,
+			Shared: persona.Shared,
+		}
+		personaView.Current = strings.EqualFold(persona.Email, user.Email)
+		if seeded, err := r.store.UserByEmail(req.Context(), persona.Email); err == nil {
+			group, groupErr := sandbox.PersonaGroup(req.Context(), r.store, persona, seeded.ID)
+			if groupErr == nil {
+				personaView.GroupName = group.Name
+				if persona.Shared && page.InviteToken == "" {
+					page.InviteToken = group.InviteToken
+				}
+			}
+		}
+		page.Personas = append(page.Personas, personaView)
+	}
+
+	html, err := r.renderer.Render("sandbox", page)
+	if err != nil {
+		r.logger.Error().Err(err).Msg("render sandbox controls")
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = w.Write(html)
+}
+
+// switchPersona signs in as a fixed sandbox person and sets the real session
+// and active-group cookies. It does not inject a user or skip group scope, so
+// activity, grading, invites, and 404s behave as they do for any signed-in
+// person.
+func (r *sandboxRuntime) switchPersona(w http.ResponseWriter, req *http.Request) {
+	if err := req.ParseForm(); err != nil {
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+	persona, ok := sandbox.PersonaByID(
+		sandbox.PersonaID(strings.TrimSpace(req.PostForm.Get("persona"))),
+	)
+	if !ok {
+		http.Error(w, "Unknown sandbox persona.", http.StatusUnprocessableEntity)
+		return
+	}
+
+	// A reset clears the users between its clear and its seed, so a switch waits
+	// for the rebuild rather than racing it.
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	user, err := auth.SignIn(req.Context(), r.store, auth.Identity{
+		Sub:   "dev:" + persona.Email,
+		Email: persona.Email,
+		Name:  persona.Name,
+	})
+	if err != nil {
+		r.logger.Error().Err(err).Str("persona", string(persona.ID)).Msg("sandbox persona sign-in")
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+	group, err := sandbox.PersonaGroup(req.Context(), r.store, persona, user.ID)
+	if err != nil {
+		r.logger.Error().Err(err).Str("persona", string(persona.ID)).Msg("sandbox persona group")
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+
+	r.cookies.SetSession(w, user.ID)
+	r.cookies.SetGroup(w, group.ID)
+	w.Header().Set("Hx-Refresh", "true")
+	w.WriteHeader(http.StatusOK)
 }
 
 // reset rebuilds the morning and then reissues the browser's real session and
