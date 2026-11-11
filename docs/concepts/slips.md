@@ -160,7 +160,8 @@ under each athlete and links to game research and player research.
 ## Votes
 
 Members can react to each other's picks with an up or down vote. The hub shows `▲ 2 ▼ 1` on a leg, highlights the
-viewer's own vote, and makes the tallies tap targets while the slip is `OPEN`. The owner of a leg sees the tally only.
+viewer's own vote, and makes the tallies tap targets while the slip is `OPEN`. The owner of a leg sees the tally only,
+and once the slip leaves `OPEN` every leg is read-only: the buttons go and the tally stays.
 
 `internal/slips.Service.Vote` takes the leg, the member, and `1`, `-1`, or `0` to clear. Only slip members vote
 (`ErrNotMember`), never on their own pick (`ErrOwnVote`), and only while the slip is `OPEN` (`ErrVotesClosed`). Kickoff
