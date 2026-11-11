@@ -1,7 +1,8 @@
 # Product
 
-Slips, weeks, members, legs, manual grading, and the editing and locking rules live in
-[Slips](../docs/concepts/slips.md), which also covers the Games tab.
+Slips, weeks, members, legs, manual grading, the pick board, votes, and the editing and locking rules live in
+[Slips](../docs/concepts/slips.md). The group list, the active group, and the top bar live in
+[Groups](../docs/concepts/groups.md).
 
 ## Grading
 
@@ -47,18 +48,14 @@ Scoped to one NFL season (selector at the top). Only graded slips count.
 
 ## Screens
 
-Phone first: one column with a bottom tab bar. At `lg` width and up, Slip, Games, and Research sit side by side as 3
-columns and Record Book is a top-nav link.
+Phone first: one column and a bottom bar with Groups, This week, and Record Book. The week runs from the group list
+(`/`) to a group's week (`/groups/{id}/week`), then the hub (`/slips/{id}`), and the pick board
+(`/slips/{id}/pick`). Those built screens, their steps, empty states, and layouts are documented in
+[Groups](../docs/concepts/groups.md), [Slips](../docs/concepts/slips.md), and
+[Routes](../docs/reference/routes.md). The hub stays one column at every width; the pick board puts its tray in a
+second column at `lg`.
 
-- **Top bar:** week label, slip switcher, current user's avatar (links to profile: home book, switch user, manage
-  users).
-- **Slip tab:**
-  - header: slip name, "2/3 locked in", status;
-  - one section per member: avatar, name, lock state, their legs (selection, odds, result chip, edit and delete when
-    allowed), "Add leg" for the current user (opens the leg form as a bottom sheet), "Lock in" when they have the full
-    count;
-  - reference odds and a payout calculator (stake default $10, boost % default 0), recomputed by the server on input
-    with a 300 ms debounce;
-  - activity feed, collapsed by default, newest first.
-- **Record Book tab (`grading-record-book`):** as described above.
-- Times render as `<time datetime="{UTC ISO}">` and `app.js` formats them in the browser's local zone.
+Still to build:
+
+- **Record Book (`grading-record-book`):** the third bottom-bar destination, one column with the season selector at the
+  top, then the group record, streaks, leaderboard, Parlay Terrorist badge, and dollar P/L described above.

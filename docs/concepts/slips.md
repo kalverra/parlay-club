@@ -25,7 +25,7 @@ with their own stake, and no money passes through the app.
 `GET /slips/{id}` is the hub. A step banner leads, then the members and their legs, then the export card, the payout
 calculator, and the activity feed. In the `export` step the card moves above the banner, because placing the picks is the
 one thing left. The bottom bar keeps Groups, This week, and Record Book; the hub's one primary action is the way into
-picking.
+picking. The hub stays one column at every width.
 
 `slips.NextStep` is one pure function over the slip, its members, its legs, the week's games, the viewer, and `now`. It
 returns the step, the legs still needed, the names the slip waits on, the first kickoff still ahead, and the slip's

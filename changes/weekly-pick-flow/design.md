@@ -53,14 +53,21 @@ flowchart LR
   `Dependencies.SetGroup func(http.ResponseWriter, int64)` that `main.go` wires to `cookies.SetGroup`, then 303s to the
   newest slip of the latest week or renders the create form. `loadSlip` uses the same seam: a slip in another of the
   viewer's groups switches the active group instead of 404ing.
-- **Hub (`GET /slips/{id}`).** Today's slip page, reordered: the step banner, then members and legs (with votes), then
-  export, payout, and activity. Same stream, same partials.
+- **Hub (`GET /slips/{id}`).** Today's slip page, reordered: the export wrapper leads the page and stays empty until
+  the slip locks, so the `export` step's card is already at the top without a reorder; then the step banner, members and
+  legs (with votes), payout, and activity. Same stream, same partials.
 - **Pick board (`GET /slips/{id}/pick`).** A focused page with a back link to the hub and no tab bar. It replaces
   `/games`, which becomes a 303 to the active group's week. `/games/{id}/props` stays as the one props-loading route and
   takes `?slip=` instead of guessing the slip.
 - **Bottom bar:** Groups (`/`), This week (`/groups/{active}/week`), Record Book. Research leaves the bar; `/research`
   and its pages stay, linked from players, props, legs, and game rows.
 - **Wider screens:** the hub stays one column; the pick board puts the tray in a right column at `lg`.
+- **Empty states.** Each first-run and dead-end gets its own screen instead of a blank board: a solo group's create form
+  welcomes its only member ("It's just you for now"), a group with no slip names the week and offers the form, a group
+  with no stored week points at the typed past-week fields, and a group whose newest slip is in an older week reads
+  "No slip yet" on its card. The pick board separates no stored games, games with no lines yet (one week-level note
+  instead of a "Load them" prompt per game), every game kicked off, and a search that matches nothing. The hub's
+  `closed` step names the member who never finished so a nudge does not point at a pick that cannot arrive.
 
 ### Next step (`internal/slips/next.go`)
 
@@ -284,5 +291,5 @@ Effort: medium (copy, states, and a full walk through the sandbox)
 - [x] Give each empty state a real screen (only "Just me", a group with no slip, a week with no lines, a member still
       missing at the deadline) and walk the full flow in the sandbox as two personas at phone width; update
       `local-dev.md` and `sandbox-replay.md` where they name `/` or `/games`
-- [ ] Docs: rewrite `plan/product.md#Screens` for the new flow, delete what `docs/` now covers, and run
+- [x] Docs: rewrite `plan/product.md#Screens` for the new flow, delete what `docs/` now covers, and run
       `good-vibes docs lint` and `good-vibes docs index`
