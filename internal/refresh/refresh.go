@@ -305,7 +305,7 @@ func (s *Service) RunOnce(ctx context.Context) error {
 	}
 
 	var errs []error
-	if err := s.refreshSync(ctx, s.scoreboardSource(games, now), now); err != nil {
+	if err := s.refreshWithTimeout(ctx, s.scoreboardSource(games, now), now); err != nil {
 		errs = append(errs, err)
 	}
 
@@ -325,7 +325,7 @@ func (s *Service) RunOnce(ctx context.Context) error {
 	)
 	for _, src := range sources {
 		wg.Go(func() {
-			if err := s.refreshSync(ctx, src, now); err != nil {
+			if err := s.refreshWithTimeout(ctx, src, now); err != nil {
 				mu.Lock()
 				runErr = append(runErr, err)
 				mu.Unlock()
@@ -416,9 +416,16 @@ func (s *Service) wait() {
 
 // refresh runs one source when it is due, unless a failure has paused it.
 func (s *Service) refresh(parent context.Context, src source, now time.Time) {
+	_ = s.refreshWithTimeout(parent, src, now)
+}
+
+// refreshWithTimeout runs one source under the shared per-source timeout. Kick
+// and RunOnce both come through here, so neither can hold a caller's lock
+// forever on a stuck store call or fetch.
+func (s *Service) refreshWithTimeout(parent context.Context, src source, now time.Time) error {
 	ctx, cancel := context.WithTimeout(parent, syncTimeout)
 	defer cancel()
-	_ = s.refreshSync(ctx, src, now)
+	return s.refreshSync(ctx, src, now)
 }
 
 // refreshSync runs one source synchronously when it is due, respecting the failure
