@@ -134,9 +134,10 @@ func Search(rows []Row, games []db.Game, roster []db.RosterPlayer, q Query) Resu
   `/games/{id}/props?slip=`, which runs the existing `SyncGameProps` (floors and all), then retriggers the search.
 - Sorts: kickoff (default), player, category, odds (shortest price first). Filters are chips that show only categories
   and windows with rows.
-- Rows come from one `OddsForWeek` read (new store method) filtered through the existing `currentOdds`, instead of a
-  query per game. `cardView`, `pickGameLine`, and the prop grouping in `games.go` move behind `board.Build` so the board
-  and the old helpers do not drift.
+- Rows come from one `OddsForWeek` read (new store method) filtered through `currentOdds`, instead of a query per
+  game. `currentOdds` keeps the newest fetch per game and sync group, so loading one game's props later does not hide
+  another game's. The old Games card and quick-add helpers give way to `board.Build`; `games.go` keeps only the prop
+  grouping for the standalone props partial, so the board and that partial do not drift.
 - `GET /slips/{id}/pick/results?q=&cat=&win=&sort=&game=` returns the results partial. The search input uses
   `hx-trigger="input changed delay:250ms"`; chips and sort are links that swap the same partial and push the URL.
   `game=` shows one game with both sides of each line in one row.
@@ -258,7 +259,7 @@ Parallel: surfaces
       partial with search, category and window chips, sorts, the one-game view, toggle add and remove, and the "Load
       them" prompt; point the hub's pick action at it, make `/games` a 303, take `?slip=` on `/games/{id}/props`, and
       test search, sorts, windows, and zero prop syncs; update `slips.md`, `routes.md`, and `data-refresh.md`
-- [ ] Add the tray (progress, remove, heads-ups on your legs, Done or Review and lock in) and replace at the limit
+- [x] Add the tray (progress, remove, heads-ups on your legs, Done or Review and lock in) and replace at the limit
       through `PUT /legs/{id}`; test add, remove, replace, the kickoff and lock-in refusals, and the tray warning;
       update `slips.md` and `analyzer.md`
 

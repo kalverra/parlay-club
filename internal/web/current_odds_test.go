@@ -39,3 +39,21 @@ func TestCurrentOddsKeepsBothSyncGroups(t *testing.T) {
 	assert.Equal(t, t3, result[2].FetchedAt)
 	assert.Equal(t, "TEAM_TOTAL", result[2].MarketType)
 }
+
+func TestCurrentOddsKeepsEachGamesNewestProps(t *testing.T) {
+	t.Parallel()
+
+	t1 := time.Date(2026, 11, 7, 10, 0, 0, 0, time.UTC)
+	t2 := time.Date(2026, 11, 7, 12, 0, 0, 0, time.UTC)
+
+	rows := []db.Odds{
+		// The first game's props were fetched earlier than the second game's.
+		{GameID: "401772001", MarketType: "PASS_YDS", PlayerName: "Josh Allen", FetchedAt: t1},
+		{GameID: "401772002", MarketType: "PASS_YDS", PlayerName: "Tua Tagovailoa", FetchedAt: t2},
+	}
+
+	result := currentOdds(rows)
+	require.Len(t, result, 2, "a newer prop sync for one game leaves another game's props alone")
+	assert.Equal(t, "Josh Allen", result[0].PlayerName)
+	assert.Equal(t, "Tua Tagovailoa", result[1].PlayerName)
+}
