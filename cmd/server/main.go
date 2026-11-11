@@ -275,14 +275,15 @@ func newLogger(cfg config.Config, out io.Writer) zerolog.Logger {
 // newMux builds the routes. Health, static files, and the sign-in screens sit
 // outside the shell's checks. Everything else needs a signed-in user and an
 // active group, and every non-GET form must come from HTMX or be one of the
-// plain forms.
+// plain forms. mountExtra adds dev-only routes behind those same checks; it may
+// be nil outside sandbox mode.
 func newMux(
 	shell, static http.Handler,
 	handlers *auth.Handlers,
 	groupHandlers *groups.Handlers,
 	scope func(http.Handler) http.Handler,
 	kick func(),
-	sandboxApps ...func(*http.ServeMux),
+	mountExtra func(*http.ServeMux),
 ) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", healthz)
@@ -294,8 +295,8 @@ func newMux(
 	if groupHandlers != nil {
 		groupHandlers.Routes(app)
 	}
-	if len(sandboxApps) > 0 && sandboxApps[0] != nil {
-		sandboxApps[0](app)
+	if mountExtra != nil {
+		mountExtra(app)
 	}
 	mux.Handle("/", handlers.RequireUser(scope(kickOnPage(kick)(app))))
 
