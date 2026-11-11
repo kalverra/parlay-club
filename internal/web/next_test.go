@@ -2,10 +2,12 @@ package web_test
 
 import (
 	"fmt"
+	"html"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -201,4 +203,78 @@ func TestHubBannerHidesTheDeadlineOnceEveryoneLocks(t *testing.T) {
 
 	assert.Contains(t, body, "Ready to place")
 	assert.NotContains(t, body, "Picks close for")
+}
+
+// TestHubLeadsWithTheExportCardOnceEveryoneLocks checks that the export step
+// puts the card above the step banner with its prices note, so the hand-off is
+// the first thing the person sees.
+func TestHubLeadsWithTheExportCardOnceEveryoneLocks(t *testing.T) {
+	t.Parallel()
+
+	fixture := hubFixture(t, 2)
+	game := addGame(t, fixture, gameKickoff())
+	exportRows(t, fixture.store, game.ID)
+	addExportLeg(t, fixture, url.Values{
+		"game_id":     {game.ID},
+		"market_type": {"ML"},
+		"team":        {"BUF"},
+		"side":        {"TEAM"},
+		"selection":   {"BUF ML"},
+		"odds":        {"-110"},
+	})
+	require.NoError(t, fixture.store.SetSlipMemberLock(
+		t.Context(), fixture.slip.ID, fixture.user.ID, &hubNow))
+	lockSlip(t, fixture)
+
+	body := html.UnescapeString(hubBody(t, fixture, fixture.slip.ID))
+
+	assert.Contains(t, body, "Ready to place")
+	assert.Contains(t, body, "Prices may have moved since")
+	assert.Contains(t, body, exportFetched.Format("3:04 PM")+" UTC")
+	assert.NotContains(t, body, "Links as of")
+	assert.Less(t,
+		strings.Index(body, `id="slip-export"`),
+		strings.Index(body, `id="slip-panel"`),
+		"the export card comes before the step banner")
+}
+
+// TestHubNudgesThePeopleStillPicking checks the waiting step's share-sheet
+// button carries the slip, the deadline, and the slip's path for the browser to
+// build the message.
+func TestHubNudgesThePeopleStillPicking(t *testing.T) {
+	t.Parallel()
+
+	fixture := hubFixture(t, 1)
+	kickoff := hubNow.Add(90 * time.Minute)
+	addGame(t, fixture, kickoff)
+	addSam(t, fixture)
+	addStepLeg(t, fixture, fixture.user.ID)
+	require.NoError(t, fixture.store.SetSlipMemberLock(
+		t.Context(), fixture.slip.ID, fixture.user.ID, &hubNow))
+
+	body := html.UnescapeString(hubBody(t, fixture, fixture.slip.ID))
+
+	assert.Contains(t, body, "Waiting on Sam")
+	assert.Contains(t, body, "Nudge Sam")
+	assert.Contains(t, body, `data-nudge-slip="Week 9"`)
+	assert.Contains(t, body, fmt.Sprintf(`data-nudge-path="/slips/%d"`, fixture.slip.ID))
+	assert.Contains(t, body, fmt.Sprintf(`data-nudge-close="%s"`, kickoff.Format(time.RFC3339)))
+}
+
+// TestHubNudgeHasNoCloseTimeWithoutADeadline checks that a slip whose week is
+// behind the clock still offers a nudge, just without a picks-close time.
+func TestHubNudgeHasNoCloseTimeWithoutADeadline(t *testing.T) {
+	t.Parallel()
+
+	fixture := hubFixture(t, 1)
+	addGame(t, fixture, hubNow.Add(-2*time.Hour))
+	addSam(t, fixture)
+	addStepLeg(t, fixture, fixture.user.ID)
+	require.NoError(t, fixture.store.SetSlipMemberLock(
+		t.Context(), fixture.slip.ID, fixture.user.ID, &hubNow))
+
+	body := html.UnescapeString(hubBody(t, fixture, fixture.slip.ID))
+
+	assert.Contains(t, body, "Nudge Sam")
+	assert.NotContains(t, body, "data-nudge-close")
 }

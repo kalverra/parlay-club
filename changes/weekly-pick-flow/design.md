@@ -279,7 +279,7 @@ Parallel: surfaces
 
 Effort: medium (copy, states, and a full walk through the sandbox)
 
-- [ ] Put export first in the `export` step with the prices note, and add the share-sheet nudge in the `waiting` step;
+- [x] Put export first in the `export` step with the prices note, and add the share-sheet nudge in the `waiting` step;
       test both and update `export.md`
 - [ ] Give each empty state a real screen (only "Just me", a group with no slip, a week with no lines, a member still
       missing at the deadline) and walk the full flow in the sandbox as two personas at phone width; update

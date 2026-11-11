@@ -4,7 +4,7 @@ title: Slips
 type: concept
 summary: How a group builds one shared parlay a week from the slate, with the hub's next-step banner and deadline, the searchable pick board and its tray, members, legs, votes, quick-add, create-slip defaults, grading, the editing and locking rules, and research.
 tags: [slips, weeks, legs, members, locking, grading, results, activity, groups, games, quick-add, nfelo, props, autocomplete, research, next-step, hub, pick-board, search, tray, votes, voting]
-sources: [internal/slips/slips.go, internal/slips/rules.go, internal/slips/next.go, internal/board/board.go, internal/db/slips.go, internal/db/legs.go, internal/db/votes.go, internal/db/odds.go, internal/db/players.go, internal/db/weeks.go, internal/db/games.go, internal/web/games.go, internal/web/pick.go, internal/web/slips.go, internal/web/home.go, internal/web/research.go]
+sources: [internal/slips/slips.go, internal/slips/rules.go, internal/slips/next.go, internal/board/board.go, internal/db/slips.go, internal/db/legs.go, internal/db/votes.go, internal/db/odds.go, internal/db/players.go, internal/db/weeks.go, internal/db/games.go, internal/web/games.go, internal/web/pick.go, internal/web/slips.go, internal/web/home.go, internal/web/research.go, web/static/app.js]
 last_verified: 2026-11-11
 ---
 
@@ -23,8 +23,9 @@ with their own stake, and no money passes through the app.
 ## The hub
 
 `GET /slips/{id}` is the hub. A step banner leads, then the members and their legs, then the export card, the payout
-calculator, and the activity feed. The bottom bar keeps Groups, This week, and Record Book; the hub's one primary action
-is the way into picking.
+calculator, and the activity feed. In the `export` step the card moves above the banner, because placing the picks is the
+one thing left. The bottom bar keeps Groups, This week, and Record Book; the hub's one primary action is the way into
+picking.
 
 `slips.NextStep` is one pure function over the slip, its members, its legs, the week's games, the viewer, and `now`. It
 returns the step, the legs still needed, the names the slip waits on, the first kickoff still ahead, and the slip's
@@ -36,14 +37,18 @@ result. The hub banner and each group card read its label, so the two always agr
 | `pick`    | The viewer has fewer legs than `legs_per_member`.         | Pick N more        | Opens `/slips/{id}/pick`.                           |
 | `closed`  | The viewer needs legs and every game has kicked off.      | Picks are closed   | None; the slip stays visible.                       |
 | `lock_in` | The viewer has every leg and has not locked in.           | Ready to lock in   | Posts `/slips/{id}/lock`.                           |
-| `waiting` | The viewer is locked in and someone else is not.          | Waiting on {names} | None.                                               |
-| `export`  | Everyone is locked in.                                    | Ready to place     | The export card carries the picks.                  |
+| `waiting` | The viewer is locked in and someone else is not.          | Waiting on {names} | Nudge {name} shares or copies the message.          |
+| `export`  | Everyone is locked in.                                    | Ready to place     | The export card leads the hub.                      |
 | `done`    | The slip is `GRADED`.                                     | Won, Lost, or Push | None.                                               |
 
 The deadline is the earliest game in the slip's week whose kickoff is still ahead of `now`. It renders as
 `Picks close for BUF @ MIA at <time>`, and `app.js` formats the time in the reader's zone. A past week has no kickoff
 ahead, so it has no deadline. Unlocking clears every lock, so the banner reopens the pick step; a member who already has
 every leg sees `lock_in` instead.
+
+In `waiting` each person still picking gets a **Nudge** button. It opens the browser's share sheet with "Waiting on you
+for {slip}. Picks close {time}. {url}", with the time in the sender's zone and an absolute link, and copies the text when
+the browser has no share sheet. The server sends nothing; a slip with no deadline drops the picks-close sentence.
 
 Opening a slip from another of the viewer's groups switches the active group, the same as opening that group's week. A
 group member who is not on the slip sees `join`; a person outside the group gets a 404.

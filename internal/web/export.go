@@ -217,9 +217,9 @@ func exportCopyText(legs []db.Leg, names map[int64]string) string {
 	return strings.Join(lines, "\n")
 }
 
-// linksNote is the "links as of" note the export card shows. It reads the
-// newest fetch time among the slip games' odds rows, the same clock the Games
-// tab uses.
+// linksNote is the "prices may have moved" note the export card shows. It reads
+// the newest fetch time among the slip games' odds rows, the same clock the
+// Games tab uses.
 func linksNote(newest time.Time) (string, string) {
 	if newest.IsZero() {
 		return "", ""
