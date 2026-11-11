@@ -5,7 +5,7 @@ type: concept
 summary: How a slip page hears about changes through one SSE stream, and how the hub, deadlines, and client reconnect keep that stream cheap.
 tags: [live, sse, hub, eventsource, deadlines, hub-topics]
 sources: [internal/live/hub.go, internal/live/stream.go, internal/refresh/live.go, internal/slips/rules.go, cmd/server/sandbox.go, web/static/app.js]
-last_verified: 2026-11-10
+last_verified: 2026-11-11
 ---
 
 # Live updates
@@ -19,7 +19,8 @@ refetches the partials it already shows, so every person gets fresh data without
 
 A change signal never includes slip data. It names a topic, and the browser reacts by asking HTMX to refresh.
 
-- `slip-updated` refreshes the slip panel and its activity.
+- `slip-updated` refreshes the slip panel and its activity. Every committed slip mutation sends it, including a vote, so
+  each open hub refetches its tallies.
 - `board-updated` refreshes the game board.
 
 This keeps the hub small, avoids leaking one person's view to another, and means a missed event does no harm: the next

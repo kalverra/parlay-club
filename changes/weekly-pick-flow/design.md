@@ -170,14 +170,17 @@ CREATE TABLE leg_votes (
 
 - `Service.Vote(ctx, actorID, legID int64, value int) error` with value -1, 0 (clear), or 1. Rules: the actor is on the
   slip (`ErrNotMember`); the leg is not theirs (`ErrOwnVote`, "you can't vote on your own pick"); the slip status is
-  `OPEN` (`ErrVotesClosed`, "votes closed once everyone locked in"). Kickoff does not close a vote. Unlock reopens
-  voting because it sets the slip back to `OPEN`.
+  `OPEN` (`ErrVotesClosed`, "votes closed once everyone locked in"). Any other value is `ErrVoteInvalid` and answers a
+  422. Kickoff does not close a vote. Unlock reopens voting because it sets the slip back to `OPEN`.
 - The same value again is a no-op and publishes nothing. A change publishes `slip:{id}` but writes **no** activity
   entry; a feed full of thumbs would bury the picks. `slips.md` rule 9 records this one exception.
-- `UpdateLeg` deletes the leg's votes in the same transaction when the pick changes (game, market, team, player, side,
-  or line). An odds-only edit keeps them: it is the same pick at a new price. `DeleteLeg` clears them by cascade.
-- The hub shows "▲ 2 ▼ 1" on every leg, with the viewer's own vote highlighted. Others' legs get tap targets while the
-  slip is `OPEN`; the owner sees the tally only. Votes are kept after the week for the Record Book.
+- `UpdateLeg` deletes the leg's votes in the same transaction when the pick changes (game, market, selection, team,
+  player, side, or line). An odds-only edit keeps them: it is the same pick at a new price. `DeleteLeg` clears them by
+  cascade.
+- The hub shows "▲ 2 ▼ 1" on every leg that has a vote or that the viewer can vote on, with the viewer's own vote
+  highlighted. Others' legs get tap targets while the slip is `OPEN`; the owner sees the tally only, so an unvoted leg
+  of the owner's shows no tally at all. The vote route answers with the refreshed panel, so the actor's tally changes in
+  place, while `slip-updated` refreshes every other open hub. Votes are kept after the week for the Record Book.
 
 ### Hand-off
 
@@ -269,7 +272,7 @@ Parallel: surfaces
 
 - [x] Add the `leg_votes` migration, store methods, `Service.Vote`, and vote clearing in `UpdateLeg`; test every rule in
       the Votes verification list; update `schema.md` and the editing rules in `slips.md`
-- [ ] Draw tallies and vote buttons on the hub's leg rows, read-only once the slip locks; test the views and a second
+- [x] Draw tallies and vote buttons on the hub's leg rows, read-only once the slip locks; test the views and a second
       client's refresh from `slip-updated`; update `slips.md` and `live-updates.md`
 
 ### Phase 4: Finish the hand-off and first-run states

@@ -67,6 +67,8 @@ func TestLegPanelOffersVotesOnSomeoneElsesLeg(t *testing.T) {
 	assert.Contains(t, body, "&uarr; 0")
 	assert.Contains(t, body, "&darr; 0")
 	assert.Contains(t, body, `data-votes`)
+	assert.Contains(t, hubBody(t, fixture, fixture.slip.ID), fmt.Sprintf(`hx-post="/legs/%d/vote"`, leg.ID),
+		"the hub's leg rows carry the same vote controls")
 
 	response := vote(t, fixture, leg.ID, 1)
 	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
@@ -134,6 +136,7 @@ func TestVoteAfterEveryoneLocksInAnswers422(t *testing.T) {
 	fixture := newSlipFixture(t, 1)
 	leg := addVotableLeg(t, fixture)
 	require.Equal(t, http.StatusOK, addLeg(t, fixture.handler, fixture.slip.ID, "BUF ML").Code)
+	require.Equal(t, http.StatusOK, vote(t, fixture, leg.ID, 1).Code)
 
 	now := time.Now()
 	require.NoError(t, fixture.store.SetSlipMemberLock(t.Context(), fixture.slip.ID, fixture.user.ID, &now))
@@ -147,6 +150,7 @@ func TestVoteAfterEveryoneLocksInAnswers422(t *testing.T) {
 	body := getPanel(t, fixture).Body.String()
 	assert.NotContains(t, body, fmt.Sprintf(`hx-post="/legs/%d/vote"`, leg.ID),
 		"a locked slip keeps the tally but takes no votes")
+	assert.Contains(t, body, "&uarr; 1", "the vote cast while the slip was open stays on the tally")
 
 	refused := vote(t, fixture, leg.ID, 1)
 	assert.Equal(t, http.StatusUnprocessableEntity, refused.Code)
@@ -196,4 +200,6 @@ func TestVoteSignalsTheOtherBrowser(t *testing.T) {
 
 	assert.Equal(t, "slip-updated", waitForEvent(t, stream.Body),
 		"the other browser refetches its panel from the signal")
+	assert.Contains(t, getPanel(t, fixture).Body.String(), "&uarr; 1",
+		"the refetched panel carries the new tally")
 }
