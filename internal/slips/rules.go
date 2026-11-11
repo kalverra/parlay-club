@@ -34,6 +34,12 @@ var (
 	ErrNotLocked = errors.New("nobody is locked in")
 	// ErrMemberHasLegs is returned when a member with legs is removed.
 	ErrMemberHasLegs = errors.New("delete their legs first")
+	// ErrOwnVote is returned when a member votes on their own leg.
+	ErrOwnVote = errors.New("you can't vote on your own pick")
+	// ErrVotesClosed is returned when the slip is no longer OPEN.
+	ErrVotesClosed = errors.New("votes closed once everyone locked in")
+	// ErrVoteInvalid is returned when a vote is not up, down, or clear.
+	ErrVoteInvalid = errors.New("vote must be up, down, or clear")
 )
 
 // Publisher tells live listeners that a slip changed. *live.Hub implements it.
@@ -394,6 +400,13 @@ func (s *Service) UpdateLeg(ctx context.Context, actorID int64, leg db.Leg) (db.
 		if err != nil {
 			return err
 		}
+		// A different pick is a different question, so its votes do not carry
+		// over. An odds-only edit keeps them: it is the same pick at a new price.
+		if pickChanged(existing, updated) {
+			if err := tx.DeleteLegVotes(ctx, updated.ID); err != nil {
+				return err
+			}
+		}
 		message := fmt.Sprintf("%s edited %s", actor.User.Name, updated.Selection)
 		if updated.Selection != existing.Selection {
 			message = fmt.Sprintf(
@@ -407,6 +420,62 @@ func (s *Service) UpdateLeg(ctx context.Context, actorID int64, leg db.Leg) (db.
 	}
 	s.notify(updated.SlipID)
 	return updated, nil
+}
+
+// Vote records the acting member's vote on someone else's leg: 1 for up, -1
+// for down, and 0 to clear it. Only slip members can vote, they cannot vote on
+// their own pick, and votes stop once the slip leaves OPEN. Voting writes no
+// activity entry, and the same vote again changes nothing.
+func (s *Service) Vote(ctx context.Context, actorID, legID int64, value int) error {
+	if value != -1 && value != 0 && value != 1 {
+		return fmt.Errorf("vote on leg %d: %w", legID, ErrVoteInvalid)
+	}
+	now := s.now()
+	var (
+		slipID  int64
+		changed bool
+	)
+	err := s.store.Tx(ctx, func(tx *db.Store) error {
+		leg, err := tx.LegByID(ctx, legID)
+		if err != nil {
+			return err
+		}
+		slipID = leg.SlipID
+		slip, _, _, err := loadSlip(ctx, tx, slipID, actorID)
+		if err != nil {
+			return err
+		}
+		if leg.UserID == actorID {
+			return ErrOwnVote
+		}
+		if slip.Status != db.SlipOpen {
+			return ErrVotesClosed
+		}
+
+		current, err := tx.LegVoteValue(ctx, legID, actorID)
+		if err != nil {
+			return err
+		}
+		if current == value {
+			return nil
+		}
+		if value == 0 {
+			if err := tx.ClearLegVote(ctx, legID, actorID); err != nil {
+				return err
+			}
+		} else if err := tx.SetLegVote(ctx, legID, actorID, value, now); err != nil {
+			return err
+		}
+		changed = true
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("vote on leg %d: %w", legID, err)
+	}
+	if changed {
+		s.notify(slipID)
+	}
+	return nil
 }
 
 // DeleteLeg removes one of the acting member's legs. A kickoff-locked leg or a
@@ -623,6 +692,26 @@ func checkKickoff(
 		return ErrKickoffLocked
 	}
 	return nil
+}
+
+// pickChanged reports whether an edit changed the pick itself. Odds are a
+// price, not a pick, so an odds-only edit keeps the leg's votes.
+func pickChanged(before, after db.Leg) bool {
+	return !sameText(before.GameID, after.GameID) ||
+		before.MarketType != after.MarketType ||
+		before.Selection != after.Selection ||
+		!sameText(before.Team, after.Team) ||
+		!sameText(before.PlayerName, after.PlayerName) ||
+		!sameText(before.Side, after.Side) ||
+		!db.SameLine(before.Line, after.Line)
+}
+
+// sameText compares two optional leg fields.
+func sameText(left, right *string) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return *left == *right
 }
 
 // slipChange describes a name or legs-per-member change for the activity feed.

@@ -138,6 +138,7 @@ slip outside every group is 404.
 | `GET /legs/{id}/edit`                      | Edit form filled from the leg with player autocomplete          | Leg form partial. |
 | `PUT /legs/{id}`                           | Save the leg's pick fields                                      | Panel partial with `Hx-Trigger: leg-saved`, or the results partial for `from=board`. |
 | `PUT /legs/{id}/result`                    | Grade the leg from an upper-case `result`                       | Panel partial. Any member may grade any leg; an unknown result is 422. |
+| `POST /legs/{id}/vote`                     | Vote on someone else's leg with `value` 1, -1, or 0 to clear   | Panel partial. Only slip members vote, not on their own pick; a closed slip is 422. |
 | `DELETE /legs/{id}`                        | Delete the leg                                                  | Panel partial; `?from=board` answers the row, `?from=tray` the tray. |
 | `POST /slips/{id}/lock`                    | Record the signed-in member's lock in                           | Panel partial with `Hx-Trigger: slip-updated`. |
 | `POST /slips/{id}/unlock`                  | Clear every member's lock                                       | Panel partial with `Hx-Trigger: slip-updated`. |
@@ -153,6 +154,10 @@ unreadable number is 422 with "Odds need to be a number.", "Line needs to be a n
 
 `?quick=1` turns the form into a quick add: the target becomes the game card's `#quick-add-{gameID}` element, and a
 successful `POST` answers with the `leg-added` partial instead of the slip panel.
+
+`POST /legs/{id}/vote` records an up vote (`1`), a down vote (`-1`), or a clear (`0`) on another member's leg. Voting
+again with the same value changes nothing, and a change publishes `slip:{id}` without writing an activity entry, so the
+actor's panel response and the other browsers' refresh both show the new tally. See [Slips](../concepts/slips.md#votes).
 
 `GET /slips/{id}/events` serves one connection for one slip. It subscribes to `slip:{id}` and `week:{weekID}`, sends
 `slip-updated` and `board-updated` signals, pings every 25 seconds, and ends with `bye` at its deadline. The slip page

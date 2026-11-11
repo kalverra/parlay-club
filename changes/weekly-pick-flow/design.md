@@ -267,7 +267,7 @@ Parallel: surfaces
 
 Parallel: surfaces
 
-- [ ] Add the `leg_votes` migration, store methods, `Service.Vote`, and vote clearing in `UpdateLeg`; test every rule in
+- [x] Add the `leg_votes` migration, store methods, `Service.Vote`, and vote clearing in `UpdateLeg`; test every rule in
       the Votes verification list; update `schema.md` and the editing rules in `slips.md`
 - [ ] Draw tallies and vote buttons on the hub's leg rows, read-only once the slip locks; test the views and a second
       client's refresh from `slip-updated`; update `slips.md` and `live-updates.md`
