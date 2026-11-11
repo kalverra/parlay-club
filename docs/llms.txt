@@ -31,6 +31,7 @@
 - [Archive every external response](decisions/raw-response-archive.md): Add one append-only archive of raw responses in SQLite, written by a single seam that every outside call passes through.
 - [Slate, weather, and lines](decisions/slate-and-lines.md): Pull the Sunday and Monday slate from ESPN, stadium weather from Open-Meteo, and game lines from The Odds API, fetched only when someone opens the app and the data is stale.
 - [Live shared slips](decisions/slips-live.md): Add shared slips: each week has one or more slips, each slip has members, and every member adds the same number of legs.
+- [Make the weekly pick flow the center of the app](decisions/weekly-pick-flow.md): Land on your groups, see what the week needs on the hub, pick on a searchable board, lock in, vote, and export.
 
 ## Guide
 
