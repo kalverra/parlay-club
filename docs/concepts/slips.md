@@ -2,10 +2,10 @@
 id: slips
 title: Slips
 type: concept
-summary: How a group builds one shared parlay a week from the slate, with members, legs, quick-add, create-slip defaults, grading, the editing and locking rules, and research.
-tags: [slips, weeks, legs, members, locking, grading, results, activity, groups, games, quick-add, nfelo, props, autocomplete, research]
-sources: [internal/slips/slips.go, internal/slips/rules.go, internal/db/slips.go, internal/db/legs.go, internal/db/players.go, internal/db/weeks.go, internal/db/games.go, internal/web/games.go, internal/web/slips.go, internal/web/research.go]
-last_verified: 2026-11-10
+summary: How a group builds one shared parlay a week from the slate, with the hub's next-step banner and deadline, members, legs, quick-add, create-slip defaults, grading, the editing and locking rules, and research.
+tags: [slips, weeks, legs, members, locking, grading, results, activity, groups, games, quick-add, nfelo, props, autocomplete, research, next-step, hub]
+sources: [internal/slips/slips.go, internal/slips/rules.go, internal/slips/next.go, internal/db/slips.go, internal/db/legs.go, internal/db/players.go, internal/db/weeks.go, internal/db/games.go, internal/web/games.go, internal/web/slips.go, internal/web/home.go, internal/web/research.go]
+last_verified: 2026-11-11
 ---
 
 # Slips
@@ -20,10 +20,39 @@ A **slip** is one shared parlay inside a group and a week. A week usually has on
 person can belong to several in the same week. The app tracks the picks. Each person places the bet at their own book
 with their own stake, and no money passes through the app.
 
+## The hub
+
+`GET /slips/{id}` is the hub. A step banner leads, then the members and their legs, then the export card, the payout
+calculator, and the activity feed. The bottom bar keeps Groups, This week, and Record Book; the hub's one primary action
+is the way into picking.
+
+`slips.NextStep` is one pure function over the slip, its members, its legs, the week's games, the viewer, and `now`. It
+returns the step, the legs still needed, the names the slip waits on, the first kickoff still ahead, and the slip's
+result. The hub banner and each group card read its label, so the two always agree.
+
+| Step      | When                                                      | Banner             | Primary action                                      |
+| --------- | --------------------------------------------------------- | ------------------ | --------------------------------------------------- |
+| `join`    | The viewer is in the group but not on the slip.           | Join this slip     | Adds the viewer through `POST /slips/{id}/members`. |
+| `pick`    | The viewer has fewer legs than `legs_per_member`.         | Pick N more        | Opens `/games`.                                     |
+| `closed`  | The viewer needs legs and every game has kicked off.      | Picks are closed   | None; the slip stays visible.                       |
+| `lock_in` | The viewer has every leg and has not locked in.           | Ready to lock in   | Posts `/slips/{id}/lock`.                           |
+| `waiting` | The viewer is locked in and someone else is not.          | Waiting on {names} | None.                                               |
+| `export`  | Everyone is locked in.                                    | Ready to place     | The export card carries the picks.                  |
+| `done`    | The slip is `GRADED`.                                     | Won, Lost, or Push | None.                                               |
+
+The deadline is the earliest game in the slip's week whose kickoff is still ahead of `now`. It renders as
+`Picks close for BUF @ MIA at <time>`, and `app.js` formats the time in the reader's zone. A past week has no kickoff
+ahead, so it has no deadline. Unlocking clears every lock, so the banner reopens the pick step; a member who already has
+every leg sees `lock_in` instead.
+
+Opening a slip from another of the viewer's groups switches the active group, the same as opening that group's week. A
+group member who is not on the slip sees `join`; a person outside the group gets a 404.
+
 ## Creating a slip
 
-The home page opens the newest slip of the latest week. The slate sync keeps that week current, so it is normally the
-week being played. When the group has none, it shows the create-slip form.
+The landing list opens a group's week (`GET /groups/{id}/week`), which switches the active group and opens that group's
+newest slip of the latest week. The slate sync keeps that week current, so it is normally the week being played. When the
+group has none, it shows the create-slip form.
 
 - Week defaults to the latest week. The picker lists every stored week with its season. A past week the slate never
   stored can be typed in by season, season type, and week number, and the form creates the week. A typed week later than
@@ -43,7 +72,8 @@ A slip has **members**: a subset of the group's users, guests included. `slip_me
 holds `locked_at` for a lock in.
 
 Members and `legs_per_member` can change only while the slip is `OPEN`. A member with legs cannot be removed until their
-legs are deleted. Adding someone already on the slip changes nothing.
+legs are deleted. Adding someone already on the slip changes nothing. A group member who is not on the slip can join it
+themselves through the same add-member route while it is `OPEN`.
 
 ## Legs
 
@@ -89,9 +119,9 @@ keeps its own price. The formulas are in [Odds math](../reference/odds-math.md).
 
 ## The Games tab
 
-The Games tab lists the latest week's games, sorted by kickoff. Each card shows the matchup, the kickoff time, the two
-spreads, and the over and under. A live or final game also shows its score and a status chip. Times render as
-`<time datetime="{UTC ISO}">`, and `app.js` formats them in the browser's local zone.
+The hub's pick step opens `GET /games`. It lists the latest week's games, sorted by kickoff. Each card shows the matchup,
+the kickoff time, the two spreads, and the over and under. A live or final game also shows its score and a status chip.
+Times render as `<time datetime="{UTC ISO}">`, and `app.js` formats them in the browser's local zone.
 
 Prices come from the viewer's home book when it carries the selection, and the median across every book otherwise. A row
 left behind by an earlier odds sync is ignored, so a card never mixes old prices with new ones. The "lines as of" note
@@ -112,8 +142,8 @@ added. "Custom leg" opens the leg form with the game already chosen.
 
 ## Research
 
-The Research tab (`GET /research`) offers game injury reports and player hit bars. It opens from the bottom tab bar,
-a game card ("Game research &rarr;"), or a slip leg ("Research &rarr;").
+The Research page (`GET /research`) offers game injury reports and player hit bars. It opens from a player, prop, leg,
+or game link. It is not a bottom-bar tab.
 
 - **Game research (`GET /research/games/{id}`):** fetches ESPN summary injuries on demand and displays injuries
   filtered to key positions (`QB`, `RB`, `WR`, `TE`, `LT`, `OT`, `C`, `CB`, `S`). A player-match section lists
@@ -123,7 +153,8 @@ a game card ("Game research &rarr;"), or a slip leg ("Research &rarr;").
   last-5 hit bars (green over the line, red under), callouts for the last-5 median and season mean, and total games
   played this season. Opening from a slip leg or prop pill preselects that market and line; otherwise it picks the
   player's primary prop line or the first available market.
-- **Responsive layout:** Phone and desktop screens show Research as a bottom tab in a single column.
+- **Responsive layout:** Phone and desktop screens keep Research in a single column, reached from the page or leg that
+  names the player or game.
 
 ## Grading
 

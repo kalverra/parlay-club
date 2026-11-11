@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/kalverra/parlay-club/internal/db"
+	"github.com/kalverra/parlay-club/internal/slips"
 )
 
 // HomePage is the group list a signed-in person lands on.
@@ -17,8 +19,9 @@ type HomePage struct {
 
 // HomeCard is one group on the landing list.
 type HomeCard struct {
-	ID   int64
-	Name string
+	ID      int64
+	Name    string
+	Summary string
 }
 
 // home lists every group the person belongs to, oldest first. A person with one
@@ -43,8 +46,27 @@ func (h *slipHandlers) home(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cards := make([]HomeCard, 0, len(groupList))
+	now := h.deps.now()
+	week, hasWeek, ok := h.latestWeek(w, r)
+	if !ok {
+		return
+	}
 	for _, group := range groupList {
-		cards = append(cards, HomeCard{ID: group.ID, Name: group.Name})
+		summary := "No slip yet"
+		if hasWeek {
+			groupSlips, err := h.deps.Store.SlipsForWeek(r.Context(), group.ID, week.ID)
+			if err != nil {
+				h.serverError(w, err)
+				return
+			}
+			if len(groupSlips) > 0 {
+				summary = h.groupStep(w, r, groupSlips[0], user.ID, now)
+				if summary == "" {
+					return
+				}
+			}
+		}
+		cards = append(cards, HomeCard{ID: group.ID, Name: group.Name, Summary: summary})
 	}
 
 	if len(cards) == 1 && !isHTMX(r) {
@@ -52,6 +74,46 @@ func (h *slipHandlers) home(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.renderHome(w, r, page, cards)
+}
+
+// latestWeek returns the latest stored week, and whether there is one.
+func (h *slipHandlers) latestWeek(w http.ResponseWriter, r *http.Request) (db.Week, bool, bool) {
+	week, err := h.deps.Store.LatestWeek(r.Context())
+	if errors.Is(err, db.ErrWeekNotFound) {
+		return db.Week{}, false, true
+	}
+	if err != nil {
+		h.serverError(w, err)
+		return db.Week{}, false, false
+	}
+	return week, true, true
+}
+
+// groupStep is the viewer's next-step summary on a group's newest slip. It
+// writes the error response and returns "" when a query fails.
+func (h *slipHandlers) groupStep(
+	w http.ResponseWriter,
+	r *http.Request,
+	slip db.Slip,
+	viewerID int64,
+	now time.Time,
+) string {
+	members, err := h.deps.Store.SlipMembers(r.Context(), slip.ID)
+	if err != nil {
+		h.serverError(w, err)
+		return ""
+	}
+	legs, err := h.deps.Store.LegsForSlip(r.Context(), slip.ID)
+	if err != nil {
+		h.serverError(w, err)
+		return ""
+	}
+	games, err := h.deps.Store.GamesForWeek(r.Context(), slip.WeekID)
+	if err != nil {
+		h.serverError(w, err)
+		return ""
+	}
+	return slips.NextStep(slip, members, legs, games, viewerID, now).Label()
 }
 
 // groupWeek switches the active group and opens the newest slip of the latest

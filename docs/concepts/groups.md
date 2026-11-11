@@ -97,9 +97,10 @@ the schema, the scope check, and the group screens.
 
 ## Screens
 
-`/` is the landing page. It lists one card per group, oldest first, and each card opens that group's week. A person with
-one group skips the list: `/` sends them straight to `/groups/{id}/week`. The list holds no live stream; the browser
-refetches it when the tab becomes visible.
+`/` is the landing page. It lists one card per group, oldest first, each showing the group name and the viewer's next
+step on that group's newest slip of the latest week ("Pick 1 more", "Waiting on Ben", "Ready to place", or "No slip
+yet"). Each card opens that group's week. A person with one group skips the list: `/` sends them straight to
+`/groups/{id}/week`. The list holds no live stream; the browser refetches it when the tab becomes visible.
 
 `/groups` manages the caller's groups. Each card shows the invite link with copy and reset, a leave button when the
 person has more than one group, and a note when they do not. A create form names and starts a new group.

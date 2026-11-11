@@ -84,6 +84,32 @@ type SlipPage struct {
 	Export   ExportView
 	Creating bool
 	Create   SlipCreateView
+	Next     NextView
+}
+
+// NextView is the hub's step banner and its one primary action.
+type NextView struct {
+	Step     slips.Step
+	Title    string
+	Detail   string
+	Deadline *DeadlineView
+	Action   *NextAction
+}
+
+// DeadlineView is the first kickoff still ahead in the slip's week.
+type DeadlineView struct {
+	Matchup string
+	ISO     string
+	Label   string
+}
+
+// NextAction is the button under the step banner. Href makes a link and
+// PostURL makes an HTMX form. UserID fills the join form's hidden field.
+type NextAction struct {
+	Label   string
+	Href    string
+	PostURL string
+	UserID  int64
 }
 
 // SlipView is everything the slip panel draws.
@@ -888,7 +914,7 @@ func (h *slipHandlers) renderSlip(
 		page.WeekLabel = weekLabel(week)
 	}
 	page.Slips = h.slipOptions(r.Context(), slip)
-	view, err := h.slipView(r.Context(), slip, stake, boost)
+	data, err := h.slipView(r.Context(), slip, stake, boost)
 	if err != nil {
 		h.serverError(w, err)
 		return
@@ -898,7 +924,9 @@ func (h *slipHandlers) renderSlip(
 		h.serverError(w, err)
 		return
 	}
-	h.renderPage(w, "slip", SlipPage{Page: page, Slip: &view, Export: export})
+	data.Page = page
+	data.Export = export
+	h.renderPage(w, "slip", data)
 }
 
 // slipOptions lists the group's slips in the slip's week for the top bar. The
@@ -1098,17 +1126,17 @@ func (h *slipHandlers) slipView(
 	ctx context.Context,
 	slip db.Slip,
 	stake, boost float64,
-) (SlipView, error) {
+) (SlipPage, error) {
 	page, err := h.slipPageData(ctx, slip)
 	if err != nil {
-		return SlipView{}, err
+		return SlipPage{}, err
 	}
 	payout, err := h.payoutView(ctx, slip, stake, boost)
 	if err != nil {
-		return SlipView{}, err
+		return SlipPage{}, err
 	}
 	page.Slip.Payout = payout
-	return *page.Slip, nil
+	return page, nil
 }
 
 // slipPageData loads the slip's members, legs, and activity.
@@ -1220,7 +1248,9 @@ func (h *slipHandlers) slipPageData(ctx context.Context, slip db.Slip) (SlipPage
 		Activity:      activity,
 		Analyzer:      analyzerView(legs, gamesByID, playerStats, names),
 	}
+	viewerID := int64(0)
 	if hasUser {
+		viewerID = user.ID
 		view.LegForm = LegFormView{
 			SlipID: slip.ID,
 			Action: fmt.Sprintf("/slips/%d/legs", slip.ID),
@@ -1230,7 +1260,69 @@ func (h *slipHandlers) slipPageData(ctx context.Context, slip db.Slip) (SlipPage
 		}
 	}
 
-	return SlipPage{Page: h.page(nil, slip.Name), Slip: view}, nil
+	next := slips.NextStep(slip, members, legs, games, viewerID, h.deps.now())
+	return SlipPage{
+		Page: h.page(nil, slip.Name),
+		Slip: view,
+		Next: nextView(next, slip, viewerID, games),
+	}, nil
+}
+
+// nextView turns the pure step into the hub banner's copy and one action.
+func nextView(next slips.Next, slip db.Slip, viewerID int64, games []db.Game) NextView {
+	view := NextView{
+		Step:  next.Step,
+		Title: next.Label(),
+	}
+	switch next.Step {
+	case slips.StepPick:
+		view.Detail = "Fill your part of the slip, then lock in."
+		view.Action = &NextAction{Label: "Pick your legs", Href: "/games"}
+	case slips.StepLockIn:
+		view.Detail = "All your legs are in."
+		view.Action = &NextAction{
+			Label:   "Lock in",
+			PostURL: fmt.Sprintf("/slips/%d/lock", slip.ID),
+		}
+	case slips.StepWaiting:
+		view.Detail = "You're locked in. The slip waits on the rest."
+	case slips.StepExport:
+		view.Detail = "Everyone is locked in."
+	case slips.StepDone:
+		view.Detail = "This slip is graded."
+	case slips.StepClosed:
+		view.Detail = "Every game this week has kicked off."
+	case slips.StepJoin:
+		view.Detail = "You're in this group, but not on this slip yet."
+		view.Action = &NextAction{
+			Label:   "Join this slip",
+			PostURL: fmt.Sprintf("/slips/%d/members", slip.ID),
+			UserID:  viewerID,
+		}
+	}
+	switch next.Step {
+	case slips.StepPick, slips.StepLockIn, slips.StepWaiting, slips.StepJoin:
+		if next.Deadline != nil {
+			view.Deadline = newDeadlineView(games, *next.Deadline)
+		}
+	}
+	return view
+}
+
+// newDeadlineView names the game whose kickoff closes the picks.
+func newDeadlineView(games []db.Game, at time.Time) *DeadlineView {
+	matchup := ""
+	for _, game := range games {
+		if game.Kickoff.Equal(at) {
+			matchup = game.AwayTeam + " @ " + game.HomeTeam
+			break
+		}
+	}
+	return &DeadlineView{
+		Matchup: matchup,
+		ISO:     at.UTC().Format(time.RFC3339),
+		Label:   at.UTC().Format("Mon 3:04 PM") + " UTC",
+	}
 }
 
 // payoutView computes the combined odds and return for the calculator.
