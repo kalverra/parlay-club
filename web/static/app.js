@@ -58,6 +58,30 @@ if (document.readyState === "loading") {
   formatTimes(document);
 }
 
+// Copies text with the clipboard API, falling back to a hidden textarea for
+// browsers that refuse it.
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    const area = document.createElement("textarea");
+    area.value = text;
+    area.setAttribute("readonly", "");
+    area.className = "sr-only";
+    document.body.append(area);
+    area.select();
+    let copied = false;
+    try {
+      copied = document.execCommand("copy");
+    } catch {
+      copied = false;
+    }
+    area.remove();
+    return copied;
+  }
+}
+
 // Copies an invite link from its read-only input, then briefly says so.
 async function copyInvite(button) {
   const source = document.querySelector(button.getAttribute("data-copy-target"));
@@ -65,18 +89,57 @@ async function copyInvite(button) {
     return;
   }
 
-  try {
-    await navigator.clipboard.writeText(source.value);
-  } catch {
-    source.select();
-    document.execCommand("copy");
+  if (!(await copyText(source.value))) {
+    return;
   }
 
-  const label = button.textContent;
-  button.textContent = "Copied";
+  sayCopied(button);
+}
+
+// Flips a button's label to "Copied" for a moment, then puts it back.
+function sayCopied(button, label = "Copied") {
+  const original = button.textContent;
+  button.textContent = label;
   setTimeout(() => {
-    button.textContent = label;
+    button.textContent = original;
   }, 1500);
+}
+
+// A nudge shares a short message with the person the slip waits on. The message
+// reads in the sender's zone and carries an absolute link, so the server sends
+// only its parts.
+function nudgeMessage(button) {
+  const slip = button.getAttribute("data-nudge-slip") || "our slip";
+  let message = `Waiting on you for ${slip}.`;
+
+  const close = button.getAttribute("data-nudge-close");
+  if (close) {
+    const when = new Date(close);
+    if (!Number.isNaN(when.getTime())) {
+      message += ` Picks close ${localTimeFormat.format(when)}.`;
+    }
+  }
+
+  const path = button.getAttribute("data-nudge-path") || "";
+  return `${message} ${new URL(path, window.location.origin).href}`;
+}
+
+// Opens the share sheet when the browser has one, otherwise copies the nudge.
+async function shareNudge(button) {
+  const message = nudgeMessage(button);
+
+  if (navigator.share) {
+    try {
+      await navigator.share({ text: message });
+    } catch {
+      // Dismissing the share sheet is not a failure worth a second prompt.
+    }
+    return;
+  }
+
+  if (await copyText(message)) {
+    sayCopied(button, "Nudge copied");
+  }
 }
 
 // Closes the top bar's group sheet when a tap lands outside it.
@@ -92,6 +155,11 @@ document.addEventListener("click", (event) => {
   const copyButton = event.target.closest("[data-copy-target]");
   if (copyButton) {
     copyInvite(copyButton);
+    return;
+  }
+  const nudgeButton = event.target.closest("[data-nudge]");
+  if (nudgeButton) {
+    shareNudge(nudgeButton);
     return;
   }
   if (event.target.closest("[data-close-leg-sheet]")) {

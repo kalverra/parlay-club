@@ -78,7 +78,7 @@ func exportRows(t *testing.T, store *db.Store, gameID string) {
 
 // TestExportCardLinksSomeLegsAndListsTheRest checks the card at phone width:
 // DraftKings per-leg taps, FanDuel's one-tap combined link, friendly notes for
-// the rest, the "links as of" note, and the copy text.
+// the rest, the prices note, and the copy text.
 func TestExportCardLinksSomeLegsAndListsTheRest(t *testing.T) {
 	t.Parallel()
 
@@ -155,8 +155,9 @@ func TestExportCardLinksSomeLegsAndListsTheRest(t *testing.T) {
 	assert.NotContains(t, body, "moved this line to +47.5")
 	assert.Contains(t, body, "FanDuel has no line for this pick yet")
 
-	assert.Contains(t, body, "Links as of")
+	assert.Contains(t, body, "Prices may have moved since")
 	assert.Contains(t, body, exportFetched.Format("3:04 PM")+" UTC")
+	assert.NotContains(t, body, "Links as of")
 	assert.Contains(t, body, "Copy slip as text")
 	assert.Contains(t, body, "Ada: BUF ML (-110)")
 	assert.Contains(t, body, "Ada: Over 47.5 (-110)")

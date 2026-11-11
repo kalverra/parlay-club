@@ -103,6 +103,17 @@ type NextView struct {
 	Detail   string
 	Deadline *DeadlineView
 	Action   *NextAction
+	Nudges   []NextNudge
+}
+
+// NextNudge is the share-sheet button for one member the slip waits on. The
+// message is built in app.js so its time reads in the sender's zone and its
+// link is absolute; the server sends only the parts.
+type NextNudge struct {
+	Name     string
+	SlipName string
+	CloseISO string
+	Path     string
 }
 
 // DeadlineView is the first kickoff still ahead in the slip's week.
@@ -1431,6 +1442,17 @@ func nextView(next slips.Next, slip db.Slip, viewerID int64, games []db.Game) Ne
 		}
 	case slips.StepWaiting:
 		view.Detail = "You're locked in. The slip waits on the rest."
+		for _, name := range next.WaitingOn {
+			nudge := NextNudge{
+				Name:     name,
+				SlipName: slip.Name,
+				Path:     fmt.Sprintf("/slips/%d", slip.ID),
+			}
+			if next.Deadline != nil {
+				nudge.CloseISO = next.Deadline.UTC().Format(time.RFC3339)
+			}
+			view.Nudges = append(view.Nudges, nudge)
+		}
 	case slips.StepExport:
 		view.Detail = "Everyone is locked in."
 	case slips.StepDone:

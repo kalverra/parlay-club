@@ -5,7 +5,7 @@ type: concept
 summary: How a locked slip turns stored sportsbook deep links into a one-tap combined DraftKings or FanDuel link, with per-leg taps, a manual list, and copy text for every pick that has no link.
 tags: [export, sportsbook, fanduel, draftkings, deep-links, links, combined-links, locking, manual-legs, copy, sse, the-odds-api]
 sources: [internal/export/export.go, internal/web/export.go, internal/ingest/odds/lines.go, internal/refresh/sources.go, internal/db/odds.go, internal/db/migrations/0004_odds_links.sql, internal/web/slips.go, web/templates/partials.html]
-last_verified: 2026-11-09
+last_verified: 2026-11-11
 ---
 
 # Export
@@ -14,8 +14,9 @@ last_verified: 2026-11-09
 
 A `LOCKED` slip shows an export card. It offers DraftKings and FanDuel. When a book has two or more linked picks, one
 tap opens them all in that book's betslip; otherwise it lists one tap per pick. A plain list holds every pick that needs
-adding by hand, and the whole slip copies as text. The app still only tracks bets; the person places them at their own
-book. Nothing here places a bet or moves money.
+adding by hand, and the whole slip copies as text. In the `export` step the card leads the hub, because placing the picks
+is the one thing left to do. The app still only tracks bets; the person places them at their own book. Nothing here
+places a bet or moves money.
 
 ## Where the links come from
 
@@ -116,12 +117,16 @@ fallback when a combined link cannot be built. The full probe notes live in
 
 ## The card
 
-Only a `LOCKED` slip draws the card. The slip page includes it, and `GET /slips/{id}/export` renders the same card for
-live refreshes. The wrapper listens for `slip-updated` and swaps itself, so an unlock makes the card disappear on the
-next event.
+Only a `LOCKED` slip draws the card. `GET /slips/{id}/export` returns the same card, and the wrapper listens for
+`slip-updated` and swaps itself, so an unlock makes the card disappear on the next event.
+
+In the slip's `export` step the card is the primary action, so the hub draws it above the step banner and the picks. The
+wrapper sits first in the page at every step and renders empty until the slip locks, which keeps that order when a lock
+in arrives over `slip-updated` without a reload.
 
 The card shows, in order:
 
+- the prices note, "Prices may have moved since <time>", from the newest `odds.fetched_at` among the slip's games;
 - one block per book. With a `Combined` URL it is one "Open in DraftKings" or "Open in FanDuel" button. Without one, it
   is a numbered list of per-leg taps, each labeled with the selection and the book's price.
 - under each book, every manual leg by selection, with a friendly note that says why it needs a hand.
@@ -136,11 +141,12 @@ tab with `rel="noopener"`.
 
 ## Staleness
 
-A link is offered only while its game is unstarted. The card shows "links as of" from the newest `odds.fetched_at` among
-the slip's games, in UTC. It reads only the rows from each game's newest sync, the same rule the Games tab and the
-slip's reference prices use. A market a book stopped quoting therefore becomes `no line` instead of offering a dead
-link. Rows from the current sync are still shown past the cache window, because the book corrects the price when the leg
-opens; the note tells the person how old the links are. Nothing blocks a leg.
+A link is offered only while its game is unstarted. The card's prices note reads the newest `odds.fetched_at` among the
+slip's games, in UTC, and says "Prices may have moved since" because the book shows its own price when the link opens. It
+reads only the rows from each game's newest sync, the same rule the pick board and the slip's reference prices use. A
+market a book stopped quoting therefore becomes `no line` instead of offering a dead link. Rows from the current sync are
+still shown past the cache window, because the book corrects the price when the leg opens; the note tells the person how
+old the prices are. Nothing blocks a leg.
 
 ## Related
 

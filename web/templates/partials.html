@@ -71,6 +71,18 @@
         </form>
       {{end}}
     {{end}}
+    {{range .Next.Nudges}}
+      <button
+        type="button"
+        data-nudge
+        data-nudge-slip="{{.SlipName}}"
+        {{if .CloseISO}}data-nudge-close="{{.CloseISO}}"{{end}}
+        data-nudge-path="{{.Path}}"
+        class="mt-2 w-full rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-200 hover:bg-slate-800"
+      >
+        Nudge {{.Name}}
+      </button>
+    {{end}}
   </section>
 
   <header class="rounded-xl border border-slate-800 bg-slate-900 p-4">
@@ -301,12 +313,12 @@
           <h2 class="text-sm font-semibold text-slate-300">Export</h2>
           <p class="mt-0.5 text-xs text-slate-400">Tap a pick to open it at the book.</p>
         </div>
-        {{if .LinesAtISO}}
-          <p class="shrink-0 text-right text-xs text-slate-500">
-            Links as of <time datetime="{{.LinesAtISO}}">{{.LinesAtLabel}}</time>
-          </p>
-        {{end}}
       </div>
+      {{if .LinesAtISO}}
+        <p class="text-xs text-slate-500">
+          Prices may have moved since <time datetime="{{.LinesAtISO}}">{{.LinesAtLabel}}</time>.
+        </p>
+      {{end}}
 
       {{range .Books}}
         <div class="rounded-lg border border-slate-800 px-3 py-2">
