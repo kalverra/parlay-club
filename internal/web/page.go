@@ -2,6 +2,7 @@
 package web
 
 import (
+	"fmt"
 	"strings"
 	"unicode"
 )
@@ -60,19 +61,18 @@ func (p Page) CurrentGroup() string {
 	return ""
 }
 
-// The four bottom-bar destinations.
+// The three bottom-bar destinations.
 const (
-	TabSlip     Tab = "slip"
-	TabGames    Tab = "games"
-	TabResearch Tab = "research"
-	TabRecord   Tab = "record"
+	TabGroups Tab = "groups"
+	TabWeek   Tab = "week"
+	TabRecord Tab = "record"
 )
 
-// navTabs is the bottom bar in display order.
+// navTabs is the bottom bar in display order. The This week link is filled in
+// per page because it names the active group.
 var navTabs = []NavTab{
-	{Tab: TabSlip, Label: "Slip", Href: "/"},
-	{Tab: TabGames, Label: "Games", Href: "/games"},
-	{Tab: TabResearch, Label: "Research", Href: "/research"},
+	{Tab: TabGroups, Label: "Groups", Href: "/"},
+	{Tab: TabWeek, Label: "This week", Href: "/"},
 	{Tab: TabRecord, Label: "Record Book", Href: "/record"},
 }
 
@@ -81,9 +81,23 @@ func (p Page) Tabs() []NavTab {
 	tabs := make([]NavTab, len(navTabs))
 	for i, tab := range navTabs {
 		tab.Current = tab.Tab == p.Tab
+		if tab.Tab == TabWeek {
+			tab.Href = p.weekHref()
+		}
 		tabs[i] = tab
 	}
 	return tabs
+}
+
+// weekHref points This week at the active group, falling back to the group
+// list when the page has no group choices.
+func (p Page) weekHref() string {
+	for _, group := range p.Groups {
+		if group.Current {
+			return fmt.Sprintf("/groups/%d/week", group.ID)
+		}
+	}
+	return "/"
 }
 
 // Label returns the tab's display name.

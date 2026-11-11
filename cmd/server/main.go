@@ -146,6 +146,7 @@ func run() error {
 		UserFrom:   auth.UserFrom,
 		GroupsFrom: groups.Options,
 		GroupFrom:  groups.From,
+		SetGroup:   cookies.SetGroup,
 		Store:      store,
 		Slips:      slipService,
 		Stream:     stream,

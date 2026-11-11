@@ -4,8 +4,8 @@ title: Routes
 type: reference
 summary: Every HTTP route the server serves, the middleware in front of them, and the status codes, HTMX headers, and SSE frames handlers return.
 tags: [routes, http, handlers, middleware, htmx, sse, props, research]
-sources: [cmd/server/main.go, cmd/server/sandbox.go, internal/auth/handlers.go, internal/groups/handlers.go, internal/web/routes.go, internal/web/games.go, internal/web/slips.go, internal/web/research.go, internal/web/export.go, internal/sandbox/seed.go, internal/sandbox/plan.go, internal/live/stream.go, web/templates/sandbox.html]
-last_verified: 2026-11-10
+sources: [cmd/server/main.go, cmd/server/sandbox.go, internal/auth/handlers.go, internal/groups/handlers.go, internal/web/routes.go, internal/web/home.go, internal/web/games.go, internal/web/slips.go, internal/web/research.go, internal/web/export.go, internal/sandbox/seed.go, internal/sandbox/plan.go, internal/live/stream.go, web/templates/home.html, web/templates/sandbox.html]
+last_verified: 2026-11-11
 ---
 
 # Routes
@@ -31,7 +31,8 @@ outermost first. See [Access](../concepts/access.md) for cookies and sign-in.
 `CSRF` exempts two plain forms, `POST /logout` and `POST /dev/login`. Every other write must come from HTMX.
 
 `Scope` picks the active group and puts it on the request context. Handlers read it instead of taking a group id in the
-path. A slip or leg outside the active group answers 404, the same as a missing one.
+path. A group or slip outside the person's membership answers 404, the same as a missing one. A slip or week in another
+of their groups makes that group active instead.
 
 ## Public routes
 
@@ -58,10 +59,10 @@ CSRF checks, so they are not public.
 | `POST /dev/sandbox/reset` | Rebuild the fixed week 9 morning, people, and slip      | 200 with `HX-Refresh`, and reissued session and group cookies for the same persona |
 
 Every stage rebuilds the Sunday morning baseline, then sets its clock and replay snapshot, runs the real refresh, locks
-the shared slip, and calls the normal slip service for that stage's scripted manual grades. It never infers a result from
-a score. The stage publishes the normal week and slip signals after its writes commit; the acting browser reloads from
-`HX-Refresh`, and other connected clients refetch after the SSE signals. `POST /dev/sandbox/reset` is the same operation
-as the `morning` stage.
+the shared slip, and calls the normal slip service for that stage's scripted manual grades. It never infers a result
+from a score. The stage publishes the normal week and slip signals after its writes commit; the acting browser reloads
+from `HX-Refresh`, and other connected clients refetch after the SSE signals. `POST /dev/sandbox/reset` is the same
+operation as the `morning` stage.
 
 The persona switch calls the normal sign-in code and then sets the real cookies; the request context is never given a
 user the middleware did not load. Ada, Ben, and Cleo land in the shared group; Dex lands in their own group until they
@@ -72,21 +73,32 @@ accept the shared invite. A forged group cookie still falls back to a real membe
 
 ### Shell and tabs
 
-| Method + path     | Purpose                                                                                |
-| ----------------- | -------------------------------------------------------------------------------------- |
-| `GET /{$}`        | Slip tab: the newest slip of the latest week, or the create-slip form when there is none |
-| `GET /games`      | Games tab: the latest week's board with quick-add pills                                 |
-| `GET /research`   | Research tab: week games, player search, injury reports, and last-5 hit bars           |
-| `GET /record`     | Record Book placeholder                                                                 |
+| Method + path             | Purpose                                                                                          |
+| ------------------------- | ------------------------------------------------------------------------------------------------ |
+| `GET /{$}`                | Landing page: one card per group; a person with one group is sent to that group's week            |
+| `GET /groups/{id}/week`   | Make the group active, then open its newest slip of the latest week or the create-slip form       |
+| `GET /games`              | Games board for the latest week, linked from the slip hub                                         |
+| `GET /research`           | Research page: week games, player search, injury reports, and last-5 hit bars                     |
+| `GET /record`             | Record Book placeholder                                                                          |
+
+The bottom bar has three destinations: Groups (`/`), This week (`/groups/{active}/week`), and Record Book. Games and
+Research keep full pages but leave the bar; the hub links to Games and pick rows link to Research.
+
+`GET /{$}` lists every group oldest first and carries `data-refresh-on-visible`, so the browser refetches the list when
+the tab becomes visible instead of holding a stream. A person in one group gets a 303 to `/groups/{id}/week`.
+
+`GET /groups/{id}/week` answers 404 for a group the person does not belong to, sets `pc_group`, then 303s to the newest
+slip of the latest week or renders the create form. It uses the same group-switch seam as a slip link from another
+group.
 
 The slip handler file also serves `/me` and the slip and leg routes below. `/record` renders its empty state until a
-later change fills it in. The Games and Research tabs are described below.
+later change fills it in. The Games and Research pages are described below.
 
 ### Groups
 
 | Method + path                          | Purpose                                                     | Response |
 | -------------------------------------- | ----------------------------------------------------------- | -------- |
-| `GET /groups`                          | Group list, create form, invite links, and leave buttons     | Full page |
+| `GET /groups`                          | Manage groups: create form, invite links, and leave buttons  | Full page |
 | `POST /groups`                         | Create a group from `name` and make it active                | 303 to `/groups` |
 | `POST /groups/switch`                  | Make the group in `group_id` active                          | `HX-Refresh` |
 | `POST /groups/{id}/reset-invite`       | Mint a new invite token and kill the old one                 | `HX-Refresh` |
@@ -102,7 +114,8 @@ stranger cannot learn which groups exist.
 
 ### Slips
 
-All slip routes require the slip to belong to the active group.
+Slip routes require membership in the slip's group. A slip in another of the person's groups makes that group active; a
+slip outside every group is 404.
 
 | Method + path                              | Purpose                                                         | Request and response |
 | ------------------------------------------ | --------------------------------------------------------------- | -------------------- |
@@ -129,10 +142,10 @@ All slip routes require the slip to belong to the active group.
 The leg form takes `market_type`, `selection`, `team`, `player_name`, `player_id`, `side`, `line`, `odds`, and
 `game_id`. The form provides a `<datalist>` of player names (`WeekPlayerNames`) populated from the week's rosters and
 props boards. When a player market leg is saved, the handler automatically resolves `player_id` (ESPN athlete ID) and
-`team` via `ResolvePlayerMatch`. The game picker lists the week's games that have not kicked off; a past week lists
-them all and allows no game. When `selection` is blank, the handler builds the display text from the market fields.
-Each leg row on the slip panel includes a "Research &rarr;" link to `/research` when it has a resolved player or game.
-An unreadable number is 422 with "Odds need to be a number.", "Line needs to be a number.", or a similar short message.
+`team` via `ResolvePlayerMatch`. The game picker lists the week's games that have not kicked off; a past week lists them
+all and allows no game. When `selection` is blank, the handler builds the display text from the market fields. Each leg
+row on the slip panel includes a "Research &rarr;" link to `/research` when it has a resolved player or game. An
+unreadable number is 422 with "Odds need to be a number.", "Line needs to be a number.", or a similar short message.
 
 `?quick=1` turns the form into a quick add: the target becomes the game card's `#quick-add-{gameID}` element, and a
 successful `POST` answers with the `leg-added` partial instead of the slip panel.
@@ -151,7 +164,7 @@ without waiting for the SSE stream. See [Export](../concepts/export.md).
 
 | Method + path              | Purpose                                                      | Response |
 | -------------------------- | ------------------------------------------------------------ | -------- |
-| `GET /games`               | Games tab: the latest week's board                           | Full page |
+| `GET /games`               | Games board for the latest week, linked from the slip hub     | Full page |
 | `GET /games/{id}/props`    | Prop quick-add pills and research links for one game card    | Partial   |
 
 `GET /games` renders the latest week's board. It reads the week's games and each game's odds rows. Rows from an older
@@ -171,8 +184,8 @@ Expanding a card loads `GET /games/{id}/props` via HTMX (`hx-trigger="toggle onc
 rushing, receiving, anytime TD, and kicker points, alongside links to game research and each player's research view.
 Each pill posts to `POST /slips/{id}/legs` with `quick=1` and the game, market, team, player, side, line, and price
 prefilled, swapping the "Added {selection}" partial into that card. The pills appear only when the newest slip in the
-week is `OPEN`. With no slip, the card links to `/slips/new`; with a locked slip, it says picks cannot be added.
-"Custom leg" opens the same leg form with `game_id` set and `quick=1`, so a saved custom leg lands in the card too.
+week is `OPEN`. With no slip, the card links to `/slips/new`; with a locked slip, it says picks cannot be added. "Custom
+leg" opens the same leg form with `game_id` set and `quick=1`, so a saved custom leg lands in the card too.
 
 ### Research
 
@@ -191,12 +204,12 @@ week is `OPEN`. With no slip, the card links to `/slips/new`; with a locked slip
 positions (`QB`, `RB`, `WR`, `TE`, `LT`, `OT`, `C`, `CB`, `S`). It also lists sportsbook prop names with their matched
 ESPN athlete, and provides a form to manually link unmatched players.
 
-`GET /research/players/{espnID}` syncs game logs on demand (`espn:gamelog:{id}`). It renders last-5 hit bars (green
-when over the line, red when under), the last-5 median, the season mean, and total games played. If `market` or `line`
-is omitted, it resolves them from `?leg_id=` or the player's stored odds.
+`GET /research/players/{espnID}` syncs game logs on demand (`espn:gamelog:{id}`). It renders last-5 hit bars (green when
+over the line, red when under), the last-5 median, the season mean, and total games played. If `market` or `line` is
+omitted, it resolves them from `?leg_id=` or the player's stored odds.
 
-`POST /research/matches` accepts `odds_name`, `team`, and `athlete_id`. It saves a manual player match (`manual=1`)
-in `player_matches`, removes conflicting non-manual matches for that game, backfills `player_id` and `team` on matching
+`POST /research/matches` accepts `odds_name`, `team`, and `athlete_id`. It saves a manual player match (`manual=1`) in
+`player_matches`, removes conflicting non-manual matches for that game, backfills `player_id` and `team` on matching
 odds and legs, and returns the refreshed game research partial.
 
 ### Profile
@@ -217,7 +230,7 @@ outside the active group is 404.
 | Code | When |
 | ---- | ---- |
 | 200  | Pages, partials, and successful HTMX writes. Redirects and refreshes send 200 with an `HX-*` header. |
-| 303  | A plain form redirect, such as create slip, save profile, logout, or joining a group. |
+| 303  | A plain form redirect or landing redirect, such as create slip, save profile, logout, joining a group, or the one-group landing. |
 | 400  | A malformed form body, or a failed Google round trip. |
 | 403  | A non-GET request without `HX-Request: true`. |
 | 404  | A missing slip, leg, member, or group; a resource in another group; or an unknown invite token. |

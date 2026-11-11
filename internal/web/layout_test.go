@@ -16,9 +16,13 @@ import (
 func TestLayoutRendersBottomTabs(t *testing.T) {
 	t.Parallel()
 
-	out := renderPage(t, "games", webui.Page{Title: "Games", Tab: webui.TabGames})
+	out := renderPage(t, "record", webui.Page{
+		Title:  "Record Book",
+		Tab:    webui.TabRecord,
+		Groups: []webui.GroupOption{{ID: 7, Name: "Sunday Parlay Club", Current: true}},
+	})
 
-	for _, label := range []string{"Slip", "Games", "Research", "Record Book"} {
+	for _, label := range []string{"Groups", "This week", "Record Book"} {
 		assert.Contains(t, out, ">"+label+"</a")
 	}
 
@@ -27,13 +31,14 @@ func TestLayoutRendersBottomTabs(t *testing.T) {
 	current := regexp.MustCompile(`<a\s+href="([^"]+)"[^>]*aria-current="page"`)
 	match := current.FindStringSubmatch(out)
 	require.Len(t, match, 2)
-	assert.Equal(t, "/games", match[1])
+	assert.Equal(t, "/record", match[1])
+	assert.Contains(t, out, `href="/groups/7/week"`, "This week names the active group")
 }
 
 func TestLayoutLinksAssets(t *testing.T) {
 	t.Parallel()
 
-	out := renderPage(t, "slip", webui.Page{Title: "Slip", Tab: webui.TabSlip})
+	out := renderPage(t, "slip", webui.Page{Title: "Slip", Tab: webui.TabWeek})
 
 	assert.Contains(t, out, "/static/app.css?v=")
 	assert.Contains(t, out, "/static/app.js?v=")
@@ -57,7 +62,7 @@ func TestLayoutTopBar(t *testing.T) {
 
 	out := renderPage(t, "slip", webui.Page{
 		Title:     "Slip",
-		Tab:       webui.TabSlip,
+		Tab:       webui.TabWeek,
 		WeekLabel: "Week 9",
 		Slips: []webui.SlipOption{
 			{ID: 1, Name: "Week 9"},
@@ -81,7 +86,7 @@ func TestAvatarShowsPicture(t *testing.T) {
 
 	out := renderPage(t, "slip", webui.Page{
 		Title: "Slip",
-		Tab:   webui.TabSlip,
+		Tab:   webui.TabWeek,
 		User: &webui.User{
 			Name:        "Adam Hamrick",
 			Initials:    "AH",
@@ -100,7 +105,7 @@ func TestAvatarFallsBackToInitials(t *testing.T) {
 
 	out := renderPage(t, "slip", webui.Page{
 		Title: "Slip",
-		Tab:   webui.TabSlip,
+		Tab:   webui.TabWeek,
 		User:  &webui.User{Name: "Adam Hamrick", Initials: "AH", AvatarClass: "bg-sky-500"},
 	})
 
@@ -114,7 +119,7 @@ func TestLayoutHidesSwitcherForOneSlip(t *testing.T) {
 
 	out := renderPage(t, "slip", webui.Page{
 		Title: "Slip",
-		Tab:   webui.TabSlip,
+		Tab:   webui.TabWeek,
 		Slips: []webui.SlipOption{{ID: 1, Name: "Week 9", Current: true}},
 	})
 
@@ -126,7 +131,7 @@ func TestLayoutGroupSwitcher(t *testing.T) {
 
 	out := renderPage(t, "slip", webui.Page{
 		Title: "Slip",
-		Tab:   webui.TabSlip,
+		Tab:   webui.TabWeek,
 		User:  &webui.User{Name: "Adam Hamrick", Initials: "AH", AvatarClass: "bg-sky-500"},
 		Groups: []webui.GroupOption{
 			{ID: 1, Name: "Just me"},
@@ -148,7 +153,7 @@ func TestLayoutHidesGroupSwitcherForOneGroup(t *testing.T) {
 
 	out := renderPage(t, "slip", webui.Page{
 		Title:  "Slip",
-		Tab:    webui.TabSlip,
+		Tab:    webui.TabWeek,
 		User:   &webui.User{Name: "Adam Hamrick", Initials: "AH", AvatarClass: "bg-sky-500"},
 		Groups: []webui.GroupOption{{ID: 1, Name: "Just me", Current: true}},
 	})
@@ -163,7 +168,7 @@ func TestLayoutHidesGroupSwitcherForOneGroup(t *testing.T) {
 func TestLayoutWithoutUser(t *testing.T) {
 	t.Parallel()
 
-	out := renderPage(t, "slip", webui.Page{Title: "Slip", Tab: webui.TabSlip})
+	out := renderPage(t, "slip", webui.Page{Title: "Slip", Tab: webui.TabWeek})
 
 	assert.NotContains(t, out, `href="/me"`)
 }
@@ -178,9 +183,9 @@ func TestPlaceholderPages(t *testing.T) {
 		heading string
 		message string
 	}{
-		{"slip", "slip", webui.TabSlip, "Slip", "Slip contents show up here once the season starts."},
-		{"games", "games", webui.TabGames, "Games", "Game lines show up here once the week is synced."},
-		{"research", "research", webui.TabResearch, "Research", "Player and game research shows up here."},
+		{"slip", "slip", webui.TabWeek, "Slip", "Slip contents show up here once the season starts."},
+		{"games", "games", "", "Games", "Game lines show up here once the week is synced."},
+		{"research", "research", "", "Research", "Player and game research shows up here."},
 		{"record", "record", webui.TabRecord, "Record Book", "Season results show up here."},
 	}
 
@@ -207,6 +212,8 @@ func renderPage(t *testing.T, page string, data webui.Page) string {
 
 	var value any = data
 	switch page {
+	case "home":
+		value = webui.HomePage{Page: data}
 	case "slip":
 		value = webui.SlipPage{Page: data}
 	case "games":

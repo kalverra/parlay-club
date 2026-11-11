@@ -4,8 +4,8 @@ title: Access
 type: concept
 summary: How Google sign-in, open sign-up, and signed session and group cookies decide who is using the app and which group they see.
 tags: [auth, google, oauth, cookies, middleware, csrf, groups]
-sources: [internal/auth/cookies.go, internal/auth/handlers.go, internal/auth/middleware.go, internal/auth/signin.go, internal/auth/provider.go, internal/db/users.go, internal/groups/groups.go, internal/groups/handlers.go, internal/sandbox/seed.go, cmd/server/main.go, cmd/server/sandbox.go, web/templates/login.html, web/templates/dev-login.html, web/templates/sandbox.html, web/templates/avatar.html]
-last_verified: 2026-11-10
+sources: [internal/auth/cookies.go, internal/auth/handlers.go, internal/auth/middleware.go, internal/auth/signin.go, internal/auth/provider.go, internal/db/users.go, internal/groups/groups.go, internal/groups/handlers.go, internal/web/home.go, internal/sandbox/seed.go, cmd/server/main.go, cmd/server/sandbox.go, web/templates/login.html, web/templates/dev-login.html, web/templates/sandbox.html, web/templates/home.html, web/templates/avatar.html]
+last_verified: 2026-11-11
 ---
 
 # Access
@@ -25,15 +25,16 @@ forms, and no name picker.
    the code with the PKCE verifier, and verifies the ID token's signature, issuer, audience, expiry, and nonce.
 4. An ID token with `email_verified` false is refused. Google must prove the address before it can name a user.
 5. The verified identity goes through `auth.SignIn`. A known or new person gets a `pc_session` cookie, the round-trip
-   cookie is cleared, and the browser lands on `/` or on the invite path they came from.
+   cookie is cleared, and the browser lands on `/` or on the invite path they came from. `/` is the group list; a person
+   in one group is sent straight on to that group's week.
 
 A missing or expired `pc_oauth`, a wrong `state`, a failed exchange, or an identity with no subject or email returns the
 sign-in page with a 400 and "Sign-in didn't work. Try again." No case sets a session cookie.
 
 ## Who gets in
 
-Sign-up is open. Any Google account with a verified email can sign in. There is no allow list, and `RequireUser` does not
-check one. What limits what a person sees is group membership, not the door.
+Sign-up is open. Any Google account with a verified email can sign in. There is no allow list, and `RequireUser` does
+not check one. What limits what a person sees is group membership, not the door.
 
 `auth.SignIn` resolves a verified identity inside one transaction, in this order:
 
@@ -75,7 +76,8 @@ starts. Its MAC covers `"oauth:" +` the rest of the value, and its return field 
 lives for 30 days at `Path=/`, and its MAC covers `"group:" + groupID + "." + expiryUnix`.
 
 `pc_group` is a preference, not a permission. A forged or stale value only falls back to a group the person belongs to.
-The session and group cookies are cleared together on logout.
+Opening `/groups/{id}/week` or a slip from another of their groups writes a fresh choice, and only after membership is
+checked. The session and group cookies are cleared together on logout.
 
 The session cookie's name changed from the foundation's `pc_auth` and `pc_user`. Old cookies are simply ignored, so the
 first request after this change sends every browser back to `/login`. Rotating `SESSION_KEY` likewise invalidates every

@@ -32,6 +32,10 @@ type GroupsFrom func(context.Context) []GroupOption
 // groups.From; tests pass a stub.
 type GroupFrom func(context.Context) (db.Group, bool)
 
+// SetGroup makes a group the browser's active one. The server passes
+// cookies.SetGroup; tests record the choice.
+type SetGroup func(http.ResponseWriter, int64)
+
 // Refresher describes on-demand sync for game props and research.
 type Refresher interface {
 	SyncGameProps(ctx context.Context, gameID string) error
@@ -48,6 +52,7 @@ type Dependencies struct {
 	UserFrom   UserFrom
 	GroupsFrom GroupsFrom
 	GroupFrom  GroupFrom
+	SetGroup   SetGroup
 	Store      *db.Store
 	Slips      *slips.Service
 	Stream     *live.Stream

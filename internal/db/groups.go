@@ -90,6 +90,23 @@ func (s *Store) FirstGroup(ctx context.Context) (Group, error) {
 	return group, nil
 }
 
+// GroupByID returns one group. A missing row wraps ErrGroupNotFound.
+func (s *Store) GroupByID(ctx context.Context, id int64) (Group, error) {
+	var group Group
+	err := s.conn().QueryRowContext(ctx, `
+		SELECT id, name, invite_token
+		FROM groups
+		WHERE id = ?`, id).
+		Scan(&group.ID, &group.Name, &group.InviteToken)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Group{}, fmt.Errorf("group %d: %w", id, ErrGroupNotFound)
+	}
+	if err != nil {
+		return Group{}, fmt.Errorf("group %d: %w", id, err)
+	}
+	return group, nil
+}
+
 // ForUser returns the groups userID belongs to, oldest membership first. A
 // user with no groups gets an empty slice, not nil.
 func (s *Store) ForUser(ctx context.Context, userID int64) ([]Group, error) {

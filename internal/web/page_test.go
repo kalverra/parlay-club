@@ -13,31 +13,51 @@ func TestPageTabs(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name string
-		tab  webui.Tab
-		href string
+		name  string
+		tab   webui.Tab
+		href  string
+		group []webui.GroupOption
 	}{
-		{"slip", webui.TabSlip, "/"},
-		{"games", webui.TabGames, "/games"},
-		{"research", webui.TabResearch, "/research"},
-		{"record", webui.TabRecord, "/record"},
+		{"groups", webui.TabGroups, "/", nil},
+		{
+			"week",
+			webui.TabWeek,
+			"/groups/7/week",
+			[]webui.GroupOption{{ID: 4, Name: "Just me"}, {ID: 7, Name: "Sunday Parlay Club", Current: true}},
+		},
+		{"record", webui.TabRecord, "/record", nil},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 
-			tabs := webui.Page{Tab: test.tab}.Tabs()
-			require.Len(t, tabs, 4)
+			tabs := webui.Page{Tab: test.tab, Groups: test.group}.Tabs()
+			require.Len(t, tabs, 3)
 
 			labels := make([]string, 0, len(tabs))
 			for _, tab := range tabs {
 				labels = append(labels, tab.Label)
-				assert.Equal(t, tab.Href == test.href, tab.Current)
+				if tab.Tab == test.tab {
+					assert.True(t, tab.Current)
+					assert.Equal(t, test.href, tab.Href)
+				} else {
+					assert.False(t, tab.Current)
+				}
 			}
 
-			assert.Equal(t, []string{"Slip", "Games", "Research", "Record Book"}, labels)
+			assert.Equal(t, []string{"Groups", "This week", "Record Book"}, labels)
 		})
+	}
+}
+
+func TestWeekTabFallsBackToTheGroupList(t *testing.T) {
+	t.Parallel()
+
+	for _, tab := range (webui.Page{Tab: webui.TabWeek}).Tabs() {
+		if tab.Tab == webui.TabWeek {
+			assert.Equal(t, "/", tab.Href)
+		}
 	}
 }
 

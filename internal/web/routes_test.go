@@ -25,7 +25,7 @@ func TestShellPages(t *testing.T) {
 		path    string
 		heading string
 	}{
-		{"/", "Slip"},
+		{"/", "Groups"},
 		{"/games", "Games"},
 		{"/research", "Research"},
 		{"/record", "Record Book"},
@@ -41,13 +41,26 @@ func TestShellPages(t *testing.T) {
 			assert.Equal(t, http.StatusOK, recorder.Code)
 			assert.Equal(t, "text/html; charset=utf-8", recorder.Header().Get("Content-Type"))
 			assert.Contains(t, recorder.Body.String(), `<h1 class="text-xl font-semibold">`+test.heading+"</h1>")
-
-			current := regexp.MustCompile(
-				`<a\s+href="` + regexp.QuoteMeta(test.path) + `"[^>]*aria-current="page"`,
-			)
-			assert.Regexp(t, current, recorder.Body.String())
 		})
 	}
+}
+
+func TestShellMarksTheCurrentTab(t *testing.T) {
+	t.Parallel()
+
+	handler := newShell(t)
+
+	current := regexp.MustCompile(`<a\s+href="([^"]+)"[^>]*aria-current="page"`)
+
+	home := httptest.NewRecorder()
+	handler.ServeHTTP(home, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil))
+	match := current.FindStringSubmatch(home.Body.String())
+	require.Len(t, match, 2)
+	assert.Equal(t, "/", match[1])
+
+	games := httptest.NewRecorder()
+	handler.ServeHTTP(games, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/games", nil))
+	assert.NotContains(t, games.Body.String(), `aria-current="page"`, "Games leaves the bar off")
 }
 
 func TestShellServesStatic(t *testing.T) {
