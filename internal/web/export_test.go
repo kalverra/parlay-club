@@ -310,6 +310,29 @@ func TestExportCardIgnoresStaleOddsRows(t *testing.T) {
 	assert.Contains(t, body, "FanDuel has no line for this pick yet")
 }
 
+func TestExportUsesTheScenarioClockForKickoff(t *testing.T) {
+	t.Parallel()
+
+	scenarioNow := time.Now().UTC().Add(49 * time.Hour)
+	fixture := newSlipFixtureAt(t, 2, func() time.Time { return scenarioNow })
+	game := addGame(t, fixture, gameKickoff())
+	exportRows(t, fixture.store, game.ID)
+
+	addExportLeg(t, fixture, url.Values{
+		"game_id":     {game.ID},
+		"market_type": {"ML"},
+		"team":        {"BUF"},
+		"side":        {"TEAM"},
+		"selection":   {"BUF ML"},
+		"odds":        {"-150"},
+	})
+	lockSlip(t, fixture)
+
+	body := html.UnescapeString(getExport(t, fixture.handler, fixture.slip.ID).Body.String())
+	assert.Contains(t, body, "this game already started, so add it by hand",
+		"the export reads scenario time, not the wall clock")
+}
+
 // TestLockAndUnlockRefreshTheExportCard checks that the person who acts gets
 // the export card refreshed with their own response, not only over SSE.
 func TestLockAndUnlockRefreshTheExportCard(t *testing.T) {

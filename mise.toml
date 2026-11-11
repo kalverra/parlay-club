@@ -20,6 +20,10 @@ _.file = ".env"
 description = "Run the server with hot reload and open it in Chrome"
 run = "./scripts/dev.sh"
 
+[tasks.sandbox]
+description = "Run the offline Sunday sandbox with hot reload"
+run = "SUNDAY_SANDBOX=1 ./scripts/dev.sh"
+
 [tasks.setup]
 description = "Install the git hooks in this clone"
 run = "lefthook install"

@@ -2,10 +2,10 @@
 id: persistence
 title: Persistence
 type: concept
-summary: How one SQLite file holds every slip and every cached response, how Litestream restores and replicates it on Cloud Run, and why only one process may write to it.
-tags: [persistence, sqlite, litestream, gcs, backup, restore, cloud-run, single-instance, wal]
-sources: [Dockerfile, deploy/entrypoint.sh, deploy/litestream.yml, internal/db/db.go, cmd/server/main.go]
-last_verified: 2026-11-08
+summary: How one SQLite file holds every slip and every cached response, how Litestream restores and replicates it on Cloud Run, why only one process may write to it, and how the local sandbox keeps its own file and stage row.
+tags: [persistence, sqlite, litestream, gcs, backup, restore, cloud-run, single-instance, wal, sandbox]
+sources: [Dockerfile, deploy/entrypoint.sh, deploy/litestream.yml, internal/db/db.go, internal/sandbox/state.go, internal/sandbox/scenario.go, cmd/server/main.go, cmd/server/sandbox.go]
+last_verified: 2026-11-10
 ---
 
 # Persistence
@@ -33,6 +33,17 @@ events published by the other. Keep shared state in SQLite or the hub, never in 
 
 Slips, users, groups, weeks, games, odds, the sync state, and the raw response archive all share this file. That is why
 Litestream backs up the archive for free. See [Response archive](archive.md).
+
+## The sandbox database
+
+`SUNDAY_SANDBOX=1` uses `./data/sunday-sandbox.db` and ignores `DB_PATH`, so a sandbox run never opens the normal dev
+file. It still runs the ordinary migrations, so the domain tables have the production shape.
+
+The sandbox adds one table of its own: `sandbox_state`, a single row holding the active stage and the scenario time.
+`internal/sandbox` creates that table; no production migration knows about it, so a normal database never gains it. A
+first boot runs the morning sync and then writes the `morning` row. A later boot reads the row, restores the stage and
+clock, and leaves the domain rows alone, which is why an Air restart keeps manual edits. Delete
+`data/sunday-sandbox.db*` to rebuild from the morning.
 
 ## Boot in the container
 

@@ -1,6 +1,7 @@
 // Package sandbox replays a fixed Sunday of NFL data through the ordinary
-// ingest clients. It owns the fail-closed replay transport and the named week 9
-// response registry the local sandbox scenario is built from.
+// ingest clients. It owns the fail-closed replay transport, the named week 9
+// response registry, the shared scenario clock, and the stage record the local
+// sandbox is built from.
 package sandbox
 
 import (

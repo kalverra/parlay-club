@@ -43,6 +43,13 @@ type slipFixture struct {
 func newSlipFixture(t *testing.T, legsPerMember int) *slipFixture {
 	t.Helper()
 
+	return newSlipFixtureAt(t, legsPerMember, nil)
+}
+
+// newSlipFixtureAt is newSlipFixture with an injected app clock.
+func newSlipFixtureAt(t *testing.T, legsPerMember int, now func() time.Time) *slipFixture {
+	t.Helper()
+
 	database, err := db.Open(filepath.Join(t.TempDir(), "parlay.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { assert.NoError(t, database.Close()) })
@@ -80,6 +87,7 @@ func newSlipFixture(t *testing.T, legsPerMember int) *slipFixture {
 		Store:  store,
 		Slips:  service,
 		Stream: stream,
+		Now:    now,
 	})
 
 	return &slipFixture{
@@ -302,6 +310,43 @@ func TestLegFormListsOnlyGamesBeforeKickoff(t *testing.T) {
 	assert.Contains(t, body, "MIA @ BUF")
 	assert.NotContains(t, body, started.ID, "a kicked-off game is not offered")
 	assert.Contains(t, body, "required", "a current week asks for a game")
+}
+
+func TestLegFormPickerUsesTheScenarioClock(t *testing.T) {
+	t.Parallel()
+
+	scenarioNow := time.Now().UTC().Add(48*time.Hour + time.Minute)
+	fixture := newSlipFixtureAt(t, 2, func() time.Time { return scenarioNow })
+	started := addGame(t, fixture, gameKickoff())
+	later, err := fixture.store.UpsertGame(t.Context(), db.Game{
+		ID:         "401772099",
+		WeekID:     fixture.week.ID,
+		HomeTeam:   "SEA",
+		AwayTeam:   "SF",
+		HomeName:   "Seattle Seahawks",
+		AwayName:   "San Francisco 49ers",
+		HomeESPNID: "26",
+		AwayESPNID: "25",
+		Kickoff:    scenarioNow.Add(2 * time.Hour),
+		Status:     db.GameScheduled,
+		UpdatedAt:  time.Now().UTC(),
+	})
+	require.NoError(t, err)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodGet,
+		fmt.Sprintf("/slips/%d/legs/new", fixture.slip.ID),
+		nil,
+	)
+	fixture.handler.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	body := recorder.Body.String()
+	assert.Contains(t, body, later.ID, "a game after scenario time is still pickable")
+	assert.NotContains(t, body, started.ID, "the real wall clock is not the picker's clock")
+	assert.Contains(t, body, "required")
 }
 
 func TestLegFormListsKickedOffGamesForAPastWeek(t *testing.T) {

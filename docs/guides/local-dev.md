@@ -2,10 +2,10 @@
 id: local-dev
 title: Local development
 type: guide
-summary: Start the app with hot reload, set up the git hooks, and fall back to a plain server run when you need it.
-tags: [development, mise, air, tailwind, server]
-sources: [mise.toml, .air.toml, scripts/dev.sh, lefthook.yml, web/*.go, web/tailwind/*.css, web/templates/*.html, cmd/server/main.go, internal/config/config.go, internal/auth/*.go, internal/groups/*.go]
-last_verified: 2026-11-07
+summary: Start the app with hot reload, run the offline Sunday sandbox, set up the git hooks, and fall back to a plain server run when you need it.
+tags: [development, mise, air, tailwind, server, sandbox, offline]
+sources: [mise.toml, .air.toml, scripts/dev.sh, lefthook.yml, web/*.go, web/tailwind/*.css, web/templates/*.html, cmd/server/main.go, cmd/server/sandbox.go, internal/config/config.go, internal/sandbox/*.go, internal/auth/*.go, internal/groups/*.go]
+last_verified: 2026-11-10
 ---
 
 # Local development
@@ -35,6 +35,41 @@ email, and optionally a name, and the tabs load. The dev form calls the same sig
 "Just me" group in the same transaction. See [Access](../concepts/access.md) for the session and the cookies.
 
 Dev logs print as readable console lines; prod logs are JSON.
+
+## Run the Sunday sandbox
+
+The sandbox is the same app running against a fixed week 9 Sunday. It replays saved provider responses instead of calling
+out, so it needs no API keys and spends no Odds API credits.
+
+```sh
+mise run sandbox
+# or, equivalently:
+SUNDAY_SANDBOX=1 mise run dev
+```
+
+The hot-reload loop is unchanged. The differences are all in startup:
+
+- The database is always `./data/sunday-sandbox.db`. `DB_PATH` is ignored, so a sandbox run cannot touch the normal
+  `./data/parlay.db`.
+- Startup skips history import and Google provider construction. The dev sign-in form is always on, even when `.env`
+  holds Google values.
+- Every ingest client points at `internal/sandbox`'s fail-closed replay transport. No request can reach a provider, and
+  replayed calls never enter the response archive.
+- A fresh sandbox runs the morning sync synchronously before it serves, so the slate, lines, projections, and forecasts
+  are there on the first page load. Later restarts restore the saved stage and scenario clock instead of rebuilding.
+
+The scenario clock is the week 9 Sunday morning. Game pickers, kickoff locks, the export card, and nfelo freshness all
+read it, so the app agrees with the data it shows. Auth cookies and SSE timers keep real time so sessions and open
+streams behave normally.
+
+To start from a clean sandbox, stop the server and delete its file:
+
+```sh
+rm -f data/sunday-sandbox.db*
+```
+
+The normal dev database is separate, so that command never touches your own slips. Production rejects
+`SUNDAY_SANDBOX=1`; see [Configuration](../reference/config.md).
 
 ### What reloads
 

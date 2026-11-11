@@ -7,11 +7,11 @@
 - [Access](concepts/access.md): How Google sign-in, open sign-up, and signed session and group cookies decide who is using the app and which group they see.
 - [Analyzer](concepts/analyzer.md): How the sharp-friend banner under a slip turns legs, games, weather, player stats, and nfelo's model into plain-Go warnings, and the tone those warnings keep.
 - [Response archive](concepts/archive.md): How every successful external API response is kept raw in SQLite, how the source key labels it, and how to read the stored metadata and gzipped bodies.
-- [Data refresh](concepts/data-refresh.md): How page loads and on-demand views drive lazy syncs of the slate, weather, game lines, props, rosters, injuries, game logs, and nfelo projections, with per-source staleness windows, single-flight, failure backoff, tiered Parlay API and The Odds API credit floors, and an archive of every successful response.
+- [Data refresh](concepts/data-refresh.md): How page loads and on-demand views drive lazy syncs of the slate, weather, game lines, props, rosters, injuries, game logs, and nfelo projections, with per-source staleness windows, single-flight, failure backoff, tiered Parlay API and The Odds API credit floors, an archive of every successful response, and a synchronous sandbox bootstrap.
 - [Export](concepts/export.md): How a locked slip turns stored sportsbook deep links into a one-tap combined DraftKings or FanDuel link, with per-leg taps, a manual list, and copy text for every pick that has no link.
 - [Groups](concepts/groups.md): How groups split people into shared clubs, how invites and leaving work, and how the active group scopes what a person sees.
 - [Live updates](concepts/live-updates.md): How a slip page hears about changes through one SSE stream, and how the hub, deadlines, and client reconnect keep that stream cheap.
-- [Persistence](concepts/persistence.md): How one SQLite file holds every slip and every cached response, how Litestream restores and replicates it on Cloud Run, and why only one process may write to it.
+- [Persistence](concepts/persistence.md): How one SQLite file holds every slip and every cached response, how Litestream restores and replicates it on Cloud Run, why only one process may write to it, and how the local sandbox keeps its own file and stage row.
 - [Slips](concepts/slips.md): How a group builds one shared parlay a week from the slate, with members, legs, quick-add, create-slip defaults, grading, the editing and locking rules, and research.
 
 ## Decision
@@ -34,17 +34,17 @@
 ## Guide
 
 - [GCP setup](guides/gcp-setup.md): Create the Google Cloud project resources once, add the secrets and GitHub variables, and run the first deploy that puts the app on Cloud Run.
-- [Local development](guides/local-dev.md): Start the app with hot reload, set up the git hooks, and fall back to a plain server run when you need it.
+- [Local development](guides/local-dev.md): Start the app with hot reload, run the offline Sunday sandbox, set up the git hooks, and fall back to a plain server run when you need it.
 
 ## Reference
 
 - [Analyzer rules](reference/analyzer-rules.md): The stable IDs, severities, triggers, and example messages for the correlation, weather, key-number, chalk, player stats, and nfelo model rules in internal/analyzer.
-- [Configuration](reference/config.md): Environment variables the server reads, their dev defaults, the odds provider keys they configure, and the values it rejects in prod.
+- [Configuration](reference/config.md): Environment variables the server reads, their dev defaults, the odds provider keys they configure, the offline sandbox switch, and the values it rejects in prod.
 - [Data sources](reference/data-sources.md): The free sources behind the slate, the ESPN scoreboard endpoint and its Sunday and Monday filter, the Open-Meteo forecast behind a game's weather, Parlay API game lines and props with The Odds API enrichment and fallback, ESPN rosters, game logs, and summary injuries, player matching, nfelo model projections, bookmakers, deep links, tiered credit floors, and the raw response archive every successful call leaves.
 - [History file](reference/history-file.md): The seed/history.yaml format, its slip and leg fields and defaults, how boot imports it into the first group, which slips are skipped, and how errors and users are handled.
 - [Odds math](reference/odds-math.md): The formulas in internal/parlay for converting American and decimal odds, combining legs, picking a reference price, and computing payout and units.
 - [Routes](reference/routes.md): Every HTTP route the server serves, the middleware in front of them, and the status codes, HTMX headers, and SSE frames handlers return.
-- [Sandbox replay](reference/sandbox-replay.md): The fail-closed HTTP transport and named week 9 response registry behind the local Sunday sandbox, the requests they answer, and which fixtures are real captures versus derived snapshots.
+- [Sandbox replay](reference/sandbox-replay.md): The fail-closed HTTP transport and named week 9 response registry behind the local Sunday sandbox, the requests they answer, which fixtures are real captures versus derived snapshots, and how server startup replays them.
 - [Database schema](reference/schema.md): SQLite tables, including groups and their members, odds rows with sportsbook deep links, rosters and player game logs for props research, player name matching, nfelo model projections, the raw external response archive, how migrations are tracked and applied, and connection settings.
 
 ## Runbook

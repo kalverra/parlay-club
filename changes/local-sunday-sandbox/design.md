@@ -165,7 +165,7 @@ but reuses the existing clients and domain services rather than adding productio
 
 ### Phase 2: Launch the isolated offline app
 
-- [ ] Add synchronous refresh and scenario-clock seams through refresh, slips, and web, then wire `SUNDAY_SANDBOX=1`, the
+- [x] Add synchronous refresh and scenario-clock seams through refresh, slips, and web, then wire `SUNDAY_SANDBOX=1`, the
   mise convenience task, fixed isolated database, forced dev auth, synchronous morning bootstrap, and stage persistence.
   Test no-network startup, production rejection, normal dev preservation, and restart behavior; update local development,
   configuration, persistence, and data-refresh docs.

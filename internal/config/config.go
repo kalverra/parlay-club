@@ -25,6 +25,10 @@ const (
 	defaultDBPath     = "./data/parlay.db"
 	devSessionKey     = "dev-session-key-not-for-production"
 	minSessionKeySize = 32
+
+	// SandboxDBPath is the fixed database the local Sunday sandbox uses. It
+	// never reads DB_PATH, so a sandbox run cannot touch the normal dev file.
+	SandboxDBPath = "./data/sunday-sandbox.db"
 )
 
 // Config holds every value the app reads from the environment. LITESTREAM_BUCKET
@@ -40,6 +44,7 @@ type Config struct {
 	OddsAPIKey         string
 	TheOddsAPIKey      string
 	LogLevel           zerolog.Level
+	Sandbox            bool
 }
 
 // IsProd reports whether production rules apply.
@@ -56,11 +61,17 @@ func Load(env Env) (Config, error) {
 	}
 	prod := appEnv == EnvProd
 	port := portOr(env, &problems)
+	sandbox := sandboxOr(env, prod, &problems)
+
+	dbPath := valueOr(env, "DB_PATH", defaultDBPath)
+	if sandbox {
+		dbPath = SandboxDBPath
+	}
 
 	cfg := Config{
 		AppEnv:             appEnv,
 		Port:               port,
-		DBPath:             valueOr(env, "DB_PATH", defaultDBPath),
+		DBPath:             dbPath,
 		SessionKey:         devDefault(env, "SESSION_KEY", devSessionKey, prod),
 		GoogleClientID:     devDefault(env, "GOOGLE_CLIENT_ID", "", prod),
 		GoogleClientSecret: devDefault(env, "GOOGLE_CLIENT_SECRET", "", prod),
@@ -68,6 +79,7 @@ func Load(env Env) (Config, error) {
 		OddsAPIKey:         oddsAPIKeyOr(env),
 		TheOddsAPIKey:      theOddsAPIKeyOr(env),
 		LogLevel:           levelOr(env, prod, &problems),
+		Sandbox:            sandbox,
 	}
 
 	if prod && len(cfg.SessionKey) < minSessionKeySize {
@@ -147,6 +159,24 @@ func levelOr(env Env, prod bool, problems *[]error) zerolog.Level {
 		return zerolog.InfoLevel
 	}
 	return level
+}
+
+// sandboxOr parses SUNDAY_SANDBOX. Sandbox mode is dev-only; prod rejects it
+// instead of silently serving replay data.
+func sandboxOr(env Env, prod bool, problems *[]error) bool {
+	raw := strings.TrimSpace(env("SUNDAY_SANDBOX"))
+	if raw == "" {
+		return false
+	}
+	sandbox, err := strconv.ParseBool(raw)
+	if err != nil {
+		*problems = append(*problems, fmt.Errorf("SUNDAY_SANDBOX must be a boolean, got %q", raw))
+		return false
+	}
+	if prod && sandbox {
+		*problems = append(*problems, errors.New("SUNDAY_SANDBOX is not allowed in prod"))
+	}
+	return sandbox
 }
 
 // oddsAPIKeyOr returns the Parlay API key. It checks PARLAY_API_KEY first,

@@ -135,7 +135,7 @@ func (h *slipHandlers) exportView(ctx context.Context, slip db.Slip) (ExportView
 		exportLegs = append(exportLegs, item)
 	}
 
-	now := time.Now()
+	now := h.deps.now()
 	for _, book := range exportBooks {
 		plan := export.Plan(slip, exportLegs, oddsRows, book.key, now)
 		view.Books = append(view.Books, exportBookView(plan, book.label))
