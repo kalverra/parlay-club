@@ -172,7 +172,7 @@ but reuses the existing clients and domain services rather than adding productio
 
 ### Phase 3: Add repeatable people and picks
 
-- [ ] Implement transactional sandbox reset and real-service seeding of shared personas, an outsider, an editable slip,
+- [x] Implement transactional sandbox reset and real-service seeding of shared personas, an outsider, an editable slip,
   and named legs. Add the reset controls with post-commit notifications, then test repeatability, normal-database
   isolation, cleanup of cache/backoff state, and current-session recovery.
 - [ ] Add the development-only controls page and cookie-backed persona switching through real sign-in and group scope.

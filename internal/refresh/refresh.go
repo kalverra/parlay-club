@@ -556,3 +556,12 @@ func (s *Service) clearBackoff(key string) {
 
 	delete(s.backoff, key)
 }
+
+// ClearBackoff forgets every source's failure pause. A sandbox reset calls it
+// after clearing sync_state so an old failure cannot skip the fresh pass.
+func (s *Service) ClearBackoff() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	clear(s.backoff)
+}

@@ -96,8 +96,11 @@ func run() error {
 	}
 
 	var (
-		refresher *refresh.Service
-		appNow    func() time.Time
+		refresher   *refresh.Service
+		slipService *slips.Service
+		appNow      func() time.Time
+		kick        func()
+		sandboxApp  func(*http.ServeMux)
 	)
 	if cfg.Sandbox {
 		root, err := repoRoot()
@@ -108,8 +111,12 @@ func run() error {
 		if err != nil {
 			return err
 		}
+		runtime.cookies = cookies
 		refresher = runtime.refresher
+		slipService = runtime.slips
 		appNow = runtime.scenario.Now
+		kick = runtime.Kick
+		sandboxApp = runtime.MountRoutes
 	} else {
 		loadHistory(ctx, logger, store)
 		ingestClient := newIngestClient(store)
@@ -123,13 +130,14 @@ func run() error {
 			Publisher:     hub,
 			Logger:        logger,
 		})
+		slipService = slips.New(store, hub, nil)
+		kick = refresher.Kick
 	}
 
 	handlers := auth.NewHandlers(logger, store, cookies, renderer, provider, devLogin)
 	scope := groups.Scope(logger, store, auth.UserFrom, cookies)
 	groupHandlers := groups.NewHandlers(logger, store, auth.UserFrom, cookies, renderer)
 
-	slipService := slips.New(store, hub, appNow)
 	stream := live.NewStream(hub, refresher.LiveWindow)
 	shell := web.NewWithDeps(web.Dependencies{
 		Logger:     logger,
@@ -152,7 +160,8 @@ func run() error {
 			handlers,
 			groupHandlers,
 			scope,
-			refresher.Kick,
+			kick,
+			sandboxApp,
 		),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
@@ -272,6 +281,7 @@ func newMux(
 	groupHandlers *groups.Handlers,
 	scope func(http.Handler) http.Handler,
 	kick func(),
+	sandboxApps ...func(*http.ServeMux),
 ) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", healthz)
@@ -282,6 +292,9 @@ func newMux(
 	app.Handle("/", shell)
 	if groupHandlers != nil {
 		groupHandlers.Routes(app)
+	}
+	if len(sandboxApps) > 0 && sandboxApps[0] != nil {
+		sandboxApps[0](app)
 	}
 	mux.Handle("/", handlers.RequireUser(scope(kickOnPage(kick)(app))))
 

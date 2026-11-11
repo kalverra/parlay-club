@@ -234,6 +234,45 @@ func TestFailureBacksOffForFiveMinutes(t *testing.T) {
 	assert.Equal(t, int32(2), runs.Load(), "the source retries after the backoff")
 }
 
+func TestClearBackoffForgetsEveryPause(t *testing.T) {
+	t.Parallel()
+
+	clock := &fakeClock{now: novemberTime(4, 12, 0)}
+	service := testService(openTestStore(t), clock.Now)
+
+	var (
+		runs    atomic.Int32
+		failing atomic.Bool
+	)
+	failing.Store(true)
+	src := source{
+		key: "test:clear-all",
+		due: alwaysDue,
+		run: func(context.Context) (bool, error) {
+			runs.Add(1)
+			if failing.Load() {
+				return false, errors.New("source is down")
+			}
+			return true, nil
+		},
+	}
+
+	service.runSources(t.Context(), clock.Now(), []source{src})
+	service.wait()
+	require.Equal(t, int32(1), runs.Load())
+
+	// Without clearing, the same clock is still inside the five-minute pause.
+	failing.Store(false)
+	service.runSources(t.Context(), clock.Now(), []source{src})
+	service.wait()
+	assert.Equal(t, int32(1), runs.Load())
+
+	service.ClearBackoff()
+	service.runSources(t.Context(), clock.Now(), []source{src})
+	service.wait()
+	assert.Equal(t, int32(2), runs.Load(), "ClearBackoff releases every paused source")
+}
+
 func TestSuccessClearsTheBackoff(t *testing.T) {
 	t.Parallel()
 

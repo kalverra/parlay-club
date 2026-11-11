@@ -2,9 +2,9 @@
 id: sandbox-replay
 title: Sandbox replay
 type: reference
-summary: The fail-closed HTTP transport and named week 9 response registry behind the local Sunday sandbox, the requests they answer, which fixtures are real captures versus derived snapshots, and how server startup replays them.
-tags: [sandbox, replay, fixtures, testing, espn, weather, parlay-api, nfelo, provenance, offline, startup, clock]
-sources: [internal/sandbox/registry.go, internal/sandbox/transport.go, internal/sandbox/scenario.go, internal/sandbox/state.go, internal/sandbox/sandbox_test.go, internal/sandbox/state_test.go, cmd/server/sandbox.go, cmd/server/main.go, internal/config/config.go, internal/ingest/espn/testdata/README.md, internal/ingest/odds/testdata/README.md, internal/ingest/weather/testdata/README.md, internal/ingest/nfelo/testdata/README.md]
+summary: The fail-closed HTTP transport and named week 9 response registry behind the local Sunday sandbox, the requests they answer, which fixtures are real captures versus derived snapshots, and how startup, reset, and seeded people replay them.
+tags: [sandbox, replay, fixtures, testing, espn, weather, parlay-api, nfelo, provenance, offline, startup, clock, reset, seeding, personas]
+sources: [internal/sandbox/registry.go, internal/sandbox/transport.go, internal/sandbox/scenario.go, internal/sandbox/state.go, internal/sandbox/reset.go, internal/sandbox/seed.go, internal/sandbox/sandbox_test.go, internal/sandbox/state_test.go, cmd/server/sandbox.go, cmd/server/main.go, internal/config/config.go, internal/ingest/espn/testdata/README.md, internal/ingest/odds/testdata/README.md, internal/ingest/weather/testdata/README.md, internal/ingest/nfelo/testdata/README.md]
 last_verified: 2026-11-10
 ---
 
@@ -47,6 +47,36 @@ See [Persistence](../concepts/persistence.md).
 
 The sandbox scenario clock is `2026-11-08T13:00:00Z`. Refresh, slips, and the web handlers share it; auth cookies and
 SSE timers stay on real time. See [Data refresh](../concepts/data-refresh.md).
+
+## Reset and seeded people
+
+`POST /dev/sandbox/reset` is mounted only while `SUNDAY_SANDBOX=1`. It sits inside the normal `RequireUser`, group
+scope, and HTMX CSRF checks, so it is an ordinary signed-in route. The response asks HTMX to refresh the page.
+
+One reset:
+
+1. sets the scenario to the `morning` stage and saves that stage and clock;
+2. clears every disposable table (`api_responses`, `api_bodies`, activity, wagers, legs, slip members, slips, player
+   research, player matches, nfelo games, odds, games, weeks, group members, groups, users, and `sync_state`) in one
+   transaction;
+3. clears the refresh service's in-memory failure backoff and runs the real morning ingest synchronously;
+4. signs in three fixed `.test` personas through `auth.SignIn`, creates one shared group, and adds the other two through
+   the normal invite join;
+5. leaves a fourth persona in its own group as the outsider;
+6. creates the shared slip with `Store.CreateSlip` and adds six named picks through `slips.Service.AddLeg`;
+7. syncs the featured game's prop board and publishes the final `week:{id}` and `slip:{id}` signals after every write
+   commits.
+
+The schema, the migration version, and the sandbox-only `sandbox_state` row survive. The seeded people are Ada
+(`ada@sandbox.test`), Ben (`ben@sandbox.test`), and Cleo (`cleo@sandbox.test`) in the shared `Sunday Sandbox` group, plus
+Dex (`dex@sandbox.test`) outside it. The `Week 9 Sandbox` slip stays `OPEN` with six `PENDING` legs, two per shared
+person. Stages refer to people and legs by symbolic IDs, not the numeric row IDs a reset creates.
+
+A reset removes and recreates the signed-in persona, so the handler reissues that browser's real session and group
+cookies for the same persona. Any other signed-in identity is cleared and sent back to sign-in. A page-load refresh
+starts at most one background pass and waits behind a reset, so a pass that began earlier cannot write after the fresh
+morning. A failed rebuild answers 500 and leaves reset available to retry. Startup writes the stage row only after the
+first full build succeeds, so a failed first boot retries instead of restoring a half-built sandbox.
 
 ## Week 9 registry
 
@@ -112,5 +142,8 @@ normal event, line, and lazy prop paths enforce their floors instead of silently
 
 `internal/sandbox/state_test.go` covers the one-row stage record and the scenario clock. `cmd/server/sandbox_test.go`
 boots a fresh sandbox through the real clients and refresh, asserts the whole morning landed offline with no archive
-rows, proves a sentinel normal dev file is untouched, and reconstructs the runtime to show the stage and clock survive a
-restart without re-fetching.
+rows, and reconstructs the runtime to show the stage and clock survive a restart without re-fetching. It also resets
+twice and compares the people, memberships, slip, legs, results, activity, games, and sync state; proves the seeded
+people and slip are real service rows; checks that manual edits and a stale failure backoff disappear; shows a sentinel
+normal dev file is untouched; observes the post-commit week and slip signals; and proves the signed-in persona keeps a
+working session and shared group after reset.

@@ -1,9 +1,14 @@
 package main
 
 import (
+	"database/sql"
+	"fmt"
 	"io/fs"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sort"
 	"testing"
 	"time"
 
@@ -11,12 +16,17 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/kalverra/parlay-club/internal/auth"
 	"github.com/kalverra/parlay-club/internal/config"
 	"github.com/kalverra/parlay-club/internal/db"
+	"github.com/kalverra/parlay-club/internal/groups"
 	"github.com/kalverra/parlay-club/internal/live"
+	"github.com/kalverra/parlay-club/internal/parlay"
 	"github.com/kalverra/parlay-club/internal/refresh"
 	"github.com/kalverra/parlay-club/internal/sandbox"
 )
+
+const sandboxTestSessionKey = "test-session-key-long-enough-for-anything"
 
 // sandboxFixtures is the repository root the fixture registry reads from.
 func sandboxFixtures(t *testing.T) fs.FS {
@@ -27,19 +37,38 @@ func sandboxFixtures(t *testing.T) fs.FS {
 	return os.DirFS(root)
 }
 
-func TestSandboxBootstrapReplaysTheMorningOffline(t *testing.T) {
-	t.Parallel()
+// sandboxCookies returns a signer the runtime and the test share, so a reset's
+// reissued cookies can be read back with the same key.
+func sandboxCookies() *auth.Cookies {
+	return auth.NewCookies(sandboxTestSessionKey, false)
+}
+
+// openSandbox boots the real runtime against a fresh isolated file.
+func openSandbox(t *testing.T, hub *live.Hub, cookies *auth.Cookies) (
+	*sql.DB,
+	*db.Store,
+	*sandboxRuntime,
+) {
+	t.Helper()
 
 	database, err := db.Open(filepath.Join(t.TempDir(), "sunday-sandbox.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { assert.NoError(t, database.Close()) })
 	require.NoError(t, db.Migrate(t.Context(), database))
-	store := db.NewStore(database)
-	hub := &live.Hub{}
-	fixtures := sandboxFixtures(t)
 
-	runtime, err := newSandboxRuntime(t.Context(), database, store, hub, fixtures, zerolog.Nop())
+	store := db.NewStore(database)
+	runtime, err := newSandboxRuntime(
+		t.Context(), database, store, hub, sandboxFixtures(t), zerolog.Nop(),
+	)
 	require.NoError(t, err)
+	runtime.cookies = cookies
+	return database, store, runtime
+}
+
+func TestSandboxBootstrapReplaysTheMorningOffline(t *testing.T) {
+	t.Parallel()
+
+	database, store, runtime := openSandbox(t, &live.Hub{}, sandboxCookies())
 
 	assert.Equal(t, sandbox.Morning, runtime.scenario.Stage())
 	assert.Equal(t, sandbox.MorningTime(), runtime.scenario.Now())
@@ -94,6 +123,15 @@ func TestSandboxBootstrapReplaysTheMorningOffline(t *testing.T) {
 	saved, err := runtime.state.Load(t.Context())
 	require.NoError(t, err)
 	assert.Equal(t, sandbox.State{Stage: sandbox.Morning, Now: sandbox.MorningTime()}, saved)
+
+	seed := runtime.Seed()
+	assert.Len(t, seed.People, 4, "three shared personas and an outsider")
+	assert.Len(t, seed.Legs, 6, "every shared persona has two named legs")
+	slip, err := store.SlipByID(t.Context(), seed.Slip.ID)
+	require.NoError(t, err)
+	assert.Equal(t, db.SlipOpen, slip.Status, "the morning slip stays editable")
+	assert.Equal(t, parlay.Pending, slip.Result)
+	assert.Equal(t, len(seed.Legs), countRows(t, database, "legs"))
 }
 
 func TestSandboxRestartRestoresStageAndClock(t *testing.T) {
@@ -106,7 +144,9 @@ func TestSandboxRestartRestoresStageAndClock(t *testing.T) {
 	store := db.NewStore(database)
 	fixtures := sandboxFixtures(t)
 
-	first, err := newSandboxRuntime(t.Context(), database, store, &live.Hub{}, fixtures, zerolog.Nop())
+	first, err := newSandboxRuntime(
+		t.Context(), database, store, &live.Hub{}, fixtures, zerolog.Nop(),
+	)
 	require.NoError(t, err)
 
 	weather, err := store.SyncState(t.Context(), refresh.ScoreboardSource)
@@ -121,7 +161,9 @@ func TestSandboxRestartRestoresStageAndClock(t *testing.T) {
 	}
 	require.NoError(t, first.state.Save(t.Context(), restored))
 
-	second, err := newSandboxRuntime(t.Context(), database, store, &live.Hub{}, fixtures, zerolog.Nop())
+	second, err := newSandboxRuntime(
+		t.Context(), database, store, &live.Hub{}, fixtures, zerolog.Nop(),
+	)
 	require.NoError(t, err)
 
 	assert.Equal(t, restored, second.scenario.State(), "the stage and clock survive a restart")
@@ -157,26 +199,500 @@ func TestSandboxAuthNeverBuildsGoogle(t *testing.T) {
 	assert.True(t, devLogin, "normal dev with no Google values keeps the dev form")
 }
 
-func TestSandboxStartupLeavesTheNormalDevDatabaseAlone(t *testing.T) {
+func TestSandboxResetRebuildsRepeatably(t *testing.T) {
+	t.Parallel()
+
+	database, store, runtime := openSandbox(t, &live.Hub{}, sandboxCookies())
+	first := runtime.Seed()
+	require.Len(t, first.People, 4)
+	require.Len(t, first.Legs, 6)
+
+	// Leave manual edits behind: a person, a slip rename, a graded leg, and a
+	// hand-written activity line. Reset must remove all of them.
+	marker, err := store.CreateUserWithIdentity(
+		t.Context(), "Marker", "marker@example.com", "dev:marker@example.com", "")
+	require.NoError(t, err)
+	_, err = runtime.slips.UpdateSlip(
+		t.Context(), first.People[0].User.ID, first.Slip.ID, "Manual edit", 2)
+	require.NoError(t, err)
+	_, err = runtime.slips.SetLegResult(
+		t.Context(), first.People[0].User.ID, first.Legs[sandbox.LegAdaBengalsML], parlay.Lost)
+	require.NoError(t, err)
+	_, err = store.AddActivity(t.Context(), first.Slip.ID, &marker.ID, "manual edit")
+	require.NoError(t, err)
+
+	one, err := runtime.Reset(t.Context())
+	require.NoError(t, err)
+
+	_, err = store.UserByEmail(t.Context(), "marker@example.com")
+	require.ErrorIs(t, err, db.ErrUserNotFound, "reset removes a manual person")
+	slip, err := store.SlipByID(t.Context(), one.Slip.ID)
+	require.NoError(t, err)
+	assert.Equal(t, first.Slip.Name, slip.Name, "reset removes a manual rename")
+	assert.Equal(t, db.SlipOpen, slip.Status)
+	assert.Equal(t, parlay.Pending, slip.Result)
+	legs, err := store.LegsForSlip(t.Context(), one.Slip.ID)
+	require.NoError(t, err)
+	for _, leg := range legs {
+		assert.Equal(t, parlay.Pending, leg.Result, "reset removes a manual grade from %s", leg.ID)
+		assert.Nil(t, leg.GradedBy)
+	}
+
+	assert.Len(t, mustActiveUsers(t, store), 4)
+	assert.Equal(t, 5, countRows(t, database, "groups"), "three solos, one shared, one outsider")
+	assert.Equal(t, 7, countRows(t, database, "group_members"))
+	assert.Equal(t, 1, countRows(t, database, "slips"))
+	assert.Equal(t, 6, countRows(t, database, "legs"))
+	assert.Equal(t, 6, countRows(t, database, "activity"))
+	assert.Equal(t, 0, countRows(t, database, "api_responses"))
+	assert.Equal(t, 0, countRows(t, database, "api_bodies"))
+	assert.Equal(t, 1, countRows(t, database, "weeks"))
+	assert.Equal(t, 14, countRows(t, database, "games"))
+	assert.Equal(t, 1, countRows(t, database, "sandbox_state"))
+	assertSandboxSync(t, database, store, one.Week)
+
+	firstSnapshot := collectSandboxSnapshot(t, store, one)
+
+	two, err := runtime.Reset(t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, sandbox.State{Stage: sandbox.Morning, Now: sandbox.MorningTime()},
+		runtime.scenario.State())
+	assert.Equal(t, sandbox.Morning, runtime.transport.Stage())
+	assert.Len(t, mustActiveUsers(t, store), 4)
+	assert.Equal(t, 1, countRows(t, database, "slips"))
+	assert.Equal(t, 0, countRows(t, database, "api_responses"))
+	assertSandboxSync(t, database, store, two.Week)
+
+	secondSnapshot := collectSandboxSnapshot(t, store, two)
+	assert.Equal(t, firstSnapshot, secondSnapshot,
+		"two resets leave the same people, memberships, slip, legs, activity, games, and cache state")
+}
+
+func TestSandboxResetLeavesTheNormalDevDatabaseAlone(t *testing.T) {
 	t.Parallel()
 
 	normalPath := filepath.Join(t.TempDir(), "parlay.db")
 	sentinel := []byte("normal dev database sentinel")
 	require.NoError(t, os.WriteFile(normalPath, sentinel, 0o600))
 
-	database, err := db.Open(filepath.Join(t.TempDir(), "sunday-sandbox.db"))
+	_, _, runtime := openSandbox(t, &live.Hub{}, sandboxCookies())
+	_, err := runtime.Reset(t.Context())
 	require.NoError(t, err)
-	t.Cleanup(func() { assert.NoError(t, database.Close()) })
-	require.NoError(t, db.Migrate(t.Context(), database))
-
-	fixtures := sandboxFixtures(t)
-	_, err = newSandboxRuntime(
-		t.Context(), database, db.NewStore(database), &live.Hub{}, fixtures, zerolog.Nop(),
-	)
+	_, err = runtime.Reset(t.Context())
 	require.NoError(t, err)
 
 	//nolint:gosec // the test reads the file it just wrote in its own temp dir.
 	unchanged, err := os.ReadFile(normalPath)
 	require.NoError(t, err)
-	assert.Equal(t, sentinel, unchanged, "sandbox startup never opens the normal dev file")
+	assert.Equal(t, sentinel, unchanged, "sandbox startup and resets never open the normal dev file")
+}
+
+func TestSandboxResetClearsFailureBackoff(t *testing.T) {
+	t.Parallel()
+
+	database, store, runtime := openSandbox(t, &live.Hub{}, sandboxCookies())
+	first := runtime.Seed()
+
+	// Make every source due and then fail, so the service remembers a pause far
+	// beyond the morning clock.
+	runtime.scenario.Set(sandbox.State{
+		Stage: sandbox.Morning,
+		Now:   sandbox.MorningTime().Add(24 * time.Hour),
+	})
+	runtime.transport.SetStage(sandbox.Stage("no-such-stage"))
+	require.Error(t, runtime.refresher.RunOnce(t.Context()), "the replay stage is unknown")
+
+	rebuilt, err := runtime.Reset(t.Context())
+	require.NoError(t, err, "reset clears the old failure pauses before refreshing")
+	assert.Equal(t, sandbox.MorningTime(), runtime.scenario.Now())
+	assert.Equal(t, sandbox.Morning, runtime.transport.Stage())
+	assert.Equal(t, first.SharedGroup.Name, rebuilt.SharedGroup.Name)
+	assertSandboxSync(t, database, store, rebuilt.Week)
+}
+
+func TestSandboxResetPublishesAfterTheRebuild(t *testing.T) {
+	t.Parallel()
+
+	hub := &live.Hub{}
+	_, store, runtime := openSandbox(t, hub, sandboxCookies())
+	seed := runtime.Seed()
+
+	weekSignals, unsubscribeWeek := hub.Subscribe(fmt.Sprintf("week:%d", seed.Week.ID))
+	t.Cleanup(unsubscribeWeek)
+	slipSignals, unsubscribeSlip := hub.Subscribe(fmt.Sprintf("slip:%d", seed.Slip.ID))
+	t.Cleanup(unsubscribeSlip)
+
+	rebuilt, err := runtime.Reset(t.Context())
+	require.NoError(t, err)
+
+	requireSignal(t, weekSignals, "week")
+	requireSignal(t, slipSignals, "slip")
+
+	games, err := store.GamesForWeek(t.Context(), rebuilt.Week.ID)
+	require.NoError(t, err)
+	assert.NotEmpty(t, games, "the signal points at committed games")
+	_, err = store.SlipByID(t.Context(), rebuilt.Slip.ID)
+	require.NoError(t, err, "the signal points at a committed slip")
+}
+
+func TestSandboxResetRecoversTheCurrentSession(t *testing.T) {
+	t.Parallel()
+
+	hub := &live.Hub{}
+	database, store, runtime := openSandbox(t, hub, sandboxCookies())
+	cookies := runtime.cookies
+
+	handlers := auth.NewHandlers(zerolog.Nop(), store, cookies, nil, nil, true)
+	scope := groups.Scope(zerolog.Nop(), store, auth.UserFrom, cookies)
+
+	var (
+		activeGroup groups.Group
+		hasGroup    bool
+	)
+	shell := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		activeGroup, hasGroup = groups.From(r.Context())
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux := newMux(shell, http.NotFoundHandler(), handlers, nil, scope, nil, runtime.MountRoutes)
+
+	seed := runtime.Seed()
+	ada, ok := seed.Person(sandbox.PersonaAda)
+	require.True(t, ok)
+
+	signed := httptest.NewRecorder()
+	cookies.SetSession(signed, ada.User.ID)
+	cookies.SetGroup(signed, ada.GroupID)
+	sessionCookie := responseCookie(t, signed, auth.SessionCookie)
+	groupCookie := responseCookie(t, signed, auth.GroupCookie)
+
+	// The route obeys the normal guards: a plain POST is a cross-site refusal
+	// and a signed-out HTMX request goes to the sign-in page.
+	blocked := httptest.NewRecorder()
+	blockedRequest := httptest.NewRequestWithContext(
+		t.Context(), http.MethodPost, "/dev/sandbox/reset", nil)
+	blockedRequest.AddCookie(sessionCookie)
+	mux.ServeHTTP(blocked, blockedRequest)
+	assert.Equal(t, http.StatusForbidden, blocked.Code)
+
+	signedOut := httptest.NewRecorder()
+	signedOutRequest := httptest.NewRequestWithContext(
+		t.Context(), http.MethodPost, "/dev/sandbox/reset", nil)
+	signedOutRequest.Header.Set("Hx-Request", "true")
+	mux.ServeHTTP(signedOut, signedOutRequest)
+	assert.Equal(t, http.StatusOK, signedOut.Code)
+	assert.Equal(t, "/login", signedOut.Header().Get("Hx-Redirect"))
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/dev/sandbox/reset", nil)
+	request.Header.Set("Hx-Request", "true")
+	request.AddCookie(sessionCookie)
+	request.AddCookie(groupCookie)
+	mux.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	assert.Equal(t, "true", recorder.Header().Get("Hx-Refresh"))
+
+	rebuilt := runtime.Seed()
+	newAda, ok := rebuilt.Person(sandbox.PersonaAda)
+	require.True(t, ok)
+	recoveredSession := responseCookie(t, recorder, auth.SessionCookie)
+	recoveredGroup := responseCookie(t, recorder, auth.GroupCookie)
+
+	next := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
+	next.AddCookie(recoveredSession)
+	next.AddCookie(recoveredGroup)
+	id, ok := cookies.SessionID(next)
+	require.True(t, ok)
+	assert.Equal(t, newAda.User.ID, id, "the browser is signed in as the same persona after reset")
+	groupID, ok := cookies.GroupID(next)
+	require.True(t, ok)
+	assert.Equal(t, newAda.GroupID, groupID, "the browser keeps the shared group after reset")
+
+	page := httptest.NewRecorder()
+	mux.ServeHTTP(page, next)
+	assert.Equal(t, http.StatusNoContent, page.Code)
+	require.True(t, hasGroup)
+	assert.Equal(t, newAda.GroupID, activeGroup.ID, "the recovered session reaches the shared group")
+
+	assert.Equal(t, 1, countRows(t, database, "slips"))
+}
+
+func TestSandboxControlRoutesStayOffOutsideSandbox(t *testing.T) {
+	t.Parallel()
+
+	database, err := db.Open(filepath.Join(t.TempDir(), "parlay.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { assert.NoError(t, database.Close()) })
+	require.NoError(t, db.Migrate(t.Context(), database))
+	store := db.NewStore(database)
+
+	user, err := store.CreateUserWithIdentity(
+		t.Context(), "Ada", "ada@example.com", "dev:ada@example.com", "")
+	require.NoError(t, err)
+	_, err = store.Create(t.Context(), user.ID, "Sunday Parlay Club")
+	require.NoError(t, err)
+
+	cookies := sandboxCookies()
+	handlers := auth.NewHandlers(zerolog.Nop(), store, cookies, nil, nil, true)
+	scope := groups.Scope(zerolog.Nop(), store, auth.UserFrom, cookies)
+	shell := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/dev/sandbox/reset" {
+			http.NotFound(w, r)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux := newMux(shell, http.NotFoundHandler(), handlers, nil, scope, nil, nil)
+
+	signed := httptest.NewRecorder()
+	cookies.SetSession(signed, user.ID)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/dev/sandbox/reset", nil)
+	request.Header.Set("Hx-Request", "true")
+	request.AddCookie(responseCookie(t, signed, auth.SessionCookie))
+	mux.ServeHTTP(recorder, request)
+
+	assert.Equal(t, http.StatusNotFound, recorder.Code,
+		"sandbox routes are mounted only when SUNDAY_SANDBOX=1")
+}
+
+// sandboxSnapshot is the domain state a reset should reproduce, with numeric
+// IDs and wall-clock metadata left out.
+type sandboxSnapshot struct {
+	People        []sandboxPersonSnapshot
+	SharedGroup   sandboxGroupSnapshot
+	OutsiderGroup sandboxGroupSnapshot
+	Slip          sandboxSlipSnapshot
+	Legs          []sandboxLegSnapshot
+	Activity      []string
+	Games         []string
+	Sync          map[string]string
+}
+
+type sandboxPersonSnapshot struct {
+	ID     sandbox.PersonaID
+	Name   string
+	Email  string
+	Active bool
+}
+
+type sandboxGroupSnapshot struct {
+	Name    string
+	Members []string
+}
+
+type sandboxSlipSnapshot struct {
+	Name          string
+	Status        db.SlipStatus
+	Result        parlay.Result
+	LegsPerMember int
+	Members       []string
+}
+
+type sandboxLegSnapshot struct {
+	ID        sandbox.LegID
+	Owner     string
+	GameID    string
+	Market    string
+	Selection string
+	Team      string
+	Side      string
+	Line      string
+	Odds      int
+	Result    parlay.Result
+}
+
+func collectSandboxSnapshot(t *testing.T, store *db.Store, seed sandbox.Seed) sandboxSnapshot {
+	t.Helper()
+
+	emails := make(map[int64]string, len(seed.People))
+	people := make([]sandboxPersonSnapshot, 0, len(seed.People))
+	for _, seeded := range seed.People {
+		user, err := store.UserByID(t.Context(), seeded.User.ID)
+		require.NoError(t, err)
+		emails[user.ID] = user.Email
+		people = append(people, sandboxPersonSnapshot{
+			ID:     seeded.Persona.ID,
+			Name:   user.Name,
+			Email:  user.Email,
+			Active: user.Active,
+		})
+	}
+
+	slip, err := store.SlipByID(t.Context(), seed.Slip.ID)
+	require.NoError(t, err)
+	members, err := store.SlipMembers(t.Context(), seed.Slip.ID)
+	require.NoError(t, err)
+	memberEmails := make([]string, 0, len(members))
+	for _, member := range members {
+		memberEmails = append(memberEmails, member.User.Email)
+	}
+	sort.Strings(memberEmails)
+
+	legs := make([]sandboxLegSnapshot, 0, len(seed.Legs))
+	for id, legID := range seed.Legs {
+		leg, err := store.LegByID(t.Context(), legID)
+		require.NoError(t, err)
+		legs = append(legs, sandboxLegSnapshot{
+			ID:        id,
+			Owner:     emails[leg.UserID],
+			GameID:    pointerValue(leg.GameID),
+			Market:    leg.MarketType,
+			Selection: leg.Selection,
+			Team:      pointerValue(leg.Team),
+			Side:      pointerValue(leg.Side),
+			Line:      lineValue(leg.Line),
+			Odds:      leg.Odds,
+			Result:    leg.Result,
+		})
+	}
+	sort.Slice(legs, func(i, j int) bool { return legs[i].ID < legs[j].ID })
+
+	entries, err := store.ActivityForSlip(t.Context(), seed.Slip.ID)
+	require.NoError(t, err)
+	activity := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		activity = append(activity, entry.Message)
+	}
+
+	games, err := store.GamesForWeek(t.Context(), seed.Week.ID)
+	require.NoError(t, err)
+	gameStates := make([]string, 0, len(games))
+	for _, game := range games {
+		gameStates = append(gameStates, fmt.Sprintf(
+			"%s %s %s @ %s %d-%d %s",
+			game.ID,
+			game.Status,
+			game.AwayTeam,
+			game.HomeTeam,
+			pointerInt(game.AwayScore),
+			pointerInt(game.HomeScore),
+			game.Kickoff.UTC().Format(time.RFC3339),
+		))
+	}
+
+	return sandboxSnapshot{
+		People:        people,
+		SharedGroup:   groupSnapshot(t, store, seed.SharedGroup),
+		OutsiderGroup: groupSnapshot(t, store, seed.OutsiderGroup),
+		Slip: sandboxSlipSnapshot{
+			Name:          slip.Name,
+			Status:        slip.Status,
+			Result:        slip.Result,
+			LegsPerMember: slip.LegsPerMember,
+			Members:       memberEmails,
+		},
+		Legs:     legs,
+		Activity: activity,
+		Games:    gameStates,
+		Sync:     syncSnapshot(t, store, seed.Week),
+	}
+}
+
+func groupSnapshot(t *testing.T, store *db.Store, group db.Group) sandboxGroupSnapshot {
+	t.Helper()
+
+	members, err := store.Members(t.Context(), group.ID)
+	require.NoError(t, err)
+	emails := make([]string, 0, len(members))
+	for _, member := range members {
+		emails = append(emails, member.Email)
+	}
+	sort.Strings(emails)
+	return sandboxGroupSnapshot{Name: group.Name, Members: emails}
+}
+
+func syncSnapshot(t *testing.T, store *db.Store, week db.Week) map[string]string {
+	t.Helper()
+
+	keys := syncKeys(t, store, week)
+	snapshot := make(map[string]string, len(keys))
+	for _, key := range keys {
+		state, err := store.SyncState(t.Context(), key)
+		require.NoError(t, err, key)
+		snapshot[key] = state.FetchedAt.UTC().Format(time.RFC3339)
+	}
+	return snapshot
+}
+
+func assertSandboxSync(t *testing.T, database *sql.DB, store *db.Store, week db.Week) {
+	t.Helper()
+
+	keys := syncKeys(t, store, week)
+	assert.Equal(t, len(keys), countRows(t, database, "sync_state"),
+		"no stale or duplicate source rows survive a reset")
+	for _, key := range keys {
+		state, err := store.SyncState(t.Context(), key)
+		require.NoError(t, err, key)
+		assert.Equal(t, sandbox.MorningTime(), state.FetchedAt, key)
+	}
+}
+
+func syncKeys(t *testing.T, store *db.Store, week db.Week) []string {
+	t.Helper()
+
+	keys := []string{
+		refresh.ScoreboardSource,
+		refresh.OddsLinesSource,
+		refresh.NfeloProjectionsSource,
+		refresh.OddsPropsSource(sandbox.FeaturedGameID),
+	}
+	games, err := store.GamesForWeek(t.Context(), week.ID)
+	require.NoError(t, err)
+	for _, game := range games {
+		if !game.Indoor {
+			keys = append(keys, refresh.WeatherSource(game.ID))
+		}
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func mustActiveUsers(t *testing.T, store *db.Store) []db.User {
+	t.Helper()
+
+	users, err := store.ListActiveUsers(t.Context())
+	require.NoError(t, err)
+	return users
+}
+
+func countRows(t *testing.T, database *sql.DB, table string) int {
+	t.Helper()
+
+	var count int
+	require.NoError(t, database.QueryRowContext(
+		t.Context(), "SELECT count(*) FROM "+table).Scan(&count))
+	return count
+}
+
+func requireSignal(t *testing.T, signals <-chan struct{}, topic string) {
+	t.Helper()
+
+	select {
+	case <-signals:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("no %s signal after reset", topic)
+	}
+}
+
+func pointerValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
+}
+
+func lineValue(value *float64) string {
+	if value == nil {
+		return ""
+	}
+	return fmt.Sprintf("%g", *value)
+}
+
+func pointerInt(value *int) int {
+	if value == nil {
+		return 0
+	}
+	return *value
 }
