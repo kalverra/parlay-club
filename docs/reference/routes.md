@@ -200,7 +200,8 @@ analyzer warnings that name one of their legs, and one action back to the hub. I
 
 A game with no prop rows offers "Load them". The button calls `GET /games/{id}/props?slip=`, which runs
 `SyncGameProps` for that one game and answers 200 with `Hx-Trigger: board-updated`; the board's results partial listens
-for that signal and re-runs its current search. Opening the board, typing, filtering, and sorting call no sync.
+for that signal and re-runs its current search. Opening the board, typing, filtering, and sorting call no sync. A week
+with no stored games, no odds, or every game kicked off shows one week-level empty state instead.
 
 `GET /games` uses the old Games link as a 303 to `/groups/{active}/week`, where the week route opens the group's newest
 slip. Without an active group it redirects to `/`.

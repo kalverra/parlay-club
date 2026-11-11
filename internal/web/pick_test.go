@@ -112,6 +112,55 @@ func TestPickBoardShowsSearchChipsSortsAndTray(t *testing.T) {
 	assert.Contains(t, body, `hx-target="closest .pick-row"`)
 }
 
+func TestPickBoardSaysWhenTheWeekHasNoGames(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+
+	recorder := pickBoard(t, fixture, "")
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	body := html.UnescapeString(recorder.Body.String())
+
+	assert.Contains(t, body, "No games are stored for this week yet.",
+		"an empty slate is its own screen")
+	assert.NotContains(t, body, "Nothing matches that search")
+	assert.NotContains(t, body, "Load them")
+}
+
+func TestPickBoardSaysWhenTheWeekHasNoLines(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	addGame(t, fixture, gameKickoff())
+
+	recorder := pickBoard(t, fixture, "")
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	body := html.UnescapeString(recorder.Body.String())
+
+	assert.Contains(t, body, "No lines for this week yet.",
+		"a week with games but no odds says what is missing")
+	assert.NotContains(t, body, "Nothing matches that search")
+	assert.NotContains(t, body, "aren’t loaded yet",
+		"one week-level message replaces a Load them prompt per game")
+	assert.NotContains(t, body, "Load them")
+}
+
+func TestPickBoardSaysWhenEveryGameStarted(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	addGame(t, fixture, time.Now().UTC().Add(-3*time.Hour))
+
+	recorder := pickBoard(t, fixture, "")
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	body := html.UnescapeString(recorder.Body.String())
+
+	assert.Contains(t, body, "Every game this week has kicked off. Picks are closed.")
+	assert.NotContains(t, body, "Nothing matches that search")
+	assert.NotContains(t, body, "already kicked off and is hidden",
+		"the all-started screen does not also list each hidden game")
+}
+
 func TestPickResultsSearchFilterAndSort(t *testing.T) {
 	t.Parallel()
 

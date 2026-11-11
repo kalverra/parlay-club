@@ -262,8 +262,30 @@ func TestHubNudgesThePeopleStillPicking(t *testing.T) {
 }
 
 // TestHubNudgeHasNoCloseTimeWithoutADeadline checks that a slip whose week is
-// behind the clock still offers a nudge, just without a picks-close time.
+// behind the clock still offers a nudge, just without a picks-close time, as
+// long as everyone has their legs.
 func TestHubNudgeHasNoCloseTimeWithoutADeadline(t *testing.T) {
+	t.Parallel()
+
+	fixture := hubFixture(t, 1)
+	addGame(t, fixture, hubNow.Add(-2*time.Hour))
+	sam := addSam(t, fixture)
+	addStepLeg(t, fixture, fixture.user.ID)
+	addStepLeg(t, fixture, sam.ID)
+	require.NoError(t, fixture.store.SetSlipMemberLock(
+		t.Context(), fixture.slip.ID, fixture.user.ID, &hubNow))
+
+	body := html.UnescapeString(hubBody(t, fixture, fixture.slip.ID))
+
+	assert.Contains(t, body, "Waiting on Sam")
+	assert.Contains(t, body, "Nudge Sam")
+	assert.NotContains(t, body, "data-nudge-close")
+}
+
+// TestHubSaysClosedWhenAMemberNeverFinished checks the empty state at the end
+// of a week: someone short of legs cannot catch up, so the banner says the
+// picks are closed instead of waiting on a pick that cannot arrive.
+func TestHubSaysClosedWhenAMemberNeverFinished(t *testing.T) {
 	t.Parallel()
 
 	fixture := hubFixture(t, 1)
@@ -275,6 +297,8 @@ func TestHubNudgeHasNoCloseTimeWithoutADeadline(t *testing.T) {
 
 	body := html.UnescapeString(hubBody(t, fixture, fixture.slip.ID))
 
-	assert.Contains(t, body, "Nudge Sam")
-	assert.NotContains(t, body, "data-nudge-close")
+	assert.Contains(t, body, "Picks are closed")
+	assert.Contains(t, body, "Sam never finished picking, so this slip can't lock in this week.")
+	assert.NotContains(t, body, "Nudge Sam", "a pick that can never arrive is not a nudge")
+	assert.NotContains(t, body, fmt.Sprintf(`href="/slips/%d/pick"`, fixture.slip.ID))
 }

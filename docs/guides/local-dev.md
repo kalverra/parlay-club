@@ -5,7 +5,7 @@ type: guide
 summary: Start the app with hot reload, run the offline Sunday sandbox, set up the git hooks, and fall back to a plain server run when you need it.
 tags: [development, mise, air, tailwind, server, sandbox, offline]
 sources: [mise.toml, .air.toml, scripts/dev.sh, lefthook.yml, web/*.go, web/tailwind/*.css, web/templates/*.html, cmd/server/main.go, cmd/server/sandbox.go, internal/config/config.go, internal/sandbox/*.go, internal/auth/*.go, internal/groups/*.go]
-last_verified: 2026-11-10
+last_verified: 2026-11-11
 ---
 
 # Local development
@@ -31,8 +31,8 @@ environment variable, for example `PORT=9000 mise run dev`, which opens port 900
 [Configuration](../reference/config.md).
 
 With no Google values set, the app opens on `/login` with a "Sign in without Google (dev)" link. Click it, enter any
-email, and optionally a name, and the tabs load. The dev form calls the same sign-in code as Google: a new person gets a
-"Just me" group in the same transaction. See [Access](../concepts/access.md) for the session and the cookies.
+email, and optionally a name, and the group list loads. The dev form calls the same sign-in code as Google: a new person
+gets a "Just me" group in the same transaction. See [Access](../concepts/access.md) for the session and the cookies.
 
 Dev logs print as readable console lines; prod logs are JSON.
 
@@ -214,5 +214,5 @@ golangci-lint run ./...
 go test -short -race ./...
 ```
 
-Every tab loads: after signing in, the Games tab shows the latest week's board once the slate syncs, and Research and
-Record Book show a placeholder for now.
+Every screen loads: after signing in, a person in one group lands on that group's week, which shows the create-slip form
+until a slip exists. The hub's pick action opens the pick board, and `/games` redirects to the active group's week.

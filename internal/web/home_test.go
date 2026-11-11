@@ -3,6 +3,7 @@ package web_test
 import (
 	"context"
 	"fmt"
+	"html"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -36,6 +37,14 @@ type landingFixture struct {
 func newLandingFixture(t *testing.T) *landingFixture {
 	t.Helper()
 
+	return newLandingFixtureWithWeek(t, true)
+}
+
+// newLandingFixtureWithWeek builds the landing fixture with or without a
+// stored week, so the create form's no-week state can be tested.
+func newLandingFixtureWithWeek(t *testing.T, withWeek bool) *landingFixture {
+	t.Helper()
+
 	database, err := db.Open(filepath.Join(t.TempDir(), "parlay.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { assert.NoError(t, database.Close()) })
@@ -48,18 +57,21 @@ func newLandingFixture(t *testing.T) *landingFixture {
 	require.NoError(t, err)
 	second, err := store.Create(t.Context(), user.ID, "Lake House")
 	require.NoError(t, err)
-	week, err := store.UpsertWeek(t.Context(), 2026, 2, 9)
-	require.NoError(t, err)
-	_, err = store.CreateSlip(t.Context(), first.ID, week.ID, "Week 9", 2, []int64{user.ID})
-	require.NoError(t, err)
 
 	fixture := &landingFixture{
 		store:  store,
 		user:   user,
 		first:  first,
 		second: second,
-		week:   week,
 	}
+	if withWeek {
+		week, err := store.UpsertWeek(t.Context(), 2026, 2, 9)
+		require.NoError(t, err)
+		fixture.week = week
+		_, err = store.CreateSlip(t.Context(), first.ID, week.ID, "Week 9", 2, []int64{user.ID})
+		require.NoError(t, err)
+	}
+
 	fixture.handler = fixture.build()
 	return fixture
 }
@@ -185,12 +197,42 @@ func TestGroupWeekShowsTheCreateFormWithNoSlip(t *testing.T) {
 
 	recorder := fixture.get(t, fmt.Sprintf("/groups/%d/week", fixture.second.ID))
 	require.Equal(t, http.StatusOK, recorder.Code)
-	body := recorder.Body.String()
+	body := html.UnescapeString(recorder.Body.String())
 
+	assert.Contains(t, body, "Start Week 9’s slip", "the create screen names the week")
+	assert.Contains(t, body, "No slip for Week 9 yet.", "the empty state explains why the form is here")
 	assert.Contains(t, body, "Create slip")
 	assert.Contains(t, body, ">Lake House</span>", "the top bar shows the group the page acts in")
 	assert.Contains(t, body, fmt.Sprintf(`href="/groups/%d/week"`, fixture.second.ID))
 	assert.Equal(t, []int64{fixture.second.ID}, fixture.selections)
+}
+
+func TestGroupWeekCreateFormWelcomesTheOnlyMember(t *testing.T) {
+	t.Parallel()
+
+	fixture := newLandingFixture(t)
+
+	body := html.UnescapeString(
+		fixture.get(t, fmt.Sprintf("/groups/%d/week", fixture.second.ID)).Body.String())
+
+	assert.Contains(t, body, "It’s just you for now.",
+		"a first run in a solo group says who is picking")
+	assert.Contains(t, body, "Invite friends from Groups whenever you like.")
+}
+
+func TestGroupWeekCreateFormWithoutAWeekSaysSo(t *testing.T) {
+	t.Parallel()
+
+	fixture := newLandingFixtureWithWeek(t, false)
+
+	recorder := fixture.get(t, fmt.Sprintf("/groups/%d/week", fixture.second.ID))
+	require.Equal(t, http.StatusOK, recorder.Code)
+	body := html.UnescapeString(recorder.Body.String())
+
+	assert.Contains(t, body, "Start a slip")
+	assert.Contains(t, body, "No week is loaded yet. Add a past week below to start a slip.")
+	assert.NotContains(t, body, `name="week_id"`, "an empty week picker is not offered")
+	assert.Contains(t, body, "Or add a past week", "the typed-week fields still start a slip")
 }
 
 func TestGroupWeekRefusesANonMember(t *testing.T) {

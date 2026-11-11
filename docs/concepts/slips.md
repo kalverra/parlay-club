@@ -35,7 +35,7 @@ result. The hub banner and each group card read its label, so the two always agr
 | --------- | --------------------------------------------------------- | ------------------ | --------------------------------------------------- |
 | `join`    | The viewer is in the group but not on the slip.           | Join this slip     | Adds the viewer through `POST /slips/{id}/members`. |
 | `pick`    | The viewer has fewer legs than `legs_per_member`.         | Pick N more        | Opens `/slips/{id}/pick`.                           |
-| `closed`  | The viewer needs legs and every game has kicked off.      | Picks are closed   | None; the slip stays visible.                       |
+| `closed`  | The week's picks are over before the slip could finish.  | Picks are closed   | None; the slip stays visible.                       |
 | `lock_in` | The viewer has every leg and has not locked in.           | Ready to lock in   | Posts `/slips/{id}/lock`.                           |
 | `waiting` | The viewer is locked in and someone else is not.          | Waiting on {names} | Nudge {name} shares or copies the message.          |
 | `export`  | Everyone is locked in.                                    | Ready to place     | The export card leads the hub.                      |
@@ -45,6 +45,11 @@ The deadline is the earliest game in the slip's week whose kickoff is still ahea
 `Picks close for BUF @ MIA at <time>`, and `app.js` formats the time in the reader's zone. A past week has no kickoff
 ahead, so it has no deadline. Unlocking clears every lock, so the banner reopens the pick step; a member who already has
 every leg sees `lock_in` instead.
+
+`closed` is the end-of-week empty state. The viewer sees it when they are short of legs and every game has kicked off, or
+when they are locked in and another member never finished picking. In the second case the banner names who never finished
+and says the slip cannot lock in this week, instead of offering a nudge for a pick that cannot arrive. If everyone has
+their legs and only a lock is missing, `waiting` stays and the nudge still works, with no picks-close time.
 
 In `waiting` each person still picking gets a **Nudge** button. It opens the browser's share sheet with "Waiting on you
 for {slip}. Picks close {time}. {url}", with the time in the sender's zone and an absolute link, and copies the text when
@@ -58,6 +63,10 @@ group member who is not on the slip sees `join`; a person outside the group gets
 The landing list opens a group's week (`GET /groups/{id}/week`), which switches the active group and opens that group's
 newest slip of the latest week. The slate sync keeps that week current, so it is normally the week being played. When the
 group has none, it shows the create-slip form.
+
+The create screen says which empty state it is in. With a stored week it reads "No slip for Week 9 yet" and offers the
+week's form. With no stored week it says no week is loaded and points at the typed past-week fields, so the empty week
+picker is not shown. A group with only the viewer adds "It's just you for now" and points at Groups for an invite.
 
 - Week defaults to the latest week. The picker lists every stored week with its season. A past week the slate never
   stored can be typed in by season, season type, and week number, and the form creates the week. A typed week later than
@@ -153,6 +162,10 @@ A game whose props were never fetched appears as a prompt when the search matche
 player on it: "Props for BUF @ MIA aren't loaded yet." The "Load them" button calls `GET /games/{id}/props?slip=`, which
 runs `SyncGameProps` for that one game (credit floors and all) and then fires `board-updated`. The board itself never
 syncs props; opening, typing, filtering, and sorting spend no credits. See [Data refresh](data-refresh.md).
+
+The board has its own empty states. A week with no stored games says the slate has not synced. A week with games but no
+odds says the lines have not synced, once, instead of offering "Load them" for every game. Once every game has kicked
+off, it says picks are closed. A search or filter that matches nothing keeps "Nothing matches that search."
 
 The tray shows the viewer's legs with remove buttons, progress ("1 of 2"), the analyzer warnings that name one of the
 viewer's legs, and one action: "Done" back to the hub, or "Review and lock in" at the limit. It refreshes on

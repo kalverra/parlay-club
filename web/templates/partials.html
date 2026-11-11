@@ -1136,6 +1136,20 @@
     </div>
   {{end}}
 
+  {{if .NoGames}}
+    <p class="rounded-xl border border-dashed border-slate-700 bg-slate-900 p-4 text-sm text-slate-400">
+      No games are stored for this week yet. The slate shows up after the next sync.
+    </p>
+  {{else if .NoLines}}
+    <p class="rounded-xl border border-dashed border-slate-700 bg-slate-900 p-4 text-sm text-slate-400">
+      No lines for this week yet. They load on the next sync, so check back in a minute.
+    </p>
+  {{else if .AllStarted}}
+    <p class="rounded-xl border border-dashed border-slate-700 bg-slate-900 p-4 text-sm text-slate-400">
+      Every game this week has kicked off. Picks are closed.
+    </p>
+  {{end}}
+
   {{range .Unloaded}}
     <div class="flex items-center justify-between gap-3 rounded-xl border border-sky-800 bg-sky-950/40 p-3">
       <p class="min-w-0 text-sm text-sky-200">
@@ -1158,7 +1172,7 @@
     </p>
   {{end}}
 
-  {{if .Started}}
+  {{if and .Started (not .AllStarted)}}
     <p class="px-1 text-xs text-slate-500">
       {{.Started}} game{{if ne .Started 1}}s{{end}} already kicked off and {{if eq .Started 1}}is{{else}}are{{end}} hidden.
     </p>
