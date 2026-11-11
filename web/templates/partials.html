@@ -120,6 +120,47 @@
               <p class="truncate text-sm font-medium">{{.Selection}}</p>
               <div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-400">
                 <span>{{.Odds}}</span>
+                {{if .Votes.Has}}
+                  <span class="flex items-center gap-1" data-votes>
+                    {{if .Votes.CanVote}}
+                      <form
+                        hx-post="/legs/{{$leg.ID}}/vote"
+                        hx-target="#slip-panel"
+                        hx-swap="outerHTML"
+                      >
+                        <input type="hidden" name="value" value="{{.Votes.UpValue}}">
+                        <button
+                          type="submit"
+                          class="rounded-full border px-1.5 py-0.5 {{if eq .Votes.Mine 1}}border-sky-600 bg-sky-950 text-sky-300{{else}}border-slate-700 bg-slate-950 text-slate-300{{end}}"
+                          title="{{if eq .Votes.Mine 1}}Clear your up vote{{else}}Up vote{{end}}"
+                        >
+                          &uarr; {{.Votes.Up}}
+                        </button>
+                      </form>
+                      <form
+                        hx-post="/legs/{{$leg.ID}}/vote"
+                        hx-target="#slip-panel"
+                        hx-swap="outerHTML"
+                      >
+                        <input type="hidden" name="value" value="{{.Votes.DownValue}}">
+                        <button
+                          type="submit"
+                          class="rounded-full border px-1.5 py-0.5 {{if eq .Votes.Mine -1}}border-rose-600 bg-rose-950 text-rose-300{{else}}border-slate-700 bg-slate-950 text-slate-300{{end}}"
+                          title="{{if eq .Votes.Mine -1}}Clear your down vote{{else}}Down vote{{end}}"
+                        >
+                          &darr; {{.Votes.Down}}
+                        </button>
+                      </form>
+                    {{else}}
+                      <span class="rounded-full border border-slate-700 bg-slate-950 px-1.5 py-0.5">
+                        &uarr; {{.Votes.Up}}
+                      </span>
+                      <span class="rounded-full border border-slate-700 bg-slate-950 px-1.5 py-0.5">
+                        &darr; {{.Votes.Down}}
+                      </span>
+                    {{end}}
+                  </span>
+                {{end}}
                 {{if .ResearchURL}}
                   <a
                     href="{{.ResearchURL}}"

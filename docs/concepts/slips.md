@@ -2,9 +2,9 @@
 id: slips
 title: Slips
 type: concept
-summary: How a group builds one shared parlay a week from the slate, with the hub's next-step banner and deadline, the searchable pick board and its tray, members, legs, quick-add, create-slip defaults, grading, the editing and locking rules, and research.
-tags: [slips, weeks, legs, members, locking, grading, results, activity, groups, games, quick-add, nfelo, props, autocomplete, research, next-step, hub, pick-board, search, tray]
-sources: [internal/slips/slips.go, internal/slips/rules.go, internal/slips/next.go, internal/board/board.go, internal/db/slips.go, internal/db/legs.go, internal/db/odds.go, internal/db/players.go, internal/db/weeks.go, internal/db/games.go, internal/web/games.go, internal/web/pick.go, internal/web/slips.go, internal/web/home.go, internal/web/research.go]
+summary: How a group builds one shared parlay a week from the slate, with the hub's next-step banner and deadline, the searchable pick board and its tray, members, legs, votes, quick-add, create-slip defaults, grading, the editing and locking rules, and research.
+tags: [slips, weeks, legs, members, locking, grading, results, activity, groups, games, quick-add, nfelo, props, autocomplete, research, next-step, hub, pick-board, search, tray, votes, voting]
+sources: [internal/slips/slips.go, internal/slips/rules.go, internal/slips/next.go, internal/board/board.go, internal/db/slips.go, internal/db/legs.go, internal/db/votes.go, internal/db/odds.go, internal/db/players.go, internal/db/weeks.go, internal/db/games.go, internal/web/games.go, internal/web/pick.go, internal/web/slips.go, internal/web/home.go, internal/web/research.go]
 last_verified: 2026-11-11
 ---
 
@@ -157,6 +157,20 @@ viewer's legs, and one action: "Done" back to the hub, or "Review and lock in" a
 without `?slip=` still renders the standalone prop partial for one game, with team totals and player props grouped
 under each athlete and links to game research and player research.
 
+## Votes
+
+Members can react to each other's picks with an up or down vote. The hub shows `▲ 2 ▼ 1` on a leg, highlights the
+viewer's own vote, and makes the tallies tap targets while the slip is `OPEN`. The owner of a leg sees the tally only.
+
+`internal/slips.Service.Vote` takes the leg, the member, and `1`, `-1`, or `0` to clear. Only slip members vote
+(`ErrNotMember`), never on their own pick (`ErrOwnVote`), and only while the slip is `OPEN` (`ErrVotesClosed`). Kickoff
+does not close a vote, and unlocking reopens voting because it sets the slip back to `OPEN`. Voting the same value again
+changes nothing and publishes nothing. A change publishes `slip:{id}` and writes no activity entry.
+
+A changed pick loses its votes: `UpdateLeg` deletes them in the same transaction when the game, market, team, player,
+side, line, or selection changes. An odds-only edit keeps them, because it is the same pick at a new price. `DeleteLeg`
+clears them by cascade. Votes are kept after the week for the Record Book.
+
 ## Research
 
 The Research page (`GET /research`) offers game injury reports and player hit bars. It opens from a player, prop, leg,
@@ -231,7 +245,8 @@ locking stay testable.
 8. Slips for past weeks skip rule 3, so history can be entered. A week counts as past once every game in it has kicked
    off (`db.WeekPast`), so a current week becomes history when its last game starts.
 9. Every mutation writes one activity entry and publishes `slip:{id}` after it commits. An add reads "Adam added BUF
-   ML", a lock in reads "Sam locked in", and a no-op writes nothing.
+   ML", a lock in reads "Sam locked in", and a no-op writes nothing. Voting is the one exception: a vote publishes a
+   change but writes no activity entry, so a feed full of thumbs would not bury the picks.
 
 The service returns typed errors so handlers can answer with a 422 and a short message.
 
@@ -247,6 +262,9 @@ The service returns typed errors so handlers can answer with a 422 and a short m
 | `ErrSlipNotOpen`         | A member, name, or limit change after lock in.  | the slip is locked                       |
 | `ErrNotLocked`           | Unlock with nobody locked in.                   | nobody is locked in                      |
 | `ErrMemberHasLegs`       | Remove a member who still has legs.             | delete their legs first                  |
+| `ErrOwnVote`             | The actor votes on their own leg.               | you can't vote on your own pick          |
+| `ErrVotesClosed`         | A vote after the slip left `OPEN`.              | votes closed once everyone locked in     |
+| `ErrVoteInvalid`         | A value other than up, down, or clear.          | vote must be up, down, or clear          |
 
 ## Several slips
 

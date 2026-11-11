@@ -2,10 +2,10 @@
 id: schema
 title: Database schema
 type: reference
-summary: SQLite tables, including groups and their members, odds rows with sportsbook deep links, rosters and player game logs for props research, player name matching, nfelo model projections, the raw external response archive, how migrations are tracked and applied, and connection settings.
-tags: [database, sqlite, migrations, groups, archive, api, raw-responses, odds, links, nfelo, projections, roster, gamelog, player-matching, injuries]
-sources: [internal/db/migrations/*.sql, internal/db/migrate.go, internal/db/db.go, internal/db/odds.go, internal/db/groups.go, internal/db/nfelo.go, internal/db/players.go, internal/db/archive.go, internal/db/archive_read.go, internal/ingest/archive/transport.go]
-last_verified: 2026-11-09
+summary: SQLite tables, including groups and their members, legs and their votes, odds rows with sportsbook deep links, rosters and player game logs for props research, player name matching, nfelo model projections, the raw external response archive, how migrations are tracked and applied, and connection settings.
+tags: [database, sqlite, migrations, groups, archive, api, raw-responses, odds, links, nfelo, projections, roster, gamelog, player-matching, injuries, votes]
+sources: [internal/db/migrations/*.sql, internal/db/migrate.go, internal/db/db.go, internal/db/odds.go, internal/db/groups.go, internal/db/nfelo.go, internal/db/players.go, internal/db/votes.go, internal/db/archive.go, internal/db/archive_read.go, internal/ingest/archive/transport.go]
+last_verified: 2026-11-11
 ---
 
 # Database schema
@@ -18,6 +18,7 @@ identity columns and drop the unique name rule. `0003_api_archive.sql` adds the 
 `api_responses`; see [Archive](../concepts/archive.md). `0004_odds_links.sql` adds each book's deep link and selection
 ID to `odds`, and `0005_odds_event_sid.sql` adds the book's own event ID. `0006_nfelo_games.sql` adds `nfelo_games`,
 one model projection per game. `0007_props_research.sql` adds `roster_players` and `player_gamelogs` for props research.
+`0008_leg_votes.sql` adds `leg_votes`, the up and down votes members cast on each other's legs.
 
 ## Connection settings
 
@@ -41,7 +42,7 @@ connection rules out `SQLITE_BUSY`.
 - `db.Migrate` applies every file whose number is greater than `PRAGMA user_version`, in number order.
 - Each file runs in its own transaction. The migration's statements and its `user_version` bump commit together, so a
   failed migration leaves neither behind.
-- A fresh database ends at version 7 with every table below.
+- A fresh database ends at version 8 with every table below.
 - `0001_init.sql` creates `groups`, `group_members`, and `slips.group_id`. A database created before groups existed has
   the old `slips` shape, so delete it and let the migrations rebuild.
 - `0002_google_identity.sql` rebuilds `users` in its transaction with the SQLite 12-step method and
@@ -57,7 +58,9 @@ connection rules out `SQLITE_BUSY`.
   existing table.
 - `0007_props_research.sql` creates `roster_players` and `player_gamelogs` for ESPN NFL team rosters and athlete
   game logs.
-- Never edit an applied file. Add `0008_name.sql` and up.
+- `0008_leg_votes.sql` creates `leg_votes`, one row per member per leg they voted on, cascading from `legs`. It changes
+  no existing table.
+- Never edit an applied file. Add `0009_name.sql` and up.
 - `PRAGMA user_version` on the database file is the only record of what ran.
 
 ## Tables
@@ -74,6 +77,7 @@ connection rules out `SQLITE_BUSY`.
 | `slips`           | One shared parlay per group per week, with status and result.  |
 | `slip_members`    | Who is on a slip and when they locked in.                     |
 | `legs`            | Picks on a slip, with market, selection, line, odds, and result. |
+| `leg_votes`       | Up and down votes members cast on each other's legs.          |
 | `wagers`          | Optional stake, odds, and boost per member per slip.          |
 | `player_matches`  | Odds player name to ESPN athlete ID, per team.                |
 | `roster_players`  | ESPN NFL team rosters by athlete ID with normalized names.    |
@@ -245,6 +249,14 @@ CREATE TABLE legs (
 );
 CREATE INDEX legs_slip ON legs(slip_id);
 
+CREATE TABLE leg_votes (
+  leg_id     INTEGER NOT NULL REFERENCES legs(id) ON DELETE CASCADE,
+  user_id    INTEGER NOT NULL REFERENCES users(id),
+  value      INTEGER NOT NULL CHECK (value IN (-1, 1)), -- 1 up, -1 down; clearing deletes the row
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (leg_id, user_id)
+);
+
 CREATE TABLE wagers (
   slip_id   INTEGER NOT NULL REFERENCES slips(id) ON DELETE CASCADE,
   user_id   INTEGER NOT NULL REFERENCES users(id),
@@ -344,6 +356,8 @@ how to read it.
 - `nfelo_games` holds one global row per game. A sync upserts it, and `updated_at` moves only when a stored value
   changes, so rerunning with the same CSV is a no-op.
 - A slip's reference odds are not stored; any view that shows them computes them.
+- `leg_votes` holds only cast votes. Clearing one deletes its row, and deleting a leg cascades. A vote changes no slip or
+  leg field and writes no activity entry.
 - `slips.status` and `slips.result` stay in step with lock and leg-result changes.
 - `groups`, `group_members`, `slips`, and the rows that hang off a slip are scoped to one group. Weeks, games, odds,
   nfelo projections, player matches, rosters, player game logs, and `sync_state` are global.

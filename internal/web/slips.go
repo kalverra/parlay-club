@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kalverra/parlay-club/internal/analyzer"
 	"github.com/kalverra/parlay-club/internal/db"
 	"github.com/kalverra/parlay-club/internal/parlay"
 	"github.com/kalverra/parlay-club/internal/slips"
@@ -34,6 +35,9 @@ var ruleErrors = []error{
 	slips.ErrSlipNotOpen,
 	slips.ErrNotLocked,
 	slips.ErrMemberHasLegs,
+	slips.ErrOwnVote,
+	slips.ErrVotesClosed,
+	slips.ErrVoteInvalid,
 	db.ErrSlipNameRequired,
 	db.ErrLegsPerMemberRange,
 	db.ErrSlipMembersRequired,
@@ -74,6 +78,7 @@ func (h *slipHandlers) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /legs/{id}/edit", h.editLegForm)
 	mux.HandleFunc("PUT /legs/{id}", h.updateLeg)
 	mux.HandleFunc("PUT /legs/{id}/result", h.setLegResult)
+	mux.HandleFunc("POST /legs/{id}/vote", h.voteLeg)
 	mux.HandleFunc("DELETE /legs/{id}", h.deleteLeg)
 	mux.HandleFunc("POST /slips/{id}/lock", h.lockIn)
 	mux.HandleFunc("POST /slips/{id}/unlock", h.unlock)
@@ -154,6 +159,19 @@ type LegView struct {
 	CanEdit     bool
 	CanGrade    bool
 	ResearchURL string
+	Votes       VoteView
+}
+
+// VoteView is one leg's tally and the viewer's own vote. UpValue and DownValue
+// are what the next tap sends: the matching value again clears the vote.
+type VoteView struct {
+	Up        int
+	Down      int
+	Mine      int
+	CanVote   bool
+	Has       bool
+	UpValue   int
+	DownValue int
 }
 
 // ActivityView is one activity line.
@@ -755,6 +773,34 @@ func (h *slipHandlers) setLegResult(w http.ResponseWriter, r *http.Request) {
 	h.renderPanel(w, r, slip)
 }
 
+// voteLeg records the signed-in member's vote on someone else's leg. Up, down,
+// and clear refresh the panel so the tally updates without a reload.
+func (h *slipHandlers) voteLeg(w http.ResponseWriter, r *http.Request) {
+	leg, user, ok := h.loadLeg(w, r, r.PathValue("id"))
+	if !ok {
+		return
+	}
+	if err := readForm(w, r); err != nil {
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+	value, err := strconv.Atoi(strings.TrimSpace(r.PostForm.Get("value")))
+	if err != nil || (value != -1 && value != 0 && value != 1) {
+		h.writeFormError(w, slips.ErrVoteInvalid.Error())
+		return
+	}
+	if err := h.deps.Slips.Vote(r.Context(), user.ID, leg.ID, value); err != nil {
+		h.respondError(w, err)
+		return
+	}
+	slip, err := h.deps.Store.SlipByID(r.Context(), leg.SlipID)
+	if err != nil {
+		h.respondError(w, err)
+		return
+	}
+	h.renderPanel(w, r, slip)
+}
+
 // deleteLeg removes one leg.
 func (h *slipHandlers) deleteLeg(w http.ResponseWriter, r *http.Request) {
 	leg, user, ok := h.loadLeg(w, r, r.PathValue("id"))
@@ -1194,6 +1240,10 @@ func (h *slipHandlers) slipPageData(ctx context.Context, slip db.Slip) (SlipPage
 	if err != nil {
 		return SlipPage{}, err
 	}
+	votes, err := h.deps.Store.VotesForSlip(ctx, slip.ID)
+	if err != nil {
+		return SlipPage{}, err
+	}
 
 	names := make(map[int64]string, len(members))
 	viewerIsMember := false
@@ -1204,49 +1254,19 @@ func (h *slipHandlers) slipPageData(ctx context.Context, slip db.Slip) (SlipPage
 		}
 	}
 
-	legsByUser := make(map[int64][]LegView, len(members))
+	open := slip.Status == db.SlipOpen
+	nfelo := h.nfeloForGames(ctx, games)
+	gamesByID := analyzerGameMap(games, nfelo)
+	playerStats := h.playerStatsForLegs(ctx, legs)
+	viewerID := user.ID
+	votesByLeg := voteViews(votes, viewerID)
+	legsByUser := legViews(legs, names, gamesByID, open, hasUser, viewerIsMember, viewerID, votesByLeg)
+
 	locked := 0
 	for _, member := range members {
 		if member.LockedAt != nil {
 			locked++
 		}
-	}
-
-	open := slip.Status == db.SlipOpen
-	nfelo := h.nfeloForGames(ctx, games)
-	gamesByID := analyzerGameMap(games, nfelo)
-	playerStats := h.playerStatsForLegs(ctx, legs)
-	for _, leg := range legs {
-		owner := names[leg.UserID]
-		researchURL := ""
-		if leg.PlayerID != nil && *leg.PlayerID != "" {
-			u := url.Values{}
-			u.Set("player_id", *leg.PlayerID)
-			u.Set("leg_id", strconv.FormatInt(leg.ID, 10))
-			if leg.MarketType != "" {
-				u.Set("market", leg.MarketType)
-			}
-			if leg.Line != nil {
-				u.Set("line", fmt.Sprintf("%g", *leg.Line))
-			}
-			researchURL = "/research?" + u.Encode()
-		} else if leg.GameID != nil && *leg.GameID != "" {
-			u := url.Values{}
-			u.Set("game_id", *leg.GameID)
-			u.Set("leg_id", strconv.FormatInt(leg.ID, 10))
-			researchURL = "/research?" + u.Encode()
-		}
-		legsByUser[leg.UserID] = append(legsByUser[leg.UserID], LegView{
-			ID:          leg.ID,
-			Selection:   leg.Selection,
-			Odds:        formatOdds(leg.Odds),
-			Model:       legModel(leg, gamesByID),
-			Result:      string(leg.Result),
-			OwnerName:   owner,
-			CanEdit:     open && hasUser && leg.UserID == user.ID,
-			CanGrade:    viewerIsMember,
-			ResearchURL: researchURL,
-		})
 	}
 
 	memberViews := make([]SlipMemberView, 0, len(members))
@@ -1284,9 +1304,7 @@ func (h *slipHandlers) slipPageData(ctx context.Context, slip db.Slip) (SlipPage
 		Activity:      activity,
 		Analyzer:      analyzerView(legs, gamesByID, playerStats, names),
 	}
-	viewerID := int64(0)
 	if hasUser {
-		viewerID = user.ID
 		view.LegForm = LegFormView{
 			SlipID: slip.ID,
 			Action: fmt.Sprintf("/slips/%d/legs", slip.ID),
@@ -1302,6 +1320,94 @@ func (h *slipHandlers) slipPageData(ctx context.Context, slip db.Slip) (SlipPage
 		Slip: view,
 		Next: nextView(next, slip, viewerID, games),
 	}, nil
+}
+
+// voteViews folds the stored votes into one tally per leg and the viewer's own
+// vote. The caller fills CanVote, Has, and the next-tap values per leg.
+func voteViews(votes []db.LegVote, viewerID int64) map[int64]VoteView {
+	views := make(map[int64]VoteView, len(votes))
+	for _, vote := range votes {
+		view := views[vote.LegID]
+		if vote.Value > 0 {
+			view.Up++
+		} else if vote.Value < 0 {
+			view.Down++
+		}
+		if viewerID != 0 && vote.UserID == viewerID {
+			view.Mine = vote.Value
+		}
+		views[vote.LegID] = view
+	}
+	return views
+}
+
+// legViews groups a slip's legs by owner for the panel, with each leg's vote
+// tally and the viewer's part in it.
+func legViews(
+	legs []db.Leg,
+	names map[int64]string,
+	games map[string]analyzer.Game,
+	open, hasUser, viewerIsMember bool,
+	viewerID int64,
+	votes map[int64]VoteView,
+) map[int64][]LegView {
+	byUser := make(map[int64][]LegView, len(names))
+	for _, leg := range legs {
+		canVote := open && hasUser && viewerIsMember && leg.UserID != viewerID
+		byUser[leg.UserID] = append(byUser[leg.UserID], LegView{
+			ID:          leg.ID,
+			Selection:   leg.Selection,
+			Odds:        formatOdds(leg.Odds),
+			Model:       legModel(leg, games),
+			Result:      string(leg.Result),
+			OwnerName:   names[leg.UserID],
+			CanEdit:     open && hasUser && leg.UserID == viewerID,
+			CanGrade:    viewerIsMember,
+			ResearchURL: legResearchURL(leg),
+			Votes:       legVoteView(votes, leg, canVote),
+		})
+	}
+	return byUser
+}
+
+// legResearchURL links a leg to the research view for its player or game.
+func legResearchURL(leg db.Leg) string {
+	if leg.PlayerID != nil && *leg.PlayerID != "" {
+		u := url.Values{}
+		u.Set("player_id", *leg.PlayerID)
+		u.Set("leg_id", strconv.FormatInt(leg.ID, 10))
+		if leg.MarketType != "" {
+			u.Set("market", leg.MarketType)
+		}
+		if leg.Line != nil {
+			u.Set("line", fmt.Sprintf("%g", *leg.Line))
+		}
+		return "/research?" + u.Encode()
+	}
+	if leg.GameID != nil && *leg.GameID != "" {
+		u := url.Values{}
+		u.Set("game_id", *leg.GameID)
+		u.Set("leg_id", strconv.FormatInt(leg.ID, 10))
+		return "/research?" + u.Encode()
+	}
+	return ""
+}
+
+// legVoteView returns one leg's tally, decides whether the viewer can vote on
+// it, and sets what the next tap sends. Tapping the highlighted vote clears it.
+func legVoteView(votes map[int64]VoteView, leg db.Leg, canVote bool) VoteView {
+	view := votes[leg.ID]
+	view.CanVote = canVote
+	view.Has = canVote || view.Up+view.Down > 0
+	view.UpValue = 1
+	if view.Mine == 1 {
+		view.UpValue = 0
+	}
+	view.DownValue = -1
+	if view.Mine == -1 {
+		view.DownValue = 0
+	}
+	return view
 }
 
 // nextView turns the pure step into the hub banner's copy and one action.
