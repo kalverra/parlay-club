@@ -180,7 +180,7 @@ template patterns)
 
 ### Phase 2: Render logos and portraits on the pick board and slip hub
 
-- [ ] Add shared `media.html` template helpers (`team-logo`, `player-portrait`, `matchup-logos`) wired in
+- [x] Add shared `media.html` template helpers (`team-logo`, `player-portrait`, `matchup-logos`) wired in
       `internal/web/render.go`, plus the capturing `error` fallback in `web/static/app.js` and regenerated
       `web/static/app.css`.
 - [ ] Render team logos and player portraits on `pick-slate` cards, `pick-detail` headers and `PickPlayerView` cards,

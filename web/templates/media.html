@@ -1,0 +1,56 @@
+{{- define "team-logo" -}}
+{{- if or .URL .Fallback -}}
+<span data-media class="inline-flex shrink-0 items-center justify-center">
+  {{- if .URL -}}
+  <img
+    src="{{.URL}}"
+    alt=""
+    loading="lazy"
+    referrerpolicy="no-referrer"
+    data-fallback-img
+    class="{{if .Size}}{{.Size}}{{else}}h-5 w-5{{end}} shrink-0 rounded bg-slate-800/80 object-contain p-0.5 ring-1 ring-slate-700/60"
+  >
+  {{- end -}}
+  {{- if .Fallback -}}
+  <span
+    data-fallback-badge
+    class="{{if .URL}}hidden{{else}}flex{{end}} {{if .Size}}{{.Size}}{{else}}h-5 w-5{{end}} shrink-0 items-center justify-center rounded bg-slate-800 text-[10px] font-semibold uppercase tracking-tight text-slate-300 ring-1 ring-slate-700/60"
+  >{{.Fallback}}</span>
+  {{- end -}}
+</span>
+{{- end -}}
+{{- end -}}
+
+{{- define "player-portrait" -}}
+{{- if or .URL .Initials -}}
+<span data-media class="inline-flex shrink-0 items-center justify-center">
+  {{- if .URL -}}
+  <img
+    src="{{.URL}}"
+    alt=""
+    loading="lazy"
+    referrerpolicy="no-referrer"
+    data-fallback-img
+    class="{{if .Size}}{{.Size}}{{else}}h-9 w-9{{end}} shrink-0 rounded-full bg-slate-800 object-cover object-top ring-1 ring-slate-700/60"
+  >
+  {{- end -}}
+  <span
+    data-fallback-badge
+    class="{{if .URL}}hidden{{else}}flex{{end}} {{if .Size}}{{.Size}}{{else}}h-9 w-9{{end}} shrink-0 items-center justify-center rounded-full bg-slate-800 {{if .TextSize}}{{.TextSize}}{{else}}text-xs{{end}} font-semibold text-slate-200 ring-1 ring-slate-700/60"
+  >{{.Initials}}</span>
+</span>
+{{- end -}}
+{{- end -}}
+
+{{- define "matchup-logos" -}}
+{{- if or .AwayURL .HomeURL .AwayFallback .HomeFallback -}}
+<span class="inline-flex shrink-0 items-center -space-x-1">
+  {{- if or .AwayURL .AwayFallback -}}
+    {{- template "team-logo" (dict "URL" .AwayURL "Fallback" .AwayFallback "Size" .Size) -}}
+  {{- end -}}
+  {{- if or .HomeURL .HomeFallback -}}
+    {{- template "team-logo" (dict "URL" .HomeURL "Fallback" .HomeFallback "Size" .Size) -}}
+  {{- end -}}
+</span>
+{{- end -}}
+{{- end -}}
