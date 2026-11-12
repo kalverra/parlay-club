@@ -21,3 +21,6 @@ Real scoreboard, roster, gamelog, and summary responses from ESPN's public site 
 | `gamelog_mcpherson.json` | The same endpoint for athlete `4360234` on 2026-11-11. Evan McPherson game log, behind the sandbox featured prop board. |
 | `summary.json` | `GET https://site.api.espn.com/apis/site/v2/sports/football/nfl/summary?event=401873051` on 2026-11-09. Buffalo Bills at Minnesota Vikings summary with injury reports. |
 | `summary_week9_featured.json` | The same endpoint for `event=401873038` on 2026-11-11. Cincinnati Bengals at Atlanta Falcons summary, the sandbox featured game's injury report. |
+| `roster_empty.json` | **Derived** empty roster (`{"athletes":[]}`) the sandbox replays for teams outside the featured game. |
+| `summary_empty.json` | **Derived** empty summary (`{}`) the sandbox replays for games outside the featured game. |
+| `gamelog_empty.json` | **Derived** empty game log (`{}`) the sandbox replays for athletes outside the featured prop board. |

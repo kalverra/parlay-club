@@ -347,6 +347,43 @@ func TestWeek9FeaturedResearchReplaysRostersSummaryAndLogs(t *testing.T) {
 	}
 }
 
+func TestWeek9EmptyFallbacksAnswerUncapturedResearch(t *testing.T) {
+	t.Parallel()
+
+	client := replayClient(t)
+
+	props, _, err := odds.NewClient("", "synthetic-sandbox-key", client).
+		Props(t.Context(), "44d8c37868b700e90f816db7c5df5cdd")
+	require.NoError(t, err)
+	assert.Empty(t, props, "a game without captured props shows an empty board")
+
+	espnClient := espn.NewClient("", client)
+	roster, err := espnClient.Roster(t.Context(), "15")
+	require.NoError(t, err)
+	assert.Empty(t, roster, "a team without a captured roster shows no players")
+
+	rawInjuries, err := espnClient.SummaryInjuries(t.Context(), "401873042")
+	require.NoError(t, err)
+	assert.Equal(t, "[]", rawInjuries, "a game without a captured summary shows no injuries")
+
+	log, err := espnClient.GameLog(t.Context(), "9999999")
+	require.NoError(t, err)
+	assert.Zero(t, log.GamesPlayed, "an athlete without a captured log shows no games")
+
+	// The transport labels the synthesized body so a debugging session can
+	// tell it apart from a capture.
+	transport := sandbox.NewTransport(week9Registry(t), sandbox.Morning)
+	req, err := http.NewRequestWithContext(
+		t.Context(), http.MethodGet, odds.DefaultBaseURL+"/props?eventId=another-game", nil,
+	)
+	require.NoError(t, err)
+	resp, err := transport.RoundTrip(req)
+	require.NoError(t, err)
+	t.Cleanup(func() { assert.NoError(t, resp.Body.Close()) })
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, sandbox.FallbackEmpty, resp.Header.Get(sandbox.FallbackHeader))
+}
+
 func TestReplayTransportFailsClosed(t *testing.T) {
 	t.Parallel()
 
@@ -435,6 +472,32 @@ func TestRegistryRejectsDuplicateResponse(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "second")
 	assert.Contains(t, err.Error(), "another response")
+}
+
+func TestRegistryRejectsBadFallbackPattern(t *testing.T) {
+	t.Parallel()
+
+	files := fstest.MapFS{"empty.json": {Data: []byte(`[]`)}}
+	fixture := sandbox.Fixture{
+		Name:       "saved",
+		Stage:      sandbox.Morning,
+		Method:     http.MethodGet,
+		URL:        "https://example.test/scoreboard",
+		File:       "empty.json",
+		Provenance: sandbox.Captured,
+		Note:       "A test fixture.",
+	}
+
+	_, err := sandbox.NewRegistryWithFallbacks(files, []sandbox.Fixture{fixture}, []sandbox.Fallback{{
+		Name:   "bad-pattern",
+		Stage:  sandbox.Morning,
+		Method: http.MethodGet,
+		URL:    "https://example.test/teams/[bad/roster",
+		File:   "empty.json",
+		Note:   "A test fallback.",
+	}})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not a match pattern")
 }
 
 // week9Registry preloads the real week 9 registry from the repository root.
