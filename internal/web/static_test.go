@@ -89,6 +89,33 @@ func TestAppJSOpensAndClosesThePickDock(t *testing.T) {
 	assert.Contains(t, script, "data-close-dock", "the sheet has a close control")
 }
 
+func TestAppJSHandlesBugReportCaptureAndSubmission(t *testing.T) {
+	t.Parallel()
+
+	source, err := fs.ReadFile(assets.Static, "static/app.js")
+	require.NoError(t, err)
+	script := string(source)
+
+	for _, want := range []string{
+		`"bug-report-trigger"`,
+		`"bug-report-dialog"`,
+		`"bug-report-form"`,
+		`"bug-report-error"`,
+		`"bug-preview-slot"`,
+		`"bug-preview"`,
+		`"bug-input-screenshot"`,
+		`"bug-input-page-url"`,
+		`"bug-input-screen-size"`,
+		`"bug-input-user-agent"`,
+		"html2canvas",
+		`"image/jpeg"`,
+		"data-bug-dialog-close",
+		"htmx:beforeSwap",
+	} {
+		assert.Contains(t, script, want)
+	}
+}
+
 func TestStaticHandlerStaysInsideStaticDir(t *testing.T) {
 	t.Parallel()
 

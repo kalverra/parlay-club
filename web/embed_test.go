@@ -21,6 +21,7 @@ func TestStaticAssetsEmbedded(t *testing.T) {
 	}{
 		{name: "generated CSS", path: "static/app.css"},
 		{name: "app script", path: "static/app.js"},
+		{name: "html2canvas-pro script", path: "static/html2canvas-pro.min.js"},
 	}
 
 	for _, test := range tests {

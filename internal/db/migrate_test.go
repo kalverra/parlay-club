@@ -14,7 +14,7 @@ import (
 )
 
 // latestSchemaVersion is the version the last migration records.
-const latestSchemaVersion = 9
+const latestSchemaVersion = 10
 
 func TestMigrateFreshDatabase(t *testing.T) {
 	t.Parallel()
@@ -27,6 +27,7 @@ func TestMigrateFreshDatabase(t *testing.T) {
 		"activity",
 		"api_bodies",
 		"api_responses",
+		"bug_reports",
 		"games",
 		"group_members",
 		"group_slip_schedules",
@@ -171,9 +172,9 @@ func TestMigrationUpgradePathEnsureWeekSlipsSingleSlip(t *testing.T) {
 	`)
 	require.NoError(t, err)
 
-	// Run migration to apply 0009
+	// Run migration to apply 0009 and 0010
 	require.NoError(t, db.Migrate(t.Context(), database))
-	assert.Equal(t, 9, schemaVersion(t, database))
+	assert.Equal(t, latestSchemaVersion, schemaVersion(t, database))
 
 	// Verify backfilled schedule is created and linked to the existing slip
 	store := db.NewStore(database)
@@ -193,6 +194,45 @@ func TestMigrationUpgradePathEnsureWeekSlipsSingleSlip(t *testing.T) {
 	assert.Len(t, slipsList, 1, "week must still have exactly one slip, no duplicate created")
 	assert.Equal(t, int64(10), slipsList[0].ID)
 	assert.Equal(t, "Week 9 Sandbox", slipsList[0].Name)
+}
+
+func TestMigration0010BugReports(t *testing.T) {
+	t.Parallel()
+
+	database := openTestDB(t)
+	require.NoError(t, db.Migrate(t.Context(), database))
+
+	// Insert user for foreign key
+	_, err := database.ExecContext(t.Context(),
+		"INSERT INTO users (id, name, avatar_color) VALUES (1, 'Ada', 'sky')")
+	require.NoError(t, err)
+
+	_, err = database.ExecContext(t.Context(), `
+		INSERT INTO bug_reports (
+			token, user_id, page_url, description, user_agent, screen_size, screenshot
+		) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		"0123456789abcdef0123456789abcdef",
+		1,
+		"https://example.com/slips/1",
+		"Button does not respond",
+		"Mozilla/5.0",
+		"390x844",
+		[]byte("fake-jpeg-bytes"),
+	)
+	require.NoError(t, err)
+
+	var (
+		token          string
+		description    string
+		screenshotMIME string
+	)
+	require.NoError(t, database.QueryRowContext(t.Context(),
+		"SELECT token, description, screenshot_mime FROM bug_reports WHERE user_id = 1").
+		Scan(&token, &description, &screenshotMIME))
+
+	assert.Equal(t, "0123456789abcdef0123456789abcdef", token)
+	assert.Equal(t, "Button does not respond", description)
+	assert.Equal(t, "image/jpeg", screenshotMIME)
 }
 
 // schemaVersion reads PRAGMA user_version, the migration runner's record of the

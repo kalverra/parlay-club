@@ -115,6 +115,7 @@ func openSandboxApp(t *testing.T) *sandboxApp {
 	mux := newMux(
 		shell,
 		http.NotFoundHandler(),
+		http.NotFoundHandler(),
 		handlers,
 		groupHandlers,
 		scope,
@@ -570,7 +571,16 @@ func TestSandboxResetRecoversTheCurrentSession(t *testing.T) {
 		activeGroup, hasGroup = groups.From(r.Context())
 		w.WriteHeader(http.StatusNoContent)
 	})
-	mux := newMux(shell, http.NotFoundHandler(), handlers, nil, scope, nil, runtime.MountRoutes)
+	mux := newMux(
+		shell,
+		http.NotFoundHandler(),
+		http.NotFoundHandler(),
+		handlers,
+		nil,
+		scope,
+		nil,
+		runtime.MountRoutes,
+	)
 
 	seed := runtime.Seed()
 	ada, ok := seed.Person(sandbox.PersonaAda)
@@ -873,7 +883,16 @@ func TestSandboxControlRoutesStayOffOutsideSandbox(t *testing.T) {
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})
-	mux := newMux(shell, http.NotFoundHandler(), handlers, nil, scope, nil, nil)
+	mux := newMux(
+		shell,
+		http.NotFoundHandler(),
+		http.NotFoundHandler(),
+		handlers,
+		nil,
+		scope,
+		nil,
+		nil,
+	)
 
 	signed := httptest.NewRecorder()
 	cookies.SetSession(signed, user.ID)

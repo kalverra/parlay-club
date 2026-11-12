@@ -38,7 +38,7 @@ Add an accessible bug button to the top header in `web/templates/layout.html`, p
 <button
   type="button"
   id="bug-report-trigger"
-  class="flex shrink-0 items-center justify-center rounded-md border border-slate-700 bg-slate-800 p-1.5 text-slate-300 hover:bg-slate-700 hover:text-slate-100"
+  class="flex shrink-0 items-center justify-center rounded-md border border-slate-700 bg-slate-800 p-1.5"
   title="Report a bug"
   aria-label="Report a bug"
 >
@@ -261,22 +261,22 @@ capability image serving, and server-side GitHub issue creation)
 
 ### Phase 1: Bug Report Storage, Configuration, and GitHub Client
 
-- [ ] Add migration `0010_bug_reports.sql` and database store methods in `internal/db` to create, query by token, and
+- [x] Add migration `0010_bug_reports.sql` and database store methods in `internal/db` to create, query by token, and
       record GitHub issue results.
-- [ ] Add `GITHUB_TOKEN` and `GITHUB_REPO` to `internal/config`, and implement `internal/bugs` with the GitHub REST API
+- [x] Add `GITHUB_TOKEN` and `GITHUB_REPO` to `internal/config`, and implement `internal/bugs` with the GitHub REST API
       client, markdown body builder, and unit tests.
-- [ ] Docs: update `docs/reference/config.md` with GitHub issue reporting environment variables.
+- [x] Docs: update `docs/reference/config.md` with GitHub issue reporting environment variables.
 
 ### Phase 2: Web API Endpoints and Screenshot Delivery
 
-- [ ] Implement public `GET /screenshots/{token}.jpg` capability route to serve screenshot bytes with content headers,
+- [x] Implement public `GET /screenshots/{token}.jpg` capability route to serve screenshot bytes with content headers,
       with unit tests.
-- [ ] Implement authenticated `POST /bug-reports` handler with HTMX partial rendering, input validation, and unit tests.
-- [ ] Docs: update `docs/reference/routes.md` with `/bug-reports` and `/screenshots/{token}.jpg`.
+- [x] Implement authenticated `POST /bug-reports` handler with HTMX partial rendering, input validation, and unit tests.
+- [x] Docs: update `docs/reference/routes.md` with `/bug-reports` and `/screenshots/{token}.jpg`.
 
 ### Phase 3: Client UI, Screen Capture, and Modal Workflow
 
-- [ ] Vendor `html2canvas.min.js` in `web/static/` and add the bug trigger button and `<dialog id="bug-report-dialog">`
+- [x] Vendor `html2canvas.min.js` in `web/static/` and add the bug trigger button and `<dialog id="bug-report-dialog">`
       to `web/templates/layout.html` and `partials.html`.
-- [ ] Implement screen capture, preview rendering, and form submission in `web/static/app.js`, with web handler
+- [x] Implement screen capture, preview rendering, and form submission in `web/static/app.js`, with web handler
       integration tests.
