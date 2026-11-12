@@ -891,6 +891,8 @@ func marketHeading(market string) string {
 		return "Total"
 	case "TEAM_TOTAL":
 		return "Team total"
+	case "ANYTIME_TD":
+		return "Anytime TD"
 	default:
 		return marketLabel(market)
 	}

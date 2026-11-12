@@ -284,6 +284,9 @@ and `good-vibes check`.
   screen off-center. Check every `max-w-3xl` use and test at 1024.
 - **Scroll resets.** Replacing `#pick-body` can throw the slate back to the top. The save/restore handler is the only
   mitigation; test game switches after scrolling deep in the list.
+- **Stale detail refresh URL.** `#pick-body` carries its live refresh URL from page load. A tab or sort swap replaces
+  only `#pick-detail`, so a later `board-updated` refetches the body with the old tab and sort and resets them. Phase 4
+  can give the detail its own refresh when the dock takes over the body refresh.
 - **Stale pair rows.** A live update or a second tab can change the picked side. The row is rebuilt from stored legs on
   every board or tray signal; if a stale update lands, `UpdateLeg` still checks the owner and kickoff, so the failure is
   a 422, not a bad write.
@@ -316,7 +319,7 @@ new tests).
 
 - [x] Add `board.Detail`, `GameDetail`, `LineGroup`, and `PlayerGroup`, with tests for tab order, folding team totals
       into Lines, and player clustering across markets.
-- [ ] Add `GET /slips/{id}/pick/detail`, the detail view model, and the pinned header plus horizontal tab bar. Render
+- [x] Add `GET /slips/{id}/pick/detail`, the detail view model, and the pinned header plus horizontal tab bar. Render
       the Lines tab as game lines then team totals, and prop tabs as player cards with their lines. Keep the existing
       add/remove buttons inside each row.
 - [ ] Docs: update the pick board section in `docs/concepts/slips.md` and the detail route in

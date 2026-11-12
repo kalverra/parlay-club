@@ -1151,83 +1151,128 @@
   </section>
 
   {{with .Detail}}
-    <section id="pick-detail" class="min-w-0 space-y-3 lg:min-h-0 lg:overflow-y-auto lg:pl-1" aria-label="Game picks">
-      <header
-        class="sticky top-14 z-10 -mx-1 border-b border-slate-800 bg-slate-950/95 px-1 pb-2 backdrop-blur lg:top-0"
-      >
-        <div class="flex items-center justify-between gap-3">
-          <a
-            href="{{.BackPushURL}}"
-            hx-get="{{.BackHref}}"
-            hx-target="#pick-body"
-            hx-swap="outerHTML"
-            hx-push-url="{{.BackPushURL}}"
-            class="rounded-md border border-slate-700 px-2 py-1 text-sm text-slate-200 hover:bg-slate-800"
-            >&larr; All games</a
-          >
-          <a
-            href="/research?game_id={{.GameID}}"
-            class="text-xs font-medium text-sky-400 hover:text-sky-300"
-            >Research &rarr;</a
-          >
-        </div>
-        <h2 class="mt-2 truncate text-lg font-semibold">{{.Matchup}}</h2>
-        <p class="mt-0.5 text-xs text-slate-500">
-          {{if .KickoffISO}}<time datetime="{{.KickoffISO}}">{{.KickoffFallback}}</time>{{end}}{{if .Venue}} &middot; {{.Venue}}{{end}}
-        </p>
-      </header>
-
-      <div class="flex flex-wrap items-center gap-1.5">
-        {{range .Categories}}
-          <a
-            href="{{.PushURL}}"
-            hx-get="{{.Href}}"
-            hx-target="#pick-body"
-            hx-swap="outerHTML"
-            hx-push-url="{{.PushURL}}"
-            class="rounded-full px-2.5 py-1 text-xs font-medium {{if .Active}}bg-sky-600 text-white{{else}}border border-slate-700 bg-slate-800 text-slate-300 hover:bg-slate-700{{end}}"
-            >{{.Label}}{{if .Count}} <span class="opacity-70">{{.Count}}</span>{{end}}</a
-          >
-        {{end}}
-      </div>
-
-      <div class="flex flex-wrap items-center gap-1.5">
-        <span class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Sort</span>
-        {{range .Sorts}}
-          <a
-            href="{{.PushURL}}"
-            hx-get="{{.Href}}"
-            hx-target="#pick-body"
-            hx-swap="outerHTML"
-            hx-push-url="{{.PushURL}}"
-            class="rounded-full px-2 py-0.5 text-xs font-medium {{if .Active}}text-sky-300 underline{{else}}text-slate-400 hover:text-slate-200{{end}}"
-            >{{.Label}}</a
-          >
-        {{end}}
-      </div>
-
-      {{range .GameGroups}}
-        <section class="rounded-xl border border-slate-800 bg-slate-900 p-3">
-          <div class="grid grid-cols-2 gap-2">
-            {{range .Options}}
-              <div class="pick-row">{{template "pick-option" .}}</div>
-            {{end}}
-          </div>
-        </section>
-      {{end}}
-
-      {{if .Empty}}
-        <p class="rounded-xl border border-dashed border-slate-700 bg-slate-900 p-4 text-sm text-slate-400">
-          Nothing matches that search. Try a team, a player, or a market.
-        </p>
-      {{end}}
-    </section>
+    {{template "pick-detail" .}}
   {{else}}
     <section class="hidden min-w-0 rounded-xl border border-dashed border-slate-800 p-6 text-sm text-slate-500 lg:flex lg:items-center lg:justify-center" aria-label="Game picks">
       Pick a game to see its lines and props.
     </section>
   {{end}}
 </div>
+{{end}}
+
+{{define "pick-detail"}}
+<section
+  id="pick-detail"
+  data-category="{{.Category}}"
+  data-sort="{{.Sort}}"
+  class="min-w-0 space-y-3 lg:min-h-0 lg:overflow-y-auto lg:pl-1"
+  aria-label="Game picks"
+>
+  <div class="sticky top-14 z-10 -mx-1 border-b border-slate-800 bg-slate-950/95 px-1 pb-2 backdrop-blur lg:top-0">
+    <div class="flex items-center justify-between gap-3">
+      <a
+        href="{{.BackPushURL}}"
+        hx-get="{{.BackHref}}"
+        hx-target="#pick-body"
+        hx-swap="outerHTML"
+        hx-push-url="{{.BackPushURL}}"
+        class="rounded-md border border-slate-700 px-2 py-1 text-sm text-slate-200 hover:bg-slate-800"
+        >&larr; All games</a
+      >
+      <a
+        href="/research?game_id={{.GameID}}"
+        class="text-xs font-medium text-sky-400 hover:text-sky-300"
+        >Research &rarr;</a
+      >
+    </div>
+    <h2 class="mt-2 truncate text-lg font-semibold">{{.Matchup}}</h2>
+    <p class="mt-0.5 text-xs text-slate-500">
+      {{if .KickoffISO}}<time datetime="{{.KickoffISO}}">{{.KickoffFallback}}</time>{{end}}{{if .Venue}} &middot; {{.Venue}}{{end}}
+    </p>
+
+    <nav class="no-scrollbar -mx-1 mt-2 overflow-x-auto" aria-label="Markets">
+      <div class="flex w-max items-center gap-1.5 px-1">
+        {{range .Tabs}}
+          <a
+            href="{{.PushURL}}"
+            hx-get="{{.Href}}"
+            hx-target="#pick-detail"
+            hx-swap="outerHTML"
+            hx-push-url="{{.PushURL}}"
+            {{if .Active}}aria-current="true"{{end}}
+            class="shrink-0 rounded-full px-2.5 py-1 text-xs font-medium {{if .Active}}bg-sky-600 text-white{{else}}border border-slate-700 bg-slate-800 text-slate-300 hover:bg-slate-700{{end}}"
+            >{{.Label}}{{if .Count}} <span class="opacity-70">{{.Count}}</span>{{end}}</a
+          >
+        {{end}}
+      </div>
+    </nav>
+  </div>
+
+  <div class="flex flex-wrap items-center gap-1.5">
+    <span class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Sort</span>
+    {{range .Sorts}}
+      <a
+        href="{{.PushURL}}"
+        hx-get="{{.Href}}"
+        hx-target="#pick-detail"
+        hx-swap="outerHTML"
+        hx-push-url="{{.PushURL}}"
+        {{if .Active}}aria-current="true"{{end}}
+        class="rounded-full px-2 py-0.5 text-xs font-medium {{if .Active}}text-sky-300 underline{{else}}text-slate-400 hover:text-slate-200{{end}}"
+        >{{.Label}}</a
+      >
+    {{end}}
+  </div>
+
+  {{range .Lines}}
+    {{template "pick-line-group" .}}
+  {{end}}
+
+  {{range .Players}}
+    <section class="rounded-xl border border-slate-800 bg-slate-900 p-3">
+      <header class="flex items-baseline justify-between gap-3">
+        <h3 class="min-w-0 truncate text-sm font-semibold">{{.Name}}</h3>
+        {{if or .Position .Team}}
+          <p class="shrink-0 text-[11px] font-medium uppercase tracking-wide text-slate-500">
+            {{.Position}}{{if and .Position .Team}} &middot; {{end}}{{.Team}}
+          </p>
+        {{end}}
+      </header>
+      <div class="mt-2 space-y-2">
+        {{range .Lines}}
+          {{template "pick-line-group" .}}
+        {{end}}
+      </div>
+    </section>
+  {{end}}
+
+  {{if .Empty}}
+    <p class="rounded-xl border border-dashed border-slate-700 bg-slate-900 p-4 text-sm text-slate-400">
+      {{if .Search}}Nothing matches that search. Try a team, a player, or a market.{{else}}No lines for this game yet. They load on the next sync.{{end}}
+    </p>
+  {{end}}
+</section>
+{{end}}
+
+{{define "pick-line-group"}}
+<div>
+  {{if .Label}}<p class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{{.Label}}</p>{{end}}
+  <div class="mt-1 grid gap-2 {{if eq (len .Options) 1}}grid-cols-1{{else}}grid-cols-2{{end}}">
+    {{range .Options}}
+      <div class="pick-row min-w-0">{{template "pick-option" .}}</div>
+    {{end}}
+  </div>
+</div>
+{{end}}
+
+{{define "pick-detail-empty"}}
+<section
+  id="pick-detail"
+  class="min-w-0 rounded-xl border border-dashed border-slate-800 p-4 text-sm text-slate-500"
+  aria-label="Game picks"
+>
+  Pick a game to see its lines and props.
+</section>
 {{end}}
 
 {{define "pick-tray"}}

@@ -102,16 +102,19 @@ func TestPickBoardShowsSearchChipsSortsAndTray(t *testing.T) {
 	assert.Contains(t, body, "Lines")
 	assert.Contains(t, body, "Passing")
 	assert.Contains(t, body, "Any time")
-	assert.Contains(t, body, "Kickoff")
+	assert.Contains(t, body, "Player", "the open game's sort chips start at player")
 	assert.Contains(t, body, "Your picks")
 	assert.Contains(t, body, "0 of 2")
 	assert.Contains(t, body, "Done")
 	assert.Contains(t, body, "BUF -3")
-	assert.Contains(t, body, "Josh Allen Over 245.5 Pass Yds")
+	assert.Contains(t, body, fmt.Sprintf(
+		`hx-get="/slips/%d/pick/detail?cat=passing&game=%s&sort=player"`, fixture.slip.ID, game.ID))
 	assert.Contains(t, body, `name="from" value="board"`)
 	assert.Contains(t, body, `hx-target="closest .pick-row"`)
 	assert.Contains(t, body, `id="pick-body"`)
 	assert.Contains(t, body, `id="pick-detail"`)
+	assert.Contains(t, body, `data-category="lines"`, "an open game starts on the Lines tab")
+	assert.Contains(t, body, `data-sort="player"`)
 	assert.Contains(t, body, `hx-trigger="board-updated from:body"`, "a fresh prop sync refreshes the board")
 }
 
@@ -248,7 +251,9 @@ func TestPickResultsSearchFilterAndSort(t *testing.T) {
 	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
 	body := html.UnescapeString(recorder.Body.String())
 
-	assert.Contains(t, body, "Ja'Marr Chase Over 72.5 Rec Yds")
+	assert.Contains(t, body, "Ja'Marr Chase")
+	assert.Contains(t, body, "Over 72.5")
+	assert.Contains(t, body, "Rec Yds", "the player card names the market above its line")
 	assert.NotContains(t, body, "Josh Allen")
 	assert.NotContains(t, body, "BUF -3")
 	assert.Contains(t, body, `value="Chase"`)
@@ -277,14 +282,16 @@ func TestPickBoardKeepsEachGamesProps(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	firstBody := html.UnescapeString(pickBoard(t, fixture, "game="+first.ID).Body.String())
-	assert.Contains(t, firstBody, "Josh Allen Over 245.5 Pass Yds",
+	firstBody := html.UnescapeString(pickBoard(t, fixture, "game="+first.ID+"&cat=passing").Body.String())
+	assert.Contains(t, firstBody, "Josh Allen",
 		"a newer prop sync for one game leaves another game's props on the board")
-	assert.NotContains(t, firstBody, "Joe Burrow Over 255.5 Pass Yds")
+	assert.Contains(t, firstBody, "Over 245.5")
+	assert.NotContains(t, firstBody, "Joe Burrow")
 
-	secondBody := html.UnescapeString(pickBoard(t, fixture, "game="+second.ID).Body.String())
-	assert.Contains(t, secondBody, "Joe Burrow Over 255.5 Pass Yds")
-	assert.NotContains(t, secondBody, "Josh Allen Over 245.5 Pass Yds")
+	secondBody := html.UnescapeString(pickBoard(t, fixture, "game="+second.ID+"&cat=passing").Body.String())
+	assert.Contains(t, secondBody, "Joe Burrow")
+	assert.Contains(t, secondBody, "Over 255.5")
+	assert.NotContains(t, secondBody, "Josh Allen")
 	assert.NotContains(t, firstBody, "aren’t loaded yet")
 	assert.NotContains(t, secondBody, "aren’t loaded yet")
 }
@@ -330,6 +337,8 @@ func TestPickBoardNeverSyncsPropsOnItsOwn(t *testing.T) {
 		fmt.Sprintf("/slips/%d/pick/results?cat=passing", fixture.slip.ID),
 		fmt.Sprintf("/slips/%d/pick/results?win=sun_early", fixture.slip.ID),
 		fmt.Sprintf("/slips/%d/pick/results?sort=odds", fixture.slip.ID),
+		fmt.Sprintf("/slips/%d/pick/detail?game=%s", fixture.slip.ID, game.ID),
+		fmt.Sprintf("/slips/%d/pick/detail?game=%s&cat=passing", fixture.slip.ID, game.ID),
 		fmt.Sprintf("/slips/%d/tray", fixture.slip.ID),
 	} {
 		recorder := httptest.NewRecorder()
@@ -776,6 +785,220 @@ func TestPickOneGameViewPairsBothSides(t *testing.T) {
 	assert.Contains(t, body, "hidden lg:block", "a phone drilldown hides the slate")
 	assert.Contains(t, body, fmt.Sprintf(`hx-get="/slips/%d/pick/results"`, fixture.slip.ID))
 	assert.Contains(t, body, `hx-target="#pick-body"`)
+	assert.Contains(
+		t,
+		body,
+		fmt.Sprintf(`hx-get="/slips/%d/pick/detail?cat=lines&game=%s&sort=player"`, fixture.slip.ID, game.ID),
+		"the detail's tab and sort links ask for the detail alone",
+	)
+}
+
+// pickDetail fetches the detail partial for one game.
+func pickDetail(t *testing.T, fixture *slipFixture, query string) *httptest.ResponseRecorder {
+	t.Helper()
+
+	target := fmt.Sprintf("/slips/%d/pick/detail", fixture.slip.ID)
+	if query != "" {
+		target += "?" + query
+	}
+	recorder := httptest.NewRecorder()
+	fixture.handler.ServeHTTP(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodGet, target, nil))
+	return recorder
+}
+
+// addTeamTotal writes one side of a team total.
+func addTeamTotal(t *testing.T, store *db.Store, gameID, team, side string, line float64) {
+	t.Helper()
+
+	_, err := store.UpsertOdds(t.Context(), []db.Odds{{
+		GameID:     gameID,
+		Book:       "draftkings",
+		MarketType: "TEAM_TOTAL",
+		Team:       team,
+		Side:       side,
+		Line:       new(line),
+		Price:      -110,
+		FetchedAt:  time.Date(2026, time.November, 7, 15, 42, 0, 0, time.UTC),
+	}})
+	require.NoError(t, err)
+}
+
+func TestPickDetailReturnsOnlyTheOpenGamesDetail(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	game := addGame(t, fixture, gameKickoff())
+	addGameOdds(t, fixture.store, game.ID)
+	addPropOdds(t, fixture.store, game.ID, "PASS_YDS", "Josh Allen", 245.5, -110)
+	addPropOdds(t, fixture.store, game.ID, "PASS_TDS", "Josh Allen", 1.5, 120)
+	addPropOdds(t, fixture.store, game.ID, "REC_YDS", "Ja'Marr Chase", 72.5, -115)
+
+	recorder := pickDetail(t, fixture, "game="+game.ID+"&cat=passing")
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	body := html.UnescapeString(recorder.Body.String())
+
+	assert.NotContains(t, body, `id="pick-body"`, "a tab change leaves the slate alone")
+	assert.NotContains(t, body, `placeholder="Search a team or player"`)
+	assert.Contains(t, body, `id="pick-detail"`)
+	assert.Contains(t, body, `data-category="passing"`)
+	assert.Contains(t, body, `data-sort="player"`)
+	assert.Contains(t, body, `hx-target="#pick-detail"`)
+	assert.Contains(t, body, "overflow-x-auto", "the tab bar scrolls sideways on a phone")
+
+	lines := strings.Index(body, ">Lines")
+	passing := strings.Index(body, ">Passing")
+	receiving := strings.Index(body, ">Receiving")
+	require.GreaterOrEqual(t, lines, 0)
+	require.GreaterOrEqual(t, passing, 0)
+	require.GreaterOrEqual(t, receiving, 0)
+	assert.Less(t, lines, passing, "the tabs keep the board order")
+	assert.Less(t, passing, receiving)
+
+	assert.Equal(t, 1, strings.Count(body, ">Josh Allen</h3>"),
+		"one player card clusters both of his passing markets")
+	assert.Contains(t, body, "Pass TDs")
+	assert.Contains(t, body, "Pass Yds")
+	assert.Contains(t, body, "Over 1.5")
+	assert.Contains(t, body, "Over 245.5")
+	assert.NotContains(t, body, "Ja'Marr Chase", "a passing tab leaves receiving rows out")
+
+	assert.Contains(t, body, fmt.Sprintf(`hx-post="/slips/%d/legs"`, fixture.slip.ID))
+	assert.Contains(t, body, `hx-target="closest .pick-row"`, "add and remove keep working inside each row")
+}
+
+func TestPickDetailLinesTabShowsGameLinesThenTeamTotals(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	game := addGame(t, fixture, gameKickoff())
+	addGameOdds(t, fixture.store, game.ID)
+	addTeamTotal(t, fixture.store, game.ID, "BUF", "OVER", 24.5)
+	addTeamTotal(t, fixture.store, game.ID, "BUF", "UNDER", 24.5)
+	addTeamTotal(t, fixture.store, game.ID, "MIA", "OVER", 20.5)
+	addTeamTotal(t, fixture.store, game.ID, "MIA", "UNDER", 20.5)
+
+	recorder := pickDetail(t, fixture, "game="+game.ID)
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	body := html.UnescapeString(recorder.Body.String())
+
+	assert.Contains(t, body, `data-category="lines"`, "team totals fold into Lines")
+	spread := strings.Index(body, ">Spread</p>")
+	moneyline := strings.Index(body, ">Moneyline</p>")
+	total := strings.Index(body, ">Total</p>")
+	buffalo := strings.Index(body, ">BUF team total</p>")
+	miami := strings.Index(body, ">MIA team total</p>")
+	require.GreaterOrEqual(t, spread, 0, "the Lines tab names its spread")
+	require.GreaterOrEqual(t, moneyline, 0, "the Lines tab names its moneyline")
+	require.GreaterOrEqual(t, total, 0, "the Lines tab names its total")
+	require.GreaterOrEqual(t, buffalo, 0, "the team total keeps its team")
+	require.GreaterOrEqual(t, miami, 0, "the team total keeps its team")
+	assert.Less(t, spread, moneyline, "the game lines come first")
+	assert.Less(t, moneyline, total)
+	assert.Less(t, total, buffalo, "team totals come after the game lines")
+	assert.Less(t, buffalo, miami)
+	assert.Contains(t, body, "BUF Team Total Over 24.5")
+	assert.Contains(t, body, "MIA Team Total Over 20.5")
+	assert.Contains(t, body, "grid-cols-2", "both sides of a line sit in one row")
+}
+
+func TestPickDetailKeepsTheOpenTabAndSortInEveryLink(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	game := addGame(t, fixture, gameKickoff())
+	addGameOdds(t, fixture.store, game.ID)
+	addPropOdds(t, fixture.store, game.ID, "PASS_YDS", "Josh Allen", 245.5, -110)
+
+	recorder := pickDetail(t, fixture, "game="+game.ID+"&cat=passing&sort=line")
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	body := html.UnescapeString(recorder.Body.String())
+
+	base := fmt.Sprintf(`/slips/%d/pick`, fixture.slip.ID)
+	assert.Contains(t, body, base+fmt.Sprintf("?cat=passing&game=%s&sort=line", game.ID),
+		"the active tab link keeps the sort")
+	assert.Contains(t, body, base+fmt.Sprintf("?cat=lines&game=%s&sort=line", game.ID),
+		"another tab keeps the sort")
+	assert.Contains(t, body, base+fmt.Sprintf("?cat=passing&game=%s&sort=odds", game.ID),
+		"a sort chip keeps the tab")
+	assert.Contains(t, body, fmt.Sprintf(`hx-get="/slips/%d/pick/detail?cat=passing&game=%s&sort=odds"`,
+		fixture.slip.ID, game.ID))
+}
+
+func TestPickDetailFallsBackFromTeamTotalsAndUnknownTabs(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	game := addGame(t, fixture, gameKickoff())
+	addGameOdds(t, fixture.store, game.ID)
+	addTeamTotal(t, fixture.store, game.ID, "BUF", "OVER", 24.5)
+
+	for _, query := range []string{
+		"game=" + game.ID + "&cat=team_totals",
+		"game=" + game.ID + "&cat=bogus",
+	} {
+		recorder := pickDetail(t, fixture, query)
+		require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+		body := html.UnescapeString(recorder.Body.String())
+
+		assert.Contains(t, body, `data-category="lines"`, query)
+		assert.Contains(t, body, "BUF team total", query)
+	}
+}
+
+func TestPickDetailShowsRemoveOnAPickedLine(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	game := addGame(t, fixture, gameKickoff())
+	addGameOdds(t, fixture.store, game.ID)
+	leg := addStoredLeg(t, fixture, db.Leg{
+		UserID:     fixture.user.ID,
+		GameID:     new(game.ID),
+		MarketType: "SPREAD",
+		Selection:  "BUF -3",
+		Team:       new("BUF"),
+		Side:       new("TEAM"),
+		Line:       new(-3.0),
+		Odds:       -110,
+	})
+
+	body := html.UnescapeString(pickDetail(t, fixture, "game="+game.ID).Body.String())
+	assert.Contains(t, body, "tap to remove")
+	assert.Contains(t, body, fmt.Sprintf(`hx-delete="/legs/%d?from=board"`, leg.ID))
+}
+
+func TestPickDetailSaysWhenTheGameHasNoLines(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	game := addGame(t, fixture, gameKickoff())
+
+	body := html.UnescapeString(pickDetail(t, fixture, "game="+game.ID).Body.String())
+	assert.Contains(t, body, "No lines for this game yet.")
+	assert.NotContains(t, body, "Nothing matches that search.")
+}
+
+func TestPickDetailSaysWhenTheSearchMatchesNothing(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	game := addGame(t, fixture, gameKickoff())
+	addGameOdds(t, fixture.store, game.ID)
+	addPropOdds(t, fixture.store, game.ID, "PASS_YDS", "Josh Allen", 245.5, -110)
+
+	body := html.UnescapeString(pickDetail(t, fixture, "game="+game.ID+"&q=zzz").Body.String())
+	assert.Contains(t, body, "Nothing matches that search.")
+}
+
+func TestPickDetailFallsBackToAPlaceholderWithoutAnOpenGame(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+
+	body := html.UnescapeString(pickDetail(t, fixture, "game=missing").Body.String())
+	assert.Contains(t, body, `id="pick-detail"`)
+	assert.Contains(t, body, "Pick a game to see its lines and props.")
+	assert.NotContains(t, body, "data-category=", "no game means no tab bar")
 }
 
 func TestGamesRedirectsToTheActiveGroupWeek(t *testing.T) {

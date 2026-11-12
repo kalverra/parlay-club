@@ -626,6 +626,11 @@ func TestDetailFallsBackToTheFirstTabWithRows(t *testing.T) {
 	assert.Equal(t, board.CategoryTDs, detail.Tabs[1].Category)
 	require.Len(t, detail.Players, 1)
 	assert.Equal(t, "Josh Allen", detail.Players[0].Name)
+
+	tds := board.Detail(g, built, board.Query{Category: board.CategoryTDs, Now: now})
+	require.Len(t, tds.Players, 1)
+	require.Len(t, tds.Players[0].Lines, 1)
+	assert.Equal(t, "Anytime TD", tds.Players[0].Lines[0].Label)
 }
 
 func TestDetailSorts(t *testing.T) {
