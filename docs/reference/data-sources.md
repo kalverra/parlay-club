@@ -5,7 +5,7 @@ type: reference
 summary: The free sources behind the slate, the ESPN scoreboard endpoint and its Sunday and Monday filter, the Open-Meteo forecast behind a game's weather, Parlay API game lines and props with The Odds API enrichment and fallback, ESPN rosters, game logs, and summary injuries, player matching, nfelo model projections, bookmakers, deep links, tiered credit floors, and the raw response archive every successful call leaves.
 tags: [data, espn, scoreboard, games, sync, fixtures, weather, open-meteo, venues, odds, parlay-api, the-odds-api, props, lines, bookmakers, links, credits, budget, enrichment, fallback, nfelo, projections, spreads, quarterbacks, archive, raw-responses, sqlite, rosters, gamelogs, injuries, player-matching]
 sources: [internal/ingest/espn/client.go, internal/ingest/espn/scoreboard.go, internal/ingest/espn/roster.go, internal/ingest/espn/summary.go, internal/ingest/espn/gamelog.go, internal/db/weeks.go, internal/db/games.go, internal/db/players.go, internal/ingest/weather/client.go, internal/ingest/weather/forecast.go, internal/ingest/weather/venues.go, internal/ingest/odds/client.go, internal/ingest/odds/events.go, internal/ingest/odds/lines.go, internal/ingest/odds/props.go, internal/ingest/odds/match.go, internal/ingest/nfelo/client.go, internal/ingest/nfelo/projections.go, internal/ingest/nfelo/teams.go, internal/db/nfelo.go, internal/refresh/nfelo.go, internal/refresh/research.go, internal/ingest/archive/transport.go, internal/ingest/archive/labels.go, internal/db/archive.go, internal/refresh/refresh.go, internal/refresh/sources.go, cmd/server/main.go]
-last_verified: 2026-11-09
+last_verified: 2026-11-12
 ---
 
 # Data sources
@@ -52,6 +52,7 @@ With no params it returns the current week. For a specific week: `?seasontype={2
 | `events[].competitions[0].competitors[].team.abbreviation`        | `home_team` or `away_team`                                               |
 | `events[].competitions[0].competitors[].team.displayName`        | `home_name` or `away_name`                                               |
 | `events[].competitions[0].competitors[].team.id`                 | `home_espn_id` or `away_espn_id`                                         |
+| `events[].competitions[0].competitors[].team.logo`               | `home_logo` or `away_logo` (`https://` URLs only; empty when missing)    |
 | `events[].competitions[0].competitors[].score`                   | `home_score` or `away_score`, only for a live or final game              |
 | `events[].competitions[0].venue`                                 | `venue_id`, `venue_name`, `is_indoor` from `id`, `fullName`, `indoor`    |
 | `events[].status.type.state`                                     | `pre` → `SCHEDULED`, `in` → `LIVE`, `post` → `FINAL`                     |
@@ -69,13 +70,17 @@ With no params it returns the current week. For a specific week: `?seasontype={2
 
 - `SummaryInjuries(ctx, eventID)` returns the raw `injuries` JSON array or `"[]"` when absent.
 - `ParseInjuries(rawJSON)` parses per-team injury lists filtered to key positions (`QB`, `RB`, `WR`, `TE`, `LT`, `C`, `CB`, `S`, plus `OT`). Non-key positions are omitted.
-- Injuries include `AthleteID`, `FullName`, `Position`, `Status`, and a formatted `Detail` string.
+- Each team group includes `LogoURL` (from `team.logo`). Injuries include `AthleteID`, `FullName`, `Position`,
+  `Status`, `HeadshotURL` (from `athlete.headshot.href`), and a formatted `Detail` string.
 
 ### Roster
 
 `GET https://site.api.espn.com/apis/site/v2/sports/football/nfl/teams/{espnTeamID}/roster`
 
-- `Roster(ctx, espnTeamID)` flattens position groups into `[]RosterPlayer{ID, FullName, Position}`, skipping entries without an athlete ID or full name.
+- `Roster(ctx, espnTeamID)` flattens position groups into `[]RosterPlayer{ID, FullName, Position, HeadshotURL}` (with
+  `HeadshotURL` from `headshot.href`), skipping entries without an athlete ID or full name.
+- All ESPN logo and headshot URLs are trimmed and accepted only when they use `https://` with a non-empty host
+  (returning `""` otherwise).
 
 ### Game log
 

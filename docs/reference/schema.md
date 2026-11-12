@@ -5,7 +5,7 @@ type: reference
 summary: SQLite tables, including groups and their members, legs and their votes, odds rows with sportsbook deep links, rosters and player game logs for props research, player name matching, nfelo model projections, the raw external response archive, how migrations are tracked and applied, and connection settings.
 tags: [database, sqlite, migrations, groups, archive, api, raw-responses, odds, links, nfelo, projections, roster, gamelog, player-matching, injuries, votes]
 sources: [internal/db/migrations/*.sql, internal/db/migrate.go, internal/db/db.go, internal/db/odds.go, internal/db/groups.go, internal/db/nfelo.go, internal/db/players.go, internal/db/votes.go, internal/db/archive.go, internal/db/archive_read.go, internal/ingest/archive/transport.go]
-last_verified: 2026-11-11
+last_verified: 2026-11-12
 ---
 
 # Database schema
@@ -19,6 +19,7 @@ identity columns and drop the unique name rule. `0003_api_archive.sql` adds the 
 ID to `odds`, and `0005_odds_event_sid.sql` adds the book's own event ID. `0006_nfelo_games.sql` adds `nfelo_games`,
 one model projection per game. `0007_props_research.sql` adds `roster_players` and `player_gamelogs` for props research.
 `0008_leg_votes.sql` adds `leg_votes`, the up and down votes members cast on each other's legs.
+`0011_logos_portraits.sql` adds `home_logo` and `away_logo` to `games` and `headshot_url` to `roster_players`.
 
 ## Connection settings
 
@@ -60,7 +61,9 @@ connection rules out `SQLITE_BUSY`.
   game logs.
 - `0008_leg_votes.sql` creates `leg_votes`, one row per member per leg they voted on, cascading from `legs`. It changes
   no existing table.
-- Never edit an applied file. Add `0009_name.sql` and up.
+- `0011_logos_portraits.sql` adds nullable `home_logo` and `away_logo` columns to `games` and a
+  `headshot_url TEXT NOT NULL DEFAULT ''` column to `roster_players`.
+- Never edit an applied file. Add `0012_name.sql` and up.
 - `PRAGMA user_version` on the database file is the only record of what ran.
 
 ## Tables
@@ -180,7 +183,9 @@ CREATE TABLE games (
   home_score     INTEGER,
   away_score     INTEGER,
   injuries_json  TEXT,                         -- raw ESPN injuries block
-  updated_at     TEXT NOT NULL
+  updated_at     TEXT NOT NULL,
+  home_logo      TEXT,                         -- ESPN team logo URL (https:// only)
+  away_logo      TEXT                          -- ESPN team logo URL (https:// only)
 );
 CREATE INDEX games_week ON games(week_id, kickoff_utc);
 
@@ -282,7 +287,8 @@ CREATE TABLE roster_players (
   full_name    TEXT NOT NULL,
   norm_name    TEXT NOT NULL,
   position     TEXT NOT NULL DEFAULT '',
-  updated_at   TEXT NOT NULL
+  updated_at   TEXT NOT NULL,
+  headshot_url TEXT NOT NULL DEFAULT ''        -- ESPN athlete headshot URL (https:// only)
 );
 CREATE INDEX roster_players_team_norm ON roster_players(team, norm_name);
 
@@ -361,7 +367,9 @@ how to read it.
 - `slips.status` and `slips.result` stay in step with lock and leg-result changes.
 - `groups`, `group_members`, `slips`, and the rows that hang off a slip are scoped to one group. Weeks, games, odds,
   nfelo projections, player matches, rosters, player game logs, and `sync_state` are global.
-- `roster_players` stores team roster athletes with `norm_name` for fast matching.
+- `roster_players` stores team roster athletes with `norm_name` for fast matching and `headshot_url` (`''` when
+  missing).
+- `games.home_logo` and `games.away_logo` store validated `https://` ESPN team logo URLs (`NULL` when missing).
 - `player_gamelogs.stats_json` stores parsed season market values as a JSON map of float arrays, ordered most recent first.
 - `player_matches` maps normalized sportsbook player names and teams to ESPN athlete IDs. A row with `manual = 1` was
   corrected by a user and is never overwritten by automated matching.

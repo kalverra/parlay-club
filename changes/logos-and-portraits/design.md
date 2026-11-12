@@ -175,7 +175,7 @@ template patterns)
 - [x] Add `0010_logos_portraits.sql` (`games.home_logo`, `games.away_logo`, `roster_players.headshot_url`), update
       `db.Game`, `db.RosterPlayer`, `UpsertGame` idempotency, `RosterPlayersByIDs`/`TeamLogos`, `refresh` syncs, and
       `board` (`GameCard`, `Row`, `PlayerGroup`) with tests.
-- [ ] Docs: update `docs/reference/data-sources.md` and `docs/reference/schema.md` for the new logo and headshot fields
+- [x] Docs: update `docs/reference/data-sources.md` and `docs/reference/schema.md` for the new logo and headshot fields
       and migration `0010`.
 
 ### Phase 2: Render logos and portraits on the pick board and slip hub
