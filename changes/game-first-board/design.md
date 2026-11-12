@@ -26,7 +26,7 @@ Read before starting:
 - [Slips](../docs/concepts/slips.md#the-pick-board) for the current board, tray, and empty states.
 - [Routes](../docs/reference/routes.md#pick-board) for the routes, query parameters, and HTMX headers.
 - [Odds math](../docs/reference/odds-math.md) for the home-book and median price rule.
-- [Analyzer](../docs/concepts/analyzer.md#the-pick-tray) for what the tray repeats.
+- [Analyzer](../docs/concepts/analyzer.md#the-pick-docks-tray) for what the tray repeats.
 - [Product plan](../plan/product.md#screens) and [Architecture plan](../plan/architecture.md#stack) for the stack and
   screen order.
 - `AGENTS.md` for phone first, the free-tier rules, and "never blocking".
@@ -342,7 +342,7 @@ new tests).
 - [x] Add the combined price to `PickDockView` from the viewer's legs and its tests, then replace the aside tray with
       the fixed dock and a `dialog` sheet. Add the dock's open/close handler, refresh it on `tray-updated` and
       `slip-updated`, and reserve bottom padding so rows are not hidden.
-- [ ] Docs: update the tray and dock in `docs/concepts/slips.md` and the pick tray description in
+- [x] Docs: update the tray and dock in `docs/concepts/slips.md` and the pick tray description in
       `docs/concepts/analyzer.md`.
 
 ### Phase 5: Finish search, sorts, and lazy prompts

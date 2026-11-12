@@ -2,8 +2,8 @@
 id: slips
 title: Slips
 type: concept
-summary: How a group builds one shared parlay a week from the slate, with the hub's next-step banner and deadline, the game-first pick board and its tray, members, legs, votes, quick-add, create-slip defaults, grading, the editing and locking rules, and research.
-tags: [slips, weeks, legs, members, locking, grading, results, activity, groups, games, quick-add, nfelo, props, autocomplete, research, next-step, hub, pick-board, slate, drilldown, tabs, search, tray, votes, voting]
+summary: How a group builds one shared parlay a week from the slate, with the hub's next-step banner and deadline, the game-first pick board and its pick dock, members, legs, votes, quick-add, create-slip defaults, grading, the editing and locking rules, and research.
+tags: [slips, weeks, legs, members, locking, grading, results, activity, groups, games, quick-add, nfelo, props, autocomplete, research, next-step, hub, pick-board, slate, drilldown, tabs, search, dock, tray, votes, voting]
 sources: [internal/slips/slips.go, internal/slips/rules.go, internal/slips/next.go, internal/board/board.go, internal/db/slips.go, internal/db/legs.go, internal/db/votes.go, internal/db/odds.go, internal/db/players.go, internal/db/weeks.go, internal/db/games.go, internal/web/games.go, internal/web/pick.go, internal/web/slips.go, internal/web/home.go, internal/web/research.go, web/static/app.js]
 last_verified: 2026-11-11
 ---
@@ -136,9 +136,10 @@ keeps its own price. The formulas are in [Odds math](../reference/odds-math.md).
 The hub's pick step opens `GET /slips/{id}/pick`, a focused screen with a back link to the hub and no bottom bar. It is a
 game slate with the open game's picks beside it. On a phone the slate fills the screen and a game opens a drilldown with
 an "All games" back link; at `lg` the slate and detail sit in a `22rem + 1fr` grid and scroll on their own while the page
-body stays put. A tray holds the viewer's own picks beside the body at `lg` and below it on a phone. The page sets
-`Page.Wide`, so the header and main widen to `max-w-6xl`, and carries the slip's `data-live-url`, so it still opens one
-stream per page.
+body stays put. A fixed dock sits at the bottom at every width, so the picks stay in reach while the slate moves, and
+the page reserves bottom padding for it so the last row is never hidden. The page sets `Page.Wide`, so the header, main,
+and dock widen to `max-w-6xl`, and carries the slip's `data-live-url`, so it still opens one stream per page. The dock is
+only on this screen; the hub keeps its panel and banner.
 
 `internal/board` turns the week's stored odds into rows. It reads nothing itself. `board.Build` folds one row per
 selection, using the viewer's home book when it prices the selection and the median across every book otherwise. Rows
@@ -199,8 +200,8 @@ Tapping a side of an unpicked line adds it with the normal add-leg route (`quick
 side removes that leg. Tapping the other side of a line that already holds a pick sends `PUT /legs/{id}` with the new
 side's fields, so the pair holds one leg instead of two; `UpdateLeg` enforces the owner, the lock in, and kickoff on both
 games, and its activity entry reads "Adam changed X to Y". Add, update, and delete answer the same way: the refreshed
-pair row for that line, both sides with their current picks, plus `tray-updated`. Only that row swaps, and the tray
-refreshes without a reload. A switch that moves the leg to another line also fires `board-updated`, because the old
+pair row for that line, both sides with their current picks, plus `tray-updated`. Only that row swaps, and the dock and
+the tray refresh without a reload. A switch that moves the leg to another line also fires `board-updated`, because the old
 line's row is still on screen and must lose its delete button. At the limit, a line with neither side picked opens
 "Swap which pick?" and lists the viewer's legs that are not kickoff-locked. Choosing one sends `PUT /legs/{old}` with the
 new pick's fields; a line that already holds a pick switches sides in place and needs no free slot.
@@ -216,9 +217,14 @@ odds says the lines have not synced, once, instead of offering "Load them" for e
 off, it says picks are closed. A search or filter that matches nothing keeps "Nothing matches that search." When only
 some games have started, one line says how many are hidden.
 
-The tray shows the viewer's legs with remove buttons, progress ("1 of 2"), the analyzer warnings that name one of the
-viewer's legs, and one action: "Done" back to the hub, or "Review and lock in" at the limit. It refreshes on
-`tray-updated` and `slip-updated`. A leg whose game has kicked off shows "Locked" instead of a remove button.
+The dock shows "Your picks", then `Picked of Limit` and the combined price of the viewer's legs, and a "Slip" button. The
+combined price is `parlay.CombinedOdds` over the viewer's legs, converted back with `parlay.DecimalToAmerican`, the same
+math the payout card uses; a slip with no legs shows only the count. The button loads `GET /slips/{id}/tray` into a
+`dialog` sheet, and the tray inside carries the viewer's legs with remove buttons, progress ("1 of 2"), the analyzer
+warnings that name one of the viewer's legs, and one action: "Done" back to the hub, or "Review and lock in" at the
+limit. A leg whose game has kicked off shows "Locked" instead of a remove button. The dock watches `tray-updated` and
+`slip-updated` and refreshes from `GET /slips/{id}/pick/dock`, and the tray does the same, so a leg added, swapped, or
+removed anywhere updates the count and price without a reload.
 
 `GET /games` is a 303 to the active group's week, so old links still land somewhere useful. `GET /games/{id}/props`
 without `?slip=` still renders the standalone prop partial for one game, with team totals and player props grouped
