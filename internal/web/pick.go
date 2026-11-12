@@ -68,6 +68,8 @@ type PickGameCardView struct {
 	Venue           string
 	Away            string
 	Home            string
+	AwayLogo        string
+	HomeLogo        string
 	KickoffISO      string
 	KickoffFallback string
 	Spread          string
@@ -88,6 +90,10 @@ type PickDetailView struct {
 	SlipID          int64
 	GameID          string
 	Matchup         string
+	Away            string
+	Home            string
+	AwayLogo        string
+	HomeLogo        string
 	Venue           string
 	KickoffISO      string
 	KickoffFallback string
@@ -116,10 +122,13 @@ type PickLineGroupView struct {
 // PickPlayerView is one player's card in a prop tab. A player's markets share
 // the card, so Receiving Yards and Receptions sit together.
 type PickPlayerView struct {
-	Name     string
-	Position string
-	Team     string
-	Lines    []PickLineGroupView
+	Name        string
+	Initials    string
+	HeadshotURL string
+	Position    string
+	Team        string
+	TeamLogo    string
+	Lines       []PickLineGroupView
 }
 
 // PickChip is one filter or sort link.
@@ -485,6 +494,10 @@ func pickDetailView(
 		SlipID:          slipID,
 		GameID:          model.Game.ID,
 		Matchup:         model.Game.Matchup,
+		Away:            model.Game.Away,
+		Home:            model.Game.Home,
+		AwayLogo:        model.Game.AwayLogo,
+		HomeLogo:        model.Game.HomeLogo,
 		Venue:           model.Game.Venue,
 		KickoffISO:      kickoffISO(model.Game.Kickoff),
 		KickoffFallback: kickoffFallback(model.Game.Kickoff),
@@ -509,9 +522,12 @@ func pickDetailView(
 	}
 	for _, player := range model.Players {
 		card := PickPlayerView{
-			Name:     player.Name,
-			Position: player.Position,
-			Team:     player.Team,
+			Name:        player.Name,
+			Initials:    Initials(player.Name),
+			HeadshotURL: player.HeadshotURL,
+			Position:    player.Position,
+			Team:        player.Team,
+			TeamLogo:    teamLogoForGame(player.Team, model.Game),
 		}
 		for _, group := range player.Lines {
 			card.Lines = append(card.Lines, pickLineGroupView(slipID, group, atLimit, linkQuery, true))
@@ -520,6 +536,20 @@ func pickDetailView(
 	}
 	view.Empty = len(view.Lines) == 0 && len(view.Players) == 0
 	return view
+}
+
+// teamLogoForGame resolves a player's team logo from the game's away/home team.
+func teamLogoForGame(team string, game board.GameCard) string {
+	switch {
+	case team == "":
+		return ""
+	case strings.EqualFold(team, game.Away):
+		return game.AwayLogo
+	case strings.EqualFold(team, game.Home):
+		return game.HomeLogo
+	default:
+		return ""
+	}
 }
 
 // detailChip builds one tab or sort link for the open game's detail.
@@ -612,6 +642,8 @@ func pickGameCardView(slipID int64, card board.GameCard, q board.Query, unloaded
 		Venue:           card.Venue,
 		Away:            card.Away,
 		Home:            card.Home,
+		AwayLogo:        card.AwayLogo,
+		HomeLogo:        card.HomeLogo,
 		KickoffISO:      kickoffISO(card.Kickoff),
 		KickoffFallback: kickoffFallback(card.Kickoff),
 		Spread:          spreadSummary(card),

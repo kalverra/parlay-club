@@ -1129,3 +1129,157 @@ func TestCreateSlipWithSlateScope(t *testing.T) {
 	assert.Contains(t, bodyInvalid, "invalid slate scope")
 	assert.Contains(t, bodyInvalid, "Invalid Scope Slip")
 }
+
+func TestSlipPanelRendersLegLogosAndPortraits(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 5)
+	_, err := fixture.store.UpsertGame(t.Context(), db.Game{
+		ID:         "401772001",
+		WeekID:     fixture.week.ID,
+		HomeTeam:   "BUF",
+		AwayTeam:   "MIA",
+		HomeName:   "Buffalo Bills",
+		AwayName:   "Miami Dolphins",
+		HomeESPNID: "2",
+		AwayESPNID: "15",
+		HomeLogo:   new("https://a.espncdn.com/i/teamlogos/nfl/500/buf.png"),
+		AwayLogo:   new("https://a.espncdn.com/i/teamlogos/nfl/500/mia.png"),
+		Kickoff:    time.Date(2026, time.November, 8, 18, 0, 0, 0, time.UTC),
+		Status:     db.GameScheduled,
+		UpdatedAt:  time.Now().UTC(),
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, fixture.store.UpsertRosterPlayers(t.Context(), []db.RosterPlayer{
+		{
+			AthleteID:   "3918298",
+			Team:        "BUF",
+			ESPNTeamID:  "2",
+			FullName:    "Josh Allen",
+			Position:    "QB",
+			HeadshotURL: "https://a.espncdn.com/i/headshots/nfl/players/full/3918298.png",
+			UpdatedAt:   time.Now().UTC(),
+		},
+		{
+			AthleteID:   "4241479",
+			Team:        "MIA",
+			ESPNTeamID:  "15",
+			FullName:    "Tua Tagovailoa",
+			Position:    "QB",
+			HeadshotURL: "",
+			UpdatedAt:   time.Now().UTC(),
+		},
+		{
+			AthleteID:   "9999999",
+			Team:        "KC",
+			ESPNTeamID:  "12",
+			FullName:    "Rookie Player",
+			Position:    "WR",
+			HeadshotURL: "",
+			UpdatedAt:   time.Now().UTC(),
+		},
+	}))
+
+	// 1. Matched player leg with headshot.
+	_, err = fixture.store.CreateLeg(t.Context(), db.Leg{
+		SlipID:     fixture.slip.ID,
+		UserID:     fixture.user.ID,
+		GameID:     new("401772001"),
+		MarketType: "PASS_YARDS",
+		Selection:  "Josh Allen Over 255.5 Passing Yards",
+		Team:       new("BUF"),
+		PlayerName: new("Josh Allen"),
+		PlayerID:   new("3918298"),
+		Side:       new("OVER"),
+		Line:       new(255.5),
+		Odds:       -110,
+	})
+	require.NoError(t, err)
+
+	// 2. Matched player leg without headshot, falls back to team logo.
+	_, err = fixture.store.CreateLeg(t.Context(), db.Leg{
+		SlipID:     fixture.slip.ID,
+		UserID:     fixture.user.ID,
+		GameID:     new("401772001"),
+		MarketType: "PASS_YARDS",
+		Selection:  "Tua Tagovailoa Over 245.5 Passing Yards",
+		Team:       new("MIA"),
+		PlayerName: new("Tua Tagovailoa"),
+		PlayerID:   new("4241479"),
+		Side:       new("OVER"),
+		Line:       new(245.5),
+		Odds:       -110,
+	})
+	require.NoError(t, err)
+
+	// 3. Matched player leg without headshot or team logo, falls back to initials.
+	_, err = fixture.store.CreateLeg(t.Context(), db.Leg{
+		SlipID:     fixture.slip.ID,
+		UserID:     fixture.user.ID,
+		MarketType: "REC_YARDS",
+		Selection:  "Rookie Player Over 45.5 Receiving Yards",
+		Team:       new("KC"),
+		PlayerName: new("Rookie Player"),
+		PlayerID:   new("9999999"),
+		Side:       new("OVER"),
+		Line:       new(45.5),
+		Odds:       -110,
+	})
+	require.NoError(t, err)
+
+	// 4. Team-scoped spread leg.
+	_, err = fixture.store.CreateLeg(t.Context(), db.Leg{
+		SlipID:     fixture.slip.ID,
+		UserID:     fixture.user.ID,
+		GameID:     new("401772001"),
+		MarketType: "SPREAD",
+		Selection:  "Bills -3.5",
+		Team:       new("BUF"),
+		Odds:       -110,
+	})
+	require.NoError(t, err)
+
+	// 5. Game TOTAL leg (GameID set, Team empty).
+	_, err = fixture.store.CreateLeg(t.Context(), db.Leg{
+		SlipID:     fixture.slip.ID,
+		UserID:     fixture.user.ID,
+		GameID:     new("401772001"),
+		MarketType: "TOTAL",
+		Selection:  "MIA @ BUF Over 47.5",
+		Side:       new("OVER"),
+		Line:       new(47.5),
+		Odds:       -110,
+	})
+	require.NoError(t, err)
+
+	// 6. Custom/unlinked leg without game, team, or player.
+	_, err = fixture.store.CreateLeg(t.Context(), db.Leg{
+		SlipID:     fixture.slip.ID,
+		UserID:     fixture.user.ID,
+		MarketType: "OTHER",
+		Selection:  "Custom Backyard Prop",
+		Odds:       150,
+	})
+	require.NoError(t, err)
+
+	rec := httptest.NewRecorder()
+	fixture.handler.ServeHTTP(rec, httptest.NewRequestWithContext(
+		t.Context(), http.MethodGet, fmt.Sprintf("/slips/%d/panel", fixture.slip.ID), nil,
+	))
+	require.Equal(t, http.StatusOK, rec.Code)
+	body := rec.Body.String()
+
+	assert.Contains(t, body, `src="https://a.espncdn.com/i/headshots/nfl/players/full/3918298.png"`)
+	assert.Contains(t, body, `>JA</span>`)
+	assert.Contains(t, body, `src="https://a.espncdn.com/i/teamlogos/nfl/500/mia.png"`)
+	assert.Contains(t, body, `src="https://a.espncdn.com/i/teamlogos/nfl/500/buf.png"`)
+	assert.Contains(t, body, `>RP</span>`)
+	assert.Contains(t, body, "Custom Backyard Prop")
+	// Custom leg must not render a data-media placeholder next to its selection.
+	customIdx := strings.Index(body, "Custom Backyard Prop")
+	require.Positive(t, customIdx)
+	liStart := strings.LastIndex(body[:customIdx], "<li ")
+	require.Positive(t, liStart)
+	assert.NotContains(t, body[liStart:customIdx], "data-media")
+}

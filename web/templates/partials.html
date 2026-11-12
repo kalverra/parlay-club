@@ -142,9 +142,19 @@
         {{range .Legs}}
           {{$leg := .}}
           <li class="flex items-start justify-between gap-3 rounded-lg border border-slate-800 px-3 py-2">
-            <div class="min-w-0">
-              <p class="truncate text-sm font-medium">{{.Selection}}</p>
-              <div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-400">
+            <div class="flex min-w-0 items-start gap-2.5">
+              {{- if .PlayerHeadshot -}}
+                {{template "player-portrait" (dict "URL" .PlayerHeadshot "Initials" .PlayerInitials "Size" "h-7 w-7" "TextSize" "text-[10px]")}}
+              {{- else if .TeamLogo -}}
+                {{template "team-logo" (dict "URL" .TeamLogo "Size" "h-6 w-6")}}
+              {{- else if .PlayerInitials -}}
+                {{template "player-portrait" (dict "Initials" .PlayerInitials "Size" "h-7 w-7" "TextSize" "text-[10px]")}}
+              {{- else if or .MatchupAwayLogo .MatchupHomeLogo -}}
+                {{template "matchup-logos" (dict "AwayURL" .MatchupAwayLogo "HomeURL" .MatchupHomeLogo "Size" "h-5 w-5")}}
+              {{- end -}}
+              <div class="min-w-0">
+                <p class="truncate text-sm font-medium">{{.Selection}}</p>
+                <div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-400">
                 <span>{{.Odds}}</span>
                 {{if .Votes.Has}}
                   <span class="flex items-center gap-1" data-votes>
@@ -236,6 +246,7 @@
                   </span>
                 {{end}}
               </div>
+            </div>
             </div>
             {{if .CanEdit}}
               <span class="flex shrink-0 items-center gap-2 text-xs">
@@ -1125,7 +1136,10 @@
         >
           <div class="flex items-start justify-between gap-3">
             <div class="min-w-0">
-              <p class="truncate font-semibold">{{.Matchup}}</p>
+              <div class="flex min-w-0 items-center gap-2">
+                {{template "matchup-logos" (dict "AwayURL" .AwayLogo "HomeURL" .HomeLogo "Size" "h-5 w-5")}}
+                <p class="truncate font-semibold">{{.Matchup}}</p>
+              </div>
               <p class="mt-0.5 text-xs text-slate-500">
                 {{if .KickoffISO}}<time datetime="{{.KickoffISO}}">{{.KickoffFallback}}</time>{{end}}{{if .Venue}} &middot; {{.Venue}}{{end}}
               </p>
@@ -1217,7 +1231,10 @@
         >Research &rarr;</a
       >
     </div>
-    <h2 class="mt-2 truncate text-lg font-semibold">{{.Matchup}}</h2>
+    <div class="mt-2 flex min-w-0 items-center gap-2">
+      {{template "matchup-logos" (dict "AwayURL" .AwayLogo "HomeURL" .HomeLogo "Size" "h-6 w-6")}}
+      <h2 class="min-w-0 truncate text-lg font-semibold">{{.Matchup}}</h2>
+    </div>
     <p class="mt-0.5 text-xs text-slate-500">
       {{if .KickoffISO}}<time datetime="{{.KickoffISO}}">{{.KickoffFallback}}</time>{{end}}{{if .Venue}} &middot; {{.Venue}}{{end}}
     </p>
@@ -1278,11 +1295,15 @@
 
   {{range .Players}}
     <section class="rounded-xl border border-slate-800 bg-slate-900 p-3">
-      <header class="flex items-baseline justify-between gap-3">
-        <h3 class="min-w-0 truncate text-sm font-semibold">{{.Name}}</h3>
-        {{if or .Position .Team}}
-          <p class="shrink-0 text-[11px] font-medium uppercase tracking-wide text-slate-500">
-            {{.Position}}{{if and .Position .Team}} &middot; {{end}}{{.Team}}
+      <header class="flex items-center justify-between gap-3">
+        <div class="flex min-w-0 items-center gap-2.5">
+          {{template "player-portrait" (dict "URL" .HeadshotURL "Initials" .Initials "Size" "h-8 w-8")}}
+          <h3 class="min-w-0 truncate text-sm font-semibold">{{.Name}}</h3>
+        </div>
+        {{if or .Position .Team .TeamLogo}}
+          <p class="flex shrink-0 items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-slate-500">
+            {{template "team-logo" (dict "URL" .TeamLogo "Size" "h-4 w-4")}}
+            <span>{{.Position}}{{if and .Position .Team}} &middot; {{end}}{{.Team}}</span>
           </p>
         {{end}}
       </header>

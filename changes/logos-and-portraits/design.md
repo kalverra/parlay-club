@@ -183,7 +183,7 @@ template patterns)
 - [x] Add shared `media.html` template helpers (`team-logo`, `player-portrait`, `matchup-logos`) wired in
       `internal/web/render.go`, plus the capturing `error` fallback in `web/static/app.js` and regenerated
       `web/static/app.css`.
-- [ ] Render team logos and player portraits on `pick-slate` cards, `pick-detail` headers and `PickPlayerView` cards,
+- [x] Render team logos and player portraits on `pick-slate` cards, `pick-detail` headers and `PickPlayerView` cards,
       and `slip-panel` legs (`LegView`) with graceful fallbacks for missing or unlinked legs, with handler/render tests.
 
 ### Phase 3: Render logos and portraits on research and standalone props
