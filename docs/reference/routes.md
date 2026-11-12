@@ -187,11 +187,10 @@ without waiting for the SSE stream. See [Export](../concepts/export.md).
 `GET /slips/{id}/pick` is the hub's pick action. It reads the week's games, one `OddsForWeek` read, the week's rosters,
 and the viewer's legs, then hands them to `internal/board`. `board.Build` folds one row per selection, using the
 viewer's home-book price when it carries the pick and the median across books otherwise, and drops games that have
-kicked off. `board.Search` applies the query, category, window, sort, and one-game filter, and names games that match the
-query but whose props were never fetched. `board.Slates` turns the same rows into one card per upcoming game for the
-slate, and `board.Detail` shapes the open game's header, tabs, and the active tab's lines or player cards. The handler
-sets `Page.Wide`, so the header and main use `max-w-6xl`, and sets the slip's `data-live-url`, so the page opens one
-stream.
+kicked off. `board.Search` applies the query, category, window, sort, and one-game filter. `board.Slates` turns the same
+rows into one card per upcoming game for the slate, and `board.Detail` shapes the open game's header, tabs, and the
+active tab's lines or player cards. A card is marked unloaded when its game has lines but no prop rows. The handler sets
+`Page.Wide`, so the header and main use `max-w-6xl`, and sets the slip's `data-live-url`, so the page opens one stream.
 
 The board's query contract:
 
@@ -246,11 +245,12 @@ refreshes on `tray-updated` and `slip-updated`. `GET /slips/{id}/pick/dock` rend
 combined price of the viewer's legs, and refreshes on the same two signals. Removing a leg from the tray fires both
 `tray-updated` and `board-updated`, so the dock and the board follow.
 
-A game with no prop rows offers "Load them" on the slate. The button calls `GET /games/{id}/props?slip=`, which runs
-`SyncGameProps` for that one game and answers 200 with `Hx-Trigger: board-updated`; `#pick-body` listens for that signal
-and re-runs its current search. Opening the board, opening a game, typing, filtering, and sorting call no sync. A week
-with no stored games says the slate has not synced. A week with games but no odds says the lines have not synced once,
-above cards that carry no lines. Once every game has kicked off, the slate says picks are closed.
+A game with stored lines but no prop rows offers "Load them" on its slate card and in its open detail. The button calls
+`GET /games/{id}/props?slip=`, which runs `SyncGameProps` for that one game and answers 200 with
+`Hx-Trigger: board-updated`; `#pick-body` listens for that signal and re-runs its current search. Opening the board,
+opening a game, typing, filtering, and sorting call no sync. A week with no stored games says the slate has not synced. A
+week with games but no odds says the lines have not synced once, above cards that carry no lines. Once every game has
+kicked off, the slate says picks are closed.
 
 `GET /games` uses the old Games link as a 303 to `/groups/{active}/week`, where the week route opens the group's newest
 slip. Without an active group it redirects to `/`.
@@ -324,7 +324,7 @@ rest) answer 422 with the message from [Slips](../concepts/slips.md). The form s
 | ------------- | ------- |
 | `HX-Redirect` | Navigate the browser to a new page without swapping an empty body. |
 | `HX-Refresh`  | Reload the current page, used after a group switch, invite reset, or leave. |
-| `HX-Trigger`  | Fire a client event. `leg-saved` closes the leg form's bottom sheet. `tray-updated` refreshes the pick tray, and `board-updated` refreshes the pick body. |
+| `HX-Trigger`  | Fire a client event. `leg-saved` closes the leg form's bottom sheet. `tray-updated` refreshes the pick dock and tray, and `board-updated` refreshes the pick body. |
 
 Writes that change the slip return the refreshed panel, so the page reflects the new state without a reload. Partials
 listen with `hx-trigger="slip-updated from:body"` for live updates.

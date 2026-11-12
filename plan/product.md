@@ -52,8 +52,8 @@ Phone first: one column and a bottom bar with Groups, This week, and Record Book
 (`/`) to a group's week (`/groups/{id}/week`), then the hub (`/slips/{id}`), and the pick board
 (`/slips/{id}/pick`). Those built screens, their steps, empty states, and layouts are documented in
 [Groups](../docs/concepts/groups.md), [Slips](../docs/concepts/slips.md), and
-[Routes](../docs/reference/routes.md). The hub stays one column at every width; the pick board puts its tray in a
-second column at `lg`.
+[Routes](../docs/reference/routes.md). The hub stays one column at every width; the pick board puts its slate and detail
+in two columns at `lg`, with a fixed dock at the bottom at every width.
 
 Still to build:
 

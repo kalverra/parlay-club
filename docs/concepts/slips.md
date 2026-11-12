@@ -206,16 +206,18 @@ line's row is still on screen and must lose its delete button. At the limit, a l
 "Swap which pick?" and lists the viewer's legs that are not kickoff-locked. Choosing one sends `PUT /legs/{old}` with the
 new pick's fields; a line that already holds a pick switches sides in place and needs no free slot.
 
-A game whose props were never fetched appears as a prompt on the slate when the search matches its team, its matchup, or
-a roster player on it: "Props for BUF @ MIA aren't loaded yet." The "Load them" button calls
-`GET /games/{id}/props?slip=`, which runs `SyncGameProps` for that one game (credit floors and all) and then fires
-`board-updated`. The board itself never syncs props; opening a game, switching tabs, typing, filtering, and sorting spend
-no credits. See [Data refresh](data-refresh.md).
+A game that has stored lines but no prop rows offers "Load them" on its slate card and again in its open detail: "Props
+for BUF @ MIA aren't loaded yet." The button calls `GET /games/{id}/props?slip=`, which runs `SyncGameProps` for that one
+game (credit floors and all) and then fires `board-updated`, so the body refreshes in place and the open game stays open.
+A week with no odds at all keeps the one week-level "No lines" state instead of a button per game. The board itself
+never syncs props; opening a game, switching tabs, typing, filtering, and sorting spend no credits. See
+[Data refresh](data-refresh.md).
 
 The board has its own empty states. A week with no stored games says the slate has not synced. A week with games but no
 odds says the lines have not synced, once, instead of offering "Load them" for every game. Once every game has kicked
-off, it says picks are closed. A search or filter that matches nothing keeps "Nothing matches that search." When only
-some games have started, one line says how many are hidden.
+off, it says picks are closed. A search or filter that matches nothing keeps "Nothing matches that search." An open game
+with no rows in the current search says the same inside the detail; with no search it says the game's lines have not
+synced. When only some games have started, one line says how many are hidden.
 
 The dock shows "Your picks", then `Picked of Limit` and the combined price of the viewer's legs, and a "Slip" button. The
 combined price is `parlay.CombinedOdds` over the viewer's legs, converted back with `parlay.DecimalToAmerican`, the same
