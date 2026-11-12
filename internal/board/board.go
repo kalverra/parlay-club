@@ -823,9 +823,13 @@ func rowsForGame(rows []Row, gameID string) []Row {
 	return gameRows
 }
 
-// lineGroups folds rows into one group per line, ordering each group's sides
-// and then the groups themselves for the sort.
-func lineGroups(game db.Game, rows []Row, mode Sort) []LineGroup {
+// Pair folds one game's built rows into one group per line. Rows that share a
+// market, team, player, and line share a group, so an Over and an Under on the
+// same number sit on one row. Each group's options come back in a fixed order:
+// away before home for a spread or moneyline, Over before Under for a total or
+// prop, and the single Yes of an anytime touchdown. A line with only one stored
+// side keeps one option.
+func Pair(game db.Game, rows []Row) []LineGroup {
 	groups := make([]LineGroup, 0, len(rows))
 	index := make(map[string]int, len(rows))
 	for _, row := range rows {
@@ -840,6 +844,13 @@ func lineGroups(game db.Game, rows []Row, mode Sort) []LineGroup {
 	for i := range groups {
 		sortOptions(game, groups[i].Options)
 	}
+	return groups
+}
+
+// lineGroups pairs rows into one group per line and then orders the groups for
+// the detail's sort.
+func lineGroups(game db.Game, rows []Row, mode Sort) []LineGroup {
+	groups := Pair(game, rows)
 	sortLineGroups(groups, mode)
 	return groups
 }
@@ -900,10 +911,23 @@ func marketHeading(market string) string {
 
 // sortOptions orders one line's sides: away then home for a spread or
 // moneyline, Over then Under for a total or a prop, and the single Yes for an
-// anytime touchdown.
+// anytime touchdown. The remaining fields break a tie the same way every time.
 func sortOptions(game db.Game, options []Row) {
 	sort.SliceStable(options, func(i, j int) bool {
-		return optionRank(game, options[i]) < optionRank(game, options[j])
+		left, right := options[i], options[j]
+		if optionRank(game, left) != optionRank(game, right) {
+			return optionRank(game, left) < optionRank(game, right)
+		}
+		if left.Side != right.Side {
+			return left.Side < right.Side
+		}
+		if left.Team != right.Team {
+			return left.Team < right.Team
+		}
+		if a, b := lineValue(left.Line), lineValue(right.Line); a != b {
+			return a < b
+		}
+		return left.Text < right.Text
 	})
 }
 

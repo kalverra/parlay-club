@@ -705,3 +705,154 @@ func TestDetailOfAGameWithNoRows(t *testing.T) {
 	assert.Empty(t, detail.Lines, "another game's rows stay out of the detail")
 	assert.Empty(t, detail.Players)
 }
+
+func TestPairKeepsBothSidesOfOneLine(t *testing.T) {
+	t.Parallel()
+
+	g := game("401", at(t, 8, 13, 0))
+	games := []db.Game{g}
+	rows := []db.Odds{
+		odds("401", "draftkings", "TOTAL", "", "", "OVER", new(47.5), -105),
+		odds("401", "draftkings", "TOTAL", "", "", "UNDER", new(47.5), -110),
+		odds("401", "draftkings", "REC_YDS", "BUF", "Khalil Shakir", "UNDER", new(52.5), -115),
+		odds("401", "draftkings", "REC_YDS", "BUF", "Khalil Shakir", "OVER", new(52.5), -105),
+	}
+	built := board.Build(games, rows, nil, "", nil, at(t, 7, 12, 0))
+
+	groups := board.Pair(g, built)
+	require.Len(t, groups, 2, "the total and the prop keep their own rows")
+
+	total := pairGroup(t, groups, "TOTAL", "", "")
+	require.Len(t, total.Options, 2)
+	assert.Equal(t, []string{"OVER", "UNDER"}, optionSides(total), "Over comes before Under")
+	assert.Equal(t, total.Options[0].Line, total.Options[1].Line, "both sides key on the same number")
+
+	prop := pairGroup(t, groups, "REC_YDS", "BUF", "Khalil Shakir")
+	require.Len(t, prop.Options, 2)
+	assert.Equal(t, []string{"OVER", "UNDER"}, optionSides(prop))
+}
+
+func TestPairPutsTheAwaySideFirst(t *testing.T) {
+	t.Parallel()
+
+	g := game("401", at(t, 8, 13, 0))
+	games := []db.Game{g}
+	rows := []db.Odds{
+		odds("401", "draftkings", "SPREAD", "BUF", "", "TEAM", new(-3.0), -115),
+		odds("401", "draftkings", "SPREAD", "MIA", "", "TEAM", new(3.0), -105),
+		odds("401", "draftkings", "ML", "BUF", "", "TEAM", nil, -150),
+		odds("401", "draftkings", "ML", "MIA", "", "TEAM", nil, 130),
+	}
+	built := board.Build(games, rows, nil, "", nil, at(t, 7, 12, 0))
+
+	groups := board.Pair(g, built)
+	require.Len(t, groups, 2)
+
+	spread := pairGroup(t, groups, "SPREAD", "", "")
+	assert.Equal(t, []string{"MIA", "BUF"}, optionTeams(spread), "the away side comes first")
+	require.Len(t, spread.Options, 2)
+	assert.Equal(t, -3.0, *spread.Options[1].Line)
+
+	moneyline := pairGroup(t, groups, "ML", "", "")
+	assert.Equal(t, []string{"MIA", "BUF"}, optionTeams(moneyline))
+	assert.Equal(t, []string{"TEAM", "TEAM"}, optionSides(moneyline))
+}
+
+func TestPairKeepsTheSingleAnytimeTDSide(t *testing.T) {
+	t.Parallel()
+
+	g := game("401", at(t, 8, 13, 0))
+	games := []db.Game{g}
+	rows := []db.Odds{
+		odds("401", "draftkings", "ANYTIME_TD", "BUF", "James Cook", "YES", nil, 150),
+	}
+	built := board.Build(games, rows, nil, "", nil, at(t, 7, 12, 0))
+
+	groups := board.Pair(g, built)
+	require.Len(t, groups, 1)
+	group := groups[0]
+	assert.Equal(t, "ANYTIME_TD", group.Market)
+	assert.Equal(t, "Anytime TD", group.Label)
+	require.Len(t, group.Options, 1, "an anytime touchdown has one side")
+	assert.Equal(t, "YES", group.Options[0].Side)
+}
+
+func TestPairKeepsAMissingSide(t *testing.T) {
+	t.Parallel()
+
+	g := game("401", at(t, 8, 13, 0))
+	games := []db.Game{g}
+	rows := []db.Odds{
+		odds("401", "draftkings", "TOTAL", "", "", "OVER", new(47.5), -105),
+		odds("401", "draftkings", "SPREAD", "MIA", "", "TEAM", new(3.0), -105),
+		odds("401", "draftkings", "REC_YDS", "BUF", "Khalil Shakir", "OVER", new(52.5), -110),
+	}
+	built := board.Build(games, rows, nil, "", nil, at(t, 7, 12, 0))
+
+	groups := board.Pair(g, built)
+	require.Len(t, groups, 3)
+
+	for _, group := range groups {
+		assert.Len(t, group.Options, 1, "%s keeps its one stored side", group.Market)
+	}
+}
+
+func TestPairOptionOrderIsDeterministic(t *testing.T) {
+	t.Parallel()
+
+	g := game("401", at(t, 8, 13, 0))
+	games := []db.Game{g}
+	rows := []db.Odds{
+		odds("401", "draftkings", "SPREAD", "BUF", "", "TEAM", new(-3.0), -115),
+		odds("401", "draftkings", "SPREAD", "MIA", "", "TEAM", new(3.0), -105),
+		odds("401", "draftkings", "ML", "BUF", "", "TEAM", nil, -150),
+		odds("401", "draftkings", "ML", "MIA", "", "TEAM", nil, 130),
+		odds("401", "draftkings", "TOTAL", "", "", "OVER", new(47.5), -105),
+		odds("401", "draftkings", "TOTAL", "", "", "UNDER", new(47.5), -110),
+		odds("401", "draftkings", "ANYTIME_TD", "BUF", "James Cook", "YES", nil, 150),
+	}
+	built := board.Build(games, rows, nil, "", nil, at(t, 7, 12, 0))
+	reversed := make([]board.Row, len(built))
+	for i := range built {
+		reversed[len(built)-1-i] = built[i]
+	}
+
+	first := board.Pair(g, built)
+	second := board.Pair(g, reversed)
+	require.Len(t, first, len(second))
+	for _, group := range first {
+		same := pairGroup(t, second, group.Market, group.Team, group.Player)
+		assert.Equal(t, optionSides(group), optionSides(same),
+			"%s keeps its option order whatever the input order", group.Market)
+	}
+}
+
+// pairGroup finds one line group by its market, team, and player.
+func pairGroup(t *testing.T, groups []board.LineGroup, market, team, player string) board.LineGroup {
+	t.Helper()
+	for _, group := range groups {
+		if group.Market == market && group.Team == team && group.Player == player {
+			return group
+		}
+	}
+	t.Fatalf("no %s group for team %q player %q", market, team, player)
+	return board.LineGroup{}
+}
+
+// optionSides lists a group's option sides in order.
+func optionSides(group board.LineGroup) []string {
+	sides := make([]string, 0, len(group.Options))
+	for _, option := range group.Options {
+		sides = append(sides, option.Side)
+	}
+	return sides
+}
+
+// optionTeams lists a group's option teams in order.
+func optionTeams(group board.LineGroup) []string {
+	teams := make([]string, 0, len(group.Options))
+	for _, option := range group.Options {
+		teams = append(teams, option.Team)
+	}
+	return teams
+}
