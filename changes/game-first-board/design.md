@@ -105,7 +105,8 @@ card through the same helper `Slates` uses. `Tab.Count` counts visible rows, wit
 
 Pairing is a keyed fold, not a second data source:
 
-- Key on `market + team + player + line`.
+- Key on the line: `SPREAD` and `ML` key on the market alone so both teams pair, `TOTAL` keys on the market and number,
+  and `TEAM_TOTAL`, props, and `ANYTIME_TD` key on the market, team, player, and number.
 - Order the options deterministically: away before home for `SPREAD`/`ML`, `OVER` before `UNDER` for totals and props,
   and the single `YES` row for `ANYTIME_TD`.
 - A missing price leaves one option. The template shows one full-width button instead of a dead half.
@@ -332,7 +333,7 @@ new tests).
 - [x] Render one row per line with two side buttons. A picked side deletes, the opposite side updates that leg through
       `PUT /legs/{id}`, and an empty side adds. Return the refreshed pair row from the board update path and keep
       `Hx-Trigger: tray-updated`. Add handler tests for all three paths.
-- [ ] Docs: document pairing and the update response in `docs/concepts/slips.md` and `docs/reference/routes.md`.
+- [x] Docs: document pairing and the update response in `docs/concepts/slips.md` and `docs/reference/routes.md`.
 
 ### Phase 4: Add the pick dock
 
