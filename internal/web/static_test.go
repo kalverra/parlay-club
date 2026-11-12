@@ -77,6 +77,18 @@ func TestAppJSKeepsThePickSlateScroll(t *testing.T) {
 	assert.Contains(t, script, "htmx:afterSwap", "the handler restores it after the swap")
 }
 
+func TestAppJSOpensAndClosesThePickDock(t *testing.T) {
+	t.Parallel()
+
+	source, err := fs.ReadFile(assets.Static, "static/app.js")
+	require.NoError(t, err)
+	script := string(source)
+
+	assert.Contains(t, script, `"pick-tray-body"`, "the sheet opens once its tray lands")
+	assert.Contains(t, script, `"pick-tray-sheet"`, "the sheet shell is wired up")
+	assert.Contains(t, script, "data-close-dock", "the sheet has a close control")
+}
+
 func TestStaticHandlerStaysInsideStaticDir(t *testing.T) {
 	t.Parallel()
 

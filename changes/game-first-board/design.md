@@ -153,6 +153,7 @@ Routes:
 | `GET /slips/{id}/pick/results`    | `#pick-body`: slate plus detail for game, search, or window changes |
 | `GET /slips/{id}/pick/detail`     | `#pick-detail`: one game's header, tabs, and rows for tab/sort changes |
 | `GET /slips/{id}/tray`            | The tray partial, loaded into the dock sheet                    |
+| `GET /slips/{id}/pick/dock`       | The fixed dock's count and combined price                       |
 | `GET /slips/{id}/pick/swap`       | Unchanged swap sheet                                            |
 
 The existing `/pick/results` name stays, so old links keep working. `/pick/detail` is new. Every response reuses the
@@ -220,7 +221,8 @@ stateDiagram-v2
 
 ### 4. Dock and tray
 
-The tray moves out of the aside and into a fixed dock. `PickDockView` reuses `trayFrom` and adds the combined price:
+The tray moves out of the aside and into a fixed dock. `PickDockView` reuses the dock's leg builder (`dockFrom`) and adds
+the combined price:
 
 ```go
 type PickDockView struct {
@@ -236,8 +238,8 @@ Combined odds come from `parlay.CombinedOdds` over the viewer's legs, converted 
 `parlay.DecimalToAmerican`, the same math the payout card uses. The dock shows `Picked of Limit` and the combined price
 next to a "Slip" button. The button loads `/slips/{id}/tray` into a `dialog` sheet, reusing the swap sheet's shell and
 the existing legs, warnings, and one action. The dock listens for `tray-updated` and `slip-updated` and refreshes
-itself; the tray inside the sheet already listens for the same events. A new `data-close-dock` handler in `app.js`
-mirrors `data-close-swap-sheet`.
+itself from `GET /slips/{id}/pick/dock`; the tray inside the sheet already listens for the same events. A new
+`data-close-dock` handler in `app.js` mirrors `data-close-swap-sheet`.
 
 The dock is fixed above the safe area at `z-20`, spans the wide layout width, and reserves bottom padding so the last
 row is never hidden. It appears only on the pick screen; the hub is unchanged. This keeps picks visible while moving
@@ -337,7 +339,7 @@ new tests).
 
 ### Phase 4: Add the pick dock
 
-- [ ] Add the combined price to `PickDockView` from the viewer's legs and its tests, then replace the aside tray with
+- [x] Add the combined price to `PickDockView` from the viewer's legs and its tests, then replace the aside tray with
       the fixed dock and a `dialog` sheet. Add the dock's open/close handler, refresh it on `tray-updated` and
       `slip-updated`, and reserve bottom padding so rows are not hidden.
 - [ ] Docs: update the tray and dock in `docs/concepts/slips.md` and the pick tray description in

@@ -62,6 +62,9 @@ document.addEventListener("htmx:afterSwap", (event) => {
   if (target && target.id === "pick-swap-body") {
     openSwapSheet();
   }
+  if (target && target.id === "pick-tray-body") {
+    openDockSheet();
+  }
 });
 
 document.addEventListener("htmx:oobAfterSwap", (event) => {
@@ -187,6 +190,10 @@ document.addEventListener("click", (event) => {
     closeSwapSheet();
     return;
   }
+  if (event.target.closest("[data-close-dock]")) {
+    closeDockSheet();
+    return;
+  }
   closeGroupSwitcher(event);
 });
 
@@ -240,6 +247,32 @@ if (swapSheet) {
     }
   });
   document.body.addEventListener("tray-updated", closeSwapSheet);
+}
+
+// The pick dock opens the viewer's picks in a sheet. Its body is fetched from
+// /slips/{id}/tray, and the tray inside keeps itself fresh on the same signals
+// as the dock, so a leg can be removed right there.
+const dockSheet = document.getElementById("pick-tray-sheet");
+const dockSheetBody = document.getElementById("pick-tray-body");
+
+function openDockSheet() {
+  if (dockSheet && !dockSheet.open) {
+    dockSheet.showModal();
+  }
+}
+
+function closeDockSheet() {
+  if (dockSheet && dockSheet.open) {
+    dockSheet.close();
+  }
+}
+
+if (dockSheet) {
+  dockSheet.addEventListener("close", () => {
+    if (dockSheetBody) {
+      dockSheetBody.replaceChildren();
+    }
+  });
 }
 
 // HTMX leaves a 4xx response in place by default. Rule refusals answer 422
