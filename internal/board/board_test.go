@@ -278,3 +278,188 @@ func TestPickedRowsCarryTheLegID(t *testing.T) {
 	require.Len(t, built, 1)
 	assert.Equal(t, int64(7), built[0].Picked)
 }
+
+func TestBuildCopiesPositionOntoPropRows(t *testing.T) {
+	t.Parallel()
+
+	games := []db.Game{game("401", at(t, 8, 13, 0))}
+	rows := []db.Odds{
+		odds("401", "draftkings", "PASS_YDS", "BUF", "Josh Allen", "OVER", new(245.5), -110),
+		odds("401", "draftkings", "ML", "BUF", "", "TEAM", nil, -150),
+	}
+	roster := []db.RosterPlayer{
+		{AthleteID: "1", Team: "BUF", FullName: "Josh Allen", Position: "QB"},
+	}
+	built := board.Build(games, rows, roster, "", nil, at(t, 7, 12, 0))
+	require.Len(t, built, 2)
+
+	byText := make(map[string]board.Row, len(built))
+	for _, row := range built {
+		byText[row.Text] = row
+	}
+	prop := byText["Josh Allen Over 245.5 Pass Yds"]
+	assert.Equal(t, "1", prop.PlayerID)
+	assert.Equal(t, "QB", prop.Position)
+	assert.Empty(t, byText["BUF ML"].Position)
+}
+
+func TestSlatesOrderByKickoff(t *testing.T) {
+	t.Parallel()
+
+	games := []db.Game{
+		game("monday", at(t, 9, 20, 15)),
+		game("late", at(t, 8, 16, 25)),
+		game("early", at(t, 8, 13, 0)),
+	}
+	rows := []db.Odds{
+		odds("monday", "draftkings", "ML", "BUF", "", "TEAM", nil, -110),
+		odds("late", "draftkings", "ML", "BUF", "", "TEAM", nil, -110),
+		odds("early", "draftkings", "ML", "BUF", "", "TEAM", nil, -110),
+	}
+	now := at(t, 7, 12, 0)
+	built := board.Build(games, rows, nil, "", nil, now)
+
+	cards := board.Slates(games, built, nil, board.Query{Now: now})
+	require.Len(t, cards, 3)
+	assert.Equal(t, []string{"early", "late", "monday"},
+		[]string{cards[0].ID, cards[1].ID, cards[2].ID}, "the earliest kickoff comes first")
+	assert.Equal(t, "MIA @ BUF", cards[0].Matchup)
+	assert.Equal(t, "MIA", cards[0].Away)
+	assert.Equal(t, "BUF", cards[0].Home)
+	assert.Equal(t, at(t, 8, 13, 0).UTC(), cards[0].Kickoff.UTC())
+	assert.Nil(t, cards[0].Lines.Spread, "a game with only a moneyline has no spread")
+	assert.Nil(t, cards[0].Lines.Total)
+	assert.Equal(t, "-110", cards[0].Lines.Moneyline.HomeOdds)
+	assert.Empty(t, cards[0].Lines.Moneyline.AwayOdds, "an unpriced side stays blank")
+	assert.False(t, cards[0].HasProps)
+}
+
+func TestSlatesSummarizeTheGameLines(t *testing.T) {
+	t.Parallel()
+
+	g := game("401", at(t, 8, 13, 0))
+	g.VenueName = new("Highmark Stadium")
+	games := []db.Game{g}
+	rows := []db.Odds{
+		odds("401", "draftkings", "SPREAD", "MIA", "", "TEAM", new(3.0), -105),
+		odds("401", "draftkings", "SPREAD", "BUF", "", "TEAM", new(-3.0), -115),
+		odds("401", "draftkings", "TOTAL", "", "", "OVER", new(47.5), -110),
+		odds("401", "draftkings", "TOTAL", "", "", "UNDER", new(47.5), -115),
+		odds("401", "draftkings", "ML", "MIA", "", "TEAM", nil, 130),
+		odds("401", "draftkings", "ML", "BUF", "", "TEAM", nil, -150),
+	}
+	now := at(t, 7, 12, 0)
+	built := board.Build(games, rows, nil, "", nil, now)
+
+	cards := board.Slates(games, built, nil, board.Query{Now: now})
+	require.Len(t, cards, 1)
+	card := cards[0]
+	assert.Equal(t, "Highmark Stadium", card.Venue)
+
+	require.NotNil(t, card.Lines.Spread)
+	assert.Equal(t, "+3", card.Lines.Spread.AwayLine)
+	assert.Equal(t, "-105", card.Lines.Spread.AwayOdds)
+	assert.Equal(t, "-3", card.Lines.Spread.HomeLine)
+	assert.Equal(t, "-115", card.Lines.Spread.HomeOdds)
+
+	require.NotNil(t, card.Lines.Total)
+	assert.Equal(t, "47.5", card.Lines.Total.Line)
+	assert.Equal(t, "-110", card.Lines.Total.OverOdds)
+	assert.Equal(t, "-115", card.Lines.Total.UnderOdds)
+
+	require.NotNil(t, card.Lines.Moneyline)
+	assert.Equal(t, "+130", card.Lines.Moneyline.AwayOdds)
+	assert.Equal(t, "-150", card.Lines.Moneyline.HomeOdds)
+	assert.Empty(t, card.Lines.Moneyline.AwayLine)
+}
+
+func TestSlatesCountPropRows(t *testing.T) {
+	t.Parallel()
+
+	games := []db.Game{
+		game("401", at(t, 8, 13, 0)),
+		game("402", at(t, 8, 16, 0)),
+	}
+	rows := []db.Odds{
+		odds("401", "draftkings", "ML", "BUF", "", "TEAM", nil, -150),
+		odds("401", "draftkings", "TEAM_TOTAL", "BUF", "", "OVER", new(24.5), -110),
+		odds("401", "draftkings", "PASS_YDS", "BUF", "Josh Allen", "OVER", new(245.5), -110),
+		odds("401", "draftkings", "ANYTIME_TD", "BUF", "James Cook", "YES", nil, 150),
+		odds("402", "draftkings", "ML", "MIA", "", "TEAM", nil, 130),
+	}
+	now := at(t, 7, 12, 0)
+	built := board.Build(games, rows, nil, "", nil, now)
+
+	cards := board.Slates(games, built, nil, board.Query{Now: now})
+	require.Len(t, cards, 2)
+
+	byID := make(map[string]board.GameCard, len(cards))
+	for _, card := range cards {
+		byID[card.ID] = card
+	}
+	assert.Equal(t, 3, byID["401"].Props, "team totals and player markets count as props")
+	assert.True(t, byID["401"].HasProps)
+	assert.Zero(t, byID["402"].Props)
+	assert.False(t, byID["402"].HasProps)
+}
+
+func TestSlatesFilterByWindowAndQuery(t *testing.T) {
+	t.Parallel()
+
+	early := game("early", at(t, 8, 13, 0))
+	early.VenueName = new("Highmark Stadium")
+	late := game("late", at(t, 8, 16, 25))
+	late.HomeTeam = "KC"
+	late.HomeName = "Kansas City Chiefs"
+	games := []db.Game{early, late}
+	rows := []db.Odds{
+		odds("early", "draftkings", "ML", "BUF", "", "TEAM", nil, -150),
+		odds("late", "draftkings", "ML", "KC", "", "TEAM", nil, -150),
+	}
+	roster := []db.RosterPlayer{
+		{AthleteID: "1", Team: "BUF", FullName: "Josh Allen", Position: "QB"},
+	}
+	now := at(t, 7, 12, 0)
+	built := board.Build(games, rows, roster, "", nil, now)
+
+	window := board.Slates(games, built, roster, board.Query{
+		Window: board.WindowSundayLate,
+		Now:    now,
+	})
+	require.Len(t, window, 1)
+	assert.Equal(t, "late", window[0].ID)
+
+	byTeam := board.Slates(games, built, roster, board.Query{Q: "Buffalo", Now: now})
+	require.Len(t, byTeam, 1)
+	assert.Equal(t, "early", byTeam[0].ID)
+
+	byVenue := board.Slates(games, built, roster, board.Query{Q: "highmark", Now: now})
+	require.Len(t, byVenue, 1)
+	assert.Equal(t, "early", byVenue[0].ID)
+
+	byPlayer := board.Slates(games, built, roster, board.Query{Q: "JOSH ALLEN", Now: now})
+	require.Len(t, byPlayer, 1)
+	assert.Equal(t, "early", byPlayer[0].ID)
+
+	noMatch := board.Slates(games, built, roster, board.Query{Q: "Seattle", Now: now})
+	assert.Empty(t, noMatch)
+}
+
+func TestSlatesDropKickedOffGames(t *testing.T) {
+	t.Parallel()
+
+	games := []db.Game{
+		game("started", at(t, 8, 13, 0)),
+		game("upcoming", at(t, 8, 16, 0)),
+	}
+	rows := []db.Odds{
+		odds("started", "draftkings", "ML", "BUF", "", "TEAM", nil, -110),
+		odds("upcoming", "draftkings", "ML", "BUF", "", "TEAM", nil, -110),
+	}
+	now := at(t, 8, 13, 30)
+	built := board.Build(games, rows, nil, "", nil, now)
+
+	cards := board.Slates(games, built, nil, board.Query{Now: now})
+	require.Len(t, cards, 1)
+	assert.Equal(t, "upcoming", cards[0].ID)
+}
