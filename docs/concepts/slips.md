@@ -3,7 +3,7 @@ id: slips
 title: Slips
 type: concept
 summary: How a group builds one shared parlay a week from the slate, with the hub's next-step banner and deadline, the game-first pick board and its tray, members, legs, votes, quick-add, create-slip defaults, grading, the editing and locking rules, and research.
-tags: [slips, weeks, legs, members, locking, grading, results, activity, groups, games, quick-add, nfelo, props, autocomplete, research, next-step, hub, pick-board, slate, drilldown, search, tray, votes, voting]
+tags: [slips, weeks, legs, members, locking, grading, results, activity, groups, games, quick-add, nfelo, props, autocomplete, research, next-step, hub, pick-board, slate, drilldown, tabs, search, tray, votes, voting]
 sources: [internal/slips/slips.go, internal/slips/rules.go, internal/slips/next.go, internal/board/board.go, internal/db/slips.go, internal/db/legs.go, internal/db/votes.go, internal/db/odds.go, internal/db/players.go, internal/db/weeks.go, internal/db/games.go, internal/web/games.go, internal/web/pick.go, internal/web/slips.go, internal/web/home.go, internal/web/research.go, web/static/app.js]
 last_verified: 2026-11-11
 ---
@@ -159,12 +159,28 @@ covers and appears only when it has rows. Each card shows the matchup, venue, ki
 either "Explore N props" or "No props yet", and the open game is highlighted. Cards are links: a plain `href` to the full
 page and an `hx-get` that swaps `#pick-body` and pushes the full page URL.
 
-A card opens the detail: the game's header with its matchup, kickoff, venue, and a Research link, then category and sort
-chips, then the game's rows with both sides of each line beside each other. Category chips are lines, team totals,
-passing, rushing, receiving, TDs, and kicking, counted from that game's rows. Sorts are kickoff (default), player,
-category, and odds (shortest price first). The search text also filters the open game's rows. Every chip and the "All
-games" link swap the same body partial; the back link drops `game` and `cat` and keeps `q` and `win`. An unknown game, a
-kicked-off game, or a game the window hides falls back to the slate instead of a 404.
+A card opens the detail: a pinned header with the matchup, kickoff, venue, a Research link, and an "All games" back
+link, then a horizontal tab bar and the sort chips. The header and tab bar stay below the top bar while the rows scroll,
+and the tab bar scrolls sideways on a phone with no visible scrollbar.
+
+The tabs are Lines, Passing, Rushing, Receiving, TDs, and Kicking. Team totals fold into Lines, so they have no tab of
+their own. A tab appears only when it has rows or is open, and its badge counts the rows it holds, so the Lines count
+includes both sides of a spread and both team totals. An empty or unknown `cat` opens Lines when it has rows, otherwise
+the first tab that does. An unknown game, a kicked-off game, or a game the window hides falls back to the slate instead
+of a 404.
+
+The Lines tab shows the game lines first (spread, moneyline, total) and then team totals grouped by team. Each line sits
+with its sides beside each other: away before home on a spread or moneyline, Over before Under on a total or a prop, and
+the one Yes on an anytime touchdown. A side with no stored price leaves one full-width button instead of a dead half.
+
+A prop tab clusters that tab's rows by player. One card carries the player's name, position, and team, and every market
+that player has in the tab sits under it, so Receiving Yards and Receptions share a card. Prop buttons read short
+("Over 245.5", "Yes") because the card already names the player; the pick they post is unchanged.
+
+The search text also filters the open game's rows. Sorts are player (default), odds (shortest price first), and line
+(highest line first). Kickoff and category drop out because one game has one kickoff. Tab and sort chips swap
+`#pick-detail` only, so the slate keeps its scroll and search; the back link drops `game` and `cat`, keeps `q` and
+`win`, and swaps the whole body.
 
 Game selection replaces `#pick-body`, which can reset the slate's scroll. `app.js` saves the `scrollTop` of the
 `[data-keep-scroll]` pane before an HTMX swap and restores it after. Times keep the existing contract: a `<time>`
@@ -180,8 +196,8 @@ games, and its activity entry reads "Adam changed X to Y". Its board answer is t
 A game whose props were never fetched appears as a prompt on the slate when the search matches its team, its matchup, or
 a roster player on it: "Props for BUF @ MIA aren't loaded yet." The "Load them" button calls
 `GET /games/{id}/props?slip=`, which runs `SyncGameProps` for that one game (credit floors and all) and then fires
-`board-updated`. The board itself never syncs props; opening a game, typing, filtering, and sorting spend no credits. See
-[Data refresh](data-refresh.md).
+`board-updated`. The board itself never syncs props; opening a game, switching tabs, typing, filtering, and sorting spend
+no credits. See [Data refresh](data-refresh.md).
 
 The board has its own empty states. A week with no stored games says the slate has not synced. A week with games but no
 odds says the lines have not synced, once, instead of offering "Load them" for every game. Once every game has kicked

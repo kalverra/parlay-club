@@ -123,7 +123,8 @@ slip outside every group is 404.
 | `POST /slips`                              | Create the slip from `week_id` (or a typed `season`, `season_type`, and `week`), `name`, `legs_per_member`, and `member_id` | 303 to `/slips/{id}`; a fixable error re-renders the form. |
 | `GET /slips/{id}`                          | Full slip page                                                  | Full page, with the payout form at the default stake. |
 | `GET /slips/{id}/pick`                     | Focused pick board: the game slate, the open game's picks, and the tray | Full page; no bottom bar. |
-| `GET /slips/{id}/pick/results`             | `#pick-body` for a search, window, game, category, or sort change | Optional `?q=`, `?cat=`, `?win=`, `?sort=`, and `?game=`; `#pick-body` partial. |
+| `GET /slips/{id}/pick/results`             | `#pick-body` for a search, window, or game change                | Optional `?q=`, `?cat=`, `?win=`, `?sort=`, and `?game=`; `#pick-body` partial. |
+| `GET /slips/{id}/pick/detail`              | `#pick-detail` for a tab or sort change                          | Optional `?q=`, `?cat=`, `?sort=`, `?win=`, and `?game=`; `#pick-detail` partial, or the "Pick a game" placeholder without an open game. |
 | `GET /slips/{id}/pick/swap`                | Swap sheet for one unpicked row                                 | Row fields in the query; swap partial. |
 | `GET /slips/{id}/tray`                     | The viewer's picks, progress, warnings, and one action          | Tray partial. Refreshes on `tray-updated` and `slip-updated`. |
 | `GET /slips/{id}/panel`                    | Members, legs, odds, lock state, and banner                     | Panel partial. Refreshes on `slip-updated`. |
@@ -174,7 +175,8 @@ without waiting for the SSE stream. See [Export](../concepts/export.md).
 | Method + path                   | Purpose                                                                  | Response |
 | ------------------------------- | ------------------------------------------------------------------------ | -------- |
 | `GET /slips/{id}/pick`          | Focused pick board: the game slate, the open game's picks, and the tray   | Full page, no bottom bar |
-| `GET /slips/{id}/pick/results`  | `#pick-body` for a search, window, game, category, or sort change         | `#pick-body` partial |
+| `GET /slips/{id}/pick/results`  | `#pick-body` for a search, window, or game change                         | `#pick-body` partial |
+| `GET /slips/{id}/pick/detail`   | `#pick-detail` for a tab or sort change                                   | `#pick-detail` partial, or the "Pick a game" placeholder |
 | `GET /slips/{id}/pick/swap`     | Swap sheet for one unpicked row                                          | Swap partial |
 | `GET /games`                    | 303 to the active group's week                                           | Redirect |
 | `GET /games/{id}/props`         | Load one game's props on demand, or render its prop partial               | 200 with `Hx-Trigger: board-updated` when `?slip=`, otherwise a partial |
@@ -184,18 +186,19 @@ and the viewer's legs, then hands them to `internal/board`. `board.Build` folds 
 viewer's home-book price when it carries the pick and the median across books otherwise, and drops games that have
 kicked off. `board.Search` applies the query, category, window, sort, and one-game filter, and names games that match the
 query but whose props were never fetched. `board.Slates` turns the same rows into one card per upcoming game for the
-slate. The handler sets `Page.Wide`, so the header and main use `max-w-6xl`, and sets the slip's `data-live-url`, so the
-page opens one stream.
+slate, and `board.Detail` shapes the open game's header, tabs, and the active tab's lines or player cards. The handler
+sets `Page.Wide`, so the header and main use `max-w-6xl`, and sets the slip's `data-live-url`, so the page opens one
+stream.
 
 The board's query contract:
 
 | Parameter | Screen        | Meaning |
 | --------- | ------------- | ------- |
 | `game`    | slate, detail | The open game. Absent shows the slate. An unknown game, a kicked-off game, or a game the window hides is dropped. |
-| `cat`     | detail        | The open category: `lines`, `team_totals`, `passing`, `rushing`, `receiving`, `tds`, or `kicking`. Unknown values fall back to all. |
+| `cat`     | detail        | The open tab: `lines`, `passing`, `rushing`, `receiving`, `tds`, or `kicking`. `team_totals` folds into `lines`. An unknown value opens `lines` when it has rows, otherwise the first tab that does. |
 | `q`       | slate, detail | Search text. Matches a matchup, team, venue, or roster player on the slate, and a row in the open game. |
 | `win`     | slate         | Kickoff window: `sun_morning`, `sun_early`, `sun_late`, `sun_night`, or `monday`, in Eastern time. Unknown values fall back to any time. |
-| `sort`    | detail        | `kickoff` (default), `player`, `category`, or `odds` (shortest price first). Unknown values fall back to kickoff. |
+| `sort`    | detail        | `player` (default), `odds` (shortest price first), or `line` (highest line first). Kickoff, category, and unknown values resolve to `player`. |
 
 The slate shows one card per upcoming game, ordered by kickoff, with the matchup, venue, kickoff, spread, total,
 moneyline, and either "Explore N props" or "No props yet". A game with no stored odds still gets a card, with no lines
@@ -206,11 +209,19 @@ Eastern), Sun early (before 4), Sun late (before 7), Sun night, and Monday. A ch
 appears only when it has rows. A card is a link with a plain `href` to `/slips/{id}/pick?game=` and an `hx-get` to the
 results URL; both swap `#pick-body` and push the full page URL. `#pick-body` also re-fetches itself on `board-updated`.
 
-Inside the open game, category chips (lines, team totals, passing, rushing, receiving, TDs, kicking) and sort chips
-(kickoff, player, category, odds) swap the same `#pick-body` partial. The "All games" back link drops `game` and `cat`,
-keeps `q` and `win`, and swaps the same partial. A search filters the open game's rows. An unknown category or sort
-falls back to all or kickoff, and a game that is unknown, kicked off, or hidden by the window falls back to the slate
-instead of a 404.
+Inside the open game, the detail has a pinned header with the back link, matchup, kickoff, venue, and a Research link,
+then a horizontal tab bar and the sort chips. The tabs are Lines, Passing, Rushing, Receiving, TDs, and Kicking. Team
+totals fold into Lines, a tab appears only when it has rows or is open, and each badge counts its rows, so the Lines
+badge includes both sides of each line. Tab and sort chips swap `#pick-detail` and push the full page URL, leaving the
+slate and its scroll alone. An unknown category opens Lines when it has rows, otherwise the first tab that does; `sort`
+resolves to `player`, `odds`, or `line`, and anything else reads as `player`. The "All games" back link drops `game` and
+`cat`, keeps `q` and `win`, and swaps `#pick-body`. A search filters the open game's rows. An unknown game, a kicked-off
+game, or a game the window hides falls back to the slate instead of a 404.
+
+`GET /slips/{id}/pick/detail` answers with `#pick-detail`: the open game's header, tabs, sort chips, and the active tab's
+rows. The Lines tab shows the game lines first, then team totals grouped by team; a prop tab shows one card per player
+with position and team and every market that player has in the tab. Without an open game the route renders the "Pick a
+game" placeholder, not the slate.
 
 An unpicked row posts `POST /slips/{id}/legs` with `quick=1&from=board`; a picked row sends
 `DELETE /legs/{id}?from=board`. Both answer with the row and fire `Hx-Trigger: tray-updated`. At the limit, an unpicked
