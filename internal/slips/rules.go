@@ -23,6 +23,8 @@ var (
 	ErrLegsPerMemberTooLow = errors.New("a member already has more legs than that")
 	// ErrKickoffLocked is returned once a leg's game has kicked off.
 	ErrKickoffLocked = errors.New("that game already kicked off")
+	// ErrGameOutsideScope is returned when a leg's game does not belong to the slip's slate scope.
+	ErrGameOutsideScope = errors.New("that game is outside this slip's slate")
 	// ErrLockedIn is returned when a locked-in member tries to change their legs.
 	ErrLockedIn = errors.New("you've locked in")
 	// ErrLegsNotReady is returned when a member locks in without exactly
@@ -667,8 +669,9 @@ func loadJoin(
 	return slip, db.SlipMember{User: actor}, members, nil
 }
 
-// checkKickoff refuses a game that has kicked off, unless the slip is for a
-// past week, where history can be entered.
+// checkKickoff refuses a game that has kicked off or does not belong to the
+// slip's slate scope, unless the slip is for a past week, where history can
+// be entered.
 func checkKickoff(
 	ctx context.Context,
 	store *db.Store,
@@ -693,6 +696,9 @@ func checkKickoff(
 	}
 	if !now.Before(kickoff) {
 		return ErrKickoffLocked
+	}
+	if !slip.SlateScope.Matches(kickoff) {
+		return ErrGameOutsideScope
 	}
 	return nil
 }

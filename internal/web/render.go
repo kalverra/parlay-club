@@ -11,6 +11,7 @@ import (
 // The shell and the auth screens share the layout, so they share this map.
 var pageFiles = map[string]string{
 	"home":      "templates/home.html",
+	"week":      "templates/week.html",
 	"slip":      "templates/slip.html",
 	"pick":      "templates/pick.html",
 	"research":  "templates/research.html",

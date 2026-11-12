@@ -3,9 +3,9 @@ id: routes
 title: Routes
 type: reference
 summary: Every HTTP route the server serves, the middleware in front of them, and the status codes, HTMX headers, and SSE frames handlers return.
-tags: [routes, http, handlers, middleware, htmx, sse, props, research]
-sources: [cmd/server/main.go, cmd/server/sandbox.go, internal/auth/handlers.go, internal/groups/handlers.go, internal/board/board.go, internal/web/routes.go, internal/web/home.go, internal/web/games.go, internal/web/pick.go, internal/web/slips.go, internal/web/research.go, internal/web/export.go, internal/sandbox/seed.go, internal/sandbox/plan.go, internal/live/stream.go, web/templates/home.html, web/templates/pick.html, web/templates/sandbox.html]
-last_verified: 2026-11-11
+tags: [routes, http, handlers, middleware, htmx, sse, props, research, schedules]
+sources: [cmd/server/main.go, cmd/server/sandbox.go, internal/auth/handlers.go, internal/groups/handlers.go, internal/board/board.go, internal/web/routes.go, internal/web/home.go, internal/web/games.go, internal/web/pick.go, internal/web/slips.go, internal/web/schedules.go, internal/web/research.go, internal/web/export.go, internal/sandbox/seed.go, internal/sandbox/plan.go, internal/live/stream.go, web/templates/home.html, web/templates/pick.html, web/templates/week.html, web/templates/sandbox.html]
+last_verified: 2026-11-12
 ---
 
 # Routes
@@ -76,7 +76,7 @@ accept the shared invite. A forged group cookie still falls back to a real membe
 | Method + path             | Purpose                                                                                          |
 | ------------------------- | ------------------------------------------------------------------------------------------------ |
 | `GET /{$}`                | Landing page: one card per group; a person with one group is sent to that group's week            |
-| `GET /groups/{id}/week`   | Make the group active, then open its newest slip of the latest week or the create-slip form       |
+| `GET /groups/{id}/week`   | Make the group active, ensure scheduled slips exist, then redirect to the slip (1 slip), render the week hub (>1 slips), or show create form (0 slips) |
 | `GET /games`              | 303 to the active group's week; the pick board owns the week                                     |
 | `GET /research`           | Research page: week games, player search, injury reports, and last-5 hit bars                     |
 | `GET /record`             | Record Book placeholder                                                                          |
@@ -87,30 +87,43 @@ keeps a full page but leaves the bar; the hub links to the pick board, and pick 
 `GET /{$}` lists every group oldest first and carries `data-refresh-on-visible`, so the browser refetches the list when
 the tab becomes visible instead of holding a stream. A person in one group gets a 303 to `/groups/{id}/week`.
 
-`GET /groups/{id}/week` answers 404 for a group the person does not belong to, sets `pc_group`, then 303s to the newest
-slip of the latest week or renders the create form. It uses the same group-switch seam as a slip link from another
-group.
+`GET /groups/{id}/week` answers 404 for a group the person does not belong to, sets `pc_group`, and calls
+`slips.EnsureWeekSlips` to auto-generate slips for active recurring schedules. With zero slips for the week, it renders
+the create form. With exactly one slip, it 303s directly to `/slips/{id}`. With multiple slips, it renders the week hub
+(`week.html`) with cards for each slip (name, scope badge, next step, deadline, progress) and a button to add a one-off
+slip. It uses the same group-switch seam as a slip link from another group.
 
 The slip handler file also serves `/me` and the slip and leg routes below. `/record` renders its empty state until a
 later change fills it in. The pick board and Research are described below.
 
 ### Groups
 
-| Method + path                          | Purpose                                                     | Response |
-| -------------------------------------- | ----------------------------------------------------------- | -------- |
-| `GET /groups`                          | Manage groups: create form, invite links, and leave buttons  | Full page |
-| `POST /groups`                         | Create a group from `name` and make it active                | 303 to `/groups` |
-| `POST /groups/switch`                  | Make the group in `group_id` active                          | `HX-Refresh` |
-| `POST /groups/{id}/reset-invite`       | Mint a new invite token and kill the old one                 | `HX-Refresh` |
-| `POST /groups/{id}/leave`              | Leave the group, keeping the person's legs                   | 303 to `/groups` |
-| `GET /join/{token}`                    | Join page naming the group and its active members            | Full page; unknown token 404 |
-| `POST /join/{token}`                   | Join the group idempotently and make it active               | 303 to `/` |
+| Method + path                                     | Purpose                                                                        | Response |
+| ------------------------------------------------- | ------------------------------------------------------------------------------ | -------- |
+| `GET /groups`                                     | Manage groups: create form, invite links, and leave buttons                     | Full page |
+| `POST /groups`                                    | Create a group from `name` and make it active                                   | 303 to `/groups` |
+| `POST /groups/switch`                             | Make the group in `group_id` active                                             | `HX-Refresh` |
+| `POST /groups/{id}/reset-invite`                  | Mint a new invite token and kill the old one                                    | `HX-Refresh` |
+| `POST /groups/{id}/leave`                         | Leave the group, keeping the person's legs                                      | 303 to `/groups` |
+| `GET /join/{token}`                               | Join page naming the group and its active members                               | Full page; unknown token 404 |
+| `POST /join/{token}`                              | Join the group idempotently and make it active                                  | 303 to `/` |
+| `GET /groups/{id}/schedules`                      | List recurring slip schedules for the group                                    | JSON array of schedules |
+| `POST /groups/{id}/schedules`                     | Add a recurring slip schedule from `name`, `slate_scope`, and `legs_per_member` | `HX-Refresh`, 201 JSON, or 303 to `/groups/{id}/week` |
+| `POST /groups/{id}/schedules/{scheduleID}/active` | Set or toggle schedule active status (`active` on/off)                          | `HX-Refresh`, 200 JSON, or 303 to `/groups/{id}/week` |
+| `PATCH /groups/{id}/schedules/{scheduleID}`       | Update `name`, `slate_scope`, or `legs_per_member`                              | `HX-Refresh`, 200 JSON, or 303 to `/groups/{id}/week` |
+| `DELETE /groups/{id}/schedules/{scheduleID}`      | Delete a recurring slip schedule                                               | `HX-Refresh`, 204 No Content, or 303 to `/groups/{id}/week` |
 
 A signed-out visitor is sent to `/login` with the invite path kept in `pc_oauth`, so sign-in returns them to the join
 page. Only a `/join/` path is accepted as a return target.
 
 `POST /groups/{id}/reset-invite` and `POST /groups/{id}/leave` answer 404 when the caller is not in that group, so a
 stranger cannot learn which groups exist.
+
+Slip schedule routes manage recurring parlays for a group. They accept both HTML form submissions (returning
+`HX-Refresh: true` for HTMX or 303 redirects) and JSON payloads (returning JSON entities). Handlers verify caller
+membership in the target schedule's group; an unknown schedule or a request from a non-member answers 404 to avoid
+leaking group existence. Input validation errors (blank name, duplicate name within the group, invalid slate scope, or
+legs outside 1–5) answer 422.
 
 ### Slips
 
@@ -119,8 +132,8 @@ slip outside every group is 404.
 
 | Method + path                              | Purpose                                                         | Request and response |
 | ------------------------------------------ | --------------------------------------------------------------- | -------------------- |
-| `GET /slips/new`                           | Create-slip page                                                | Optional `?week=`; unknown week 404. Full page. |
-| `POST /slips`                              | Create the slip from `week_id` (or a typed `season`, `season_type`, and `week`), `name`, `legs_per_member`, and `member_id` | 303 to `/slips/{id}`; a fixable error re-renders the form. |
+| `GET /slips/new`                           | Create-slip page                                                | Optional `?week=` and `?slate_scope=` (or `?scope=`); unknown week 404. Full page. |
+| `POST /slips`                              | Create the slip from `week_id` (or a typed `season`, `season_type`, and `week`), `name`, `slate_scope`, `legs_per_member`, and `member_id` | 303 to `/slips/{id}`; a fixable error re-renders the form. |
 | `GET /slips/{id}`                          | Full slip page                                                  | Full page, with the payout form at the default stake. |
 | `GET /slips/{id}/pick`                     | Focused pick board: the game slate, the open game's picks, and the dock | Full page; no bottom bar. |
 | `GET /slips/{id}/pick/results`             | `#pick-body` for a search, window, or game change                | Optional `?q=`, `?cat=`, `?win=`, `?sort=`, and `?game=`; `#pick-body` partial. |
@@ -171,6 +184,9 @@ and never fetches or writes. The slip page includes it, and the wrapper refreshe
 the card. The lock and unlock responses carry `Hx-Trigger: slip-updated`, so the person who acts sees the card change
 without waiting for the SSE stream. See [Export](../concepts/export.md).
 
+When a week has multiple slips, `GET /slips/{id}` and `GET /slips/{id}/panel` render a horizontal sibling slip switcher
+bar in the header with links to each sibling slip and their status summaries (`(Locked)`, `(1/2 Picks)`, `(Won)`).
+
 ### Pick board
 
 | Method + path                   | Purpose                                                                  | Response |
@@ -185,14 +201,15 @@ without waiting for the SSE stream. See [Export](../concepts/export.md).
 | `GET /games`                    | 303 to the active group's week                                           | Redirect |
 | `GET /games/{id}/props`         | Load one game's props on demand, or render its prop partial               | 200 with `Hx-Trigger: board-updated` when `?slip=`, otherwise a partial |
 
-`GET /slips/{id}/pick` is the hub's pick action. It reads the week's games, one `OddsForWeek` read, the week's rosters,
-and the viewer's legs, then hands them to `internal/board`. `board.Build` folds one row per selection, using the
-viewer's home-book price when it carries the pick and the median across books otherwise, and drops games that have
-kicked off. `board.Slates` turns the same rows into one card per upcoming game for the slate, `board.StartedCount`
-counts the games that already kicked off for the empty state, and `board.Detail` shapes the open game's header, tabs,
-and the active tab's lines or player cards. A card is marked unloaded when its game has lines but no prop rows. The
-handler sets `Page.Wide`, so the header and main use `max-w-6xl`, and sets the slip's `data-live-url`, so the page opens
-one stream.
+`GET /slips/{id}/pick` is the hub's pick action. It filters the week's games by the slip's `slate_scope` via
+`slips.FilterGamesByScope`, so games outside the scope are omitted from the slate, window chips, and detail drilldowns.
+It reads the filtered games, one `OddsForWeek` read, the week's rosters, and the viewer's legs, then hands them to
+`internal/board`. `board.Build` folds one row per selection, using the viewer's home-book price when it carries the pick
+and the median across books otherwise, and drops games that have kicked off. `board.Slates` turns the same rows into one
+card per upcoming game for the slate, `board.StartedCount` counts the games that already kicked off for the empty state,
+and `board.Detail` shapes the open game's header, tabs, and the active tab's lines or player cards. A card is marked
+unloaded when its game has lines but no prop rows. The handler sets `Page.Wide`, so the header and main use `max-w-6xl`,
+and sets the slip's `data-live-url`, so the page opens one stream.
 
 The board's query contract:
 
@@ -201,35 +218,36 @@ The board's query contract:
 | `game`    | slate, detail | The open game. Absent shows the slate. An unknown game, a kicked-off game, or a game the window hides is dropped. |
 | `cat`     | detail        | The open tab: `lines`, `passing`, `rushing`, `receiving`, `tds`, or `kicking`. `team_totals` folds into `lines`. An unknown value opens `lines` when it has rows, otherwise the first tab that does. |
 | `q`       | slate, detail | Search text. Matches a matchup, team, venue, or roster player on the slate, and a row in the open game. |
-| `win`     | slate         | Kickoff window: `sun_morning`, `sun_early`, `sun_late`, `sun_night`, or `monday`, in Eastern time. Unknown values fall back to any time. |
+| `win`     | slate         | Kickoff window: `thursday`, `sun_morning`, `sun_early`, `sun_late`, `sun_night`, or `monday`, in Eastern time. Unknown values fall back to any time. |
 | `sort`    | detail        | `player` (default), `odds` (shortest price first), or `line` (highest line first). Kickoff, category, and unknown values resolve to `player`. |
 
 The slate shows one card per upcoming game, ordered by kickoff, with the matchup, venue, kickoff, spread, total,
 moneyline, and either "Explore N props" or "No props yet". A game with no stored odds still gets a card, with no lines
 and no props. The open game is highlighted.
 
-The search input debounces at 250 ms and swaps `GET /slips/{id}/pick/results`. Window chips are Sun morning (before noon
-Eastern), Sun early (before 4), Sun late (before 7), Sun night, and Monday. A chip shows how many rows it covers and
-appears only when it has rows. A card is a link with a plain `href` to `/slips/{id}/pick?game=` and an `hx-get` to the
-results URL; both swap `#pick-body` and push the full page URL. The results response also carries `HX-Push-Url` with the
-full page URL built from the resolved query, so a search writes `q` into the address bar. `#pick-slate` re-fetches itself
-from `GET /slips/{id}/pick/slate` on `board-updated`, so the cards follow a prop sync without touching the open detail.
+The search input debounces at 250 ms and swaps `GET /slips/{id}/pick/results`. Window chips are Thursday, Sun morning
+(before noon Eastern), Sun early (before 4), Sun late (before 7), Sun night, and Monday. A chip shows how many rows it
+covers and appears only when it has rows. A card is a link with a plain `href` to `/slips/{id}/pick?game=` and an
+`hx-get` to the results URL; both swap `#pick-body` and push the full page URL. The results response also carries
+`HX-Push-Url` with the full page URL built from the resolved query, so a search writes `q` into the address bar.
+`#pick-slate` re-fetches itself from `GET /slips/{id}/pick/slate` on `board-updated`, so the cards follow a prop sync
+without touching the open detail.
 
 Inside the open game, the detail has a pinned header with the back link, matchup, kickoff, venue, and a Research link,
 then a horizontal tab bar and the sort chips. The tabs are Lines, Passing, Rushing, Receiving, TDs, and Kicking. Team
 totals fold into Lines, a tab appears only when it has rows or is open, and each badge counts its rows, so the Lines
 badge includes both sides of each line. Tab and sort chips swap `#pick-detail` and push the full page URL, leaving the
 slate and its scroll alone. `#pick-detail` re-fetches itself from its resolved tab and sort on `board-updated`, and a
-tab or sort response out-of-band syncs the search form's hidden `cat` and `sort`, so a later search or live refresh keeps
-the open tab. An unknown category opens Lines when it has rows, otherwise the first tab that does; `sort` resolves to
-`player`, `odds`, or `line`, and anything else reads as `player`. The "All games" back link drops `game` and `cat`, keeps
-`q` and `win`, and swaps `#pick-body`. A search filters the open game's rows. An unknown game, a kicked-off game, or a
-game the window hides falls back to the slate instead of a 404.
+tab or sort response out-of-band syncs the search form's hidden `cat` and `sort`, so a later search or live refresh
+keeps the open tab. An unknown category opens Lines when it has rows, otherwise the first tab that does; `sort` resolves
+to `player`, `odds`, or `line`, and anything else reads as `player`. The "All games" back link drops `game` and `cat`,
+keeps `q` and `win`, and swaps `#pick-body`. A search filters the open game's rows. An unknown game, a kicked-off game,
+or a game the window hides falls back to the slate instead of a 404.
 
-`GET /slips/{id}/pick/detail` answers with `#pick-detail`: the open game's header, tabs, sort chips, and the active tab's
-rows. The Lines tab shows the game lines first, then team totals grouped by team; a prop tab shows one card per player
-with position and team and every market that player has in the tab. Without an open game the route renders the "Pick a
-game" placeholder, not the slate.
+`GET /slips/{id}/pick/detail` answers with `#pick-detail`: the open game's header, tabs, sort chips, and the active
+tab's rows. The Lines tab shows the game lines first, then team totals grouped by team; a prop tab shows one card per
+player with position and team and every market that player has in the tab. Without an open game the route renders the
+"Pick a game" placeholder, not the slate.
 
 A side of an unpicked line posts `POST /slips/{id}/legs` with `quick=1&from=board`; the picked side sends
 `DELETE /legs/{id}?from=board`. The other side of a line that already holds a pick sends `PUT /legs/{id}` with the new
@@ -240,10 +258,10 @@ longer rebuild, such as a hand-typed leg with no stored odds, answers one option
 removes, or switches.
 
 At the limit, a line with neither side picked opens `GET /slips/{id}/pick/swap`, which lists the viewer's unlocked legs;
-a choice sends `PUT /legs/{old}` with `from=board` and the new pick's fields. The sheet sits outside the row, so its form
-targets the row's `pick-line-...` id instead of `closest`, and the handler answers with the same refreshed pair row and
-`Hx-Trigger: tray-updated`. A switch that moves the leg to another line adds `board-updated` to the trigger, so the line
-left behind loses its stale delete button.
+a choice sends `PUT /legs/{old}` with `from=board` and the new pick's fields. The sheet sits outside the row, so its
+form targets the row's `pick-line-...` id instead of `closest`, and the handler answers with the same refreshed pair row
+and `Hx-Trigger: tray-updated`. A switch that moves the leg to another line adds `board-updated` to the trigger, so the
+line left behind loses its stale delete button.
 
 `GET /slips/{id}/tray` renders the viewer's legs with remove buttons (`DELETE /legs/{id}?from=tray`), progress, the
 analyzer warnings that name one of their legs, and one action back to the hub. It loads into the dock's sheet and
@@ -253,10 +271,10 @@ combined price of the viewer's legs, and refreshes on the same two signals. Remo
 
 A game with stored lines but no prop rows offers "Load them" on its slate card and in its open detail. The button calls
 `GET /games/{id}/props?slip=`, which runs `SyncGameProps` for that one game and answers 200 with
-`Hx-Trigger: board-updated`; `#pick-slate` refetches from `/pick/slate` and `#pick-detail` refetches from its resolved tab
-and sort. Opening the board, opening a game, typing, filtering, and sorting call no sync. A week with no stored games says
-the slate has not synced. A week with games but no odds says the lines have not synced once, above cards that carry no
-lines. Once every game has kicked off, the slate says picks are closed.
+`Hx-Trigger: board-updated`; `#pick-slate` refetches from `/pick/slate` and `#pick-detail` refetches from its resolved
+tab and sort. Opening the board, opening a game, typing, filtering, and sorting call no sync. A week with no stored
+games says the slate has not synced. A week with games but no odds says the lines have not synced once, above cards that
+carry no lines. Once every game has kicked off, the slate says picks are closed.
 
 `GET /games` uses the old Games link as a 303 to `/groups/{active}/week`, where the week route opens the group's newest
 slip. Without an active group it redirects to `/`.
@@ -314,6 +332,8 @@ outside the active group is 404.
 | Code | When |
 | ---- | ---- |
 | 200  | Pages, partials, and successful HTMX writes. Redirects and refreshes send 200 with an `HX-*` header. |
+| 201  | A created resource for JSON requests, such as adding a recurring schedule. |
+| 204  | A successful write with no content returned, such as deleting a schedule. |
 | 303  | A plain form redirect or landing redirect, such as create slip, save profile, logout, joining a group, or the one-group landing. |
 | 400  | A malformed form body, or a failed Google round trip. |
 | 403  | A non-GET request without `HX-Request: true`. |
@@ -321,8 +341,9 @@ outside the active group is 404.
 | 422  | A fixable rule refusal or form error. The body is the short message shown in the form. |
 | 500  | An unexpected store or render failure, or a signed-in user with no group. |
 
-Rule violations from `internal/slips` (`ErrLegLimit`, `ErrKickoffLocked`, `ErrLockedIn`, `ErrLegsNotReady`, and the
-rest) answer 422 with the message from [Slips](../concepts/slips.md). The form shows it and keeps every pick allowed.
+Rule violations from `internal/slips` (`ErrLegLimit`, `ErrKickoffLocked`, `ErrGameOutsideScope`, `ErrLockedIn`,
+`ErrLegsNotReady`, and the rest) and schedule rules (`ErrScheduleNameRequired`, `ErrScheduleNameTaken`, invalid scope,
+or invalid leg count) answer 422 with a short descriptive message. The form shows it and keeps every pick allowed.
 
 ### HTMX headers
 

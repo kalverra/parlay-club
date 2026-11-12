@@ -9,10 +9,10 @@
 - [Response archive](concepts/archive.md): How every successful external API response is kept raw in SQLite, how the source key labels it, and how to read the stored metadata and gzipped bodies.
 - [Data refresh](concepts/data-refresh.md): How page loads and on-demand views drive lazy syncs of the slate, weather, game lines, props, rosters, injuries, game logs, and nfelo projections, with per-source staleness windows, single-flight, failure backoff, tiered Parlay API and The Odds API credit floors, an archive of every successful response, and a synchronous sandbox bootstrap.
 - [Export](concepts/export.md): How a locked slip turns stored sportsbook deep links into a one-tap combined DraftKings or FanDuel link, with per-leg taps, a manual list, and copy text for every pick that has no link.
-- [Groups](concepts/groups.md): How groups split people into shared clubs, how invites and leaving work, and how the active group scopes what a person sees.
+- [Groups](concepts/groups.md): How groups split people into shared clubs, how invites and leaving work, how recurring slip schedules automate weekly slips, and how the active group scopes what a person sees.
 - [Live updates](concepts/live-updates.md): How a slip page hears about changes through one SSE stream, and how the hub, deadlines, and client reconnect keep that stream cheap.
 - [Persistence](concepts/persistence.md): How one SQLite file holds every slip and every cached response, how Litestream restores and replicates it on Cloud Run, why only one process may write to it, and how the local sandbox keeps its own file and stage row.
-- [Slips](concepts/slips.md): How a group builds one shared parlay a week from the slate, with the hub's next-step banner and deadline, the game-first pick board and its pick dock, members, legs, votes, quick-add, create-slip defaults, grading, the editing and locking rules, and research.
+- [Slips](concepts/slips.md): How a group builds shared parlays from the slate, with slate scopes and deadline isolation, multi-slip week views, sibling slip switching, one-off slip creation, the hub's next-step banner and deadline, the game-first pick board and its pick dock, members, legs, votes, quick-add, create-slip defaults, grading, the editing and locking rules, and research.
 
 ## Decision
 
@@ -32,6 +32,7 @@
 - [Archive every external response](decisions/raw-response-archive.md): Add one append-only archive of raw responses in SQLite, written by a single seam that every outside call passes through.
 - [Slate, weather, and lines](decisions/slate-and-lines.md): Pull the Sunday and Monday slate from ESPN, stadium weather from Open-Meteo, and game lines from The Odds API, fetched only when someone opens the app and the data is stale.
 - [Live shared slips](decisions/slips-live.md): Add shared slips: each week has one or more slips, each slip has members, and every member adds the same number of legs.
+- [Thursday Night Games and Multi-Slip Events](decisions/thursday-and-multi-slips.md): Extend the game slate to ingest Thursday night football games.
 - [Make the weekly pick flow the center of the app](decisions/weekly-pick-flow.md): Land on your groups, see what the week needs on the hub, pick on a searchable board, lock in, vote, and export.
 
 ## Guide

@@ -1512,3 +1512,104 @@ func TestGamesRedirectsToTheActiveGroupWeek(t *testing.T) {
 	require.Equal(t, http.StatusSeeOther, recorder.Code)
 	assert.Equal(t, fmt.Sprintf("/groups/%d/week", fixture.group.ID), recorder.Header().Get("Location"))
 }
+
+func TestPickBoardFiltersSlateBySlipSlateScope(t *testing.T) {
+	t.Parallel()
+
+	loc, err := time.LoadLocation("America/New_York")
+	require.NoError(t, err)
+
+	now := time.Date(2026, 11, 4, 12, 0, 0, 0, loc) // Wednesday noon ET
+	fixture := newSlipFixtureAt(t, 2, func() time.Time { return now })
+
+	// Insert Thursday, Sunday, and Monday games.
+	thuGame := addSecondGameAt(
+		t, fixture, "401873037", "BAL", "JAX", "Baltimore Ravens", "Jacksonville Jaguars",
+		time.Date(2026, 11, 5, 20, 15, 0, 0, loc),
+	)
+	sunGame := addSecondGameAt(
+		t, fixture, "401873042", "MIA", "DET", "Miami Dolphins", "Detroit Lions",
+		time.Date(2026, 11, 8, 13, 0, 0, 0, loc),
+	)
+	monGame := addSecondGameAt(
+		t, fixture, "401873051", "MIN", "BUF", "Minnesota Vikings", "Buffalo Bills",
+		time.Date(2026, 11, 9, 20, 15, 0, 0, loc),
+	)
+
+	addGameOdds(t, fixture.store, thuGame.ID)
+	addGameOdds(t, fixture.store, sunGame.ID)
+	addGameOdds(t, fixture.store, monGame.ID)
+
+	thuSlip, err := fixture.store.CreateSlip(
+		t.Context(), fixture.group.ID, fixture.week.ID, nil, "Thursday Slip",
+		db.SlateScopeThursday, 2, []int64{fixture.user.ID},
+	)
+	require.NoError(t, err)
+
+	sunSlip, err := fixture.store.CreateSlip(
+		t.Context(), fixture.group.ID, fixture.week.ID, nil, "Sunday Slip",
+		db.SlateScopeSundayMain, 2, []int64{fixture.user.ID},
+	)
+	require.NoError(t, err)
+
+	// 1. Thursday slip pick board includes only the Thursday game.
+	recThu := httptest.NewRecorder()
+	fixture.handler.ServeHTTP(recThu, httptest.NewRequestWithContext(
+		t.Context(), http.MethodGet, fmt.Sprintf("/slips/%d/pick", thuSlip.ID), nil,
+	))
+	require.Equal(t, http.StatusOK, recThu.Code)
+	bodyThu := recThu.Body.String()
+	assert.Contains(t, bodyThu, "BAL @ JAX")
+	assert.NotContains(t, bodyThu, "MIA @ DET")
+	assert.NotContains(t, bodyThu, "MIN @ BUF")
+	assert.Contains(t, bodyThu, "win=thursday")
+	assert.NotContains(t, bodyThu, "win=sun_early")
+	assert.NotContains(t, bodyThu, "win=monday")
+
+	// Attempting to open out-of-scope Sunday game falls back without opening it.
+	recThuDetail := httptest.NewRecorder()
+	fixture.handler.ServeHTTP(recThuDetail, httptest.NewRequestWithContext(
+		t.Context(), http.MethodGet, fmt.Sprintf("/slips/%d/pick?game=%s", thuSlip.ID, sunGame.ID), nil,
+	))
+	require.Equal(t, http.StatusOK, recThuDetail.Code)
+	bodyThuDetail := recThuDetail.Body.String()
+	assert.NotContains(t, bodyThuDetail, "MIA @ DET")
+
+	// Partial slate endpoint also respects slate scope.
+	recThuSlate := httptest.NewRecorder()
+	fixture.handler.ServeHTTP(recThuSlate, httptest.NewRequestWithContext(
+		t.Context(), http.MethodGet, fmt.Sprintf("/slips/%d/pick/slate", thuSlip.ID), nil,
+	))
+	require.Equal(t, http.StatusOK, recThuSlate.Code)
+	bodyThuSlate := recThuSlate.Body.String()
+	assert.Contains(t, bodyThuSlate, "BAL @ JAX")
+	assert.NotContains(t, bodyThuSlate, "MIA @ DET")
+
+	// 2. Sunday Main slip pick board includes Sunday and Monday games, but excludes Thursday.
+	recSun := httptest.NewRecorder()
+	fixture.handler.ServeHTTP(recSun, httptest.NewRequestWithContext(
+		t.Context(), http.MethodGet, fmt.Sprintf("/slips/%d/pick", sunSlip.ID), nil,
+	))
+	require.Equal(t, http.StatusOK, recSun.Code)
+	bodySun := recSun.Body.String()
+	assert.NotContains(t, bodySun, "BAL @ JAX")
+	assert.Contains(t, bodySun, "MIA @ DET")
+	assert.Contains(t, bodySun, "MIN @ BUF")
+	assert.NotContains(t, bodySun, "win=thursday")
+	assert.Contains(t, bodySun, "win=sun_early")
+	assert.Contains(t, bodySun, "win=monday")
+
+	// 3. Full Week slip (fixture.slip) includes all games.
+	recFull := httptest.NewRecorder()
+	fixture.handler.ServeHTTP(recFull, httptest.NewRequestWithContext(
+		t.Context(), http.MethodGet, fmt.Sprintf("/slips/%d/pick", fixture.slip.ID), nil,
+	))
+	require.Equal(t, http.StatusOK, recFull.Code)
+	bodyFull := recFull.Body.String()
+	assert.Contains(t, bodyFull, "BAL @ JAX")
+	assert.Contains(t, bodyFull, "MIA @ DET")
+	assert.Contains(t, bodyFull, "MIN @ BUF")
+	assert.Contains(t, bodyFull, "win=thursday")
+	assert.Contains(t, bodyFull, "win=sun_early")
+	assert.Contains(t, bodyFull, "win=monday")
+}

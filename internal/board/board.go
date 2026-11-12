@@ -3,20 +3,16 @@
 package board
 
 import (
-	"fmt"
 	"math"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
-	// Embed the zone database so America/New_York resolves in a container
-	// without a separate tzdata package.
-	_ "time/tzdata"
-
 	"github.com/kalverra/parlay-club/internal/analyzer"
 	"github.com/kalverra/parlay-club/internal/db"
 	"github.com/kalverra/parlay-club/internal/parlay"
+	"github.com/kalverra/parlay-club/internal/tz"
 )
 
 // Category groups a row for the category chips.
@@ -71,6 +67,7 @@ type Window string
 
 // The kickoff windows the pick board filters by, in Eastern time.
 const (
+	WindowThursday      Window = "thursday"
 	WindowSundayMorning Window = "sun_morning"
 	WindowSundayEarly   Window = "sun_early"
 	WindowSundayLate    Window = "sun_late"
@@ -80,6 +77,7 @@ const (
 
 // Windows lists the window chips in display order.
 var Windows = []Window{
+	WindowThursday,
 	WindowSundayMorning,
 	WindowSundayEarly,
 	WindowSundayLate,
@@ -90,6 +88,8 @@ var Windows = []Window{
 // Label is the chip text.
 func (w Window) Label() string {
 	switch w {
+	case WindowThursday:
+		return "Thursday"
 	case WindowSundayMorning:
 		return "Sun morning"
 	case WindowSundayEarly:
@@ -243,15 +243,7 @@ type Query struct {
 }
 
 // eastern is the zone the kickoff windows use.
-var eastern = mustLoadLocation("America/New_York")
-
-func mustLoadLocation(name string) *time.Location {
-	location, err := time.LoadLocation(name)
-	if err != nil {
-		panic(fmt.Sprintf("load location %s: %v", name, err))
-	}
-	return location
-}
+var eastern = tz.Eastern
 
 // IsPropRow reports whether an odds row belongs to the prop sync group.
 func IsPropRow(row db.Odds) bool {
@@ -386,12 +378,15 @@ func categoryFor(market string) Category {
 	}
 }
 
-// windowFor maps a kickoff to its Eastern-time window chip. Monday covers the
-// whole day, so a Monday-night game that lands on Tuesday in UTC still reads
-// Monday here.
+// windowFor maps a kickoff to its Eastern-time window chip. Thursday and Monday
+// cover the whole day, so a late game that lands on the next day in UTC still
+// reads by its local Eastern day here.
 func windowFor(kickoff time.Time) Window {
 	easternTime := kickoff.In(eastern)
-	if easternTime.Weekday() == time.Monday {
+	switch easternTime.Weekday() {
+	case time.Thursday:
+		return WindowThursday
+	case time.Monday:
 		return WindowMonday
 	}
 	switch hour := easternTime.Hour(); {

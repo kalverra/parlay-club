@@ -5,7 +5,7 @@ type: runbook
 summary: How a commit reaches Cloud Run, why deploys pause during game windows, how to force one, and how to verify, roll back, and read the spend.
 tags: [deploy, cloud-run, github-actions, blackout, litestream, rollback, runbook]
 sources: [.github/workflows/deploy.yml, .github/workflows/ci.yml, deploy/blackout.sh, deploy/entrypoint.sh, docs/concepts/persistence.md, internal/seed/seed.go, cmd/server/main.go, internal/db/migrate.go]
-last_verified: 2026-11-08
+last_verified: 2026-11-12
 ---
 
 # Deploy
@@ -38,8 +38,8 @@ overlapping deploys are exactly what the blackout exists to prevent.
 
 ### The blackout
 
-`deploy/blackout.sh` refuses a deploy from Sunday 09:00 through 23:59 and Monday 20:00 through 23:59, in
-`America/New_York`, daylight saving included. It exits 1 inside those windows and 0 outside them.
+`deploy/blackout.sh` refuses a deploy from Thursday 20:00 through 23:59, Sunday 09:00 through 23:59, and Monday 20:00
+through 23:59, in `America/New_York`, daylight saving included. It exits 1 inside those windows and 0 outside them.
 
 The reason is the database. A new revision restores `/data/parlay.db` from the Litestream replica while the old revision
 may still be writing. Writes made in that gap can be lost. Outside the game windows the app is quiet enough that the gap
@@ -52,11 +52,12 @@ is the only way past the gate.
 Check the gate locally by pinning the clock with `NOW`:
 
 ```sh
-NOW=2026-11-08T15:00:00Z deploy/blackout.sh   # Sunday 10:00 New York: exits 1
-NOW=2026-11-09T15:00:00Z deploy/blackout.sh   # Monday 10:00 New York: exits 0
+NOW=2026-11-12T21:00:00-05:00 deploy/blackout.sh   # Thursday 21:00 New York: exits 1
+NOW=2026-11-08T15:00:00Z deploy/blackout.sh         # Sunday 10:00 New York: exits 1
+NOW=2026-11-09T15:00:00Z deploy/blackout.sh         # Monday 10:00 New York: exits 0
 ```
 
-`deploy/blackout_test.sh` covers both windows, both sides of their edges, and both EST and EDT. CI runs it on every
+`deploy/blackout_test.sh` covers all three windows, both sides of their edges, and both EST and EDT. CI runs it on every
 push, so a broken gate fails before it can block or allow a deploy.
 
 ### What the workflow does

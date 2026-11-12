@@ -78,7 +78,7 @@ func writeTemplates(t *testing.T, content string) string {
 	writeTemplate(t, dir, "layout.html", `{{define "layout"}}<main>{{template "content" .}}</main>{{end}}`)
 	writeTemplate(t, dir, "avatar.html", `{{define "avatar"}}{{end}}`)
 	writeTemplate(t, dir, "partials.html", "")
-	for _, page := range []string{"home", "slip", "pick", "research", "record", "login", "dev-login", "join", "groups", "profile", "sandbox"} {
+	for _, page := range []string{"home", "week", "slip", "pick", "research", "record", "login", "dev-login", "join", "groups", "profile", "sandbox"} {
 		writeTemplate(t, dir, page+".html", `{{define "content"}}`+content+`{{end}}`)
 	}
 

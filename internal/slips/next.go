@@ -52,6 +52,8 @@ func NextStep(
 	viewerID int64,
 	now time.Time,
 ) Next {
+	games = FilterGamesByScope(games, slip.SlateScope)
+
 	next := Next{
 		Result:   slip.Result,
 		Deadline: firstKickoff(games, now),
@@ -190,6 +192,20 @@ func membersShort(members []db.SlipMember, legs []db.Leg, limit int) []string {
 		}
 	}
 	return names
+}
+
+// FilterGamesByScope retains only games that match the slip's slate scope.
+func FilterGamesByScope(games []db.Game, scope db.SlateScope) []db.Game {
+	if len(games) == 0 {
+		return nil
+	}
+	filtered := make([]db.Game, 0, len(games))
+	for _, game := range games {
+		if scope.Matches(game.Kickoff) {
+			filtered = append(filtered, game)
+		}
+	}
+	return filtered
 }
 
 // firstKickoff is the earliest game still ahead of now, or nil when the week

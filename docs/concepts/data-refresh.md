@@ -5,7 +5,7 @@ type: concept
 summary: How page loads and on-demand views drive lazy syncs of the slate, weather, game lines, props, rosters, injuries, game logs, and nfelo projections, with per-source staleness windows, single-flight, failure backoff, tiered Parlay API and The Odds API credit floors, an archive of every successful response, and a synchronous sandbox bootstrap.
 tags: [refresh, sync, lazy, staleness, singleflight, backoff, credits, odds, parlay-api, the-odds-api, enrichment, fallback, props, weather, slate, live-window, nfelo, projections, archive, raw-responses, roster, gamelog, injuries, player-matching, sandbox, clock, pick-board]
 sources: [internal/refresh/refresh.go, internal/refresh/rules.go, internal/refresh/sources.go, internal/refresh/research.go, internal/refresh/nfelo.go, internal/refresh/publish.go, internal/refresh/live.go, internal/sandbox/*.go, internal/board/board.go, internal/db/sync.go, internal/db/players.go, internal/db/odds.go, internal/db/nfelo.go, internal/web/pick.go, internal/web/games.go, internal/ingest/nfelo/client.go, internal/ingest/archive/transport.go, cmd/server/main.go, cmd/server/sandbox.go]
-last_verified: 2026-11-11
+last_verified: 2026-11-12
 ---
 
 # Data refresh
@@ -14,8 +14,8 @@ last_verified: 2026-11-11
 
 Outside data comes in lazily. `internal/refresh` owns when. There is no cron, no Cloud Scheduler, and no background
 ticker. A full-page `GET` calls `Kick()` from middleware; it returns at once and does the work in the background. Each
-source has its own staleness window, its own single-flight, and its own failure backoff. Parlay API and The Odds API
-are the metered sources, so each free event list runs before its balances gate the paid calls.
+source has its own staleness window, its own single-flight, and its own failure backoff. Parlay API and The Odds API are
+the metered sources, so each free event list runs before its balances gate the paid calls.
 
 ## What kicks a sync
 
@@ -38,10 +38,10 @@ and returns the failures joined. Normal page loads still use `Kick()`; the sandb
 does not serve an empty database while the first morning sync is still running.
 
 On-demand user actions also trigger syncs directly. Tapping "Load them" on the pick board calls
-`SyncGameProps(ctx, gameID)`. Loading game research calls `SyncGameResearch(ctx, gameID)`. Loading player research
-calls `SyncPlayerResearch(ctx, athleteID)`. These run synchronously with a 10-second timeout, but share the same
-single-flight deduplication, staleness windows, and failure backoff as background syncs. The pick board itself never
-syncs props: opening it, typing a search, filtering, and sorting read stored odds only, so they spend no credits.
+`SyncGameProps(ctx, gameID)`. Loading game research calls `SyncGameResearch(ctx, gameID)`. Loading player research calls
+`SyncPlayerResearch(ctx, athleteID)`. These run synchronously with a 10-second timeout, but share the same single-flight
+deduplication, staleness windows, and failure backoff as background syncs. The pick board itself never syncs props:
+opening it, typing a search, filtering, and sorting read stored odds only, so they spend no credits.
 
 ## One pass
 
@@ -83,7 +83,7 @@ Each source records its last successful sync in `sync_state.fetched_at`. A sourc
 
 | Source key         | Data                                    | Stale after                                                                                                             | Skipped when                                                       |
 | ------------------ | --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
-| `espn:scoreboard`  | Latest week's slate, scores, and status | 10 min while any game is live; 30 min on Sunday or Monday; 6 h otherwise                                                 | Never                                                              |
+| `espn:scoreboard`  | Latest week's slate, scores, and status | 10 min while any game is live; 30 min on Thursday, Sunday, or Monday; 6 h otherwise                                     | Never                                                              |
 | `weather:{gameID}` | Kickoff-window forecast for one game    | 1 h                                                                                                                      | Indoor, unknown venue, more than 48 h before kickoff, or kicked off |
 | `odds:lines`       | The week's game lines                   | 24 h Monday–Friday; 12 h Saturday; 45 min Sunday before the last Sunday kickoff; 3 h after that and all day Monday      | No games, or every game has kicked off                             |
 | `odds:props:{gameID}` | Game prop odds                       | 2 h                                                                                                                     | Once game has kicked off                                           |
@@ -92,9 +92,9 @@ Each source records its last successful sync in `sync_state.fetched_at`. A sourc
 | `espn:gamelog:{athleteID}`| Athlete season game log and stats | 12 h                                                                                                                    | Never                                                              |
 | `nfelo:projections`| The week's model spreads, win probabilities, and QB adjustments | 12 h                                                                                                     | Not a regular-season week, no games, or every game has kicked off  |
 
-"Sunday" and "Monday" mean `America/New_York`. The zone database is embedded in the binary, so it resolves in the
-container without a separate `tzdata` package. The scoreboard's live flag comes from the stored games: any game with
-status `LIVE` shortens the window to 10 minutes.
+"Thursday", "Sunday", and "Monday" mean `America/New_York`. The zone database is embedded in the binary, so it resolves
+in the container without a separate `tzdata` package. The scoreboard's live flag comes from the stored games: any game
+with status `LIVE` shortens the window to 10 minutes.
 
 `odds:theoddsapi` is not a scheduled source. The Odds API calls ride inside the `odds:lines` pass, and refresh records
 their balance under that key so the next pass can enforce the fallback and enrichment floors.
@@ -105,9 +105,9 @@ and the venue map.
 
 nfelo is per week, not per game. One fetch of the whole CSV covers every NFL week since 2021, and refresh keeps only the
 rows that match the current week's games. A game with no matching row keeps its last projection, or has none. A
-non-regular-season week is skipped because the CSV's playoff week numbers are unverified, and a week whose games have all
-kicked off is skipped because the projections are pre-game numbers that no longer change. The source spends no Odds API
-credits, so it has no floor and does not wait on the odds sync.
+non-regular-season week is skipped because the CSV's playoff week numbers are unverified, and a week whose games have
+all kicked off is skipped because the projections are pre-game numbers that no longer change. The source spends no Odds
+API credits, so it has no floor and does not wait on the odds sync.
 
 ## Odds credits
 
@@ -119,17 +119,17 @@ Parlay API is primary and The Odds API enriches it or serves as fallback. The bu
 2. Store the primary balance under `odds:lines` and The Odds API balance under `odds:theoddsapi`.
 3. Below 50 Parlay API credits, skip its paid `/odds` call and log a warning. Cached rows keep serving. This is not a
    failure, so it does not trigger backoff.
-4. The Odds API buys lines when Parlay API bought them and The Odds API has at least 100 credits. It also buys them
-   when Parlay API is unconfigured, failed, or below its floor, provided The Odds API has at least 25. Otherwise it
-   stops after the free event list.
+4. The Odds API buys lines when Parlay API bought them and The Odds API has at least 100 credits. It also buys them when
+   Parlay API is unconfigured, failed, or below its floor, provided The Odds API has at least 25. Otherwise it stops
+   after the free event list.
 5. Merge the rows. A primary row with no link adopts The Odds API's link, sid, and event sid; when the linked line
    differs, it also adopts the linked line and price. A linked primary row keeps its line, price, and link. Secondary
    rows that fill a missing book or market are appended.
 6. Record the primary fetch and write the merged rows in one transaction. A fallback event ID fills
    `games.odds_event_id` only when the game has no stored ID, so a transient primary failure does not churn it.
 
-The paid responses carry every upcoming event, not just the synced week. Refresh writes only lines for matched games
-and drops the rest, so the `odds` table never takes a row for a game that does not exist locally. Team names arrive as
+The paid responses carry every upcoming event, not just the synced week. Refresh writes only lines for matched games and
+drops the rest, so the `odds` table never takes a row for a game that does not exist locally. Team names arrive as
 provider display names and are converted to the game's ESPN abbreviation before the write.
 
 A missing or unreadable remaining count is a sync failure, not a guessed balance. `odds.ErrNoAPIKey` means a provider is
@@ -137,21 +137,21 @@ disabled, not failed. If one provider fails while the other succeeds, refresh lo
 rows, so `odds:lines` does not enter backoff. If every configured provider fails, the sync returns the joined error and
 the source backs off with cached rows still served.
 
-Props and research data run on demand through `SyncGameProps`, `SyncGameResearch`, and `SyncPlayerResearch`.
-The pick board's "Load them" prompt, or a research partial, triggers an on-demand sync with a short 10-second timeout.
-The board never loops over games: each tap is a person asking for that one game.
+Props and research data run on demand through `SyncGameProps`, `SyncGameResearch`, and `SyncPlayerResearch`. The pick
+board's "Load them" prompt, or a research partial, triggers an on-demand sync with a short 10-second timeout. The board
+never loops over games: each tap is a person asking for that one game.
 
-- `odds:props:{gameID}`: Stale after 2 hours, skipped once kickoff has passed. Before matching players, it syncs
-  rosters (`espn:roster:{teamID}`) for both teams. It enforces the Parlay API 150-credit floor (`OddsPropsFloor`). When
-  The Odds API is configured and Parlay API bought props, it calls `EventProps` at or above 100 credits
-  (`TheOddsAPIEnrichFloor`) and merges via `odds.MergeProps` to populate DraftKings prop deep links. If Parlay API is
-  unconfigured, errors, returns no props, or sits below 150 credits, it falls back to The Odds API when at least 25
-  credits remain (`TheOddsAPIFallbackFloor`). Prop players are matched against team rosters via `ResolvePlayerMatch`.
+- `odds:props:{gameID}`: Stale after 2 hours, skipped once kickoff has passed. Before matching players, it syncs rosters
+  (`espn:roster:{teamID}`) for both teams. It enforces the Parlay API 150-credit floor (`OddsPropsFloor`). When The Odds
+  API is configured and Parlay API bought props, it calls `EventProps` at or above 100 credits (`TheOddsAPIEnrichFloor`)
+  and merges via `odds.MergeProps` to populate DraftKings prop deep links. If Parlay API is unconfigured, errors,
+  returns no props, or sits below 150 credits, it falls back to The Odds API when at least 25 credits remain
+  (`TheOddsAPIFallbackFloor`). Prop players are matched against team rosters via `ResolvePlayerMatch`.
 - `espn:roster:{teamID}`: Stale after 24 hours. Upserts team roster players into `roster_players` with normalized names.
 - `espn:summary:{gameID}`: Stale after 2 hours, skipped when game status is `FINAL`. Stores raw `injuries_json` on
   `games`.
-- `espn:gamelog:{athleteID}`: Stale after 12 hours. Upserts `player_gamelogs` with market stats. In addition to on-demand
-  research lookups, `Kick()` scans slip legs in the current week and syncs stale game logs in the background.
+- `espn:gamelog:{athleteID}`: Stale after 12 hours. Upserts `player_gamelogs` with market stats. In addition to
+  on-demand research lookups, `Kick()` scans slip legs in the current week and syncs stale game logs in the background.
 
 ## Failure and backoff
 
@@ -192,5 +192,5 @@ see [Live updates](live-updates.md).
 - Check each provider's credit floor after its free event list and before its paid call. Never buy lines on a stale or
   missing balance.
 - Publish once per committed change, never inside the transaction.
-- Keep one single-flight per source. The server injects the wall clock, tests inject a fixed clock, and sandbox mode injects
-  its scenario clock. Never read `time.Now` inside a staleness rule.
+- Keep one single-flight per source. The server injects the wall clock, tests inject a fixed clock, and sandbox mode
+  injects its scenario clock. Never read `time.Now` inside a staleness rule.

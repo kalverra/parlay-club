@@ -24,6 +24,44 @@ type HomeCard struct {
 	Summary string
 }
 
+// WeekPage is the multi-slip hub rendered for a group's week when multiple slips exist.
+type WeekPage struct {
+	Page
+	Group     db.Group
+	Week      db.Week
+	Cards     []WeekSlipCard
+	Schedules []ScheduleView
+}
+
+// ScheduleView holds schedule data formatted for templates.
+type ScheduleView struct {
+	ID            int64
+	Name          string
+	SlateScope    db.SlateScope
+	ScopeBadge    string
+	LegsPerMember int
+	IsActive      bool
+}
+
+// WeekSlipCard is one slip card shown in the multi-slip week view.
+type WeekSlipCard struct {
+	ID          int64
+	Name        string
+	ScopeBadge  string
+	NextStep    string
+	Deadline    *DeadlineView
+	MemberCount int
+	PicksCount  int
+	TotalPicks  int
+	LockedCount int
+	Progress    string
+}
+
+// scopeBadge returns the display label for a slip's slate scope badge.
+func scopeBadge(scope db.SlateScope) string {
+	return scope.Label()
+}
+
 // home lists every group the person belongs to, oldest first. A person with one
 // group skips the list and lands on that group's week. The list carries no live
 // stream; app.js refetches it when the tab becomes visible.
@@ -117,7 +155,8 @@ func (h *slipHandlers) groupStep(
 }
 
 // groupWeek switches the active group and opens the newest slip of the latest
-// week, or the create form when the group has none yet.
+// week, or the create form when the group has none yet. When multiple slips
+// exist for the week, it renders the multi-slip week hub.
 func (h *slipHandlers) groupWeek(w http.ResponseWriter, r *http.Request) {
 	if h.deps.Store == nil {
 		http.NotFound(w, r)
@@ -164,8 +203,9 @@ func (h *slipHandlers) groupWeek(w http.ResponseWriter, r *http.Request) {
 		h.serverError(w, err)
 		return
 	}
+	page.WeekLabel = weekLabel(week)
 
-	groupSlips, err := h.deps.Store.SlipsForWeek(r.Context(), group.ID, week.ID)
+	groupSlips, err := slips.EnsureWeekSlips(r.Context(), h.deps.Store, group.ID, week.ID)
 	if err != nil {
 		h.serverError(w, err)
 		return
@@ -174,7 +214,88 @@ func (h *slipHandlers) groupWeek(w http.ResponseWriter, r *http.Request) {
 		h.renderCreate(w, r, page, user, group, &week, nil)
 		return
 	}
-	h.redirect(w, r, fmt.Sprintf("/slips/%d", groupSlips[0].ID))
+	if len(groupSlips) == 1 {
+		h.redirect(w, r, fmt.Sprintf("/slips/%d", groupSlips[0].ID))
+		return
+	}
+
+	games, err := h.deps.Store.GamesForWeek(r.Context(), week.ID)
+	if err != nil {
+		h.serverError(w, err)
+		return
+	}
+
+	now := h.deps.now()
+	cards := make([]WeekSlipCard, 0, len(groupSlips))
+	for _, slip := range groupSlips {
+		members, err := h.deps.Store.SlipMembers(r.Context(), slip.ID)
+		if err != nil {
+			h.serverError(w, err)
+			return
+		}
+		legs, err := h.deps.Store.LegsForSlip(r.Context(), slip.ID)
+		if err != nil {
+			h.serverError(w, err)
+			return
+		}
+
+		next := slips.NextStep(slip, members, legs, games, user.ID, now)
+		var deadline *DeadlineView
+		if next.Deadline != nil {
+			deadline = newDeadlineView(games, *next.Deadline)
+		}
+
+		lockedCount := 0
+		for _, m := range members {
+			if m.LockedAt != nil {
+				lockedCount++
+			}
+		}
+
+		memberLabel := fmt.Sprintf("%d members", len(members))
+		if len(members) == 1 {
+			memberLabel = "1 member"
+		}
+		progress := fmt.Sprintf("%s · %d/%d picks", memberLabel, len(legs), len(members)*slip.LegsPerMember)
+
+		cards = append(cards, WeekSlipCard{
+			ID:          slip.ID,
+			Name:        slip.Name,
+			ScopeBadge:  scopeBadge(slip.SlateScope),
+			NextStep:    next.Label(),
+			Deadline:    deadline,
+			MemberCount: len(members),
+			PicksCount:  len(legs),
+			TotalPicks:  len(members) * slip.LegsPerMember,
+			LockedCount: lockedCount,
+			Progress:    progress,
+		})
+	}
+
+	schedules, err := h.deps.Store.GroupSlipSchedules(r.Context(), group.ID)
+	if err != nil {
+		h.serverError(w, err)
+		return
+	}
+	schedViews := make([]ScheduleView, 0, len(schedules))
+	for _, s := range schedules {
+		schedViews = append(schedViews, ScheduleView{
+			ID:            s.ID,
+			Name:          s.Name,
+			SlateScope:    s.SlateScope,
+			ScopeBadge:    s.SlateScope.Label(),
+			LegsPerMember: s.LegsPerMember,
+			IsActive:      s.IsActive,
+		})
+	}
+
+	h.renderPage(w, "week", WeekPage{
+		Page:      page,
+		Group:     group,
+		Week:      week,
+		Cards:     cards,
+		Schedules: schedViews,
+	})
 }
 
 // renderHome writes the group list, or just its list element for an HTMX

@@ -27,7 +27,11 @@ check() {
 	fi
 }
 
-# 2026-11-08 is a Sunday, in EST (UTC-5).
+# 2026-11-05 is a Thursday, 2026-11-08 is a Sunday, in EST (UTC-5).
+check 0 "2026-11-06T00:59:00Z" "Thursday 19:59 New York"
+check 1 "2026-11-06T01:00:00Z" "Thursday 20:00 New York"
+check 1 "2026-11-06T04:59:00Z" "Thursday 23:59 New York"
+check 0 "2026-11-06T05:00:00Z" "Friday 00:00 New York"
 check 0 "2026-11-08T13:59:00Z" "Sunday 08:59 New York"
 check 1 "2026-11-08T14:00:00Z" "Sunday 09:00 New York"
 check 1 "2026-11-09T04:59:00Z" "Sunday 23:59 New York"
@@ -39,10 +43,14 @@ check 0 "2026-11-10T05:00:00Z" "Tuesday 00:00 New York"
 check 0 "2026-11-07T17:00:00Z" "Saturday 12:00 New York"
 
 # The window follows New York local time through daylight saving.
+check 0 "2026-07-09T23:59:00Z" "Thursday 19:59 New York (EDT)"
+check 1 "2026-07-10T00:00:00Z" "Thursday 20:00 New York (EDT)"
 check 0 "2026-07-12T12:59:00Z" "Sunday 08:59 New York (EDT)"
 check 1 "2026-07-12T13:00:00Z" "Sunday 09:00 New York (EDT)"
 
 # Offsets with a colon work the same as Z.
+check 1 "2026-11-05T20:00:00-05:00" "Thursday 20:00 New York (offset)"
+check 0 "2026-11-05T19:59:00-05:00" "Thursday 19:59 New York (offset)"
 check 1 "2026-11-08T09:00:00-05:00" "Sunday 09:00 New York (offset)"
 check 0 "2026-11-08T08:59:00-05:00" "Sunday 08:59 New York (offset)"
 

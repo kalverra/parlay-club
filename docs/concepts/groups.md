@@ -2,10 +2,10 @@
 id: groups
 title: Groups
 type: concept
-summary: How groups split people into shared clubs, how invites and leaving work, and how the active group scopes what a person sees.
-tags: [groups, membership, invites, solo, scope, cookies]
-sources: [internal/groups/groups.go, internal/groups/handlers.go, internal/db/groups.go, internal/db/migrations/0001_init.sql, internal/auth/signin.go, internal/auth/cookies.go, internal/auth/middleware.go, internal/web/home.go, internal/web/slips.go, cmd/server/main.go, web/templates/home.html, web/templates/groups.html, web/templates/join.html, web/templates/layout.html, web/static/app.js]
-last_verified: 2026-11-11
+summary: How groups split people into shared clubs, how invites and leaving work, how recurring slip schedules automate weekly slips, and how the active group scopes what a person sees.
+tags: [groups, membership, invites, solo, scope, cookies, schedules]
+sources: [internal/groups/groups.go, internal/groups/handlers.go, internal/db/groups.go, internal/db/schedules.go, internal/db/migrations/0001_init.sql, internal/db/migrations/0009_multi_slip_events.sql, internal/auth/signin.go, internal/auth/cookies.go, internal/auth/middleware.go, internal/web/home.go, internal/web/slips.go, internal/web/schedules.go, internal/slips/slips.go, cmd/server/main.go, web/templates/home.html, web/templates/groups.html, web/templates/join.html, web/templates/layout.html, web/static/app.js]
+last_verified: 2026-11-12
 ---
 
 # Groups
@@ -14,18 +14,20 @@ last_verified: 2026-11-11
 
 A group is one club of people who share slips. It is the boundary for everything people see and change together. A
 person can belong to more than one group, and every person starts in a group of one so solo play needs no separate mode.
-There are no roles: every member can invite, reset the invite link, and leave.
+There are no roles: every member can invite, reset the invite link, leave, and configure recurring slip schedules.
 
 Weeks, games, odds, player matches, and `sync_state` stay global. Every group reads the same lines through the shared
 cache, so a second group spends no extra Odds API credits.
 
 ## Membership
 
-Two tables hold the boundary:
+Three tables hold the boundary:
 
 - `groups` holds the name, the invite token, and when the group was created. Names are not unique, so two clubs can both
   call themselves "Sunday Parlay Club".
 - `group_members` pairs a group with a user and records when they joined. The pair is the primary key.
+- `group_slip_schedules` holds recurring slip schedules for the group, defining the name, slate scope, legs per member,
+  and active status. Schedule names are unique per group.
 
 `auth.SignIn` creates a new user and a group named "Just me" in one transaction. A known Google subject or email keeps
 the user and the groups they already have. Anyone with a Google account can sign up; an invite is what adds someone to a
@@ -33,6 +35,22 @@ group that already has people in it. See [Access](access.md) for the sign-in flo
 
 `slips` carries `group_id NOT NULL`, and its unique key is `(group_id, week_id, name)`. A slip with the same name and
 week in two groups succeeds in both. Each person's legs stay theirs after they leave a group.
+
+## Recurring slip schedules
+
+Groups configure recurring slip schedules (`group_slip_schedules`) to automate their weekly rituals:
+
+- Each schedule defines a name, a slate scope (`thursday`, `sunday_main`, or `full_week`), a leg limit per member (1–5,
+  defaulting to 2), and an active toggle (`is_active`). Names are unique within a group.
+- Every group starts with a default active schedule: `Main Sunday Slip` (`sunday_main`, 2 legs). Existing groups were
+  backfilled with this schedule in migration 0009.
+- When resolving a group's active week, `EnsureWeekSlips` checks for slips matching each active schedule. If any are
+  missing for that week, it creates them and attaches all active group members. Slips created from a schedule store its
+  `schedule_id`.
+- Members can toggle schedules on or off, edit their slate scope or leg count, add new schedules, or delete them.
+  Pausing a schedule stops auto-creation for future weeks without modifying existing slips.
+- Members can also create ad-hoc one-off slips for the current week without a schedule (`schedule_id` is null). These do
+  not recur in future weeks.
 
 ## The active group
 
@@ -86,6 +104,7 @@ The group is the filter for shared data:
 - The landing page lists every group the person belongs to. The slip screens and the Record Book read the active group.
 - A route that names a group or slip requires membership, whatever `pc_group` says. A non-member gets a 404, the same as
   a missing slip. A member opening a slip from another of their groups switches the active group.
+- Recurring slip schedules belong to the group; listing or modifying schedules requires membership in that group.
 - Live streams check membership before subscribing, so a stream never carries another group's slip. `slip:{id}` topics
   stay private; `week:{weekID}` topics are signals with no group data.
 
@@ -111,8 +130,8 @@ and reloads the page.
 
 ## Trade-offs
 
-- No roles or permissions. Every member can invite, reset the link, and leave. A group is a boundary for what people
-  see, not a permission system.
+- No roles or permissions. Every member can invite, reset the link, leave, and configure recurring schedules. A group is
+  a boundary for what people see, not a permission system.
 - Invite links are bearer secrets. 128-bit tokens, one-click reset, and a join page that shows only names limit the
   harm.
 - Open sign-up means a stranger can reach the app. The shared cache and the credit floors bound the cost, and a stranger
@@ -124,7 +143,8 @@ and reloads the page.
 ## Related
 
 - [Access](access.md): Google sign-in, the session cookie, and the `pc_oauth` return path.
-- [Database schema](../reference/schema.md): the `groups`, `group_members`, and `slips` tables.
+- [Database schema](../reference/schema.md): the `groups`, `group_members`, `group_slip_schedules`, and `slips` tables.
+- [Routes](../reference/routes.md): group and slip schedule HTTP endpoints.
 - [Configuration](../reference/config.md): the values startup requires.
 - [Architecture](../../plan/architecture.md): routes, middleware, and the single-instance constraints.
 - [Product](../../plan/product.md): slips, screens, and the Record Book.

@@ -1,6 +1,6 @@
 #!/bin/sh
-# Refuse deploys during the game windows: Sunday 09:00–23:59 and Monday
-# 20:00–23:59 in America/New_York. Outside them a deploy is clear.
+# Refuse deploys during the game windows: Thursday 20:00–23:59, Sunday
+# 09:00–23:59, and Monday 20:00–23:59 in America/New_York. Outside them a deploy is clear.
 #
 # Reads NOW (an ISO-8601 timestamp with an offset or Z) when set, so tests can
 # pin the clock. Exits 1 inside a window, 0 outside it, and 2 when NOW cannot
@@ -26,7 +26,7 @@ else
 fi
 
 # Format that instant in the game's timezone. The minutes are shown but do not
-# affect the decision, because both windows start on the hour.
+# affect the decision, because all windows start on the hour.
 if stamp=$(TZ=America/New_York date -d "@$epoch" "+%w|%H|%M|%a %Y-%m-%d %H:%M %Z" 2>/dev/null); then
 	:
 else
@@ -41,7 +41,7 @@ pretty=$(printf '%s' "$stamp" | cut -d'|' -f4)
 hour=${hour#0}
 [ -n "$hour" ] || hour=0
 
-if { [ "$dow" -eq 0 ] && [ "$hour" -ge 9 ]; } || { [ "$dow" -eq 1 ] && [ "$hour" -ge 20 ]; }; then
+if { [ "$dow" -eq 0 ] && [ "$hour" -ge 9 ]; } || { [ "$dow" -eq 1 ] && [ "$hour" -ge 20 ]; } || { [ "$dow" -eq 4 ] && [ "$hour" -ge 20 ]; }; then
 	echo "blackout: deploys paused, $pretty is inside a game window." >&2
 	echo "blackout: deploying now can drop the old instance's last writes; re-run deploy.yml with force=true to override." >&2
 	exit 1

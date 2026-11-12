@@ -2,30 +2,33 @@
 id: slips
 title: Slips
 type: concept
-summary: How a group builds one shared parlay a week from the slate, with the hub's next-step banner and deadline, the game-first pick board and its pick dock, members, legs, votes, quick-add, create-slip defaults, grading, the editing and locking rules, and research.
-tags: [slips, weeks, legs, members, locking, grading, results, activity, groups, games, quick-add, nfelo, props, autocomplete, research, next-step, hub, pick-board, slate, drilldown, tabs, search, dock, tray, votes, voting]
-sources: [internal/slips/slips.go, internal/slips/rules.go, internal/slips/next.go, internal/board/board.go, internal/db/slips.go, internal/db/legs.go, internal/db/votes.go, internal/db/odds.go, internal/db/players.go, internal/db/weeks.go, internal/db/games.go, internal/web/games.go, internal/web/pick.go, internal/web/slips.go, internal/web/home.go, internal/web/research.go, web/static/app.js]
-last_verified: 2026-11-11
+summary: How a group builds shared parlays from the slate, with slate scopes and deadline isolation, multi-slip week views, sibling slip switching, one-off slip creation, the hub's next-step banner and deadline, the game-first pick board and its pick dock, members, legs, votes, quick-add, create-slip defaults, grading, the editing and locking rules, and research.
+tags: [slips, weeks, legs, members, locking, grading, results, activity, groups, games, quick-add, nfelo, props, autocomplete, research, next-step, hub, pick-board, slate, drilldown, tabs, search, dock, tray, votes, voting, slate-scopes, deadlines, multi-slip]
+sources: [internal/slips/slips.go, internal/slips/rules.go, internal/slips/next.go, internal/board/board.go, internal/db/slips.go, internal/db/legs.go, internal/db/votes.go, internal/db/odds.go, internal/db/players.go, internal/db/weeks.go, internal/db/games.go, internal/web/games.go, internal/web/pick.go, internal/web/slips.go, internal/web/home.go, internal/web/research.go, web/templates/week.html, web/static/app.js]
+last_verified: 2026-11-12
 ---
 
 # Slips
 
 ## Summary
 
-A group builds one shared parlay at a time. A **week** is an ESPN NFL week: a season, a season type (regular or
+A group builds shared parlays for each week. A **week** is an ESPN NFL week: a season, a season type (regular or
 postseason), and a week number. Its id is `season*1000 + season_type*100 + week_num`, so Week 9 of the 2026 regular
 season is `2026209`.
 
-A **slip** is one shared parlay inside a group and a week. A week usually has one slip, but a group can make more, and a
+A **slip** is one shared parlay inside a group and a week. Every slip has a **slate scope** (`thursday`, `sunday_main`,
+or `full_week`) that isolates its games and deadline. A week usually has one slip, but a group can make more, and a
 person can belong to several in the same week. The app tracks the picks. Each person places the bet at their own book
 with their own stake, and no money passes through the app.
 
 ## The hub
 
 `GET /slips/{id}` is the hub. A step banner leads, then the members and their legs, then the export card, the payout
-calculator, and the activity feed. In the `export` step the card moves above the banner, because placing the picks is the
-one thing left. The bottom bar keeps Groups, This week, and Record Book; the hub's one primary action is the way into
-picking. The hub stays one column at every width.
+calculator, and the activity feed. In the `export` step the card moves above the banner, because placing the picks is
+the one thing left. When a group has multiple slips in the active week, the header renders a horizontal sibling slip
+switcher bar below the title with links to each sibling slip and their status summary (`(Locked)`, `(1/2 Picks)`,
+`(Won)`). The bottom bar keeps Groups, This week, and Record Book; the hub's one primary action is the way into picking.
+The hub stays one column at every width.
 
 `slips.NextStep` is one pure function over the slip, its members, its legs, the week's games, the viewer, and `now`. It
 returns the step, the legs still needed, the names the slip waits on, the first kickoff still ahead, and the slip's
@@ -41,28 +44,37 @@ result. The hub banner and each group card read its label, so the two always agr
 | `export`  | Everyone is locked in.                                    | Ready to place     | The export card leads the hub.                      |
 | `done`    | The slip is `GRADED`.                                     | Won, Lost, or Push | None.                                               |
 
-The deadline is the earliest game in the slip's week whose kickoff is still ahead of `now`. It renders as
-`Picks close for BUF @ MIA at <time>`, and `app.js` formats the time in the reader's zone. A past week has no kickoff
-ahead, so it has no deadline. Unlocking clears every lock, so the banner reopens the pick step; a member who already has
-every leg sees `lock_in` instead.
+The deadline is the earliest game in the slip's slate scope whose kickoff is still ahead of `now`. It renders as
+`Picks close for BUF @ MIA at <time>`, and `app.js` formats the time in the reader's zone. Scoping isolates deadlines: a
+Thursday slip's deadline is Thursday kickoff, while a Sunday Main slip ignores Thursday kickoffs and sets its deadline
+to the earliest Sunday game. A past week or a scope with no games left has no deadline. Unlocking clears every lock, so
+the banner reopens the pick step; a member who already has every leg sees `lock_in` instead.
 
-`closed` is the end-of-week empty state. The viewer sees it when they are short of legs and every game has kicked off, or
-when they are locked in and another member never finished picking. In the second case the banner names who never finished
-and says the slip cannot lock in this week, instead of offering a nudge for a pick that cannot arrive. If everyone has
-their legs and only a lock is missing, `waiting` stays and the nudge still works, with no picks-close time.
+`closed` is the empty state when picking ends before the slip could lock in. `slips.NextStep` evaluates games within the
+slip's slate scope. A Thursday slip closes when Thursday kicks off without full picks, even while Sunday games remain
+open. A Sunday Main slip stays open through Thursday and Friday. The viewer sees `closed` when they are short of legs
+and every game in the slip's scope has kicked off, or when they are locked in and another member never finished picking.
+In the second case the banner names who never finished and says the slip cannot lock in this week, instead of offering a
+nudge for a pick that cannot arrive. If everyone has their legs and only a lock is missing, `waiting` stays and the
+nudge still works, with no picks-close time.
 
 In `waiting` each person still picking gets a **Nudge** button. It opens the browser's share sheet with "Waiting on you
-for {slip}. Picks close {time}. {url}", with the time in the sender's zone and an absolute link, and copies the text when
-the browser has no share sheet. The server sends nothing; a slip with no deadline drops the picks-close sentence.
+for {slip}. Picks close {time}. {url}", with the time in the sender's zone and an absolute link, and copies the text
+when the browser has no share sheet. The server sends nothing; a slip with no deadline drops the picks-close sentence.
 
 Opening a slip from another of the viewer's groups switches the active group, the same as opening that group's week. A
 group member who is not on the slip sees `join`; a person outside the group gets a 404.
 
 ## Creating a slip
 
-The landing list opens a group's week (`GET /groups/{id}/week`), which switches the active group and opens that group's
-newest slip of the latest week. The slate sync keeps that week current, so it is normally the week being played. When the
-group has none, it shows the create-slip form.
+Opening a group's week (`GET /groups/{id}/week`) switches the active group and ensures slips for active recurring
+schedules exist via `slips.EnsureWeekSlips`. The slate sync keeps that week current, so it is normally the week being
+played. If the group has no slips for the week, it shows the create-slip form. If exactly one slip exists, it redirects
+directly to `/slips/{id}`. If multiple slips exist, it renders the multi-slip week hub with cards for each slip and a
+button to add a one-off slip.
+
+A member can create an ad-hoc one-off slip at `/slips/new` (with optional `?week=` and `?slate_scope=` or `?scope=`).
+One-off slips belong only to that week and do not create recurring schedules.
 
 The create screen says which empty state it is in. With a stored week it reads "No slip for Week 9 yet" and offers the
 week's form. With no stored week it says no week is loaded and points at the typed past-week fields, so the empty week
@@ -72,13 +84,34 @@ picker is not shown. A group with only the viewer adds "It's just you for now" a
   stored can be typed in by season, season type, and week number, and the form creates the week. A typed week later than
   the latest stored week is refused.
 - Name defaults to the week label, `Week 9`, then `Week 9 #2`.
+- `slate_scope` defaults to `sunday_main`, with options for `Sunday Slate` (`sunday_main`), `Thursday Night`
+  (`thursday`), and `Full Week` (`full_week`).
 - `legs_per_member` defaults to 2 and allows 1–5.
 - Members default to the previous slip's members.
 
 `slips.CreateDefaults` copies from the group's previous slip: the latest slip in that week or any earlier week. A second
 slip in the same week copies that week's first. With no previous slip it returns `DefaultLegsPerMember` (2) and no
-members. `db.Store.CreateSlip` trims the name, refuses a blank name, enforces the 1–5 range, requires at least one
-member, and ignores repeat member IDs.
+members. `db.Store.CreateSlip` trims the name, refuses a blank name, enforces the 1–5 range, validates the slate scope,
+requires at least one member, and ignores repeat member IDs.
+
+## Slate scopes
+
+Every slip belongs to a **slate scope** (`internal/db/slips.go`):
+
+| Scope | Value | Games included |
+| ----- | ----- | -------------- |
+| Thursday | `thursday` | Games kicking off on Thursday in Eastern time. |
+| Sunday Main | `sunday_main` | Games kicking off on Sunday or Monday in Eastern time (default). |
+| Full Week | `full_week` | Every game in the week. |
+
+Scopes isolate deadlines and pick boundaries:
+
+- **Deadlines:** `slips.NextStep` filters games by the slip's scope before finding the earliest upcoming kickoff. A
+  Thursday game does not pull a Sunday Main slip's deadline forward.
+- **Picks:** A pick must belong to a game matching the slip's scope. Adding a pick for a game outside the scope returns
+  `ErrGameOutsideScope`.
+- **Closure:** Once all games in a slip's scope kick off, an incomplete slip enters `closed`. Other slips in the same
+  week stay open if their own games have not kicked off.
 
 ## Members
 
@@ -113,8 +146,9 @@ line, American odds, and a display `selection` generated from those fields.
 - Team is the ESPN abbreviation of the team the leg is about. For `TOTAL`, team is empty.
 - Odds default to -110 in the form. Quick-add pills prefill the price; the formulas are in
   [Odds math](../reference/odds-math.md).
-- The game picker lists the week's games that have not kicked off. A current week requires a game; a past week lists
-  every game and allows no game. `?game_id=` preselects one when a card opens the form.
+- The game picker lists the week's games that have not kicked off and match the slip's slate scope. A current week
+  requires a matching game; a past week lists every game and allows no game. `?game_id=` preselects one when a card
+  opens the form.
 - The leg form provides a `<datalist>` of player names for autocomplete, drawn from the week's rosters and prop boards.
   Saving a player market leg resolves the player's ESPN athlete ID and team automatically through player matching.
 - A leg needs a game, except on a slip for a past week, where the game is optional and `OTHER` is the usual market.
@@ -122,8 +156,8 @@ line, American odds, and a display `selection` generated from those fields.
 
 The slip panel draws each leg as a row: the selection, then the odds, a "Research &rarr;" link when the leg has a
 resolved player or game, the model chip, and the result. A `SPREAD` or `ML` leg with a fresh nfelo model shows it beside
-the odds, from that leg's team's side: `nfelo -5.0` for a spread or `nfelo 76%` for a moneyline. Totals and props show no
-chip, and a missing row, a fetch older than 72 hours, or a live game leaves it off.
+the odds, from that leg's team's side: `nfelo -5.0` for a spread or `nfelo 76%` for a moneyline. Totals and props show
+no chip, and a missing row, a fetch older than 72 hours, or a live game leaves it off.
 
 `db.Store.CreateLeg` starts every leg `PENDING` and treats an odds value of 0 as -110.
 
@@ -133,33 +167,35 @@ keeps its own price. The formulas are in [Odds math](../reference/odds-math.md).
 
 ## The pick board
 
-The hub's pick step opens `GET /slips/{id}/pick`, a focused screen with a back link to the hub and no bottom bar. It is a
-game slate with the open game's picks beside it. On a phone the slate fills the screen and a game opens a drilldown with
-an "All games" back link; at `lg` the slate and detail sit in a `22rem + 1fr` grid and scroll on their own while the page
-body stays put. A fixed dock sits at the bottom at every width, so the picks stay in reach while the slate moves, and
-the page reserves bottom padding for it so the last row is never hidden. The page sets `Page.Wide`, so the header, main,
-and dock widen to `max-w-6xl`, and carries the slip's `data-live-url`, so it still opens one stream per page. The dock is
-only on this screen; the hub keeps its panel and banner.
+The hub's pick step opens `GET /slips/{id}/pick`, a focused screen with a back link to the hub and no bottom bar. It is
+a game slate with the open game's picks beside it. On a phone the slate fills the screen and a game opens a drilldown
+with an "All games" back link; at `lg` the slate and detail sit in a `22rem + 1fr` grid and scroll on their own while
+the page body stays put. A fixed dock sits at the bottom at every width, so the picks stay in reach while the slate
+moves, and the page reserves bottom padding for it so the last row is never hidden. The page sets `Page.Wide`, so the
+header, main, and dock widen to `max-w-6xl`, and carries the slip's `data-live-url`, so it still opens one stream per
+page. The dock is only on this screen; the hub keeps its panel and banner.
 
-`internal/board` turns the week's stored odds into rows. It reads nothing itself. `board.Build` folds one row per
+`internal/board` turns the week's stored odds into rows. It reads nothing itself. Before building rows and cards, the
+pick board filters the week's games by the active slip's `slate_scope` using `slips.FilterGamesByScope`. Games outside
+the slip's scope are omitted from the slate, window chips, and detail drilldowns. `board.Build` folds one row per
 selection, using the viewer's home book when it prices the selection and the median across every book otherwise. Rows
 from an older odds sync are dropped first, the same as the old Games board. A game that has kicked off is left out and
 counted. Each row carries its game, market, team, player, the roster athlete ID and position, side, line, price, display
 text, a category, and a kickoff window.
 
-`board.Slates` shapes those rows into one card per game still ahead. It filters by the search text and the kickoff window,
-orders cards by kickoff, and derives each card's spread, total, and moneyline from the built rows. A game with no stored
-odds still gets a card, with no lines and no props. The prop count is every row outside the lines category, so team
-totals count as props.
+`board.Slates` shapes those rows into one card per game still ahead. It filters by the search text and the kickoff
+window, orders cards by kickoff, and derives each card's spread, total, and moneyline from the built rows. A game with
+no stored odds still gets a card, with no lines and no props. The prop count is every row outside the lines category, so
+team totals count as props.
 
 The slate leads with one search box and the kickoff-window chips. Search is case- and accent-insensitive and matches a
 matchup, a team, a venue, or a roster player on the game. The input debounces at 250 ms and swaps the body partial, and
-the response pushes the full page URL so `q` survives a refresh or a shared link.
-Window chips filter by Eastern-time kickoff (Sunday morning before noon, Sunday early before 4, Sunday late before 7,
-Sunday night, Monday); a Monday-night game that lands on Tuesday in UTC still reads Monday. A chip shows how many rows it
-covers and appears only when it has rows. Each card shows the matchup, venue, kickoff, spread, total, moneyline, and
-either "Explore N props" or "No props yet", and the open game is highlighted. Cards are links: a plain `href` to the full
-page and an `hx-get` that swaps `#pick-body` and pushes the full page URL.
+the response pushes the full page URL so `q` survives a refresh or a shared link. Window chips filter by Eastern-time
+kickoff (Thursday, Sunday morning before noon, Sunday early before 4, Sunday late before 7, Sunday night, Monday); a
+Thursday- or Monday-night game that lands on the next day in UTC still reads by its local Eastern day. A chip shows how
+many rows it covers and appears only when it has rows. Each card shows the matchup, venue, kickoff, spread, total,
+moneyline, and either "Explore N props" or "No props yet", and the open game is highlighted. Cards are links: a plain
+`href` to the full page and an `hx-get` that swaps `#pick-body` and pushes the full page URL.
 
 A card opens the detail: a pinned header with the matchup, kickoff, venue, a Research link, and an "All games" back
 link, then a horizontal tab bar and the sort chips. The header and tab bar stay below the top bar while the rows scroll,
@@ -176,8 +212,8 @@ with its sides beside each other: away before home on a spread or moneyline, Ove
 the one Yes on an anytime touchdown. A side with no stored price leaves one full-width button instead of a dead half.
 
 A prop tab clusters that tab's rows by player. One card carries the player's name, position, and team, and every market
-that player has in the tab sits under it, so Receiving Yards and Receptions share a card. Prop buttons read short
-("Over 245.5", "Yes") because the card already names the player; the pick they post is unchanged.
+that player has in the tab sits under it, so Receiving Yards and Receptions share a card. Prop buttons read short ("Over
+245.5", "Yes") because the card already names the player; the pick they post is unchanged.
 
 The search text also filters the open game's rows. Sorts are player (default), odds (shortest price first), and line
 (highest line first). Kickoff and category drop out because one game has one kickoff. Tab and sort chips swap
@@ -200,19 +236,20 @@ both and lets either be removed.
 
 Tapping a side of an unpicked line adds it with the normal add-leg route (`quick=1&from=board`), and tapping a picked
 side removes that leg. Tapping the other side of a line that already holds a pick sends `PUT /legs/{id}` with the new
-side's fields, so the pair holds one leg instead of two; `UpdateLeg` enforces the owner, the lock in, and kickoff on both
-games, and its activity entry reads "Adam changed X to Y". Add, update, and delete answer the same way: the refreshed
-pair row for that line, both sides with their current picks, plus `tray-updated`. Only that row swaps, and the dock and
-the tray refresh without a reload. A switch that moves the leg to another line also fires `board-updated`, because the old
-line's row is still on screen and must lose its delete button. At the limit, a line with neither side picked opens
-"Swap which pick?" and lists the viewer's legs that are not kickoff-locked. Choosing one sends `PUT /legs/{old}` with the
-new pick's fields; a line that already holds a pick switches sides in place and needs no free slot.
+side's fields, so the pair holds one leg instead of two; `UpdateLeg` enforces the owner, the lock in, and kickoff on
+both games, and its activity entry reads "Adam changed X to Y". Add, update, and delete answer the same way: the
+refreshed pair row for that line, both sides with their current picks, plus `tray-updated`. Only that row swaps, and the
+dock and the tray refresh without a reload. A switch that moves the leg to another line also fires `board-updated`,
+because the old line's row is still on screen and must lose its delete button. At the limit, a line with neither side
+picked opens "Swap which pick?" and lists the viewer's legs that are not kickoff-locked. Choosing one sends
+`PUT /legs/{old}` with the new pick's fields; a line that already holds a pick switches sides in place and needs no free
+slot.
 
 A game that has stored lines but no prop rows offers "Load them" on its slate card and again in its open detail: "Props
-for BUF @ MIA aren't loaded yet." The button calls `GET /games/{id}/props?slip=`, which runs `SyncGameProps` for that one
-game (credit floors and all) and then fires `board-updated`, so the body refreshes in place and the open game stays open.
-A week with no odds at all keeps the one week-level "No lines" state instead of a button per game. The board itself
-never syncs props; opening a game, switching tabs, typing, filtering, and sorting spend no credits. See
+for BUF @ MIA aren't loaded yet." The button calls `GET /games/{id}/props?slip=`, which runs `SyncGameProps` for that
+one game (credit floors and all) and then fires `board-updated`, so the body refreshes in place and the open game stays
+open. A week with no odds at all keeps the one week-level "No lines" state instead of a button per game. The board
+itself never syncs props; opening a game, switching tabs, typing, filtering, and sorting spend no credits. See
 [Data refresh](data-refresh.md).
 
 The board has its own empty states. A week with no stored games says the slate has not synced. A week with games but no
@@ -221,9 +258,9 @@ off, it says picks are closed. A search or filter that matches nothing keeps "No
 with no rows in the current search says the same inside the detail; with no search it says the game's lines have not
 synced. When only some games have started, one line says how many are hidden.
 
-The dock shows "Your picks", then `Picked of Limit` and the combined price of the viewer's legs, and a "Slip" button. The
-combined price is `parlay.CombinedOdds` over the viewer's legs, converted back with `parlay.DecimalToAmerican`, the same
-math the payout card uses; a slip with no legs shows only the count. The button loads `GET /slips/{id}/tray` into a
+The dock shows "Your picks", then `Picked of Limit` and the combined price of the viewer's legs, and a "Slip" button.
+The combined price is `parlay.CombinedOdds` over the viewer's legs, converted back with `parlay.DecimalToAmerican`, the
+same math the payout card uses; a slip with no legs shows only the count. The button loads `GET /slips/{id}/tray` into a
 `dialog` sheet, and the tray inside carries the viewer's legs with remove buttons, progress ("1 of 2"), the analyzer
 warnings that name one of the viewer's legs, and one action: "Done" back to the hub, or "Review and lock in" at the
 limit. A leg whose game has kicked off shows "Locked" instead of a remove button. The dock watches `tray-updated` and
@@ -231,8 +268,8 @@ limit. A leg whose game has kicked off shows "Locked" instead of a remove button
 removed anywhere updates the count and price without a reload.
 
 `GET /games` is a 303 to the active group's week, so old links still land somewhere useful. `GET /games/{id}/props`
-without `?slip=` still renders the standalone prop partial for one game, with team totals and player props grouped
-under each athlete and links to game research and player research.
+without `?slip=` still renders the standalone prop partial for one game, with team totals and player props grouped under
+each athlete and links to game research and player research.
 
 ## Votes
 
@@ -255,10 +292,10 @@ transaction, so the tally drops with them and rejoining starts clean. Votes are 
 The Research page (`GET /research`) offers game injury reports and player hit bars. It opens from a player, prop, leg,
 or game link. It is not a bottom-bar tab.
 
-- **Game research (`GET /research/games/{id}`):** fetches ESPN summary injuries on demand and displays injuries
-  filtered to key positions (`QB`, `RB`, `WR`, `TE`, `LT`, `OT`, `C`, `CB`, `S`). A player-match section lists
-  sportsbook prop names against matched ESPN roster athletes, with a manual match form (`POST /research/matches`) to
-  fix unmatched names or corrections.
+- **Game research (`GET /research/games/{id}`):** fetches ESPN summary injuries on demand and displays injuries filtered
+  to key positions (`QB`, `RB`, `WR`, `TE`, `LT`, `OT`, `C`, `CB`, `S`). A player-match section lists sportsbook prop
+  names against matched ESPN roster athletes, with a manual match form (`POST /research/matches`) to fix unmatched names
+  or corrections.
 - **Player research (`GET /research/players/{espnID}`):** fetches the player's ESPN game log on demand and displays
   last-5 hit bars (green over the line, red under), callouts for the last-5 median and season mean, and total games
   played this season. Opening from a slip leg or prop pill preselects that market and line; otherwise it picks the
@@ -312,7 +349,8 @@ locking stay testable.
    and someone else's leg gets `ErrNotOwner`.
 2. A member can have at most `legs_per_member` legs. Adding past the limit returns `ErrLegLimit`.
 3. A leg is **kickoff-locked** once `now >= game.kickoff_utc`. A kickoff-locked leg cannot be edited or deleted, and no
-   leg can be added for a game that has kicked off. A leg without a game skips this check.
+   leg can be added for a game that has kicked off. A leg's game must also match the slip's slate scope; picking a game
+   outside the scope returns `ErrGameOutsideScope`. A leg without a game skips these checks.
 4. **Lock in** sets the member's `locked_at`. It requires exactly `legs_per_member` legs. Too few or too many returns
    `ErrLegsNotReady`. Locking in twice changes nothing.
 5. The slip's status becomes `LOCKED` when every member is locked in.
@@ -336,6 +374,7 @@ The service returns typed errors so handlers can answer with a 422 and a short m
 | `ErrLegLimit`            | The member already has `legs_per_member` legs.  | you've already added all your legs       |
 | `ErrLegsPerMemberTooLow` | The new limit is below someone's leg count.     | a member already has more legs than that |
 | `ErrKickoffLocked`       | The game has kicked off.                        | that game already kicked off             |
+| `ErrGameOutsideScope`    | The game is outside the slip's slate scope.     | that game is outside this slip's slate   |
 | `ErrLockedIn`            | A locked-in member changes a leg.               | you've locked in                         |
 | `ErrLegsNotReady`        | Lock in without exactly the limit.              | add all your legs before locking in      |
 | `ErrSlipNotOpen`         | A member, name, or limit change after lock in.  | the slip is locked                       |
@@ -347,7 +386,18 @@ The service returns typed errors so handlers can answer with a 422 and a short m
 
 ## Several slips
 
-A person can belong to several slips in a week. The top bar switches between the week's slips.
+A group can run several slips in the same week, either automatically through recurring schedules (such as a weekly
+Thursday Night slip and Sunday Main slip) or as one-off slips.
+
+When a week has multiple slips:
+
+- **Week hub (`GET /groups/{id}/week`):** Renders a card for each slip in the week showing its name, scope badge
+  (`Thursday Night`, `Sunday Slate`, `Full Week`), next-step banner summary, reader-localized deadline, and pick
+  progress, plus a button to "+ Add one-off slip".
+- **Sibling switcher (`GET /slips/{id}`):** When viewing any slip on the hub, a horizontal navigation bar sits below the
+  title with links to each sibling slip and their status summary (`(Locked)`, `(1/2 Picks)`, `(Won)`). It updates live
+  on `slip-updated`.
+- **Pick isolation:** Each slip isolates its own deadlines and available board games by its `slate_scope`.
 
 ## Related
 

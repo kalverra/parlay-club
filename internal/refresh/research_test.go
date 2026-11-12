@@ -494,7 +494,16 @@ func TestKickRefreshesSlipLegGameLogs(t *testing.T) {
 	require.NoError(t, err)
 	group, err := store.Create(t.Context(), user.ID, "Club")
 	require.NoError(t, err)
-	slip, err := store.CreateSlip(t.Context(), group.ID, game.WeekID, "Week 9 Slip", 1, []int64{user.ID})
+	slip, err := store.CreateSlip(
+		t.Context(),
+		group.ID,
+		game.WeekID,
+		nil,
+		"Week 9 Slip",
+		db.SlateScopeSundayMain,
+		1,
+		[]int64{user.ID},
+	)
 	require.NoError(t, err)
 	playerID := "3918298"
 	_, err = store.CreateLeg(t.Context(), db.Leg{

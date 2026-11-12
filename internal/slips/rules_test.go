@@ -138,8 +138,8 @@ func createSlip(
 	for _, member := range members {
 		ids = append(ids, member.ID)
 	}
-	slip, err := store.CreateSlip(t.Context(), group.ID, week.ID, "Week "+strconv.Itoa(week.WeekNum),
-		legsPerMember, ids)
+	slip, err := store.CreateSlip(t.Context(), group.ID, week.ID, nil, "Week "+strconv.Itoa(week.WeekNum),
+		db.SlateScopeSundayMain, legsPerMember, ids)
 	require.NoError(t, err)
 	return slip
 }
@@ -1160,4 +1160,94 @@ func TestNewUsesTheWallClockWhenNoneIsGiven(t *testing.T) {
 	addLeg(t, f.store, f.slip, f.ada, nil, "BUF ML")
 
 	require.NoError(t, service.LockIn(t.Context(), f.ada.ID, f.slip.ID))
+}
+
+func TestRulesEnforceSlateScopeOnPicks(t *testing.T) {
+	t.Parallel()
+
+	f := newFixture(t)
+
+	// In UTC: Thursday night game 20:15 ET is 2026-11-06T01:15:00Z.
+	// Sunday game 13:00 ET is 2026-11-08T18:00:00Z.
+	thuGame := createGame(t, f.database, f.week, "thu-game", "2026-11-06T01:15:00Z")
+	sunGame := createGame(t, f.database, f.week, "sun-game", "2026-11-08T18:00:00Z")
+
+	// Service clocked before Thursday kickoff: Thursday noon ET (17:00 UTC).
+	thuNoon := time.Date(2026, 11, 5, 17, 0, 0, 0, time.UTC)
+	serviceBeforeThu := slips.New(f.store, f.published, fixedClock{at: thuNoon}.Now)
+
+	// Slips with different scopes:
+	thuSlip, err := f.store.CreateSlip(t.Context(), f.group.ID, f.week.ID, nil, "Thursday Slip",
+		db.SlateScopeThursday, 2, []int64{f.ada.ID})
+	require.NoError(t, err)
+
+	sunSlip, err := f.store.CreateSlip(t.Context(), f.group.ID, f.week.ID, nil, "Sunday Slip",
+		db.SlateScopeSundayMain, 2, []int64{f.ada.ID})
+	require.NoError(t, err)
+
+	fullSlip, err := f.store.CreateSlip(t.Context(), f.group.ID, f.week.ID, nil, "Full Week Slip",
+		db.SlateScopeFullWeek, 2, []int64{f.ada.ID})
+	require.NoError(t, err)
+
+	// 1. AddLeg validation:
+	// SundayMain slip refuses Thursday game.
+	_, err = serviceBeforeThu.AddLeg(t.Context(), f.ada.ID, db.Leg{
+		SlipID: sunSlip.ID, GameID: &thuGame, MarketType: "ML", Selection: "BUF ML",
+	})
+	require.ErrorIs(t, err, slips.ErrGameOutsideScope)
+
+	// SundayMain slip accepts Sunday game.
+	legSun, err := serviceBeforeThu.AddLeg(t.Context(), f.ada.ID, db.Leg{
+		SlipID: sunSlip.ID, GameID: &sunGame, MarketType: "ML", Selection: "BUF ML",
+	})
+	require.NoError(t, err)
+
+	// Thursday slip refuses Sunday game.
+	_, err = serviceBeforeThu.AddLeg(t.Context(), f.ada.ID, db.Leg{
+		SlipID: thuSlip.ID, GameID: &sunGame, MarketType: "ML", Selection: "MIA ML",
+	})
+	require.ErrorIs(t, err, slips.ErrGameOutsideScope)
+
+	// Thursday slip accepts Thursday game.
+	legThu, err := serviceBeforeThu.AddLeg(t.Context(), f.ada.ID, db.Leg{
+		SlipID: thuSlip.ID, GameID: &thuGame, MarketType: "ML", Selection: "BUF -3.5",
+	})
+	require.NoError(t, err)
+
+	// Full week slip accepts both Thursday and Sunday games.
+	_, err = serviceBeforeThu.AddLeg(t.Context(), f.ada.ID, db.Leg{
+		SlipID: fullSlip.ID, GameID: &thuGame, MarketType: "ML", Selection: "BUF -3.5",
+	})
+	require.NoError(t, err)
+	_, err = serviceBeforeThu.AddLeg(t.Context(), f.ada.ID, db.Leg{
+		SlipID: fullSlip.ID, GameID: &sunGame, MarketType: "ML", Selection: "MIA ML",
+	})
+	require.NoError(t, err)
+
+	// 2. UpdateLeg validation:
+	// SundayMain slip: updating existing Sunday leg to Thursday game is refused.
+	_, err = serviceBeforeThu.UpdateLeg(t.Context(), f.ada.ID, db.Leg{
+		ID: legSun.ID, GameID: &thuGame, MarketType: "ML", Selection: "BUF -3.5",
+	})
+	require.ErrorIs(t, err, slips.ErrGameOutsideScope)
+
+	// Thursday slip: updating existing Thursday leg to Sunday game is refused.
+	_, err = serviceBeforeThu.UpdateLeg(t.Context(), f.ada.ID, db.Leg{
+		ID: legThu.ID, GameID: &sunGame, MarketType: "ML", Selection: "MIA -3.5",
+	})
+	require.ErrorIs(t, err, slips.ErrGameOutsideScope)
+
+	// 3. Kickoff lock when game is in scope:
+	// Once Thursday game kicks off (e.g. Friday noon), adding it to Thursday slip returns ErrKickoffLocked.
+	friNoon := time.Date(2026, 11, 6, 17, 0, 0, 0, time.UTC)
+	serviceAfterThu := slips.New(f.store, f.published, fixedClock{at: friNoon}.Now)
+
+	anotherThuSlip, err := f.store.CreateSlip(t.Context(), f.group.ID, f.week.ID, nil, "Late Thursday Slip",
+		db.SlateScopeThursday, 2, []int64{f.ada.ID})
+	require.NoError(t, err)
+
+	_, err = serviceAfterThu.AddLeg(t.Context(), f.ada.ID, db.Leg{
+		SlipID: anotherThuSlip.ID, GameID: &thuGame, MarketType: "ML", Selection: "BUF ML",
+	})
+	require.ErrorIs(t, err, slips.ErrKickoffLocked)
 }
