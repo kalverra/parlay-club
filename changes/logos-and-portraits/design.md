@@ -169,7 +169,7 @@ template patterns)
 
 ### Phase 1: Ingest, store, and wire logo and portrait metadata
 
-- [ ] Parse `team.logo` in `espn.Scoreboard`, `headshot.href` in `espn.Roster`, and injury
+- [x] Parse `team.logo` in `espn.Scoreboard`, `headshot.href` in `espn.Roster`, and injury
       `team.logo`/`athlete.headshot.href` in `espn.ParseInjuries` (normalizing to `https://` only), with fixture tests
       covering present and missing URLs.
 - [ ] Add `0010_logos_portraits.sql` (`games.home_logo`, `games.away_logo`, `roster_players.headshot_url`), update

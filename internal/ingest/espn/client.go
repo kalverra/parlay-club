@@ -107,3 +107,17 @@ func (c *Client) getWeb(ctx context.Context, path string, query url.Values, out 
 	}
 	return nil
 }
+
+// normalizeHTTPSURL trims whitespace and returns a normalized https:// URL
+// when raw has an https scheme and non-empty host, or "" otherwise.
+func normalizeHTTPSURL(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return ""
+	}
+	parsed, err := url.Parse(trimmed)
+	if err != nil || parsed.Scheme != "https" || parsed.Host == "" {
+		return ""
+	}
+	return parsed.String()
+}

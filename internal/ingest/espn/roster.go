@@ -8,9 +8,10 @@ import (
 
 // RosterPlayer is one player on an NFL team roster.
 type RosterPlayer struct {
-	ID       string
-	FullName string
-	Position string
+	ID          string
+	FullName    string
+	Position    string
+	HeadshotURL string
 }
 
 // rosterResponse is the slice of ESPN's team roster JSON this app reads.
@@ -22,6 +23,9 @@ type rosterResponse struct {
 			Position struct {
 				Abbreviation string `json:"abbreviation"`
 			} `json:"position"`
+			Headshot struct {
+				Href string `json:"href"`
+			} `json:"headshot"`
 		} `json:"items"`
 	} `json:"athletes"`
 }
@@ -42,9 +46,10 @@ func (c *Client) Roster(ctx context.Context, espnTeamID string) ([]RosterPlayer,
 				continue
 			}
 			players = append(players, RosterPlayer{
-				ID:       item.ID,
-				FullName: item.FullName,
-				Position: item.Position.Abbreviation,
+				ID:          item.ID,
+				FullName:    item.FullName,
+				Position:    item.Position.Abbreviation,
+				HeadshotURL: normalizeHTTPSURL(item.Headshot.Href),
 			})
 		}
 	}

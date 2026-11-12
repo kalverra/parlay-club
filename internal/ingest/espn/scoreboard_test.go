@@ -56,11 +56,13 @@ func TestScoreboardParsesAFullWeek(t *testing.T) {
 		ID:           "1",
 		Abbreviation: "ATL",
 		Name:         "Atlanta Falcons",
+		Logo:         "https://a.espncdn.com/i/teamlogos/nfl/500/scoreboard/atl.png",
 	}, madrid.Home)
 	assert.Equal(t, espn.Team{
 		ID:           "4",
 		Abbreviation: "CIN",
 		Name:         "Cincinnati Bengals",
+		Logo:         "https://a.espncdn.com/i/teamlogos/nfl/500/scoreboard/cin.png",
 	}, madrid.Away)
 	assert.Equal(t, espn.Venue{ID: "1353", Name: "Santiago Bernabéu", Indoor: true}, madrid.Venue)
 
@@ -97,9 +99,11 @@ func TestScoreboardParsesLiveAndFinalGames(t *testing.T) {
 	thursday := gameByID(t, board.Games, "401872964")
 	assert.Equal(t, espn.Final, thursday.Status)
 	assert.Equal(t, "CLE", thursday.Home.Abbreviation)
+	assert.NotEmpty(t, thursday.Home.Logo)
 	require.NotNil(t, thursday.Home.Score)
 	assert.Equal(t, 27, *thursday.Home.Score)
 	assert.Equal(t, "PIT", thursday.Away.Abbreviation)
+	assert.NotEmpty(t, thursday.Away.Logo)
 	require.NotNil(t, thursday.Away.Score)
 	assert.Equal(t, 24, *thursday.Away.Score)
 
@@ -179,6 +183,85 @@ func TestScoreboardParsesAnInternationalGame(t *testing.T) {
 	assert.Equal(t, 19, *game.Home.Score)
 	require.NotNil(t, game.Away.Score)
 	assert.Equal(t, 17, *game.Away.Score)
+}
+
+func TestScoreboardLogoNormalization(t *testing.T) {
+	t.Parallel()
+
+	fixture := `{
+		"season": {"year": 2026, "type": 2},
+		"week": {"number": 1},
+		"events": [
+			{
+				"id": "1001",
+				"date": "2026-09-13T17:00Z",
+				"status": {"type": {"state": "pre"}},
+				"competitions": [{
+					"competitors": [
+						{
+							"homeAway": "home",
+							"team": {
+								"id": "1",
+								"abbreviation": "ATL",
+								"displayName": "Atlanta Falcons",
+								"logo": "  https://a.espncdn.com/i/teamlogos/nfl/500/atl.png  "
+							}
+						},
+						{
+							"homeAway": "away",
+							"team": {
+								"id": "2",
+								"abbreviation": "BUF",
+								"displayName": "Buffalo Bills",
+								"logo": "http://a.espncdn.com/i/teamlogos/nfl/500/buf.png"
+							}
+						}
+					]
+				}]
+			},
+			{
+				"id": "1002",
+				"date": "2026-09-13T20:25Z",
+				"status": {"type": {"state": "pre"}},
+				"competitions": [{
+					"competitors": [
+						{
+							"homeAway": "home",
+							"team": {
+								"id": "3",
+								"abbreviation": "CHI",
+								"displayName": "Chicago Bears"
+							}
+						},
+						{
+							"homeAway": "away",
+							"team": {
+								"id": "4",
+								"abbreviation": "CIN",
+								"displayName": "Cincinnati Bengals",
+								"logo": "javascript:alert(1)"
+							}
+						}
+					]
+				}]
+			}
+		]
+	}`
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(fixture))
+	}))
+	t.Cleanup(server.Close)
+
+	board, err := espn.NewClient(server.URL, server.Client()).Scoreboard(t.Context(), espn.ScoreboardParams{})
+	require.NoError(t, err)
+	require.Len(t, board.Games, 2)
+
+	assert.Equal(t, "https://a.espncdn.com/i/teamlogos/nfl/500/atl.png", board.Games[0].Home.Logo)
+	assert.Empty(t, board.Games[0].Away.Logo)
+	assert.Empty(t, board.Games[1].Home.Logo)
+	assert.Empty(t, board.Games[1].Away.Logo)
 }
 
 func TestScoreboardReportsAnHTTPFailure(t *testing.T) {

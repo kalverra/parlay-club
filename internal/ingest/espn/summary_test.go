@@ -43,13 +43,23 @@ func TestSummaryInjuriesFromFixture(t *testing.T) {
 	// Check that key positions (RB, WR, CB, etc.) are included and non-key positions are filtered out.
 	foundWR := false
 	foundCB := false
+	foundTeamLogo := false
+	foundHeadshot := false
 	for _, team := range teams {
 		assert.NotEmpty(t, team.Team)
 		assert.NotEmpty(t, team.TeamID)
+		if team.LogoURL != "" {
+			foundTeamLogo = true
+			assert.Contains(t, team.LogoURL, "https://")
+		}
 		for _, inj := range team.Injuries {
 			assert.NotEmpty(t, inj.AthleteID)
 			assert.NotEmpty(t, inj.FullName)
 			assert.Contains(t, []string{"QB", "RB", "WR", "TE", "LT", "OT", "C", "CB", "S"}, inj.Position)
+			if inj.HeadshotURL != "" {
+				foundHeadshot = true
+				assert.Contains(t, inj.HeadshotURL, "https://")
+			}
 			if inj.Position == "WR" {
 				foundWR = true
 			}
@@ -60,6 +70,8 @@ func TestSummaryInjuriesFromFixture(t *testing.T) {
 	}
 	assert.True(t, foundWR, "expected WR injury in fixture")
 	assert.True(t, foundCB, "expected CB injury in fixture")
+	assert.True(t, foundTeamLogo, "expected team logo URL in fixture")
+	assert.True(t, foundHeadshot, "expected athlete headshot URL in fixture")
 }
 
 func TestSummaryInjuriesAbsent(t *testing.T) {
@@ -191,4 +203,68 @@ func TestParseInjuriesEmpty(t *testing.T) {
 
 	_, err := espn.ParseInjuries("{invalid")
 	require.Error(t, err)
+}
+
+func TestParseInjuriesMediaNormalization(t *testing.T) {
+	t.Parallel()
+
+	raw := `[
+		{
+			"team": {
+				"id": "2",
+				"displayName": "Buffalo Bills",
+				"abbreviation": "BUF",
+				"logo": "  https://a.espncdn.com/i/teamlogos/nfl/500/buf.png  "
+			},
+			"injuries": [
+				{
+					"status": "Out",
+					"athlete": {
+						"id": "100",
+						"fullName": "Valid Headshot",
+						"position": {"abbreviation": "QB"},
+						"headshot": {"href": " https://a.espncdn.com/100.png "}
+					}
+				},
+				{
+					"status": "Questionable",
+					"athlete": {
+						"id": "101",
+						"fullName": "HTTP Headshot",
+						"position": {"abbreviation": "WR"},
+						"headshot": {"href": "http://a.espncdn.com/101.png"}
+					}
+				},
+				{
+					"status": "Doubtful",
+					"athlete": {
+						"id": "102",
+						"fullName": "Missing Headshot",
+						"position": {"abbreviation": "TE"}
+					}
+				}
+			]
+		},
+		{
+			"team": {
+				"id": "1",
+				"displayName": "Atlanta Falcons",
+				"abbreviation": "ATL",
+				"logo": "http://a.espncdn.com/i/teamlogos/nfl/500/atl.png"
+			},
+			"injuries": []
+		}
+	]`
+
+	teams, err := espn.ParseInjuries(raw)
+	require.NoError(t, err)
+	require.Len(t, teams, 2)
+
+	assert.Equal(t, "https://a.espncdn.com/i/teamlogos/nfl/500/buf.png", teams[0].LogoURL)
+	require.Len(t, teams[0].Injuries, 3)
+	assert.Equal(t, "https://a.espncdn.com/100.png", teams[0].Injuries[0].HeadshotURL)
+	assert.Empty(t, teams[0].Injuries[1].HeadshotURL)
+	assert.Empty(t, teams[0].Injuries[2].HeadshotURL)
+
+	assert.Empty(t, teams[1].LogoURL)
 }
