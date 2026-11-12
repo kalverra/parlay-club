@@ -54,5 +54,6 @@
 ## Runbook
 
 - [Archive size check](runbooks/archive-size.md): Measure the raw response archive and the SQLite file, know the number to act at, and prune old responses without losing the parsed tables.
+- [Custom domain with Cloudflare](runbooks/custom-domain.md): Route a custom subdomain to Cloud Run through Cloudflare with origin header rewriting and OAuth callback configuration.
 - [Deploy](runbooks/deploy.md): How a commit reaches Cloud Run, why deploys pause during game windows, how to force one, and how to verify, roll back, and read the spend.
 - [Google OAuth setup](runbooks/google-oauth-setup.md): Create the Google Web client, register the local and prod redirect URIs, publish the consent screen, and set the client secrets.
