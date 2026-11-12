@@ -286,7 +286,20 @@ func SeedScenario(
 			sharedIDs = append(sharedIDs, person.User.ID)
 		}
 	}
-	slip, err := store.CreateSlip(ctx, shared.ID, week.ID, slipName, legsPerMember, sharedIDs)
+	var schedID *int64
+	if scheds, err := store.GroupSlipSchedules(ctx, shared.ID); err == nil && len(scheds) > 0 {
+		schedID = &scheds[0].ID
+	}
+	slip, err := store.CreateSlip(
+		ctx,
+		shared.ID,
+		week.ID,
+		schedID,
+		slipName,
+		db.SlateScopeSundayMain,
+		legsPerMember,
+		sharedIDs,
+	)
 	if err != nil {
 		return Seed{}, fmt.Errorf("seed slip: %w", err)
 	}

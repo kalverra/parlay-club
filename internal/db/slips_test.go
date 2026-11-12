@@ -29,7 +29,7 @@ func createTestWeek(t *testing.T, store *db.Store, weekNum int) db.Week {
 	return week
 }
 
-// createTestSlip creates a slip whose members are the given users.
+// createTestSlip creates a slip whose members are the given users with default scope.
 func createTestSlip(
 	t *testing.T,
 	store *db.Store,
@@ -40,12 +40,27 @@ func createTestSlip(
 	members ...db.User,
 ) db.Slip {
 	t.Helper()
+	return createTestSlipWithScope(t, store, group, week, name, db.SlateScopeSundayMain, legsPerMember, members...)
+}
+
+// createTestSlipWithScope creates a slip with an explicit slate scope.
+func createTestSlipWithScope(
+	t *testing.T,
+	store *db.Store,
+	group db.Group,
+	week db.Week,
+	name string,
+	scope db.SlateScope,
+	legsPerMember int,
+	members ...db.User,
+) db.Slip {
+	t.Helper()
 
 	ids := make([]int64, 0, len(members))
 	for _, member := range members {
 		ids = append(ids, member.ID)
 	}
-	slip, err := store.CreateSlip(t.Context(), group.ID, week.ID, name, legsPerMember, ids)
+	slip, err := store.CreateSlip(t.Context(), group.ID, week.ID, nil, name, scope, legsPerMember, ids)
 	require.NoError(t, err)
 	return slip
 }
@@ -65,6 +80,7 @@ func TestCreateSlipStoresTheSlipAndMembers(t *testing.T) {
 	assert.Equal(t, group.ID, slip.GroupID)
 	assert.Equal(t, week.ID, slip.WeekID)
 	assert.Equal(t, "Week 9", slip.Name, "the name is trimmed")
+	assert.Equal(t, db.SlateScopeSundayMain, slip.SlateScope)
 	assert.Equal(t, 3, slip.LegsPerMember)
 	assert.Equal(t, db.SlipOpen, slip.Status)
 	assert.Equal(t, parlay.Pending, slip.Result)
@@ -87,6 +103,26 @@ func TestCreateSlipStoresTheSlipAndMembers(t *testing.T) {
 	assert.Equal(t, []int64{ada.ID, bob.ID}, ids)
 }
 
+func TestCreateSlipStoresExplicitSlateScope(t *testing.T) {
+	t.Parallel()
+
+	store, _ := openTestStore(t)
+	ada := createUser(t, store, "Ada")
+	group := createTestGroup(t, store, ada)
+	week := createTestWeek(t, store, 9)
+
+	thuSlip := createTestSlipWithScope(t, store, group, week, "Thursday Night", db.SlateScopeThursday, 2, ada)
+	assert.Equal(t, db.SlateScopeThursday, thuSlip.SlateScope)
+
+	fullSlip := createTestSlipWithScope(t, store, group, week, "Full Week", db.SlateScopeFullWeek, 2, ada)
+	assert.Equal(t, db.SlateScopeFullWeek, fullSlip.SlateScope)
+
+	// Blank slate scope defaults to SlateScopeSundayMain.
+	defaultSlip, err := store.CreateSlip(t.Context(), group.ID, week.ID, nil, "Default Slip", "", 2, []int64{ada.ID})
+	require.NoError(t, err)
+	assert.Equal(t, db.SlateScopeSundayMain, defaultSlip.SlateScope)
+}
+
 func TestCreateSlipValidatesItsInput(t *testing.T) {
 	t.Parallel()
 
@@ -97,21 +133,53 @@ func TestCreateSlipValidatesItsInput(t *testing.T) {
 
 	tests := map[string]struct {
 		name          string
+		scope         db.SlateScope
 		legsPerMember int
 		memberIDs     []int64
 		want          error
 	}{
-		"blank name":    {name: "  ", legsPerMember: 2, memberIDs: []int64{ada.ID}, want: db.ErrSlipNameRequired},
-		"zero legs":     {name: "Week 9", legsPerMember: 0, memberIDs: []int64{ada.ID}, want: db.ErrLegsPerMemberRange},
-		"too many legs": {name: "Week 9", legsPerMember: 6, memberIDs: []int64{ada.ID}, want: db.ErrLegsPerMemberRange},
-		"no members":    {name: "Week 9", legsPerMember: 2, memberIDs: nil, want: db.ErrSlipMembersRequired},
+		"blank name": {
+			name:          "  ",
+			scope:         db.SlateScopeSundayMain,
+			legsPerMember: 2,
+			memberIDs:     []int64{ada.ID},
+			want:          db.ErrSlipNameRequired,
+		},
+		"invalid scope": {
+			name:          "Week 9",
+			scope:         "bogus",
+			legsPerMember: 2,
+			memberIDs:     []int64{ada.ID},
+			want:          db.ErrSlateScopeInvalid,
+		},
+		"zero legs": {
+			name:          "Week 9",
+			scope:         db.SlateScopeSundayMain,
+			legsPerMember: 0,
+			memberIDs:     []int64{ada.ID},
+			want:          db.ErrLegsPerMemberRange,
+		},
+		"too many legs": {
+			name:          "Week 9",
+			scope:         db.SlateScopeSundayMain,
+			legsPerMember: 6,
+			memberIDs:     []int64{ada.ID},
+			want:          db.ErrLegsPerMemberRange,
+		},
+		"no members": {
+			name:          "Week 9",
+			scope:         db.SlateScopeSundayMain,
+			legsPerMember: 2,
+			memberIDs:     nil,
+			want:          db.ErrSlipMembersRequired,
+		},
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
 			_, err := store.CreateSlip(
-				t.Context(), group.ID, week.ID, test.name, test.legsPerMember, test.memberIDs)
+				t.Context(), group.ID, week.ID, nil, test.name, test.scope, test.legsPerMember, test.memberIDs)
 			require.ErrorIs(t, err, test.want)
 
 			slips, err := store.SlipsForWeek(t.Context(), group.ID, week.ID)
@@ -129,12 +197,60 @@ func TestCreateSlipIgnoresDuplicateMembers(t *testing.T) {
 	group := createTestGroup(t, store, ada)
 	week := createTestWeek(t, store, 9)
 
-	slip, err := store.CreateSlip(t.Context(), group.ID, week.ID, "Week 9", 2, []int64{ada.ID, ada.ID})
+	slip, err := store.CreateSlip(
+		t.Context(),
+		group.ID,
+		week.ID,
+		nil,
+		"Week 9",
+		db.SlateScopeSundayMain,
+		2,
+		[]int64{ada.ID, ada.ID},
+	)
 	require.NoError(t, err)
 
 	ids, err := store.SlipMemberIDs(t.Context(), slip.ID)
 	require.NoError(t, err)
 	assert.Equal(t, []int64{ada.ID}, ids)
+}
+
+func TestCreateSlipScheduleIDAndDuplicateName(t *testing.T) {
+	t.Parallel()
+
+	store, _ := openTestStore(t)
+	ada := createUser(t, store, "Ada")
+	group := createTestGroup(t, store, ada)
+	week := createTestWeek(t, store, 9)
+
+	sched, err := store.CreateGroupSlipSchedule(t.Context(), group.ID, "Sunday Sched", db.SlateScopeSundayMain, 2)
+	require.NoError(t, err)
+
+	slip, err := store.CreateSlip(
+		t.Context(),
+		group.ID,
+		week.ID,
+		&sched.ID,
+		"Sunday Sched",
+		db.SlateScopeSundayMain,
+		2,
+		[]int64{ada.ID},
+	)
+	require.NoError(t, err)
+	require.NotNil(t, slip.ScheduleID)
+	assert.Equal(t, sched.ID, *slip.ScheduleID)
+
+	// Creating another slip with the same name in the same group and week must fail with ErrSlipNameTaken.
+	_, err = store.CreateSlip(
+		t.Context(),
+		group.ID,
+		week.ID,
+		nil,
+		"Sunday Sched",
+		db.SlateScopeSundayMain,
+		2,
+		[]int64{ada.ID},
+	)
+	assert.ErrorIs(t, err, db.ErrSlipNameTaken)
 }
 
 func TestSlipsForWeekReturnsTheGroupsSlipsNewestFirst(t *testing.T) {
@@ -370,4 +486,71 @@ func TestSetSlipStatus(t *testing.T) {
 		store.SetSlipStatus(t.Context(), slip.ID, db.SlipStatus("nope")), db.ErrSlipStatusInvalid)
 	require.ErrorIs(t,
 		store.SetSlipStatus(t.Context(), 404, db.SlipOpen), db.ErrSlipNotFound)
+}
+
+func TestSlateScopeLabel(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, "Sunday Slate", db.SlateScopeSundayMain.Label())
+	assert.Equal(t, "Thursday Night", db.SlateScopeThursday.Label())
+	assert.Equal(t, "Full Week", db.SlateScopeFullWeek.Label())
+	assert.Equal(t, "Sunday Slate", db.SlateScope("unknown").Label())
+	assert.Equal(t, "Sunday Slate", db.SlateScope("").Label())
+}
+
+func TestSlateScopeMatches(t *testing.T) {
+	t.Parallel()
+
+	// 2026-11-05 is Thursday, 2026-11-06 is Friday, 2026-11-07 is Saturday,
+	// 2026-11-08 is Sunday, 2026-11-09 is Monday, 2026-11-10 is Tuesday.
+	loc, err := time.LoadLocation("America/New_York")
+	require.NoError(t, err)
+
+	thuAfternoon := time.Date(2026, 11, 5, 13, 0, 0, 0, loc)
+	thuNight := time.Date(2026, 11, 5, 20, 15, 0, 0, loc)
+	fri := time.Date(2026, 11, 6, 15, 0, 0, 0, loc)
+	sat := time.Date(2026, 11, 7, 16, 30, 0, 0, loc)
+	sunLondon := time.Date(2026, 11, 8, 9, 30, 0, 0, loc)
+	sunAfternoon := time.Date(2026, 11, 8, 13, 0, 0, 0, loc)
+	sunNight := time.Date(2026, 11, 8, 20, 20, 0, 0, loc)
+	monNight := time.Date(2026, 11, 9, 20, 15, 0, 0, loc)
+	tue := time.Date(2026, 11, 10, 19, 0, 0, 0, loc)
+
+	// SlateScopeThursday matches only Thursday kickoffs in Eastern time.
+	assert.True(t, db.SlateScopeThursday.Matches(thuAfternoon))
+	assert.True(t, db.SlateScopeThursday.Matches(thuNight))
+	assert.True(t, db.SlateScopeThursday.Matches(thuNight.UTC())) // Friday in UTC
+	assert.False(t, db.SlateScopeThursday.Matches(fri))
+	assert.False(t, db.SlateScopeThursday.Matches(sat))
+	assert.False(t, db.SlateScopeThursday.Matches(sunLondon))
+	assert.False(t, db.SlateScopeThursday.Matches(sunAfternoon))
+	assert.False(t, db.SlateScopeThursday.Matches(sunNight))
+	assert.False(t, db.SlateScopeThursday.Matches(monNight))
+	assert.False(t, db.SlateScopeThursday.Matches(tue))
+
+	// SlateScopeSundayMain matches Sunday and Monday kickoffs in Eastern time.
+	assert.False(t, db.SlateScopeSundayMain.Matches(thuAfternoon))
+	assert.False(t, db.SlateScopeSundayMain.Matches(thuNight))
+	assert.False(t, db.SlateScopeSundayMain.Matches(fri))
+	assert.False(t, db.SlateScopeSundayMain.Matches(sat))
+	assert.True(t, db.SlateScopeSundayMain.Matches(sunLondon))
+	assert.True(t, db.SlateScopeSundayMain.Matches(sunAfternoon))
+	assert.True(t, db.SlateScopeSundayMain.Matches(sunNight))
+	assert.True(t, db.SlateScopeSundayMain.Matches(sunNight.UTC())) // Monday in UTC
+	assert.True(t, db.SlateScopeSundayMain.Matches(monNight))
+	assert.True(t, db.SlateScopeSundayMain.Matches(monNight.UTC())) // Tuesday in UTC
+	assert.False(t, db.SlateScopeSundayMain.Matches(tue))
+
+	// Blank / default scope behaves like Sunday Main.
+	var defaultScope db.SlateScope
+	assert.False(t, defaultScope.Matches(thuNight))
+	assert.True(t, defaultScope.Matches(sunAfternoon))
+	assert.True(t, defaultScope.Matches(monNight))
+
+	// SlateScopeFullWeek matches any day of the week.
+	for _, kickoff := range []time.Time{
+		thuAfternoon, thuNight, fri, sat, sunLondon, sunAfternoon, sunNight, monNight, tue,
+	} {
+		assert.True(t, db.SlateScopeFullWeek.Matches(kickoff))
+	}
 }

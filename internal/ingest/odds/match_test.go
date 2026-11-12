@@ -19,7 +19,7 @@ func TestMatchEventsFindsEveryGameInTheSavedSlate(t *testing.T) {
 	t.Parallel()
 
 	board := readScoreboardFixture(t, "scoreboard_week.json")
-	require.Len(t, board.Games, 14)
+	require.Len(t, board.Games, 15)
 
 	eventsServer := fixtureServer(t, "events_nfl.json", "/events",
 		odds.Credits{Remaining: 500}, apiKeyQuery())
@@ -29,8 +29,12 @@ func TestMatchEventsFindsEveryGameInTheSavedSlate(t *testing.T) {
 
 	matches, unmatched := odds.MatchEvents(events, matchGames(board.Games))
 
-	require.Len(t, matches, len(board.Games), "every slate game matches an event")
+	require.Len(t, matches, len(board.Games)-1, "every upcoming slate game matches an event (Thursday already played)")
 	for _, game := range board.Games {
+		if game.ID == "401873037" {
+			assert.Empty(t, matches[game.ID], "Thursday game was already played")
+			continue
+		}
 		assert.NotEmpty(t, matches[game.ID], "game %s %s vs %s has no event",
 			game.ID, game.Away.Name, game.Home.Name)
 	}

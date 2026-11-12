@@ -19,6 +19,18 @@ const DefaultLegsPerMember = 2
 type Store interface {
 	PreviousSlip(ctx context.Context, groupID, weekID int64) (db.Slip, error)
 	SlipMemberIDs(ctx context.Context, slipID int64) ([]int64, error)
+	ActiveGroupSlipSchedules(ctx context.Context, groupID int64) ([]db.GroupSlipSchedule, error)
+	SlipsForWeek(ctx context.Context, groupID, weekID int64) ([]db.Slip, error)
+	Members(ctx context.Context, groupID int64) ([]db.User, error)
+	CreateSlip(
+		ctx context.Context,
+		groupID, weekID int64,
+		scheduleID *int64,
+		name string,
+		slateScope db.SlateScope,
+		legsPerMember int,
+		memberIDs []int64,
+	) (db.Slip, error)
 }
 
 var _ Store = (*db.Store)(nil)
@@ -48,4 +60,78 @@ func CreateDefaults(ctx context.Context, store Store, groupID, weekID int64) (De
 		return Defaults{}, fmt.Errorf("create-slip defaults for group %d in week %d: %w", groupID, weekID, err)
 	}
 	return Defaults{LegsPerMember: previous.LegsPerMember, MemberIDs: memberIDs}, nil
+}
+
+// EnsureWeekSlips checks for slips matching each active schedule for groupID.
+// For any active schedule without a slip in weekID, it creates one with the
+// schedule's name, slate scope, legs-per-member, and all active group members.
+// It returns all slips for the group in weekID.
+func EnsureWeekSlips(ctx context.Context, store Store, groupID, weekID int64) ([]db.Slip, error) {
+	schedules, err := store.ActiveGroupSlipSchedules(ctx, groupID)
+	if err != nil {
+		return nil, fmt.Errorf("ensure week slips for group %d in week %d: %w", groupID, weekID, err)
+	}
+
+	existingSlips, err := store.SlipsForWeek(ctx, groupID, weekID)
+	if err != nil {
+		return nil, fmt.Errorf("ensure week slips for group %d in week %d: %w", groupID, weekID, err)
+	}
+	if existingSlips == nil {
+		existingSlips = []db.Slip{}
+	}
+
+	var missing []db.GroupSlipSchedule
+	for _, sched := range schedules {
+		found := false
+		for _, slip := range existingSlips {
+			if slip.ScheduleID != nil && *slip.ScheduleID == sched.ID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			missing = append(missing, sched)
+		}
+	}
+
+	if len(missing) == 0 {
+		return existingSlips, nil
+	}
+
+	members, err := store.Members(ctx, groupID)
+	if err != nil {
+		return nil, fmt.Errorf("ensure week slips for group %d in week %d: %w", groupID, weekID, err)
+	}
+	if len(members) == 0 {
+		return nil, fmt.Errorf(
+			"ensure week slips for group %d in week %d: %w",
+			groupID,
+			weekID,
+			db.ErrSlipMembersRequired,
+		)
+	}
+
+	memberIDs := make([]int64, len(members))
+	for i, m := range members {
+		memberIDs[i] = m.ID
+	}
+
+	for _, sched := range missing {
+		schedID := sched.ID
+		_, err := store.CreateSlip(
+			ctx,
+			groupID,
+			weekID,
+			&schedID,
+			sched.Name,
+			sched.SlateScope,
+			sched.LegsPerMember,
+			memberIDs,
+		)
+		if err != nil && !errors.Is(err, db.ErrSlipNameTaken) {
+			return nil, fmt.Errorf("ensure week slips for group %d in week %d: %w", groupID, weekID, err)
+		}
+	}
+
+	return store.SlipsForWeek(ctx, groupID, weekID)
 }

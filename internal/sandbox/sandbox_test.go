@@ -81,15 +81,15 @@ func TestWeek9StageScoreboardsReplayCoherentGames(t *testing.T) {
 		awayScore      int
 	}{
 		{
-			stage: sandbox.EarlyLoss, wantLive: 1, wantFinal: 0, wantScheduled: 13,
+			stage: sandbox.EarlyLoss, wantLive: 1, wantFinal: 1, wantScheduled: 13,
 			featuredStatus: espn.Live, homeScore: 17, awayScore: 10,
 		},
 		{
-			stage: sandbox.AllClear, wantLive: 0, wantFinal: 13, wantScheduled: 1,
+			stage: sandbox.AllClear, wantLive: 0, wantFinal: 14, wantScheduled: 1,
 			featuredStatus: espn.Final, homeScore: 24, awayScore: 31,
 		},
 		{
-			stage: sandbox.SundayComplete, wantLive: 0, wantFinal: 14, wantScheduled: 0,
+			stage: sandbox.SundayComplete, wantLive: 0, wantFinal: 15, wantScheduled: 0,
 			featuredStatus: espn.Final, homeScore: 24, awayScore: 31,
 		},
 	}
@@ -101,14 +101,14 @@ func TestWeek9StageScoreboardsReplayCoherentGames(t *testing.T) {
 			client := replayClientAt(t, test.stage)
 			board, err := espn.NewClient("", client).Scoreboard(t.Context(), espn.ScoreboardParams{})
 			require.NoError(t, err)
-			require.Len(t, board.Games, 14)
+			require.Len(t, board.Games, 15)
 
 			counts := map[espn.Status]int{}
 			for _, game := range board.Games {
 				counts[game.Status]++
 			}
-			// The Thursday game is already final in the capture and is dropped
-			// from the slate, so final counts here are Sunday and Monday games.
+			// The Thursday game is already final in the capture and is included
+			// in the slate alongside Sunday and Monday games.
 			assert.Equal(t, test.wantLive, counts[espn.Live], "live games")
 			assert.Equal(t, test.wantFinal, counts[espn.Final], "final games")
 			assert.Equal(t, test.wantScheduled, counts[espn.Scheduled], "scheduled games")
@@ -143,14 +143,14 @@ func TestWeek9ScoreboardReplaysThroughESPN(t *testing.T) {
 
 	assert.Equal(t, espn.Season{Year: 2026, Type: 2}, board.Season)
 	assert.Equal(t, espn.Week{Number: 9}, board.Week)
-	require.Len(t, board.Games, 14, "the Thursday game and any other weekday game are dropped")
+	require.Len(t, board.Games, 15, "the Thursday game, Sunday games, and Monday game are included")
 
 	first := board.Games[0]
-	assert.Equal(t, "401873038", first.ID)
-	assert.Equal(t, "ATL", first.Home.Abbreviation)
-	assert.Equal(t, "CIN", first.Away.Abbreviation)
-	assert.Equal(t, espn.Scheduled, first.Status)
-	assert.Equal(t, "Santiago Bernabéu", first.Venue.Name)
+	assert.Equal(t, "401873037", first.ID)
+	assert.Equal(t, "BAL", first.Home.Abbreviation)
+	assert.Equal(t, "JAX", first.Away.Abbreviation)
+	assert.Equal(t, espn.Final, first.Status)
+	assert.Equal(t, "M&T Bank Stadium", first.Venue.Name)
 
 	last := board.Games[len(board.Games)-1]
 	assert.Equal(t, "401873051", last.ID)
@@ -158,7 +158,7 @@ func TestWeek9ScoreboardReplaysThroughESPN(t *testing.T) {
 	assert.Equal(t, "BUF", last.Away.Abbreviation)
 	assert.Equal(t, espn.Scheduled, last.Status)
 
-	for _, game := range board.Games {
+	for _, game := range board.Games[1:] {
 		assert.Equal(t, espn.Scheduled, game.Status, game.ID)
 	}
 }

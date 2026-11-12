@@ -5,21 +5,11 @@ import (
 
 	"github.com/kalverra/parlay-club/internal/db"
 	"github.com/kalverra/parlay-club/internal/ingest/weather"
+	"github.com/kalverra/parlay-club/internal/tz"
 )
 
-// eastern is the zone the game-day and weekly odds rules use. Loading it
-// cannot fail because time/tzdata is embedded in refresh.go.
-var eastern = mustLoadLocation("America/New_York")
-
-// mustLoadLocation loads a zone or panics: the zone database ships with the
-// binary.
-func mustLoadLocation(name string) *time.Location {
-	location, err := time.LoadLocation(name)
-	if err != nil {
-		panic("load time zone " + name + ": " + err.Error())
-	}
-	return location
-}
+// eastern is the zone the game-day and weekly odds rules use.
+var eastern = tz.Eastern
 
 // scoreboardStale reports whether the slate is older than its window. A source
 // that has never run is always stale.
@@ -31,7 +21,7 @@ func scoreboardStale(last, now time.Time, live bool) bool {
 }
 
 // scoreboardAge is the slate's freshness window: 10 minutes while a game is
-// live, 30 minutes on a Sunday or Monday, and 6 hours otherwise.
+// live, 30 minutes on a Thursday, Sunday, or Monday, and 6 hours otherwise.
 func scoreboardAge(now time.Time, live bool) time.Duration {
 	switch {
 	case live:
@@ -43,10 +33,10 @@ func scoreboardAge(now time.Time, live bool) time.Duration {
 	}
 }
 
-// gameDay reports whether now falls on Sunday or Monday in America/New_York.
+// gameDay reports whether now falls on Thursday, Sunday, or Monday in America/New_York.
 func gameDay(now time.Time) bool {
 	switch now.In(eastern).Weekday() {
-	case time.Sunday, time.Monday:
+	case time.Thursday, time.Sunday, time.Monday:
 		return true
 	default:
 		return false

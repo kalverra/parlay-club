@@ -358,10 +358,11 @@ func (h *slipHandlers) pickPageData(
 	if err != nil {
 		return PickPage{}, err
 	}
-	games, err := h.deps.Store.GamesForWeek(ctx, slip.WeekID)
+	allGames, err := h.deps.Store.GamesForWeek(ctx, slip.WeekID)
 	if err != nil {
 		return PickPage{}, err
 	}
+	games := slips.FilterGamesByScope(allGames, slip.SlateScope)
 	odds, err := h.deps.Store.OddsForWeek(ctx, slip.WeekID)
 	if err != nil {
 		return PickPage{}, err
@@ -385,7 +386,7 @@ func (h *slipHandlers) pickPageData(
 
 	rows := board.Build(games, currentOdds(odds), roster, homeBook, mine, now)
 	started := board.StartedCount(games, now)
-	dock, err := h.dockFrom(ctx, slip, legs, games, mine)
+	dock, err := h.dockFrom(ctx, slip, legs, allGames, mine)
 	if err != nil {
 		return PickPage{}, err
 	}
@@ -726,6 +727,7 @@ func (h *slipHandlers) pickDockData(ctx context.Context, slip db.Slip) (PickDock
 	if err != nil {
 		return PickDockView{}, err
 	}
+	games = slips.FilterGamesByScope(games, slip.SlateScope)
 	user, _ := h.user(ctx)
 	return h.dockFrom(ctx, slip, legs, games, legsForUser(legs, user.ID))
 }

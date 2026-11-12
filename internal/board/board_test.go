@@ -59,13 +59,16 @@ func odds(gameID, book, market, team, player, side string, line *float64, price 
 func TestBuildMapsCategoriesWindowsAndText(t *testing.T) {
 	t.Parallel()
 
+	thursday := at(t, 5, 20, 15)
 	sunday := at(t, 8, 13, 0)
 	monday := at(t, 9, 20, 15)
 	games := []db.Game{
+		game("thu", thursday),
 		game("sun", sunday),
 		game("mon", monday),
 	}
 	rows := []db.Odds{
+		odds("thu", "draftkings", "ML", "BAL", "", "TEAM", nil, -130),
 		odds("sun", "draftkings", "SPREAD", "BUF", "", "TEAM", new(-3.0), -110),
 		odds("sun", "draftkings", "ML", "BUF", "", "TEAM", nil, -150),
 		odds("sun", "draftkings", "TOTAL", "", "", "OVER", new(47.5), -110),
@@ -78,13 +81,14 @@ func TestBuildMapsCategoriesWindowsAndText(t *testing.T) {
 		odds("mon", "draftkings", "ML", "MIA", "", "TEAM", nil, 130),
 	}
 
-	built := board.Build(games, rows, nil, "", nil, sunday.Add(-24*time.Hour))
-	require.Len(t, built, 10)
+	built := board.Build(games, rows, nil, "", nil, thursday.Add(-24*time.Hour))
+	require.Len(t, built, 11)
 
 	byText := make(map[string]board.Row, len(built))
 	for _, row := range built {
 		byText[row.Text] = row
 	}
+	assert.Equal(t, board.CategoryLines, byText["BAL ML"].Category)
 	assert.Equal(t, board.CategoryLines, byText["BUF -3"].Category)
 	assert.Equal(t, board.CategoryLines, byText["BUF ML"].Category)
 	assert.Equal(t, board.CategoryLines, byText["Over 47.5"].Category)
@@ -95,6 +99,9 @@ func TestBuildMapsCategoriesWindowsAndText(t *testing.T) {
 	assert.Equal(t, board.CategoryTDs, byText["James Cook Anytime TD"].Category)
 	assert.Equal(t, board.CategoryKicking, byText["Tyler Bass Over 7.5 Kicking Pts"].Category)
 
+	assert.Equal(t, board.WindowThursday, byText["BAL ML"].Window,
+		"a Thursday-night kickoff that lands on Friday in UTC still reads Thursday")
+	assert.Equal(t, thursday.UTC(), byText["BAL ML"].Kickoff.UTC())
 	assert.Equal(t, board.WindowSundayEarly, byText["BUF ML"].Window)
 	assert.Equal(t, board.WindowMonday, byText["MIA ML"].Window,
 		"a Monday-night kickoff that lands on Tuesday in UTC still reads Monday")
@@ -105,6 +112,7 @@ func TestWindowsSplitTheDay(t *testing.T) {
 	t.Parallel()
 
 	games := []db.Game{
+		game("thursday", at(t, 5, 20, 15)),
 		game("morning", at(t, 8, 9, 30)),
 		game("early", at(t, 8, 13, 0)),
 		game("late", at(t, 8, 16, 25)),
@@ -116,17 +124,39 @@ func TestWindowsSplitTheDay(t *testing.T) {
 		rows = append(rows, odds(game.ID, "draftkings", "ML", "BUF", "", "TEAM", nil, -110))
 	}
 
-	built := board.Build(games, rows, nil, "", nil, at(t, 7, 12, 0))
+	built := board.Build(games, rows, nil, "", nil, at(t, 4, 12, 0))
 	want := map[string]board.Window{
-		"morning": board.WindowSundayMorning,
-		"early":   board.WindowSundayEarly,
-		"late":    board.WindowSundayLate,
-		"night":   board.WindowSundayNight,
-		"monday":  board.WindowMonday,
+		"thursday": board.WindowThursday,
+		"morning":  board.WindowSundayMorning,
+		"early":    board.WindowSundayEarly,
+		"late":     board.WindowSundayLate,
+		"night":    board.WindowSundayNight,
+		"monday":   board.WindowMonday,
 	}
 	for _, row := range built {
 		assert.Equal(t, want[row.GameID], row.Window, row.GameID)
 	}
+}
+
+func TestWindowChipsAndLabels(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, []board.Window{
+		board.WindowThursday,
+		board.WindowSundayMorning,
+		board.WindowSundayEarly,
+		board.WindowSundayLate,
+		board.WindowSundayNight,
+		board.WindowMonday,
+	}, board.Windows)
+
+	assert.Equal(t, "Thursday", board.WindowThursday.Label())
+	assert.Equal(t, "Sun morning", board.WindowSundayMorning.Label())
+	assert.Equal(t, "Sun early", board.WindowSundayEarly.Label())
+	assert.Equal(t, "Sun late", board.WindowSundayLate.Label())
+	assert.Equal(t, "Sun night", board.WindowSundayNight.Label())
+	assert.Equal(t, "Monday", board.WindowMonday.Label())
+	assert.Equal(t, "other", board.Window("other").Label())
 }
 
 func TestStartedGamesAreHiddenAndCounted(t *testing.T) {
@@ -311,21 +341,34 @@ func TestSlatesCountPropRows(t *testing.T) {
 func TestSlatesFilterByWindowAndQuery(t *testing.T) {
 	t.Parallel()
 
+	thu := game("thu", at(t, 5, 20, 15))
+	thu.AwayTeam = "BAL"
+	thu.HomeTeam = "JAX"
+	thu.AwayName = "Baltimore Ravens"
+	thu.HomeName = "Jacksonville Jaguars"
 	early := game("early", at(t, 8, 13, 0))
 	early.VenueName = new("Highmark Stadium")
 	late := game("late", at(t, 8, 16, 25))
 	late.HomeTeam = "KC"
 	late.HomeName = "Kansas City Chiefs"
-	games := []db.Game{early, late}
+	games := []db.Game{thu, early, late}
 	rows := []db.Odds{
+		odds("thu", "draftkings", "ML", "BAL", "", "TEAM", nil, -150),
 		odds("early", "draftkings", "ML", "BUF", "", "TEAM", nil, -150),
 		odds("late", "draftkings", "ML", "KC", "", "TEAM", nil, -150),
 	}
 	roster := []db.RosterPlayer{
 		{AthleteID: "1", Team: "BUF", FullName: "Josh Allen", Position: "QB"},
 	}
-	now := at(t, 7, 12, 0)
+	now := at(t, 4, 12, 0)
 	built := board.Build(games, rows, roster, "", nil, now)
+
+	windowThu := board.Slates(games, built, roster, board.Query{
+		Window: board.WindowThursday,
+		Now:    now,
+	})
+	require.Len(t, windowThu, 1)
+	assert.Equal(t, "thu", windowThu[0].ID)
 
 	window := board.Slates(games, built, roster, board.Query{
 		Window: board.WindowSundayLate,

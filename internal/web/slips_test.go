@@ -63,7 +63,16 @@ func newSlipFixtureAt(t *testing.T, legsPerMember int, now func() time.Time) *sl
 	require.NoError(t, err)
 	week, err := store.UpsertWeek(t.Context(), 2026, 2, 9)
 	require.NoError(t, err)
-	slip, err := store.CreateSlip(t.Context(), group.ID, week.ID, "Week 9", legsPerMember, []int64{user.ID})
+	slip, err := store.CreateSlip(
+		t.Context(),
+		group.ID,
+		week.ID,
+		nil,
+		"Week 9",
+		db.SlateScopeFullWeek,
+		legsPerMember,
+		[]int64{user.ID},
+	)
 	require.NoError(t, err)
 
 	renderer, err := webui.NewRenderer(assets.Templates, false)
@@ -920,4 +929,203 @@ func TestAutomaticPlayerResolutionOnSave(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, legs3, 3)
 	assert.Nil(t, legs3[2].PlayerID)
+}
+
+func TestSiblingSlipSwitcher(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+
+	// 1. Single slip in week: no sibling switcher rendered.
+	reqSingle := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodGet,
+		fmt.Sprintf("/slips/%d", fixture.slip.ID),
+		nil,
+	)
+	recSingle := httptest.NewRecorder()
+	fixture.handler.ServeHTTP(recSingle, reqSingle)
+	assert.Equal(t, http.StatusOK, recSingle.Code)
+	assert.NotContains(t, recSingle.Body.String(), "data-sibling-switcher")
+
+	// 2. Add a second slip for Thursday Night in the same week.
+	thuSlip, err := fixture.store.CreateSlip(
+		t.Context(),
+		fixture.group.ID,
+		fixture.week.ID,
+		nil,
+		"Thursday Night",
+		db.SlateScopeThursday,
+		1,
+		[]int64{fixture.user.ID},
+	)
+	require.NoError(t, err)
+
+	// Lock the Thursday night slip.
+	require.NoError(t, fixture.store.SetSlipStatus(t.Context(), thuSlip.ID, db.SlipLocked))
+
+	// Add 1 leg to the main Sunday slip (legsPerMember = 2) for Ada.
+	game := addGame(t, fixture, gameKickoff())
+	_, err = fixture.store.CreateLeg(t.Context(), db.Leg{
+		SlipID:     fixture.slip.ID,
+		UserID:     fixture.user.ID,
+		GameID:     &game.ID,
+		MarketType: "PASS_YDS",
+		Selection:  "Josh Allen Over 250.5",
+		Odds:       -110,
+	})
+	require.NoError(t, err)
+
+	// 3. View Thursday slip: shows sibling switcher with Thursday (Locked) and Sunday Main (1/2 Picks).
+	reqThu := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodGet,
+		fmt.Sprintf("/slips/%d", thuSlip.ID),
+		nil,
+	)
+	recThu := httptest.NewRecorder()
+	fixture.handler.ServeHTTP(recThu, reqThu)
+	assert.Equal(t, http.StatusOK, recThu.Code)
+	bodyThu := recThu.Body.String()
+	assert.Contains(t, bodyThu, "data-sibling-switcher")
+	assert.Contains(t, bodyThu, "Thursday Night")
+	assert.Contains(t, bodyThu, "(Locked)")
+	assert.Contains(t, bodyThu, fixture.slip.Name)
+	assert.Contains(t, bodyThu, "(1/2 Picks)")
+	assert.Contains(t, bodyThu, fmt.Sprintf(`href="/slips/%d"`, fixture.slip.ID))
+	assert.Contains(t, bodyThu, fmt.Sprintf(`href="/slips/%d"`, thuSlip.ID))
+	// Thursday is current on reqThu, Sunday is not.
+	assert.Contains(t, bodyThu, `aria-current="page"`)
+
+	// 4. View Sunday slip: shows Thursday as sibling and Sunday as current.
+	reqSun := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodGet,
+		fmt.Sprintf("/slips/%d", fixture.slip.ID),
+		nil,
+	)
+	recSun := httptest.NewRecorder()
+	fixture.handler.ServeHTTP(recSun, reqSun)
+	assert.Equal(t, http.StatusOK, recSun.Code)
+	bodySun := recSun.Body.String()
+	assert.Contains(t, bodySun, "data-sibling-switcher")
+	assert.Contains(t, bodySun, "(Locked)")
+	assert.Contains(t, bodySun, "(1/2 Picks)")
+	assert.Contains(t, bodySun, `aria-current="page"`)
+
+	// 5. Check HTMX panel refresh also contains sibling switcher.
+	reqPanel := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodGet,
+		fmt.Sprintf("/slips/%d/panel", fixture.slip.ID),
+		nil,
+	)
+	reqPanel.Header.Set("Hx-Request", "true")
+	recPanel := httptest.NewRecorder()
+	fixture.handler.ServeHTTP(recPanel, reqPanel)
+	assert.Equal(t, http.StatusOK, recPanel.Code)
+	assert.Contains(t, recPanel.Body.String(), "data-sibling-switcher")
+
+	// 6. When member locks in on Sunday Main, switcher updates to (Locked).
+	lockTime := time.Now().UTC()
+	require.NoError(t, fixture.store.SetSlipMemberLock(t.Context(), fixture.slip.ID, fixture.user.ID, &lockTime))
+	recLocked := httptest.NewRecorder()
+	fixture.handler.ServeHTTP(recLocked, reqSun)
+	assert.Equal(t, http.StatusOK, recLocked.Code)
+	bodyLocked := recLocked.Body.String()
+	// Both slips should now show (Locked)
+	assert.Equal(t, 2, strings.Count(bodyLocked, "(Locked)"))
+
+	// 7. When slip is graded, switcher reflects the result (e.g. Won).
+	require.NoError(t, fixture.store.SetSlipGrade(t.Context(), thuSlip.ID, parlay.Won, db.SlipGraded))
+	recGraded := httptest.NewRecorder()
+	fixture.handler.ServeHTTP(recGraded, reqSun)
+	assert.Equal(t, http.StatusOK, recGraded.Code)
+	assert.Contains(t, recGraded.Body.String(), "(Won)")
+}
+
+func TestCreateSlipFormSlateScopeSelection(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+
+	// Default renders Sunday Slate as selected.
+	reqDefault := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/slips/new", nil)
+	recDefault := httptest.NewRecorder()
+	fixture.handler.ServeHTTP(recDefault, reqDefault)
+	require.Equal(t, http.StatusOK, recDefault.Code)
+	bodyDefault := recDefault.Body.String()
+	assert.Contains(t, bodyDefault, `<select name="slate_scope"`)
+	assert.Contains(t, bodyDefault, `<option value="sunday_main" selected>Sunday Slate</option>`)
+	assert.Contains(t, bodyDefault, `<option value="thursday">Thursday Night</option>`)
+	assert.Contains(t, bodyDefault, `<option value="full_week">Full Week</option>`)
+
+	// Pre-select Thursday Night via ?scope=thursday.
+	reqThu := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/slips/new?scope=thursday", nil)
+	recThu := httptest.NewRecorder()
+	fixture.handler.ServeHTTP(recThu, reqThu)
+	require.Equal(t, http.StatusOK, recThu.Code)
+	bodyThu := recThu.Body.String()
+	assert.Contains(t, bodyThu, `<option value="thursday" selected>Thursday Night</option>`)
+	assert.Contains(t, bodyThu, `<option value="sunday_main">Sunday Slate</option>`)
+
+	// Pre-select Full Week via ?slate_scope=full_week.
+	reqFull := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/slips/new?slate_scope=full_week", nil)
+	recFull := httptest.NewRecorder()
+	fixture.handler.ServeHTTP(recFull, reqFull)
+	require.Equal(t, http.StatusOK, recFull.Code)
+	bodyFull := recFull.Body.String()
+	assert.Contains(t, bodyFull, `<option value="full_week" selected>Full Week</option>`)
+}
+
+func TestCreateSlipWithSlateScope(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+
+	// 1. Explicit slate_scope: "thursday"
+	resThu := postForm(t, fixture.handler, "/slips", url.Values{
+		"week_id":         {strconv.FormatInt(fixture.week.ID, 10)},
+		"name":            {"Thursday One-Off"},
+		"slate_scope":     {"thursday"},
+		"legs_per_member": {"2"},
+		"member_id":       {strconv.FormatInt(fixture.user.ID, 10)},
+	})
+	require.Equal(t, http.StatusOK, resThu.Code, resThu.Body.String())
+	locThu := resThu.Header().Get("Hx-Redirect")
+	require.NotEmpty(t, locThu)
+	idThu, err := strconv.ParseInt(strings.TrimPrefix(locThu, "/slips/"), 10, 64)
+	require.NoError(t, err)
+	slipThu, err := fixture.store.SlipByID(t.Context(), idThu)
+	require.NoError(t, err)
+	assert.Equal(t, db.SlateScopeThursday, slipThu.SlateScope)
+
+	// 2. Default slate_scope (omitted) defaults to Sunday Main
+	resDefault := postForm(t, fixture.handler, "/slips", url.Values{
+		"week_id":         {strconv.FormatInt(fixture.week.ID, 10)},
+		"name":            {"Default Sunday One-Off"},
+		"legs_per_member": {"2"},
+		"member_id":       {strconv.FormatInt(fixture.user.ID, 10)},
+	})
+	require.Equal(t, http.StatusOK, resDefault.Code, resDefault.Body.String())
+	locDefault := resDefault.Header().Get("Hx-Redirect")
+	require.NotEmpty(t, locDefault)
+	idDefault, err := strconv.ParseInt(strings.TrimPrefix(locDefault, "/slips/"), 10, 64)
+	require.NoError(t, err)
+	slipDefault, err := fixture.store.SlipByID(t.Context(), idDefault)
+	require.NoError(t, err)
+	assert.Equal(t, db.SlateScopeSundayMain, slipDefault.SlateScope)
+
+	// 3. Invalid slate_scope triggers 422 error and renders form with error message
+	resInvalid := postForm(t, fixture.handler, "/slips", url.Values{
+		"week_id":         {strconv.FormatInt(fixture.week.ID, 10)},
+		"name":            {"Invalid Scope Slip"},
+		"slate_scope":     {"bogus_scope"},
+		"legs_per_member": {"2"},
+		"member_id":       {strconv.FormatInt(fixture.user.ID, 10)},
+	})
+	require.Equal(t, http.StatusOK, resInvalid.Code)
+	bodyInvalid := resInvalid.Body.String()
+	assert.Contains(t, bodyInvalid, "invalid slate scope")
+	assert.Contains(t, bodyInvalid, "Invalid Scope Slip")
 }

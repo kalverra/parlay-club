@@ -9,7 +9,11 @@ import (
 	"time"
 
 	"github.com/kalverra/parlay-club/internal/parlay"
+	"github.com/kalverra/parlay-club/internal/tz"
 )
+
+// eastern is the zone the kickoff windows and slates use.
+var eastern = tz.Eastern
 
 // Errors a caller can act on.
 var (
@@ -17,6 +21,10 @@ var (
 	ErrSlipNotFound = errors.New("slip not found")
 	// ErrSlipNameRequired is returned when CreateSlip or UpdateSlip gets a blank name.
 	ErrSlipNameRequired = errors.New("slip name required")
+	// ErrSlipNameTaken is returned when a slip with that name already exists in the group and week.
+	ErrSlipNameTaken = errors.New("slip name already taken")
+	// ErrSlateScopeInvalid is returned when a slate scope is not one the schema allows.
+	ErrSlateScopeInvalid = errors.New("invalid slate scope")
 	// ErrLegsPerMemberRange is returned when legs_per_member is outside 1-5.
 	ErrLegsPerMemberRange = errors.New("legs per member must be between 1 and 5")
 	// ErrSlipMembersRequired is returned when a new slip has no members.
@@ -28,6 +36,57 @@ var (
 	// ErrSlipResultInvalid is returned when a result is not one a slip can carry.
 	ErrSlipResultInvalid = errors.New("invalid slip result")
 )
+
+// SlateScope identifies which games in a week belong on a slip.
+type SlateScope string
+
+// The slate scopes a slip can carry.
+const (
+	SlateScopeThursday   SlateScope = "thursday"
+	SlateScopeSundayMain SlateScope = "sunday_main"
+	SlateScopeFullWeek   SlateScope = "full_week"
+)
+
+// Valid reports whether the slate scope is one of SlateScopeThursday,
+// SlateScopeSundayMain, or SlateScopeFullWeek.
+func (s SlateScope) Valid() bool {
+	switch s {
+	case SlateScopeThursday, SlateScopeSundayMain, SlateScopeFullWeek:
+		return true
+	default:
+		return false
+	}
+}
+
+// Label returns the human-readable description of the slate scope.
+func (s SlateScope) Label() string {
+	switch s {
+	case SlateScopeThursday:
+		return "Thursday Night"
+	case SlateScopeFullWeek:
+		return "Full Week"
+	case SlateScopeSundayMain:
+		return "Sunday Slate"
+	default:
+		return SlateScopeSundayMain.Label()
+	}
+}
+
+// Matches reports whether kickoff falls within this slate scope in Eastern
+// time. If the slate scope is unset or unknown, it defaults to Sunday Main.
+func (s SlateScope) Matches(kickoff time.Time) bool {
+	day := kickoff.In(eastern).Weekday()
+	switch s {
+	case SlateScopeThursday:
+		return day == time.Thursday
+	case SlateScopeFullWeek:
+		return true
+	case SlateScopeSundayMain:
+		return day == time.Sunday || day == time.Monday
+	default:
+		return SlateScopeSundayMain.Matches(kickoff)
+	}
+}
 
 // SlipStatus is where a slip sits between open editing and grading.
 type SlipStatus string
@@ -55,7 +114,9 @@ type Slip struct {
 	ID            int64
 	GroupID       int64
 	WeekID        int64
+	ScheduleID    *int64
 	Name          string
+	SlateScope    SlateScope
 	LegsPerMember int
 	Status        SlipStatus
 	Result        parlay.Result
@@ -71,21 +132,30 @@ type SlipMember struct {
 
 // slipColumns is the column list every slip query scans, in scanSlip order.
 const slipColumns = `
-	id, group_id, week_id, name, legs_per_member, status, result, created_at`
+	id, group_id, week_id, schedule_id, name, slate_scope, legs_per_member, status, result, created_at`
 
 // CreateSlip adds a slip and its members in one transaction. The name is
-// trimmed, and a blank one is refused. At least one member is required. Repeat
-// member IDs are ignored.
+// trimmed, and a blank one is refused. If slateScope is empty, it defaults to
+// SlateScopeSundayMain. An invalid slateScope returns ErrSlateScopeInvalid.
+// At least one member is required. Repeat member IDs are ignored.
 func (s *Store) CreateSlip(
 	ctx context.Context,
 	groupID, weekID int64,
+	scheduleID *int64,
 	name string,
+	slateScope SlateScope,
 	legsPerMember int,
 	memberIDs []int64,
 ) (Slip, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return Slip{}, ErrSlipNameRequired
+	}
+	if slateScope == "" {
+		slateScope = SlateScopeSundayMain
+	}
+	if !slateScope.Valid() {
+		return Slip{}, ErrSlateScopeInvalid
 	}
 	if legsPerMember < 1 || legsPerMember > 5 {
 		return Slip{}, ErrLegsPerMemberRange
@@ -97,9 +167,12 @@ func (s *Store) CreateSlip(
 	var slip Slip
 	err := s.Tx(ctx, func(tx *Store) error {
 		result, err := tx.conn().ExecContext(ctx, `
-			INSERT INTO slips (group_id, week_id, name, legs_per_member)
-			VALUES (?, ?, ?, ?)`, groupID, weekID, name, legsPerMember)
+			INSERT INTO slips (group_id, week_id, schedule_id, name, slate_scope, legs_per_member)
+			VALUES (?, ?, ?, ?, ?, ?)`, groupID, weekID, scheduleID, name, string(slateScope), legsPerMember)
 		if err != nil {
+			if isConstraintUnique(err) {
+				return fmt.Errorf("insert slip: %w", ErrSlipNameTaken)
+			}
 			return fmt.Errorf("insert slip: %w", err)
 		}
 		id, err := result.LastInsertId()
@@ -443,16 +516,20 @@ func (s *Store) SetSlipGrade(
 // scanSlip reads the columns slipColumns selects, in order.
 func scanSlip(row rowScanner) (Slip, error) {
 	var (
-		slip      Slip
-		status    string
-		result    string
-		createdAt string
+		slip       Slip
+		scheduleID sql.NullInt64
+		slateScope string
+		status     string
+		result     string
+		createdAt  string
 	)
 	if err := row.Scan(
 		&slip.ID,
 		&slip.GroupID,
 		&slip.WeekID,
+		&scheduleID,
 		&slip.Name,
+		&slateScope,
 		&slip.LegsPerMember,
 		&status,
 		&result,
@@ -461,10 +538,15 @@ func scanSlip(row rowScanner) (Slip, error) {
 		return Slip{}, err
 	}
 
+	if scheduleID.Valid {
+		slip.ScheduleID = &scheduleID.Int64
+	}
+
 	parsed, err := scanTimestamp(createdAt)
 	if err != nil {
 		return Slip{}, err
 	}
+	slip.SlateScope = SlateScope(slateScope)
 	slip.Status = SlipStatus(status)
 	slip.Result = parlay.Result(result)
 	slip.CreatedAt = parsed

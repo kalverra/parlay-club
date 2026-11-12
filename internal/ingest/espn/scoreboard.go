@@ -7,9 +7,7 @@ import (
 	"strconv"
 	"time"
 
-	// Embed the zone database so America/New_York resolves in a container
-	// without a separate tzdata package.
-	_ "time/tzdata"
+	"github.com/kalverra/parlay-club/internal/tz"
 )
 
 // Status is where a game sits in its lifecycle. These strings match the games
@@ -50,7 +48,7 @@ type Venue struct {
 	Indoor bool
 }
 
-// Game is one game from the Sunday or Monday slate, in UTC.
+// Game is one game from the Thursday, Sunday, or Monday slate, in UTC.
 type Game struct {
 	ID      string
 	Kickoff time.Time
@@ -61,7 +59,7 @@ type Game struct {
 }
 
 // Scoreboard is one week's slate. Games holds only the games whose kickoff
-// falls on a Sunday or Monday in America/New_York.
+// falls on a Thursday, Sunday, or Monday in America/New_York.
 type Scoreboard struct {
 	Season Season
 	Week   Week
@@ -94,7 +92,7 @@ func (p ScoreboardParams) query() url.Values {
 	return query
 }
 
-// Scoreboard fetches a week's scoreboard and keeps the Sunday and Monday
+// Scoreboard fetches a week's scoreboard and keeps the Thursday, Sunday, and Monday
 // games. Request or parse failures are errors; a week with no slate games
 // returns an empty slice.
 func (c *Client) Scoreboard(ctx context.Context, params ScoreboardParams) (Scoreboard, error) {
@@ -110,19 +108,8 @@ func (c *Client) Scoreboard(ctx context.Context, params ScoreboardParams) (Score
 	return board, nil
 }
 
-// eastern is the zone the slate filter uses. Loading it cannot fail because
-// time/tzdata is embedded above.
-var eastern = mustLoadLocation("America/New_York")
-
-// mustLoadLocation loads a zone or panics: the zone database ships with the
-// binary.
-func mustLoadLocation(name string) *time.Location {
-	location, err := time.LoadLocation(name)
-	if err != nil {
-		panic("load time zone " + name + ": " + err.Error())
-	}
-	return location
-}
+// eastern is the zone the slate filter uses.
+var eastern = tz.Eastern
 
 // scoreboardResponse is the slice of ESPN's scoreboard JSON this app reads.
 type scoreboardResponse struct {
@@ -180,7 +167,7 @@ type venueResponse struct {
 }
 
 // parseScoreboard turns ESPN's response into the app's shape, dropping every
-// event whose kickoff is not on Sunday or Monday in America/New_York.
+// event whose kickoff is not on Thursday, Sunday, or Monday in America/New_York.
 func parseScoreboard(raw scoreboardResponse, location *time.Location) (Scoreboard, error) {
 	board := Scoreboard{
 		Season: Season{Year: raw.Season.Year, Type: raw.Season.Type},
@@ -220,10 +207,10 @@ func parseKickoff(raw string) (time.Time, error) {
 	return time.Time{}, err
 }
 
-// inSlate reports whether kickoff falls on Sunday or Monday in location.
+// inSlate reports whether kickoff falls on Thursday, Sunday, or Monday in location.
 func inSlate(kickoff time.Time, location *time.Location) bool {
 	switch kickoff.In(location).Weekday() {
-	case time.Sunday, time.Monday:
+	case time.Thursday, time.Sunday, time.Monday:
 		return true
 	default:
 		return false

@@ -266,7 +266,9 @@ func loadSlip(
 			ctx,
 			groupID,
 			week.ID,
+			nil,
 			strings.TrimSpace(slip.Name),
+			db.SlateScopeSundayMain,
 			legsPerMember(slip),
 			memberIDs(slip.Legs, users),
 		)

@@ -96,18 +96,19 @@ func TestMigration0002PreservesData(t *testing.T) {
 
 	require.NoError(t, Migrate(t.Context(), database))
 
-	assert.Equal(t, 8, userVersionOf(t, database))
+	assert.Equal(t, 9, userVersionOf(t, database))
 	counts := map[string]int{
-		"SELECT count(*) FROM users":         2,
-		"SELECT count(*) FROM groups":        1,
-		"SELECT count(*) FROM group_members": 2,
-		"SELECT count(*) FROM weeks":         1,
-		"SELECT count(*) FROM games":         1,
-		"SELECT count(*) FROM slips":         1,
-		"SELECT count(*) FROM slip_members":  2,
-		"SELECT count(*) FROM legs":          2,
-		"SELECT count(*) FROM wagers":        2,
-		"SELECT count(*) FROM activity":      2,
+		"SELECT count(*) FROM users":                2,
+		"SELECT count(*) FROM groups":               1,
+		"SELECT count(*) FROM group_members":        2,
+		"SELECT count(*) FROM group_slip_schedules": 1,
+		"SELECT count(*) FROM weeks":                1,
+		"SELECT count(*) FROM games":                1,
+		"SELECT count(*) FROM slips":                1,
+		"SELECT count(*) FROM slip_members":         2,
+		"SELECT count(*) FROM legs":                 2,
+		"SELECT count(*) FROM wagers":               2,
+		"SELECT count(*) FROM activity":             2,
 	}
 	for query, want := range counts {
 		assert.Equal(t, want, countRows(t, database, query), query)
@@ -153,6 +154,24 @@ func TestMigration0002PreservesData(t *testing.T) {
 	require.NoError(t, database.QueryRowContext(t.Context(),
 		"SELECT message FROM activity WHERE user_id IS NULL").Scan(&message))
 	assert.Equal(t, "system note", message)
+
+	var slateScope string
+	var scheduleID sql.NullInt64
+	require.NoError(t, database.QueryRowContext(t.Context(),
+		"SELECT slate_scope, schedule_id FROM slips WHERE id = 1").Scan(&slateScope, &scheduleID))
+	assert.Equal(t, "sunday_main", slateScope)
+	assert.True(t, scheduleID.Valid, "backfill must link existing slip to schedule")
+
+	var schedName, schedScope string
+	var schedLegs, schedActive int
+	require.NoError(t, database.QueryRowContext(t.Context(),
+		"SELECT name, slate_scope, legs_per_member, is_active FROM group_slip_schedules WHERE group_id = 1").Scan(
+		&schedName, &schedScope, &schedLegs, &schedActive,
+	))
+	assert.Equal(t, "Main Sunday Slip", schedName)
+	assert.Equal(t, "sunday_main", schedScope)
+	assert.Equal(t, 2, schedLegs)
+	assert.Equal(t, 1, schedActive)
 
 	assert.Empty(t, foreignKeyProblems(t, database), "the rebuild must keep every foreign key valid")
 

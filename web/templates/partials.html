@@ -101,6 +101,20 @@
         {{.Slip.Status}}
       </span>
     </div>
+    {{if gt (len .Siblings) 1}}
+      <nav class="mt-3 flex items-center gap-2 overflow-x-auto border-t border-slate-800 pt-3" aria-label="Sibling slips" data-sibling-switcher>
+        {{range .Siblings}}
+          <a
+            href="/slips/{{.ID}}"
+            class="inline-flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition {{if .Current}}bg-sky-600 text-white shadow-sm{{else}}border border-slate-700 bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white{{end}}"
+            {{if .Current}}aria-current="page"{{end}}
+          >
+            <span>{{.Name}}</span>
+            <span class="{{if .Current}}text-sky-100{{else}}text-slate-400{{end}}">({{.Summary}})</span>
+          </a>
+        {{end}}
+      </nav>
+    {{end}}
   </header>
 
   {{range .Slip.Members}}

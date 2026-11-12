@@ -62,6 +62,11 @@ func (s *Store) Create(ctx context.Context, userID int64, name string) (Group, e
 			"INSERT INTO group_members (group_id, user_id) VALUES (?, ?)", id, userID); err != nil {
 			return fmt.Errorf("add member %d to group %d: %w", userID, id, err)
 		}
+		if _, err := tx.conn().ExecContext(ctx, `
+			INSERT INTO group_slip_schedules (group_id, name, slate_scope, legs_per_member, is_active)
+			VALUES (?, 'Main Sunday Slip', 'sunday_main', 2, 1)`, id); err != nil {
+			return fmt.Errorf("seed default schedule for group %d: %w", id, err)
+		}
 		group = Group{ID: id, Name: name, InviteToken: token}
 		return nil
 	})

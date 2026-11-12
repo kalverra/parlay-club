@@ -1,0 +1,174 @@
+{{define "content"}}
+<section class="space-y-4">
+  <div class="flex items-center justify-between gap-3">
+    <div class="space-y-1">
+      <h1 class="text-xl font-semibold">This week's slips</h1>
+      <p class="text-sm text-slate-400">
+        {{.Group.Name}} &middot; {{.Page.WeekLabel}}
+      </p>
+    </div>
+    <a
+      href="/slips/new{{if .Week.ID}}?week={{.Week.ID}}{{end}}"
+      class="rounded-lg bg-sky-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-sky-500"
+    >
+      + Add one-off slip
+    </a>
+  </div>
+
+  <div class="space-y-3">
+    {{range .Cards}}
+      <a
+        href="/slips/{{.ID}}"
+        class="block rounded-xl border border-slate-800 bg-slate-900 p-4 transition hover:border-slate-700 hover:bg-slate-800/60"
+      >
+        <div class="flex items-center justify-between gap-3">
+          <div class="flex items-center gap-2 min-w-0">
+            <span class="truncate text-base font-semibold">{{.Name}}</span>
+            <span class="shrink-0 rounded-md border border-slate-700 bg-slate-800 px-2 py-0.5 text-xs font-medium text-slate-300">
+              {{.ScopeBadge}}
+            </span>
+          </div>
+          <span class="shrink-0 text-xs font-medium text-sky-400">
+            {{.NextStep}}
+          </span>
+        </div>
+        <div class="mt-2 flex items-center justify-between gap-2 text-xs text-slate-400">
+          <span>{{.Progress}}</span>
+          {{if .Deadline}}
+            <span>
+              Deadline: <time datetime="{{.Deadline.ISO}}">{{.Deadline.Label}}</time>
+            </span>
+          {{end}}
+        </div>
+      </a>
+    {{end}}
+  </div>
+
+  <section class="space-y-4 pt-6 border-t border-slate-800">
+    <div class="space-y-1">
+      <h2 class="text-base font-semibold">Recurring schedules</h2>
+      <p class="text-xs text-slate-400">
+        Automatically create slips each week for recurring game slates.
+      </p>
+    </div>
+
+    {{if .Schedules}}
+      <ul class="space-y-3">
+        {{range .Schedules}}
+          <li class="rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-3">
+            <div class="flex items-center justify-between gap-3">
+              <div class="flex items-center gap-2 min-w-0">
+                <span class="truncate text-sm font-semibold">{{.Name}}</span>
+                <span class="shrink-0 rounded-md border border-slate-700 bg-slate-800 px-2 py-0.5 text-xs font-medium text-slate-300">
+                  {{.ScopeBadge}}
+                </span>
+              </div>
+              <form hx-post="/groups/{{$.Group.ID}}/schedules/{{.ID}}/active" hx-swap="none">
+                <input type="hidden" name="active" value="{{if .IsActive}}false{{else}}true{{end}}">
+                <button
+                  type="submit"
+                  class="rounded-md px-2.5 py-1 text-xs font-semibold {{if .IsActive}}bg-emerald-500/20 text-emerald-400 border border-emerald-500/30{{else}}bg-slate-800 text-slate-400 border border-slate-700{{end}}"
+                >
+                  {{if .IsActive}}Active{{else}}Inactive{{end}}
+                </button>
+              </form>
+            </div>
+
+            <div class="flex items-center justify-between gap-3 text-xs text-slate-400">
+              <form
+                hx-patch="/groups/{{$.Group.ID}}/schedules/{{.ID}}"
+                hx-swap="none"
+                class="flex items-center gap-2"
+              >
+                <label for="sched-legs-{{.ID}}" class="font-medium text-slate-300">Picks per person:</label>
+                <select
+                  id="sched-legs-{{.ID}}"
+                  name="legs_per_member"
+                  onchange="this.form.requestSubmit()"
+                  class="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-200"
+                >
+                  {{$currentLegs := .LegsPerMember}}
+                  <option value="1"{{if eq $currentLegs 1}} selected{{end}}>1 pick</option>
+                  <option value="2"{{if eq $currentLegs 2}} selected{{end}}>2 picks</option>
+                  <option value="3"{{if eq $currentLegs 3}} selected{{end}}>3 picks</option>
+                  <option value="4"{{if eq $currentLegs 4}} selected{{end}}>4 picks</option>
+                  <option value="5"{{if eq $currentLegs 5}} selected{{end}}>5 picks</option>
+                </select>
+              </form>
+
+              <form hx-delete="/groups/{{$.Group.ID}}/schedules/{{.ID}}" hx-swap="none">
+                <button
+                  type="submit"
+                  hx-confirm="Delete schedule &quot;{{.Name}}&quot;?"
+                  class="text-rose-400 hover:text-rose-300 text-xs font-medium"
+                >
+                  Delete
+                </button>
+              </form>
+            </div>
+          </li>
+        {{end}}
+      </ul>
+    {{else}}
+      <p class="text-xs text-slate-500">No recurring schedules configured.</p>
+    {{end}}
+
+    <form
+      hx-post="/groups/{{.Group.ID}}/schedules"
+      hx-swap="none"
+      class="space-y-3 rounded-xl border border-dashed border-slate-700 bg-slate-900/60 p-4"
+    >
+      <h3 class="text-sm font-medium text-slate-300">Add recurring schedule</h3>
+      <div class="space-y-2">
+        <label for="schedule-name" class="block text-xs font-medium text-slate-400">Name</label>
+        <input
+          id="schedule-name"
+          name="name"
+          type="text"
+          required
+          maxlength="60"
+          placeholder="e.g. Thursday Night Slip"
+          class="w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-1.5 text-sm text-slate-100 placeholder:text-slate-500 focus:border-sky-500 focus:outline-none"
+        >
+      </div>
+
+      <div class="grid grid-cols-2 gap-3">
+        <div class="space-y-1">
+          <label for="schedule-scope" class="block text-xs font-medium text-slate-400">Game Slate</label>
+          <select
+            id="schedule-scope"
+            name="slate_scope"
+            class="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 text-sm text-slate-200 focus:border-sky-500 focus:outline-none"
+          >
+            <option value="sunday_main">Sunday Slate</option>
+            <option value="thursday">Thursday Night</option>
+            <option value="full_week">Full Week</option>
+          </select>
+        </div>
+
+        <div class="space-y-1">
+          <label for="schedule-legs" class="block text-xs font-medium text-slate-400">Picks per person</label>
+          <select
+            id="schedule-legs"
+            name="legs_per_member"
+            class="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 text-sm text-slate-200 focus:border-sky-500 focus:outline-none"
+          >
+            <option value="1">1 pick</option>
+            <option value="2" selected>2 picks</option>
+            <option value="3">3 picks</option>
+            <option value="4">4 picks</option>
+            <option value="5">5 picks</option>
+          </select>
+        </div>
+      </div>
+
+      <button
+        type="submit"
+        class="rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-sky-500"
+      >
+        Save schedule
+      </button>
+    </form>
+  </section>
+</section>
+{{end}}

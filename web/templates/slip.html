@@ -90,6 +90,20 @@
         >
       </label>
       <label class="block text-sm text-slate-300">
+        Slate scope
+        <select name="slate_scope" class="mt-1 w-full rounded-md border border-slate-700 bg-slate-800 px-3 py-2">
+          {{if .Create.SlateScopes}}
+            {{range .Create.SlateScopes}}
+              <option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>
+            {{end}}
+          {{else}}
+            <option value="sunday_main"{{if or (eq .Create.SlateScope "sunday_main") (eq .Create.SlateScope "")}} selected{{end}}>Sunday Slate</option>
+            <option value="thursday"{{if eq .Create.SlateScope "thursday"}} selected{{end}}>Thursday Night</option>
+            <option value="full_week"{{if eq .Create.SlateScope "full_week"}} selected{{end}}>Full Week</option>
+          {{end}}
+        </select>
+      </label>
+      <label class="block text-sm text-slate-300">
         Legs per member
         <input
           type="number"

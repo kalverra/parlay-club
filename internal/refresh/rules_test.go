@@ -72,6 +72,18 @@ func TestScoreboardStaleRules(t *testing.T) {
 			want: true,
 		},
 		{
+			name: "thursday is also a game day",
+			last: novemberTime(5, 12, 0),
+			now:  novemberTime(5, 12, 30),
+			want: true,
+		},
+		{
+			name: "thursday waits thirty minutes",
+			last: novemberTime(5, 12, 0),
+			now:  novemberTime(5, 12, 29),
+			want: false,
+		},
+		{
 			name: "midweek waits six hours",
 			last: novemberTime(4, 12, 0),
 			now:  novemberTime(4, 17, 59),
@@ -457,6 +469,30 @@ func TestGameLogStaleRules(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 			assert.Equal(t, test.want, gameLogStale(test.last, test.now))
+		})
+	}
+}
+
+func TestGameDay(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		now  time.Time
+		want bool
+	}{
+		{name: "Sunday", now: novemberTime(8, 12, 0), want: true},
+		{name: "Monday", now: novemberTime(9, 12, 0), want: true},
+		{name: "Tuesday", now: novemberTime(10, 12, 0), want: false},
+		{name: "Wednesday", now: novemberTime(4, 12, 0), want: false},
+		{name: "Thursday", now: novemberTime(5, 12, 0), want: true},
+		{name: "Friday", now: novemberTime(6, 12, 0), want: false},
+		{name: "Saturday", now: novemberTime(7, 12, 0), want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, gameDay(tt.now))
 		})
 	}
 }

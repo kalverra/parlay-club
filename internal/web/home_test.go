@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
@@ -31,6 +32,7 @@ type landingFixture struct {
 	second     db.Group
 	week       db.Week
 	selections []int64
+	clock      func() time.Time
 }
 
 // newLandingFixture builds a person in two groups with one slip in the first.
@@ -68,7 +70,21 @@ func newLandingFixtureWithWeek(t *testing.T, withWeek bool) *landingFixture {
 		week, err := store.UpsertWeek(t.Context(), 2026, 2, 9)
 		require.NoError(t, err)
 		fixture.week = week
-		_, err = store.CreateSlip(t.Context(), first.ID, week.ID, "Week 9", 2, []int64{user.ID})
+		scheds, _ := store.GroupSlipSchedules(t.Context(), first.ID)
+		var sID *int64
+		if len(scheds) > 0 {
+			sID = &scheds[0].ID
+		}
+		_, err = store.CreateSlip(
+			t.Context(),
+			first.ID,
+			week.ID,
+			sID,
+			"Week 9",
+			db.SlateScopeSundayMain,
+			2,
+			[]int64{user.ID},
+		)
 		require.NoError(t, err)
 	}
 
@@ -105,6 +121,7 @@ func (f *landingFixture) build() http.Handler {
 		Store:  f.store,
 		Slips:  slips.New(f.store, hub, nil),
 		Stream: live.NewStream(hub, func(int64) bool { return false }),
+		Now:    f.clock,
 	})
 }
 
@@ -178,8 +195,14 @@ func TestGroupWeekSwitchesTheGroupAndOpensTheNewestSlip(t *testing.T) {
 	t.Parallel()
 
 	fixture := newLandingFixture(t)
+	scheds, err := fixture.store.GroupSlipSchedules(t.Context(), fixture.second.ID)
+	require.NoError(t, err)
+	var sID *int64
+	if len(scheds) > 0 {
+		sID = &scheds[0].ID
+	}
 	created, err := fixture.store.CreateSlip(
-		t.Context(), fixture.second.ID, fixture.week.ID, "Lake House Week 9", 2,
+		t.Context(), fixture.second.ID, fixture.week.ID, sID, "Lake House Week 9", db.SlateScopeSundayMain, 2,
 		[]int64{fixture.user.ID},
 	)
 	require.NoError(t, err)
@@ -190,10 +213,121 @@ func TestGroupWeekSwitchesTheGroupAndOpensTheNewestSlip(t *testing.T) {
 	assert.Equal(t, []int64{fixture.second.ID}, fixture.selections)
 }
 
+func TestGroupWeekRendersMultiSlipViewWhenMultipleSlipsExist(t *testing.T) {
+	t.Parallel()
+
+	fixture := newLandingFixture(t)
+	now := time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC)
+	fixture.clock = func() time.Time { return now }
+	fixture.handler = fixture.build()
+
+	thuKick := time.Date(2026, 11, 5, 20, 15, 0, 0, time.UTC)
+	sunKick := time.Date(2026, 11, 8, 18, 0, 0, 0, time.UTC)
+	_, err := fixture.store.UpsertGame(t.Context(), db.Game{
+		ID:         "401873037",
+		WeekID:     fixture.week.ID,
+		HomeTeam:   "BAL",
+		AwayTeam:   "CIN",
+		HomeName:   "Baltimore Ravens",
+		AwayName:   "Cincinnati Bengals",
+		HomeESPNID: "33",
+		AwayESPNID: "4",
+		Kickoff:    thuKick,
+		Status:     db.GameScheduled,
+		UpdatedAt:  thuKick.Add(-24 * time.Hour),
+	})
+	require.NoError(t, err)
+	_, err = fixture.store.UpsertGame(t.Context(), db.Game{
+		ID:         "401873038",
+		WeekID:     fixture.week.ID,
+		HomeTeam:   "KC",
+		AwayTeam:   "BUF",
+		HomeName:   "Kansas City Chiefs",
+		AwayName:   "Buffalo Bills",
+		HomeESPNID: "12",
+		AwayESPNID: "2",
+		Kickoff:    sunKick,
+		Status:     db.GameScheduled,
+		UpdatedAt:  sunKick.Add(-24 * time.Hour),
+	})
+	require.NoError(t, err)
+
+	thuSlip, err := fixture.store.CreateSlip(
+		t.Context(), fixture.second.ID, fixture.week.ID, nil, "Thursday Night", db.SlateScopeThursday, 2,
+		[]int64{fixture.user.ID},
+	)
+	require.NoError(t, err)
+
+	sunSlip, err := fixture.store.CreateSlip(
+		t.Context(), fixture.second.ID, fixture.week.ID, nil, "Sunday Main", db.SlateScopeSundayMain, 2,
+		[]int64{fixture.user.ID},
+	)
+	require.NoError(t, err)
+
+	recorder := fixture.get(t, fmt.Sprintf("/groups/%d/week", fixture.second.ID))
+	require.Equal(t, http.StatusOK, recorder.Code)
+	body := html.UnescapeString(recorder.Body.String())
+
+	assert.Contains(t, body, "This week's slips")
+	assert.Contains(t, body, "Thursday Night")
+	assert.Contains(t, body, "Sunday Main")
+	assert.Contains(t, body, "Sunday Slate")
+	assert.Contains(t, body, fmt.Sprintf(`/slips/%d`, thuSlip.ID))
+	assert.Contains(t, body, fmt.Sprintf(`/slips/%d`, sunSlip.ID))
+	assert.Contains(t, body, "+ Add one-off slip")
+	assert.Contains(t, body, fmt.Sprintf(`/slips/new?week=%d`, fixture.week.ID))
+	assert.Contains(t, body, "Pick 2 more")
+	assert.Contains(t, body, "1 member · 0/2 picks")
+	assert.Contains(t, body, thuKick.Format(time.RFC3339))
+	assert.Equal(t, []int64{fixture.second.ID}, fixture.selections)
+}
+
+func TestGroupWeekAutoCreatesMultipleScheduledSlipsAndRendersView(t *testing.T) {
+	t.Parallel()
+
+	fixture := newLandingFixture(t)
+	_, err := fixture.store.CreateGroupSlipSchedule(
+		t.Context(),
+		fixture.second.ID,
+		"Sunday Main",
+		db.SlateScopeSundayMain,
+		2,
+	)
+	require.NoError(t, err)
+	_, err = fixture.store.CreateGroupSlipSchedule(
+		t.Context(),
+		fixture.second.ID,
+		"Thursday Night",
+		db.SlateScopeThursday,
+		2,
+	)
+	require.NoError(t, err)
+
+	recorder := fixture.get(t, fmt.Sprintf("/groups/%d/week", fixture.second.ID))
+	require.Equal(t, http.StatusOK, recorder.Code)
+	body := html.UnescapeString(recorder.Body.String())
+
+	assert.Contains(t, body, "This week's slips")
+	assert.Contains(t, body, "Thursday Night")
+	assert.Contains(t, body, "Sunday Main")
+	assert.Contains(t, body, "Sunday Slate")
+	assert.Contains(t, body, "+ Add one-off slip")
+	assert.Contains(t, body, "Recurring schedules")
+	assert.Contains(t, body, fmt.Sprintf(`/groups/%d/schedules`, fixture.second.ID))
+	assert.Contains(t, body, "Save schedule")
+	assert.Equal(t, []int64{fixture.second.ID}, fixture.selections)
+}
+
 func TestGroupWeekShowsTheCreateFormWithNoSlip(t *testing.T) {
 	t.Parallel()
 
 	fixture := newLandingFixture(t)
+	schedules, err := fixture.store.GroupSlipSchedules(t.Context(), fixture.second.ID)
+	require.NoError(t, err)
+	for _, s := range schedules {
+		_, err := fixture.store.SetGroupSlipScheduleActive(t.Context(), s.ID, false)
+		require.NoError(t, err)
+	}
 
 	recorder := fixture.get(t, fmt.Sprintf("/groups/%d/week", fixture.second.ID))
 	require.Equal(t, http.StatusOK, recorder.Code)
@@ -211,6 +345,12 @@ func TestGroupWeekCreateFormWelcomesTheOnlyMember(t *testing.T) {
 	t.Parallel()
 
 	fixture := newLandingFixture(t)
+	schedules, err := fixture.store.GroupSlipSchedules(t.Context(), fixture.second.ID)
+	require.NoError(t, err)
+	for _, s := range schedules {
+		_, err := fixture.store.SetGroupSlipScheduleActive(t.Context(), s.ID, false)
+		require.NoError(t, err)
+	}
 
 	body := html.UnescapeString(
 		fixture.get(t, fmt.Sprintf("/groups/%d/week", fixture.second.ID)).Body.String())
@@ -254,8 +394,14 @@ func TestOpeningASlipFromAnotherGroupSwitchesTheActiveGroup(t *testing.T) {
 	t.Parallel()
 
 	fixture := newLandingFixture(t)
+	scheds, err := fixture.store.GroupSlipSchedules(t.Context(), fixture.second.ID)
+	require.NoError(t, err)
+	var sID *int64
+	if len(scheds) > 0 {
+		sID = &scheds[0].ID
+	}
 	created, err := fixture.store.CreateSlip(
-		t.Context(), fixture.second.ID, fixture.week.ID, "Lake House Week 9", 2,
+		t.Context(), fixture.second.ID, fixture.week.ID, sID, "Lake House Week 9", db.SlateScopeSundayMain, 2,
 		[]int64{fixture.user.ID},
 	)
 	require.NoError(t, err)
@@ -280,7 +426,7 @@ func TestOpeningASlipOutsideEveryGroupIs404(t *testing.T) {
 	other, err := fixture.store.Create(t.Context(), stranger.ID, "Strangers")
 	require.NoError(t, err)
 	created, err := fixture.store.CreateSlip(
-		t.Context(), other.ID, fixture.week.ID, "Strangers Week 9", 2,
+		t.Context(), other.ID, fixture.week.ID, nil, "Strangers Week 9", db.SlateScopeSundayMain, 2,
 		[]int64{stranger.ID},
 	)
 	require.NoError(t, err)

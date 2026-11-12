@@ -299,3 +299,124 @@ func TestNextStepLabelsTheGrade(t *testing.T) {
 		assert.Equal(t, want, got.Label())
 	}
 }
+
+func TestNextStepSlateScopeDeadlinesAndClosure(t *testing.T) {
+	t.Parallel()
+
+	ada := nextUser(1, "Ada")
+	sam := nextUser(2, "Sam")
+
+	// 2026-11-05 is Thursday, 2026-11-08 is Sunday, 2026-11-09 is Monday.
+	thuKickoff := time.Date(2026, 11, 6, 1, 15, 0, 0, time.UTC)  // Thursday 20:15 ET
+	sunKickoff := time.Date(2026, 11, 8, 18, 0, 0, 0, time.UTC)  // Sunday 13:00 ET
+	monKickoff := time.Date(2026, 11, 10, 1, 15, 0, 0, time.UTC) // Monday 20:15 ET
+
+	games := []db.Game{
+		nextGame("thu", thuKickoff),
+		nextGame("sun", sunKickoff),
+		nextGame("mon", monKickoff),
+	}
+
+	thuSlip := db.Slip{
+		LegsPerMember: 2,
+		Status:        db.SlipOpen,
+		SlateScope:    db.SlateScopeThursday,
+		Result:        parlay.Pending,
+	}
+	sunSlip := db.Slip{
+		LegsPerMember: 2,
+		Status:        db.SlipOpen,
+		SlateScope:    db.SlateScopeSundayMain,
+		Result:        parlay.Pending,
+	}
+	fullSlip := db.Slip{
+		LegsPerMember: 2,
+		Status:        db.SlipOpen,
+		SlateScope:    db.SlateScopeFullWeek,
+		Result:        parlay.Pending,
+	}
+
+	// 1. Before Thursday kickoff: Thursday noon ET (17:00 UTC).
+	thuNoon := time.Date(2026, 11, 5, 17, 0, 0, 0, time.UTC)
+
+	// Thursday slip deadline is Thursday kickoff.
+	gotThu := slips.NextStep(
+		thuSlip, []db.SlipMember{nextMember(ada, false)}, nil, games, ada.ID, thuNoon,
+	)
+	require.NotNil(t, gotThu.Deadline)
+	assert.True(t, thuKickoff.Equal(*gotThu.Deadline))
+	assert.Equal(t, slips.StepPick, gotThu.Step)
+
+	// Sunday Main slip deadline ignores Thursday and snaps to Sunday kickoff.
+	gotSun := slips.NextStep(
+		sunSlip, []db.SlipMember{nextMember(ada, false)}, nil, games, ada.ID, thuNoon,
+	)
+	require.NotNil(t, gotSun.Deadline)
+	assert.True(t, sunKickoff.Equal(*gotSun.Deadline), "Sunday slip must ignore Thursday game")
+	assert.Equal(t, slips.StepPick, gotSun.Step)
+
+	// Full week slip deadline is the earliest game (Thursday).
+	gotFull := slips.NextStep(
+		fullSlip, []db.SlipMember{nextMember(ada, false)}, nil, games, ada.ID, thuNoon,
+	)
+	require.NotNil(t, gotFull.Deadline)
+	assert.True(t, thuKickoff.Equal(*gotFull.Deadline))
+	assert.Equal(t, slips.StepPick, gotFull.Step)
+
+	// 2. After Thursday kickoff but before Sunday: Friday noon ET (17:00 UTC).
+	friNoon := time.Date(2026, 11, 6, 17, 0, 0, 0, time.UTC)
+
+	// Thursday slip is closed because every Thursday game kicked off.
+	gotThuFri := slips.NextStep(thuSlip, []db.SlipMember{nextMember(ada, false)}, nil, games, ada.ID, friNoon)
+	assert.Nil(t, gotThuFri.Deadline)
+	assert.Equal(t, slips.StepClosed, gotThuFri.Step, "Thursday slip must close once Thursday kicks off")
+
+	// Thursday slip with one member locked and another short also closes.
+	members := []db.SlipMember{nextMember(ada, true), nextMember(sam, false)}
+	legs := []db.Leg{nextLeg(ada.ID), nextLeg(ada.ID)}
+	gotThuFriShort := slips.NextStep(
+		thuSlip, members, legs, games, ada.ID, friNoon,
+	)
+	assert.Equal(t, slips.StepClosed, gotThuFriShort.Step)
+	assert.Equal(t, []string{"Sam"}, gotThuFriShort.WaitingOn)
+
+	// Sunday Main slip stays OPEN and deadline remains Sunday kickoff.
+	gotSunFri := slips.NextStep(
+		sunSlip, []db.SlipMember{nextMember(ada, false)}, nil, games, ada.ID, friNoon,
+	)
+	require.NotNil(t, gotSunFri.Deadline)
+	assert.True(t, sunKickoff.Equal(*gotSunFri.Deadline),
+		"Sunday slip deadline stays Sunday kickoff after Thursday kicks off")
+	assert.Equal(t, slips.StepPick, gotSunFri.Step, "Sunday slip remains open after Thursday kicks off")
+
+	// Sunday Main slip with one locked member still waits on Sam (does NOT close).
+	gotSunFriWait := slips.NextStep(
+		sunSlip, members, legs, games, ada.ID, friNoon,
+	)
+	assert.Equal(t, slips.StepWaiting, gotSunFriWait.Step)
+	assert.Equal(t, []string{"Sam"}, gotSunFriWait.WaitingOn)
+
+	// Full week slip shifts deadline to Sunday kickoff and stays open.
+	gotFullFri := slips.NextStep(
+		fullSlip, []db.SlipMember{nextMember(ada, false)}, nil, games, ada.ID, friNoon,
+	)
+	require.NotNil(t, gotFullFri.Deadline)
+	assert.True(t, sunKickoff.Equal(*gotFullFri.Deadline))
+	assert.Equal(t, slips.StepPick, gotFullFri.Step)
+
+	// 3. After Monday night kickoff: Tuesday noon ET (17:00 UTC).
+	tueNoon := time.Date(2026, 11, 10, 17, 0, 0, 0, time.UTC)
+
+	// Both Sunday Main and Full week slips are now closed.
+	gotSunTue := slips.NextStep(
+		sunSlip, []db.SlipMember{nextMember(ada, false)}, nil, games, ada.ID, tueNoon,
+	)
+	assert.Nil(t, gotSunTue.Deadline)
+	assert.Equal(t, slips.StepClosed, gotSunTue.Step)
+
+	gotFullTue := slips.NextStep(
+		fullSlip, []db.SlipMember{nextMember(ada, false)}, nil, games, ada.ID, tueNoon,
+	)
+	assert.Nil(t, gotFullTue.Deadline)
+	assert.Equal(t, slips.StepClosed, gotFullTue.Step)
+}

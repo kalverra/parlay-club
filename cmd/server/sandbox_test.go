@@ -235,11 +235,13 @@ func TestSandboxBootstrapReplaysTheMorningOffline(t *testing.T) {
 	assert.Equal(t, 9, week.WeekNum)
 	games, err := store.GamesForWeek(t.Context(), week.ID)
 	require.NoError(t, err)
-	require.Len(t, games, 14, "the whole Sunday and Monday slate is replayed")
+	require.Len(t, games, 15, "the whole slate with Thursday, Sunday, and Monday is replayed")
 
 	weatherGames := 0
 	for _, game := range games {
-		assert.False(t, runtime.scenario.Now().After(game.Kickoff), game.ID)
+		if game.Kickoff.Before(runtime.scenario.Now()) {
+			continue
+		}
 		if game.Indoor {
 			continue
 		}
@@ -462,7 +464,7 @@ func TestSandboxResetRebuildsRepeatably(t *testing.T) {
 	assert.Equal(t, 0, countRows(t, database, "api_responses"))
 	assert.Equal(t, 0, countRows(t, database, "api_bodies"))
 	assert.Equal(t, 1, countRows(t, database, "weeks"))
-	assert.Equal(t, 14, countRows(t, database, "games"))
+	assert.Equal(t, 15, countRows(t, database, "games"))
 	assert.Equal(t, 1, countRows(t, database, "sandbox_state"))
 	assertSandboxSync(t, database, store, one.Week)
 
@@ -961,7 +963,7 @@ func TestSandboxStagesApplyDirectly(t *testing.T) {
 						scheduled++
 					}
 				}
-				assert.Equal(t, 13, final, "every Sunday game is final")
+				assert.Equal(t, 14, final, "Thursday and Sunday games are final")
 				assert.Equal(t, 1, scheduled, "the Monday night game is still upcoming")
 
 				slip, err := store.SlipByID(t.Context(), seed.Slip.ID)
@@ -977,7 +979,7 @@ func TestSandboxStagesApplyDirectly(t *testing.T) {
 
 				games, err := store.GamesForWeek(t.Context(), seed.Week.ID)
 				require.NoError(t, err)
-				require.Len(t, games, 14)
+				require.Len(t, games, 15)
 				for _, game := range games {
 					assert.Equal(t, db.GameFinal, game.Status, game.ID)
 					require.NotNil(t, game.HomeScore, game.ID)
@@ -1424,7 +1426,7 @@ func syncKeys(t *testing.T, store *db.Store, week db.Week) []string {
 	games, err := store.GamesForWeek(t.Context(), week.ID)
 	require.NoError(t, err)
 	for _, game := range games {
-		if !game.Indoor {
+		if !game.Indoor && sandbox.MorningTime().Before(game.Kickoff) {
 			keys = append(keys, refresh.WeatherSource(game.ID))
 		}
 	}

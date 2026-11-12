@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 
 	// Registers the pure-Go SQLite driver under the name "sqlite".
 	_ "modernc.org/sqlite"
@@ -63,4 +64,12 @@ func dsn(path string) string {
 	}
 	uri := url.URL{Scheme: "file", Path: path, RawQuery: params.Encode()}
 	return uri.String()
+}
+
+// isConstraintUnique reports whether err represents a SQLite UNIQUE constraint violation.
+func isConstraintUnique(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "UNIQUE constraint failed")
 }

@@ -33,6 +33,14 @@ func TestCreateGroupMakesCreatorItsFirstMember(t *testing.T) {
 	groups, err := store.ForUser(t.Context(), ada.ID)
 	require.NoError(t, err)
 	assert.Equal(t, []db.Group{group}, groups)
+
+	schedules, err := store.GroupSlipSchedules(t.Context(), group.ID)
+	require.NoError(t, err)
+	require.Len(t, schedules, 1)
+	assert.Equal(t, "Main Sunday Slip", schedules[0].Name)
+	assert.Equal(t, db.SlateScopeSundayMain, schedules[0].SlateScope)
+	assert.Equal(t, 2, schedules[0].LegsPerMember)
+	assert.True(t, schedules[0].IsActive)
 }
 
 func TestFirstGroupReturnsTheOldest(t *testing.T) {
@@ -322,6 +330,14 @@ func TestLeaveRefusesTheLastGroup(t *testing.T) {
 	groups, err := store.ForUser(t.Context(), ada.ID)
 	require.NoError(t, err)
 	assert.Equal(t, []db.Group{group}, groups)
+
+	schedules, err := store.GroupSlipSchedules(t.Context(), group.ID)
+	require.NoError(t, err)
+	require.Len(t, schedules, 1)
+	assert.Equal(t, "Main Sunday Slip", schedules[0].Name)
+	assert.Equal(t, db.SlateScopeSundayMain, schedules[0].SlateScope)
+	assert.Equal(t, 2, schedules[0].LegsPerMember)
+	assert.True(t, schedules[0].IsActive)
 }
 
 func TestLeaveRejectsANonMember(t *testing.T) {

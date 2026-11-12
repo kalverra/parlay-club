@@ -27,16 +27,27 @@ func TestScoreboardParsesAFullWeek(t *testing.T) {
 
 	assert.Equal(t, espn.Season{Year: 2026, Type: 2}, board.Season)
 	assert.Equal(t, espn.Week{Number: 9}, board.Week)
-	require.Len(t, board.Games, 14, "the Thursday game is outside the slate")
+	require.Len(t, board.Games, 15, "the Thursday game is on the slate")
 
 	location := eastern(t)
 	for _, game := range board.Games {
 		day := game.Kickoff.In(location).Weekday()
-		assert.Contains(t, []time.Weekday{time.Sunday, time.Monday}, day, game.ID)
+		assert.Contains(t, []time.Weekday{time.Thursday, time.Sunday, time.Monday}, day, game.ID)
 	}
 
-	thursday := "401873037"
-	assert.NotContains(t, gameIDs(board.Games), thursday)
+	thursdayID := "401873037"
+	assert.Contains(t, gameIDs(board.Games), thursdayID)
+	thursday := gameByID(t, board.Games, thursdayID)
+	assert.Equal(t, espn.Final, thursday.Status)
+	assert.Equal(t, time.Date(2026, time.November, 6, 1, 15, 0, 0, time.UTC), thursday.Kickoff)
+	assert.Equal(t, time.Thursday, thursday.Kickoff.In(location).Weekday(), "Friday in UTC is Thursday night in ET")
+	assert.Equal(t, "BAL", thursday.Home.Abbreviation)
+	require.NotNil(t, thursday.Home.Score)
+	assert.Equal(t, 10, *thursday.Home.Score)
+	assert.Equal(t, "JAX", thursday.Away.Abbreviation)
+	require.NotNil(t, thursday.Away.Score)
+	assert.Equal(t, 33, *thursday.Away.Score)
+	assert.Equal(t, espn.Venue{ID: "3814", Name: "M&T Bank Stadium", Indoor: false}, thursday.Venue)
 
 	madrid := gameByID(t, board.Games, "401873038")
 	assert.Equal(t, espn.Scheduled, madrid.Status)
@@ -71,7 +82,7 @@ func TestScoreboardParsesLiveAndFinalGames(t *testing.T) {
 
 	assert.Equal(t, espn.Season{Year: 2026, Type: 2}, board.Season)
 	assert.Equal(t, espn.Week{Number: 4}, board.Week)
-	require.Len(t, board.Games, 15, "the Thursday game is outside the slate")
+	require.Len(t, board.Games, 16, "the Thursday game is on the slate")
 
 	counts := map[espn.Status]int{}
 	for _, game := range board.Games {
@@ -80,8 +91,17 @@ func TestScoreboardParsesLiveAndFinalGames(t *testing.T) {
 	assert.Equal(t, map[espn.Status]int{
 		espn.Scheduled: 6,
 		espn.Live:      8,
-		espn.Final:     1,
+		espn.Final:     2,
 	}, counts)
+
+	thursday := gameByID(t, board.Games, "401872964")
+	assert.Equal(t, espn.Final, thursday.Status)
+	assert.Equal(t, "CLE", thursday.Home.Abbreviation)
+	require.NotNil(t, thursday.Home.Score)
+	assert.Equal(t, 27, *thursday.Home.Score)
+	assert.Equal(t, "PIT", thursday.Away.Abbreviation)
+	require.NotNil(t, thursday.Away.Score)
+	assert.Equal(t, 24, *thursday.Away.Score)
 
 	live := gameByID(t, board.Games, "401872971")
 	assert.Equal(t, espn.Live, live.Status)
@@ -104,6 +124,34 @@ func TestScoreboardParsesLiveAndFinalGames(t *testing.T) {
 	assert.Equal(t, espn.Scheduled, scheduled.Status)
 	assert.Nil(t, scheduled.Home.Score, "a game that has not kicked off has no score")
 	assert.Nil(t, scheduled.Away.Score)
+}
+
+func TestInSlate(t *testing.T) {
+	t.Parallel()
+
+	location := eastern(t)
+	// 2026-11-05 is Thursday, 11-06 is Friday, 11-07 is Saturday, 11-08 is Sunday,
+	// 11-09 is Monday, 11-10 is Tuesday, 11-11 is Wednesday in New York.
+	tests := []struct {
+		name    string
+		kickoff time.Time
+		want    bool
+	}{
+		{name: "Thursday", kickoff: time.Date(2026, time.November, 5, 20, 15, 0, 0, location), want: true},
+		{name: "Friday", kickoff: time.Date(2026, time.November, 6, 20, 0, 0, 0, location), want: false},
+		{name: "Saturday", kickoff: time.Date(2026, time.November, 7, 13, 0, 0, 0, location), want: false},
+		{name: "Sunday", kickoff: time.Date(2026, time.November, 8, 13, 0, 0, 0, location), want: true},
+		{name: "Monday", kickoff: time.Date(2026, time.November, 9, 20, 15, 0, 0, location), want: true},
+		{name: "Tuesday", kickoff: time.Date(2026, time.November, 10, 20, 0, 0, 0, location), want: false},
+		{name: "Wednesday", kickoff: time.Date(2026, time.November, 11, 20, 0, 0, 0, location), want: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tc.want, espn.InSlate(tc.kickoff, location))
+		})
+	}
 }
 
 func TestScoreboardParsesAnInternationalGame(t *testing.T) {

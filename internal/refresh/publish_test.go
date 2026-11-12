@@ -54,7 +54,16 @@ func publishTestStore(t *testing.T) (*db.Store, db.Week, db.Slip) {
 	require.NoError(t, err)
 	week, err := store.UpsertWeek(t.Context(), 2026, 2, 9)
 	require.NoError(t, err)
-	slip, err := store.CreateSlip(t.Context(), group.ID, week.ID, "Week 9", 1, []int64{user.ID})
+	slip, err := store.CreateSlip(
+		t.Context(),
+		group.ID,
+		week.ID,
+		nil,
+		"Week 9",
+		db.SlateScopeSundayMain,
+		1,
+		[]int64{user.ID},
+	)
 	require.NoError(t, err)
 
 	return store, week, slip

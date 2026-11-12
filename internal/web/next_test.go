@@ -174,7 +174,7 @@ func TestHubBannerLetsAGroupMemberJoin(t *testing.T) {
 	fixture := hubFixture(t, 2)
 	sam := addSam(t, fixture)
 	other, err := fixture.store.CreateSlip(
-		t.Context(), fixture.group.ID, fixture.week.ID, "Sam's slip", 2, []int64{sam.ID})
+		t.Context(), fixture.group.ID, fixture.week.ID, nil, "Sam's slip", db.SlateScopeSundayMain, 2, []int64{sam.ID})
 	require.NoError(t, err)
 
 	body := hubBody(t, fixture, other.ID)

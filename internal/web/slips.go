@@ -30,6 +30,7 @@ var ruleErrors = []error{
 	slips.ErrLegLimit,
 	slips.ErrLegsPerMemberTooLow,
 	slips.ErrKickoffLocked,
+	slips.ErrGameOutsideScope,
 	slips.ErrLockedIn,
 	slips.ErrLegsNotReady,
 	slips.ErrSlipNotOpen,
@@ -39,6 +40,10 @@ var ruleErrors = []error{
 	slips.ErrVotesClosed,
 	slips.ErrVoteInvalid,
 	db.ErrSlipNameRequired,
+	db.ErrSlipNameTaken,
+	db.ErrScheduleNameRequired,
+	db.ErrScheduleNameTaken,
+	db.ErrSlateScopeInvalid,
 	db.ErrLegsPerMemberRange,
 	db.ErrSlipMembersRequired,
 	db.ErrGameNotFound,
@@ -58,6 +63,12 @@ func (h *slipHandlers) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /me", h.profile)
 	mux.HandleFunc("POST /me", h.updateProfile)
 	mux.HandleFunc("POST /users/{id}/active", h.toggleActive)
+
+	mux.HandleFunc("GET /groups/{id}/schedules", h.listSchedules)
+	mux.HandleFunc("POST /groups/{id}/schedules", h.createSchedule)
+	mux.HandleFunc("POST /groups/{id}/schedules/{scheduleID}/active", h.setScheduleActive)
+	mux.HandleFunc("PATCH /groups/{id}/schedules/{scheduleID}", h.updateSchedule)
+	mux.HandleFunc("DELETE /groups/{id}/schedules/{scheduleID}", h.deleteSchedule)
 
 	mux.HandleFunc("GET /slips/new", h.newSlipForm)
 	mux.HandleFunc("POST /slips", h.createSlip)
@@ -97,6 +108,15 @@ type SlipPage struct {
 	Creating bool
 	Create   SlipCreateView
 	Next     NextView
+	Siblings []SiblingSlipView
+}
+
+// SiblingSlipView is one choice in the sibling slip switcher.
+type SiblingSlipView struct {
+	ID      int64
+	Name    string
+	Current bool
+	Summary string
 }
 
 // NextView is the hub's step banner and its one primary action.
@@ -149,6 +169,7 @@ type SlipView struct {
 	Activity      []ActivityView
 	Analyzer      AnalyzerView
 	LegForm       LegFormView
+	Siblings      []SiblingSlipView
 }
 
 // SlipMemberView is one member's section of the panel.
@@ -204,11 +225,20 @@ type SlipCreateView struct {
 	SeasonType    int
 	WeekNum       int
 	Name          string
+	SlateScope    string
+	SlateScopes   []SlateScopeOption
 	LegsPerMember int
 	Members       []MemberOption
 	Selected      []int64
 	Solo          bool
 	Error         string
+}
+
+// SlateScopeOption is one choice in the slip create form's slate scope picker.
+type SlateScopeOption struct {
+	Value    string
+	Label    string
+	Selected bool
 }
 
 // WeekOption is one week in the create form.
@@ -369,11 +399,18 @@ func (h *slipHandlers) createSlip(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	scope := r.PostForm.Get("slate_scope")
+	if scope == "" {
+		scope = r.PostForm.Get("scope")
+	}
+
 	created, err := h.deps.Store.CreateSlip(
 		r.Context(),
 		group.ID,
 		weekID,
+		nil,
 		r.PostForm.Get("name"),
+		db.SlateScope(scope),
 		legsPerMember,
 		memberIDs,
 	)
@@ -657,6 +694,7 @@ func (h *slipHandlers) withGames(
 	if err != nil {
 		return LegFormView{}, err
 	}
+	games = slips.FilterGamesByScope(games, slip.SlateScope)
 
 	selected := false
 	for _, game := range games {
@@ -1045,6 +1083,115 @@ func (h *slipHandlers) slipOptions(ctx context.Context, slip db.Slip) []SlipOpti
 	return options
 }
 
+// siblingSlips returns the sibling slips for the switcher when a group has multiple
+// slips in the week. If 1 or 0 slips exist, it returns nil.
+func (h *slipHandlers) siblingSlips(
+	ctx context.Context,
+	slip db.Slip,
+	currentMembers []db.SlipMember,
+	currentLegs []db.Leg,
+	viewerID int64,
+) ([]SiblingSlipView, error) {
+	groupSlips, err := h.deps.Store.SlipsForWeek(ctx, slip.GroupID, slip.WeekID)
+	if err != nil {
+		return nil, err
+	}
+	if len(groupSlips) <= 1 {
+		return nil, nil
+	}
+
+	views := make([]SiblingSlipView, 0, len(groupSlips))
+	for _, other := range groupSlips {
+		otherMembers := currentMembers
+		otherLegs := currentLegs
+		if other.ID != slip.ID {
+			m, err := h.deps.Store.SlipMembers(ctx, other.ID)
+			if err != nil {
+				return nil, err
+			}
+			l, err := h.deps.Store.LegsForSlip(ctx, other.ID)
+			if err != nil {
+				return nil, err
+			}
+			otherMembers = m
+			otherLegs = l
+		}
+
+		views = append(views, SiblingSlipView{
+			ID:      other.ID,
+			Name:    other.Name,
+			Current: other.ID == slip.ID,
+			Summary: siblingSummary(other, otherMembers, otherLegs, viewerID),
+		})
+	}
+	return views, nil
+}
+
+// siblingSummary formats a short status for a slip in the sibling switcher
+// (e.g., "Locked", "1/2 Picks", "Won").
+func siblingSummary(
+	slip db.Slip,
+	members []db.SlipMember,
+	legs []db.Leg,
+	viewerID int64,
+) string {
+	if slip.Status == db.SlipGraded {
+		switch slip.Result {
+		case parlay.Won:
+			return "Won"
+		case parlay.Lost:
+			return "Lost"
+		case parlay.Push, parlay.Void:
+			return "Push"
+		default:
+			return "Graded"
+		}
+	}
+	if slip.Status == db.SlipLocked {
+		return "Locked"
+	}
+
+	var viewerMember *db.SlipMember
+	viewerLegs := 0
+	for i := range members {
+		if members[i].User.ID == viewerID {
+			viewerMember = &members[i]
+		}
+	}
+	for _, leg := range legs {
+		if leg.UserID == viewerID {
+			viewerLegs++
+		}
+	}
+
+	if viewerMember != nil {
+		if viewerMember.LockedAt != nil {
+			return "Locked"
+		}
+		return fmt.Sprintf("%d/%d Picks", viewerLegs, slip.LegsPerMember)
+	}
+
+	if len(members) > 0 && allMembersLocked(members) {
+		return "Locked"
+	}
+
+	totalNeeded := len(members) * slip.LegsPerMember
+	return fmt.Sprintf("%d/%d Picks", len(legs), totalNeeded)
+}
+
+// allMembersLocked reports whether all slip members are locked in.
+func allMembersLocked(members []db.SlipMember) bool {
+	if len(members) == 0 {
+		return false
+	}
+	for _, m := range members {
+		if m.LockedAt == nil {
+			return false
+		}
+	}
+	return true
+}
+
 // renderPanel writes the slip panel partial for slip. The payout calculator is
 // its own partial, so refreshing the panel does not reset the stake a person
 // typed.
@@ -1055,6 +1202,23 @@ func (h *slipHandlers) renderPanel(w http.ResponseWriter, r *http.Request, slip 
 		return
 	}
 	h.renderPartial(w, "slip-panel", page)
+}
+
+// defaultSlateScopeOptions returns the available slate scopes for creating a slip.
+func defaultSlateScopeOptions(selected string) []SlateScopeOption {
+	if selected == "" {
+		selected = string(db.SlateScopeSundayMain)
+	}
+	scopes := []db.SlateScope{db.SlateScopeSundayMain, db.SlateScopeThursday, db.SlateScopeFullWeek}
+	options := make([]SlateScopeOption, len(scopes))
+	for i, scope := range scopes {
+		options[i] = SlateScopeOption{
+			Value:    string(scope),
+			Label:    scope.Label(),
+			Selected: selected == string(scope),
+		}
+	}
+	return options
 }
 
 // renderCreate shows the create form, filling defaults from the previous slip.
@@ -1078,6 +1242,9 @@ func (h *slipHandlers) renderCreate(
 	if form != nil {
 		create.WeekID = form.WeekID
 		create.Name = form.Name
+		if form.SlateScope != "" {
+			create.SlateScope = form.SlateScope
+		}
 		create.LegsPerMember = form.LegsPerMember
 		create.Season = form.Season
 		create.SeasonType = form.SeasonType
@@ -1092,7 +1259,16 @@ func (h *slipHandlers) renderCreate(
 				create.Members[i].Selected = chosen[create.Members[i].ID]
 			}
 		}
+	} else {
+		reqScope := r.URL.Query().Get("slate_scope")
+		if reqScope == "" {
+			reqScope = r.URL.Query().Get("scope")
+		}
+		if db.SlateScope(reqScope).Valid() {
+			create.SlateScope = reqScope
+		}
 	}
+	create.SlateScopes = defaultSlateScopeOptions(create.SlateScope)
 	h.renderPage(w, "slip", SlipPage{Page: page, Creating: true, Create: create})
 }
 
@@ -1128,6 +1304,7 @@ func (h *slipHandlers) createView(
 	view := SlipCreateView{
 		Weeks:         options,
 		SeasonType:    2,
+		SlateScope:    string(db.SlateScopeSundayMain),
 		LegsPerMember: slips.DefaultLegsPerMember,
 		Members:       memberOptions,
 		Solo:          len(memberOptions) == 1,
@@ -1204,8 +1381,12 @@ func (h *slipHandlers) renderCreateError(
 		SeasonType:    seasonTypeFromForm(r),
 		WeekNum:       intFromForm(r, "week"),
 		Name:          r.PostForm.Get("name"),
+		SlateScope:    r.PostForm.Get("slate_scope"),
 		LegsPerMember: slips.DefaultLegsPerMember,
 		Error:         message,
+	}
+	if form.SlateScope == "" {
+		form.SlateScope = r.PostForm.Get("scope")
 	}
 	if raw := r.PostForm.Get("legs_per_member"); raw != "" {
 		if legs, err := strconv.Atoi(raw); err == nil {
@@ -1253,6 +1434,7 @@ func (h *slipHandlers) slipPageData(ctx context.Context, slip db.Slip) (SlipPage
 	if err != nil {
 		return SlipPage{}, err
 	}
+	games = slips.FilterGamesByScope(games, slip.SlateScope)
 	entries, err := h.deps.Store.ActivityForSlip(ctx, slip.ID)
 	if err != nil {
 		return SlipPage{}, err
@@ -1309,6 +1491,11 @@ func (h *slipHandlers) slipPageData(ctx context.Context, slip db.Slip) (SlipPage
 		})
 	}
 
+	siblings, err := h.siblingSlips(ctx, slip, members, legs, viewerID)
+	if err != nil {
+		return SlipPage{}, err
+	}
+
 	view := &SlipView{
 		ID:            slip.ID,
 		Name:          slip.Name,
@@ -1320,6 +1507,7 @@ func (h *slipHandlers) slipPageData(ctx context.Context, slip db.Slip) (SlipPage
 		Members:       memberViews,
 		Activity:      activity,
 		Analyzer:      analyzerView(legs, gamesByID, playerStats, names),
+		Siblings:      siblings,
 	}
 	if hasUser {
 		view.LegForm = LegFormView{
@@ -1333,9 +1521,10 @@ func (h *slipHandlers) slipPageData(ctx context.Context, slip db.Slip) (SlipPage
 
 	next := slips.NextStep(slip, members, legs, games, viewerID, h.deps.now())
 	return SlipPage{
-		Page: h.page(nil, slip.Name),
-		Slip: view,
-		Next: nextView(next, slip, viewerID, games),
+		Page:     h.page(nil, slip.Name),
+		Slip:     view,
+		Next:     nextView(next, slip, viewerID, games),
+		Siblings: siblings,
 	}, nil
 }
 
@@ -1983,7 +2172,8 @@ func (h *slipHandlers) respondError(w http.ResponseWriter, err error) {
 	case errors.Is(err, db.ErrSlipNotFound),
 		errors.Is(err, db.ErrLegNotFound),
 		errors.Is(err, db.ErrSlipMemberNotFound),
-		errors.Is(err, db.ErrUserNotFound):
+		errors.Is(err, db.ErrUserNotFound),
+		errors.Is(err, db.ErrScheduleNotFound):
 		http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
 	default:
 		h.serverError(w, err)
@@ -2018,6 +2208,7 @@ func (h *slipHandlers) redirect(w http.ResponseWriter, r *http.Request, target s
 		w.WriteHeader(http.StatusOK)
 		return
 	}
+	//nolint:gosec // target is an internal app path built by our handlers.
 	http.Redirect(w, r, target, http.StatusSeeOther)
 }
 
