@@ -66,6 +66,7 @@ func (h *slipHandlers) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /slips/{id}/pick/results", h.pickResults)
 	mux.HandleFunc("GET /slips/{id}/pick/detail", h.pickDetail)
 	mux.HandleFunc("GET /slips/{id}/pick/swap", h.pickSwap)
+	mux.HandleFunc("GET /slips/{id}/pick/dock", h.pickDock)
 	mux.HandleFunc("GET /slips/{id}/tray", h.pickTray)
 	mux.HandleFunc("GET /slips/{id}/panel", h.panel)
 	mux.HandleFunc("GET /slips/{id}/export", h.export)
@@ -834,13 +835,13 @@ func (h *slipHandlers) deleteLeg(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.URL.Query().Get("from") {
 	case "tray":
-		tray, err := h.pickTrayData(r.Context(), slip)
+		dock, err := h.pickDockData(r.Context(), slip)
 		if err != nil {
 			h.serverError(w, err)
 			return
 		}
-		w.Header().Set("Hx-Trigger", "board-updated")
-		h.renderPartial(w, "pick-tray", tray)
+		w.Header().Set("Hx-Trigger", "tray-updated, board-updated")
+		h.renderPartial(w, "pick-tray", dock)
 		return
 	case "board":
 		w.Header().Set("Hx-Trigger", "tray-updated")

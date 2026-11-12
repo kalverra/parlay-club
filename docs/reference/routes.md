@@ -122,11 +122,12 @@ slip outside every group is 404.
 | `GET /slips/new`                           | Create-slip page                                                | Optional `?week=`; unknown week 404. Full page. |
 | `POST /slips`                              | Create the slip from `week_id` (or a typed `season`, `season_type`, and `week`), `name`, `legs_per_member`, and `member_id` | 303 to `/slips/{id}`; a fixable error re-renders the form. |
 | `GET /slips/{id}`                          | Full slip page                                                  | Full page, with the payout form at the default stake. |
-| `GET /slips/{id}/pick`                     | Focused pick board: the game slate, the open game's picks, and the tray | Full page; no bottom bar. |
+| `GET /slips/{id}/pick`                     | Focused pick board: the game slate, the open game's picks, and the dock | Full page; no bottom bar. |
 | `GET /slips/{id}/pick/results`             | `#pick-body` for a search, window, or game change                | Optional `?q=`, `?cat=`, `?win=`, `?sort=`, and `?game=`; `#pick-body` partial. |
 | `GET /slips/{id}/pick/detail`              | `#pick-detail` for a tab or sort change                          | Optional `?q=`, `?cat=`, `?sort=`, `?win=`, and `?game=`; `#pick-detail` partial, or the "Pick a game" placeholder without an open game. |
 | `GET /slips/{id}/pick/swap`                | Swap sheet for one unpicked row                                 | Row fields in the query; swap partial. |
-| `GET /slips/{id}/tray`                     | The viewer's picks, progress, warnings, and one action          | Tray partial. Refreshes on `tray-updated` and `slip-updated`. |
+| `GET /slips/{id}/pick/dock`                | The fixed dock's count and combined price                       | Dock partial. Refreshes on `tray-updated` and `slip-updated`. |
+| `GET /slips/{id}/tray`                     | The viewer's picks, warnings, and one action, loaded into the dock's sheet | Tray partial. Refreshes on `tray-updated` and `slip-updated`. |
 | `GET /slips/{id}/panel`                    | Members, legs, odds, lock state, and banner                     | Panel partial. Refreshes on `slip-updated`. |
 | `GET /slips/{id}/export`                   | Export card for a `LOCKED` slip                                 | Export partial. Refreshes on `slip-updated`. |
 | `GET /slips/{id}/payout`                   | Payout calculator                                               | Optional `?stake=` and `?boost=`; defaults 10 and 0. Payout partial. |
@@ -174,10 +175,12 @@ without waiting for the SSE stream. See [Export](../concepts/export.md).
 
 | Method + path                   | Purpose                                                                  | Response |
 | ------------------------------- | ------------------------------------------------------------------------ | -------- |
-| `GET /slips/{id}/pick`          | Focused pick board: the game slate, the open game's picks, and the tray   | Full page, no bottom bar |
+| `GET /slips/{id}/pick`          | Focused pick board: the game slate, the open game's picks, and the dock   | Full page, no bottom bar |
 | `GET /slips/{id}/pick/results`  | `#pick-body` for a search, window, or game change                         | `#pick-body` partial |
 | `GET /slips/{id}/pick/detail`   | `#pick-detail` for a tab or sort change                                   | `#pick-detail` partial, or the "Pick a game" placeholder |
 | `GET /slips/{id}/pick/swap`     | Swap sheet for one unpicked row                                          | Swap partial |
+| `GET /slips/{id}/pick/dock`     | The fixed dock's count and combined price                                | Dock partial |
+| `GET /slips/{id}/tray`          | The viewer's picks and warnings, loaded into the dock's sheet             | Tray partial |
 | `GET /games`                    | 303 to the active group's week                                           | Redirect |
 | `GET /games/{id}/props`         | Load one game's props on demand, or render its prop partial               | 200 with `Hx-Trigger: board-updated` when `?slip=`, otherwise a partial |
 
@@ -238,8 +241,10 @@ targets the row's `pick-line-...` id instead of `closest`, and the handler answe
 left behind loses its stale delete button.
 
 `GET /slips/{id}/tray` renders the viewer's legs with remove buttons (`DELETE /legs/{id}?from=tray`), progress, the
-analyzer warnings that name one of their legs, and one action back to the hub. It refreshes on `tray-updated` and
-`slip-updated`.
+analyzer warnings that name one of their legs, and one action back to the hub. It loads into the dock's sheet and
+refreshes on `tray-updated` and `slip-updated`. `GET /slips/{id}/pick/dock` renders the fixed dock's "N of M" and the
+combined price of the viewer's legs, and refreshes on the same two signals. Removing a leg from the tray fires both
+`tray-updated` and `board-updated`, so the dock and the board follow.
 
 A game with no prop rows offers "Load them" on the slate. The button calls `GET /games/{id}/props?slip=`, which runs
 `SyncGameProps` for that one game and answers 200 with `Hx-Trigger: board-updated`; `#pick-body` listens for that signal

@@ -12,17 +12,18 @@ import (
 
 	"github.com/kalverra/parlay-club/internal/board"
 	"github.com/kalverra/parlay-club/internal/db"
+	"github.com/kalverra/parlay-club/internal/parlay"
 	"github.com/kalverra/parlay-club/internal/slips"
 )
 
 // PickPage is the focused pick board: the game slate, the open game's detail,
-// and the tray.
+// and the dock with its tray sheet.
 type PickPage struct {
 	Page
 	SlipID   int64
 	SlipName string
 	Body     PickBodyView
-	Tray     PickTrayView
+	Dock     PickDockView
 }
 
 // PickBodyView is the #pick-body partial: the slate and, when a game is open,
@@ -143,15 +144,18 @@ type PickRowView struct {
 	SwapURL    string
 }
 
-// PickTrayView is the viewer's own picks and the one thing to do next.
-type PickTrayView struct {
-	SlipID      int64
-	Picked      int
-	Limit       int
-	Legs        []TrayLegView
-	Warnings    []AnalyzerWarningView
-	ActionLabel string
-	ActionHref  string
+// PickDockView is the viewer's own picks: the fixed dock's count and combined
+// price, and the tray sheet's legs, warnings, and one next step.
+type PickDockView struct {
+	SlipID           int64
+	Picked           int
+	Limit            int
+	Combined         string
+	CombinedAmerican string
+	Legs             []TrayLegView
+	Warnings         []AnalyzerWarningView
+	ActionLabel      string
+	ActionHref       string
 }
 
 // TrayLegView is one of the viewer's legs in the tray.
@@ -228,18 +232,33 @@ func (h *slipHandlers) pickDetail(w http.ResponseWriter, r *http.Request) {
 	h.renderPartial(w, "pick-detail", *data.Body.Detail)
 }
 
-// pickTray returns the tray partial.
+// pickTray returns the tray partial for the dock's sheet.
 func (h *slipHandlers) pickTray(w http.ResponseWriter, r *http.Request) {
 	slip, _, _, ok := h.loadSlip(w, r, r.PathValue("id"))
 	if !ok {
 		return
 	}
-	tray, err := h.pickTrayData(r.Context(), slip)
+	dock, err := h.pickDockData(r.Context(), slip)
 	if err != nil {
 		h.serverError(w, err)
 		return
 	}
-	h.renderPartial(w, "pick-tray", tray)
+	h.renderPartial(w, "pick-tray", dock)
+}
+
+// pickDock returns the fixed dock partial, so a leg change updates the count
+// and the combined price without a page reload.
+func (h *slipHandlers) pickDock(w http.ResponseWriter, r *http.Request) {
+	slip, _, _, ok := h.loadSlip(w, r, r.PathValue("id"))
+	if !ok {
+		return
+	}
+	dock, err := h.pickDockData(r.Context(), slip)
+	if err != nil {
+		h.serverError(w, err)
+		return
+	}
+	h.renderPartial(w, "pick-dock", dock)
 }
 
 // pickSwap shows the swap sheet for one unpicked row.
@@ -248,15 +267,15 @@ func (h *slipHandlers) pickSwap(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	tray, err := h.pickTrayData(r.Context(), slip)
+	dock, err := h.pickDockData(r.Context(), slip)
 	if err != nil {
 		h.serverError(w, err)
 		return
 	}
 	// Only unlocked legs can be swapped out. A kicked-off leg stays visible in
 	// the tray, but it is not a choice here.
-	legs := make([]TrayLegView, 0, len(tray.Legs))
-	for _, leg := range tray.Legs {
+	legs := make([]TrayLegView, 0, len(dock.Legs))
+	for _, leg := range dock.Legs {
 		if !leg.Locked {
 			legs = append(legs, leg)
 		}
@@ -330,7 +349,7 @@ func (h *slipHandlers) pickPageData(
 
 	rows := board.Build(games, currentOdds(odds), roster, homeBook, mine, now)
 	result := board.Search(rows, games, roster, q)
-	tray, err := h.trayFrom(ctx, slip, legs, games, mine)
+	dock, err := h.dockFrom(ctx, slip, legs, games, mine)
 	if err != nil {
 		return PickPage{}, err
 	}
@@ -409,7 +428,7 @@ func (h *slipHandlers) pickPageData(
 		SlipID:   slip.ID,
 		SlipName: slip.Name,
 		Body:     body,
-		Tray:     tray,
+		Dock:     dock,
 	}, nil
 }
 
@@ -657,31 +676,32 @@ func kickoffFallback(kickoff time.Time) string {
 	return kickoff.In(eastern).Format("Mon 3:04 PM") + " ET"
 }
 
-// pickTrayData loads the tray for a request.
-func (h *slipHandlers) pickTrayData(ctx context.Context, slip db.Slip) (PickTrayView, error) {
+// pickDockData loads the dock and tray for a request.
+func (h *slipHandlers) pickDockData(ctx context.Context, slip db.Slip) (PickDockView, error) {
 	legs, err := h.deps.Store.LegsForSlip(ctx, slip.ID)
 	if err != nil {
-		return PickTrayView{}, err
+		return PickDockView{}, err
 	}
 	games, err := h.deps.Store.GamesForWeek(ctx, slip.WeekID)
 	if err != nil {
-		return PickTrayView{}, err
+		return PickDockView{}, err
 	}
 	user, _ := h.user(ctx)
-	return h.trayFrom(ctx, slip, legs, games, legsForUser(legs, user.ID))
+	return h.dockFrom(ctx, slip, legs, games, legsForUser(legs, user.ID))
 }
 
-// trayFrom shapes the viewer's legs and their analyzer warnings.
-func (h *slipHandlers) trayFrom(
+// dockFrom shapes the viewer's legs, their analyzer warnings, and the combined
+// price the dock shows.
+func (h *slipHandlers) dockFrom(
 	ctx context.Context,
 	slip db.Slip,
 	legs []db.Leg,
 	games []db.Game,
 	mine []db.Leg,
-) (PickTrayView, error) {
+) (PickDockView, error) {
 	members, err := h.deps.Store.SlipMembers(ctx, slip.ID)
 	if err != nil {
-		return PickTrayView{}, err
+		return PickDockView{}, err
 	}
 	names := make(map[int64]string, len(members))
 	for _, member := range members {
@@ -692,7 +712,7 @@ func (h *slipHandlers) trayFrom(
 
 	past, err := h.deps.Store.WeekPast(ctx, slip.WeekID, h.deps.now())
 	if err != nil {
-		return PickTrayView{}, err
+		return PickDockView{}, err
 	}
 	now := h.deps.now()
 	lockedGames := make(map[string]bool, len(games))
@@ -702,11 +722,12 @@ func (h *slipHandlers) trayFrom(
 		}
 	}
 
-	view := PickTrayView{
+	view := PickDockView{
 		SlipID: slip.ID,
 		Picked: len(mine),
 		Limit:  slip.LegsPerMember,
 	}
+	combinedLegs := make([]parlay.Leg, 0, len(mine))
 	for _, leg := range mine {
 		locked := false
 		if leg.GameID != nil && lockedGames[*leg.GameID] {
@@ -718,7 +739,14 @@ func (h *slipHandlers) trayFrom(
 			Odds:      formatOdds(leg.Odds),
 			Locked:    locked,
 		})
+		combinedLegs = append(combinedLegs, parlay.Leg{
+			Decimal: parlay.AmericanToDecimal(leg.Odds),
+			Result:  leg.Result,
+		})
 	}
+	combined := parlay.CombinedOdds(combinedLegs)
+	view.Combined = fmt.Sprintf("%.2fx", combined)
+	view.CombinedAmerican = formatOdds(parlay.DecimalToAmerican(combined))
 
 	nfelo := h.nfeloForGames(ctx, games)
 	gamesByID := analyzerGameMap(games, nfelo)

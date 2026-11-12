@@ -81,7 +81,61 @@ func pickBoard(t *testing.T, fixture *slipFixture, query string) *httptest.Respo
 	return recorder
 }
 
-func TestPickBoardShowsSearchChipsSortsAndTray(t *testing.T) {
+func pickDock(t *testing.T, fixture *slipFixture) *httptest.ResponseRecorder {
+	t.Helper()
+
+	recorder := httptest.NewRecorder()
+	fixture.handler.ServeHTTP(recorder, httptest.NewRequestWithContext(
+		t.Context(), http.MethodGet, fmt.Sprintf("/slips/%d/pick/dock", fixture.slip.ID), nil))
+	return recorder
+}
+
+func TestPickDockShowsTheCombinedPriceOfYourLegs(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 3)
+	game := addGame(t, fixture, gameKickoff())
+
+	partner, err := fixture.store.CreateUserWithIdentity(
+		t.Context(), "Grace", "grace@example.com", "google-grace", "")
+	require.NoError(t, err)
+	require.NoError(t, fixture.store.AddSlipMember(t.Context(), fixture.slip.ID, partner.ID))
+
+	addStoredLeg(t, fixture, db.Leg{
+		UserID:     fixture.user.ID,
+		GameID:     new(game.ID),
+		MarketType: "ML",
+		Selection:  "BUF ML",
+		Team:       new("BUF"),
+		Odds:       -110,
+	})
+	addStoredLeg(t, fixture, db.Leg{
+		UserID:     fixture.user.ID,
+		GameID:     new(game.ID),
+		MarketType: "ML",
+		Selection:  "MIA ML",
+		Team:       new("MIA"),
+		Odds:       130,
+	})
+	addStoredLeg(t, fixture, db.Leg{
+		UserID:     partner.ID,
+		GameID:     new(game.ID),
+		MarketType: "SPREAD",
+		Selection:  "BUF -3",
+		Team:       new("BUF"),
+		Odds:       -110,
+	})
+
+	recorder := pickDock(t, fixture)
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	body := html.UnescapeString(recorder.Body.String())
+
+	assert.Contains(t, body, "2 of 3", "the dock counts only the viewer's legs")
+	assert.Contains(t, body, "4.39x (+339)", "the combined price multiplies the viewer's legs")
+	assert.Contains(t, body, "Slip", "the dock keeps the way into the tray")
+}
+
+func TestPickBoardShowsSearchChipsSortsAndDock(t *testing.T) {
 	t.Parallel()
 
 	fixture := newSlipFixture(t, 2)
@@ -103,9 +157,6 @@ func TestPickBoardShowsSearchChipsSortsAndTray(t *testing.T) {
 	assert.Contains(t, body, "Passing")
 	assert.Contains(t, body, "Any time")
 	assert.Contains(t, body, "Player", "the open game's sort chips start at player")
-	assert.Contains(t, body, "Your picks")
-	assert.Contains(t, body, "0 of 2")
-	assert.Contains(t, body, "Done")
 	assert.Contains(t, body, "BUF -3")
 	assert.Contains(t, body, fmt.Sprintf(
 		`hx-get="/slips/%d/pick/detail?cat=passing&game=%s&sort=player"`, fixture.slip.ID, game.ID))
@@ -116,6 +167,20 @@ func TestPickBoardShowsSearchChipsSortsAndTray(t *testing.T) {
 	assert.Contains(t, body, `data-category="lines"`, "an open game starts on the Lines tab")
 	assert.Contains(t, body, `data-sort="player"`)
 	assert.Contains(t, body, `hx-trigger="board-updated from:body"`, "a fresh prop sync refreshes the board")
+
+	assert.Contains(t, body, `id="pick-dock"`, "the dock replaces the aside tray")
+	assert.Contains(t, body, fmt.Sprintf(`hx-get="/slips/%d/pick/dock"`, fixture.slip.ID))
+	assert.Contains(t, body, `hx-trigger="tray-updated from:body, slip-updated from:body"`,
+		"a new leg or a fresh slip refreshes the dock")
+	assert.Contains(t, body, "Your picks")
+	assert.Contains(t, body, "0 of 2")
+	assert.Contains(t, body, `hx-target="#pick-tray-body"`, "the dock opens the tray sheet")
+	assert.Contains(t, body, `id="pick-tray-sheet"`)
+	assert.Contains(t, body, `data-close-dock`)
+	assert.Contains(t, body, fmt.Sprintf(`hx-get="/slips/%d/tray"`, fixture.slip.ID))
+	assert.NotContains(t, body, "<aside", "the tray no longer sits beside the body")
+	assert.NotContains(t, body, ">Done<", "the one action lives in the tray sheet, not on the page")
+	assert.NotContains(t, body, "1.00x", "an empty slip shows no combined price")
 }
 
 func TestPickBoardLinksGameCardsWithHTMXAndHrefFallback(t *testing.T) {
@@ -339,6 +404,7 @@ func TestPickBoardNeverSyncsPropsOnItsOwn(t *testing.T) {
 		fmt.Sprintf("/slips/%d/pick/results?sort=odds", fixture.slip.ID),
 		fmt.Sprintf("/slips/%d/pick/detail?game=%s", fixture.slip.ID, game.ID),
 		fmt.Sprintf("/slips/%d/pick/detail?game=%s&cat=passing", fixture.slip.ID, game.ID),
+		fmt.Sprintf("/slips/%d/pick/dock", fixture.slip.ID),
 		fmt.Sprintf("/slips/%d/tray", fixture.slip.ID),
 	} {
 		recorder := httptest.NewRecorder()
@@ -811,6 +877,35 @@ func TestPickSwapRefusesALockedInMember(t *testing.T) {
 	stored, err := fixture.store.LegByID(t.Context(), leg.ID)
 	require.NoError(t, err)
 	assert.Equal(t, "BUF ML", stored.Selection, "a locked-in member cannot swap")
+}
+
+func TestPickTrayRemoveRefreshesTheDock(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	game := addGame(t, fixture, gameKickoff())
+	leg := addStoredLeg(t, fixture, db.Leg{
+		UserID:     fixture.user.ID,
+		GameID:     new(game.ID),
+		MarketType: "ML",
+		Selection:  "BUF ML",
+		Team:       new("BUF"),
+		Odds:       -110,
+	})
+
+	recorder := httptest.NewRecorder()
+	fixture.handler.ServeHTTP(recorder, httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodDelete,
+		fmt.Sprintf("/legs/%d?from=tray", leg.ID),
+		nil,
+	))
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	assert.Equal(t, "tray-updated, board-updated", recorder.Header().Get("Hx-Trigger"),
+		"removing a pick in the sheet refreshes the dock and the board")
+	body := html.UnescapeString(recorder.Body.String())
+	assert.Contains(t, body, "0 of 2")
+	assert.Contains(t, body, "No picks yet.")
 }
 
 func TestPickTrayShowsOnlyHeadsUpsOnYourLegs(t *testing.T) {
