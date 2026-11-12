@@ -64,6 +64,8 @@ type GameResearchView struct {
 	GameTitle     string
 	HomeTeam      string
 	AwayTeam      string
+	HomeLogo      string
+	AwayLogo      string
 	Injuries      []TeamInjuriesView
 	Matches       []PropMatchView
 	RosterOptions []RosterOptionView
@@ -74,16 +76,19 @@ type GameResearchView struct {
 type TeamInjuriesView struct {
 	Team         string
 	Abbreviation string
+	LogoURL      string
 	Injuries     []InjuryView
 }
 
 // InjuryView is one athlete's injury report.
 type InjuryView struct {
-	AthleteID string
-	FullName  string
-	Position  string
-	Status    string
-	Detail    string
+	AthleteID   string
+	FullName    string
+	Position    string
+	HeadshotURL string
+	Initials    string
+	Status      string
+	Detail      string
 }
 
 // PropMatchView is one sportsbook prop player and their match state.
@@ -93,6 +98,8 @@ type PropMatchView struct {
 	ESPNAthleteID string
 	AthleteName   string
 	Position      string
+	HeadshotURL   string
+	Initials      string
 	Manual        bool
 	Matched       bool
 }
@@ -111,6 +118,9 @@ type PlayerResearchView struct {
 	Name             string
 	Team             string
 	Position         string
+	HeadshotURL      string
+	Initials         string
+	TeamLogo         string
 	GamesPlayed      int
 	ActiveMarket     string
 	ActiveMarketName string
@@ -359,34 +369,11 @@ func (h *researchHandlers) loadGameResearch(ctx context.Context, gameID string) 
 		GameTitle: fmt.Sprintf("%s @ %s", game.AwayTeam, game.HomeTeam),
 		HomeTeam:  game.HomeTeam,
 		AwayTeam:  game.AwayTeam,
+		HomeLogo:  db.StringValue(game.HomeLogo),
+		AwayLogo:  db.StringValue(game.AwayLogo),
 	}
 	if game.AwayTeam == "" || game.HomeTeam == "" {
 		view.GameTitle = game.ID
-	}
-
-	// Parse injuries
-	rawInjuries := ""
-	if game.InjuriesJSON != nil {
-		rawInjuries = *game.InjuriesJSON
-	}
-	teamInjuries, err := espn.ParseInjuries(rawInjuries)
-	if err == nil {
-		for _, ti := range teamInjuries {
-			tView := TeamInjuriesView{
-				Team:         ti.Team,
-				Abbreviation: ti.Abbreviation,
-			}
-			for _, inj := range ti.Injuries {
-				tView.Injuries = append(tView.Injuries, InjuryView{
-					AthleteID: inj.AthleteID,
-					FullName:  inj.FullName,
-					Position:  inj.Position,
-					Status:    inj.Status,
-					Detail:    inj.Detail,
-				})
-			}
-			view.Injuries = append(view.Injuries, tView)
-		}
 	}
 
 	// Roster options
@@ -407,6 +394,9 @@ func (h *researchHandlers) loadGameResearch(ctx context.Context, gameID string) 
 			return strings.Compare(a.FullName, b.FullName)
 		})
 	}
+
+	// Parse injuries
+	view.Injuries = buildInjuryViews(game, rosterMap)
 
 	playerMatches, err := h.deps.Store.PlayerMatchesForTeams(ctx, teams)
 	matchesByNormTeam := make(map[string]db.PlayerMatch)
@@ -439,9 +429,14 @@ func (h *researchHandlers) loadGameResearch(ctx context.Context, gameID string) 
 			if aid != "" {
 				mv.Matched = true
 				mv.ESPNAthleteID = aid
+				mv.Initials = Initials(name)
 				if rp, ok := rosterMap[aid]; ok {
 					mv.AthleteName = rp.FullName
 					mv.Position = rp.Position
+					mv.HeadshotURL = rp.HeadshotURL
+					if rp.FullName != "" {
+						mv.Initials = Initials(rp.FullName)
+					}
 					if mv.Team == "" {
 						mv.Team = rp.Team
 					}
@@ -487,13 +482,20 @@ func (h *researchHandlers) loadPlayerResearch(
 	}
 
 	view := &PlayerResearchView{
-		AthleteID: athleteID,
-		Name:      player.FullName,
-		Team:      player.Team,
-		Position:  player.Position,
+		AthleteID:   athleteID,
+		Name:        player.FullName,
+		Team:        player.Team,
+		Position:    player.Position,
+		HeadshotURL: player.HeadshotURL,
 	}
 	if view.Name == "" {
 		view.Name = "Athlete #" + athleteID
+	}
+	view.Initials = Initials(view.Name)
+	if view.Team != "" {
+		if logos, err := h.deps.Store.TeamLogos(ctx); err == nil {
+			view.TeamLogo = logos[view.Team]
+		}
 	}
 
 	var markets map[string][]float64
@@ -740,6 +742,63 @@ func marketLabel(market string) string {
 		return "Kicker Points"
 	default:
 		return market
+	}
+}
+
+func buildInjuryViews(game db.Game, rosterMap map[string]db.RosterPlayer) []TeamInjuriesView {
+	rawInjuries := ""
+	if game.InjuriesJSON != nil {
+		rawInjuries = *game.InjuriesJSON
+	}
+	teamInjuries, err := espn.ParseInjuries(rawInjuries)
+	if err != nil {
+		return nil
+	}
+	views := make([]TeamInjuriesView, 0, len(teamInjuries))
+	for _, ti := range teamInjuries {
+		logoURL := ti.LogoURL
+		if logoURL == "" {
+			logoURL = gameTeamLogo(game, ti.Abbreviation, ti.Team)
+		}
+		tView := TeamInjuriesView{
+			Team:         ti.Team,
+			Abbreviation: ti.Abbreviation,
+			LogoURL:      logoURL,
+		}
+		for _, inj := range ti.Injuries {
+			headshotURL := inj.HeadshotURL
+			if headshotURL == "" {
+				if rp, ok := rosterMap[inj.AthleteID]; ok {
+					headshotURL = rp.HeadshotURL
+				}
+			}
+			tView.Injuries = append(tView.Injuries, InjuryView{
+				AthleteID:   inj.AthleteID,
+				FullName:    inj.FullName,
+				Position:    inj.Position,
+				HeadshotURL: headshotURL,
+				Initials:    Initials(inj.FullName),
+				Status:      inj.Status,
+				Detail:      inj.Detail,
+			})
+		}
+		views = append(views, tView)
+	}
+	return views
+}
+
+func gameTeamLogo(game db.Game, abbr, teamName string) string {
+	switch {
+	case abbr != "" && abbr == game.AwayTeam:
+		return db.StringValue(game.AwayLogo)
+	case abbr != "" && abbr == game.HomeTeam:
+		return db.StringValue(game.HomeLogo)
+	case teamName != "" && teamName == game.AwayName:
+		return db.StringValue(game.AwayLogo)
+	case teamName != "" && teamName == game.HomeName:
+		return db.StringValue(game.HomeLogo)
+	default:
+		return ""
 	}
 }
 
