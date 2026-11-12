@@ -38,6 +38,7 @@ var partialFiles = map[string]string{
 	"leg-added":         partialsFile,
 	"game-props":        partialsFile,
 	"pick-body":         partialsFile,
+	"pick-slate":        partialsFile,
 	"pick-detail":       partialsFile,
 	"pick-detail-empty": partialsFile,
 	"pick-line-group":   partialsFile,

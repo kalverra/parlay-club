@@ -177,6 +177,7 @@ without waiting for the SSE stream. See [Export](../concepts/export.md).
 | ------------------------------- | ------------------------------------------------------------------------ | -------- |
 | `GET /slips/{id}/pick`          | Focused pick board: the game slate, the open game's picks, and the dock   | Full page, no bottom bar |
 | `GET /slips/{id}/pick/results`  | `#pick-body` for a search, window, or game change                         | `#pick-body` partial |
+| `GET /slips/{id}/pick/slate`    | `#pick-slate` for a live board update                                     | Slate partial |
 | `GET /slips/{id}/pick/detail`   | `#pick-detail` for a tab or sort change                                   | `#pick-detail` partial, or the "Pick a game" placeholder |
 | `GET /slips/{id}/pick/swap`     | Swap sheet for one unpicked row                                          | Swap partial |
 | `GET /slips/{id}/pick/dock`     | The fixed dock's count and combined price                                | Dock partial |
@@ -187,10 +188,11 @@ without waiting for the SSE stream. See [Export](../concepts/export.md).
 `GET /slips/{id}/pick` is the hub's pick action. It reads the week's games, one `OddsForWeek` read, the week's rosters,
 and the viewer's legs, then hands them to `internal/board`. `board.Build` folds one row per selection, using the
 viewer's home-book price when it carries the pick and the median across books otherwise, and drops games that have
-kicked off. `board.Search` applies the query, category, window, sort, and one-game filter. `board.Slates` turns the same
-rows into one card per upcoming game for the slate, and `board.Detail` shapes the open game's header, tabs, and the
-active tab's lines or player cards. A card is marked unloaded when its game has lines but no prop rows. The handler sets
-`Page.Wide`, so the header and main use `max-w-6xl`, and sets the slip's `data-live-url`, so the page opens one stream.
+kicked off. `board.Slates` turns the same rows into one card per upcoming game for the slate, `board.StartedCount`
+counts the games that already kicked off for the empty state, and `board.Detail` shapes the open game's header, tabs,
+and the active tab's lines or player cards. A card is marked unloaded when its game has lines but no prop rows. The
+handler sets `Page.Wide`, so the header and main use `max-w-6xl`, and sets the slip's `data-live-url`, so the page opens
+one stream.
 
 The board's query contract:
 
@@ -209,16 +211,20 @@ and no props. The open game is highlighted.
 The search input debounces at 250 ms and swaps `GET /slips/{id}/pick/results`. Window chips are Sun morning (before noon
 Eastern), Sun early (before 4), Sun late (before 7), Sun night, and Monday. A chip shows how many rows it covers and
 appears only when it has rows. A card is a link with a plain `href` to `/slips/{id}/pick?game=` and an `hx-get` to the
-results URL; both swap `#pick-body` and push the full page URL. `#pick-body` also re-fetches itself on `board-updated`.
+results URL; both swap `#pick-body` and push the full page URL. The results response also carries `HX-Push-Url` with the
+full page URL built from the resolved query, so a search writes `q` into the address bar. `#pick-slate` re-fetches itself
+from `GET /slips/{id}/pick/slate` on `board-updated`, so the cards follow a prop sync without touching the open detail.
 
 Inside the open game, the detail has a pinned header with the back link, matchup, kickoff, venue, and a Research link,
 then a horizontal tab bar and the sort chips. The tabs are Lines, Passing, Rushing, Receiving, TDs, and Kicking. Team
 totals fold into Lines, a tab appears only when it has rows or is open, and each badge counts its rows, so the Lines
 badge includes both sides of each line. Tab and sort chips swap `#pick-detail` and push the full page URL, leaving the
-slate and its scroll alone. An unknown category opens Lines when it has rows, otherwise the first tab that does; `sort`
-resolves to `player`, `odds`, or `line`, and anything else reads as `player`. The "All games" back link drops `game` and
-`cat`, keeps `q` and `win`, and swaps `#pick-body`. A search filters the open game's rows. An unknown game, a kicked-off
-game, or a game the window hides falls back to the slate instead of a 404.
+slate and its scroll alone. `#pick-detail` re-fetches itself from its resolved tab and sort on `board-updated`, and a
+tab or sort response out-of-band syncs the search form's hidden `cat` and `sort`, so a later search or live refresh keeps
+the open tab. An unknown category opens Lines when it has rows, otherwise the first tab that does; `sort` resolves to
+`player`, `odds`, or `line`, and anything else reads as `player`. The "All games" back link drops `game` and `cat`, keeps
+`q` and `win`, and swaps `#pick-body`. A search filters the open game's rows. An unknown game, a kicked-off game, or a
+game the window hides falls back to the slate instead of a 404.
 
 `GET /slips/{id}/pick/detail` answers with `#pick-detail`: the open game's header, tabs, sort chips, and the active tab's
 rows. The Lines tab shows the game lines first, then team totals grouped by team; a prop tab shows one card per player
@@ -247,10 +253,10 @@ combined price of the viewer's legs, and refreshes on the same two signals. Remo
 
 A game with stored lines but no prop rows offers "Load them" on its slate card and in its open detail. The button calls
 `GET /games/{id}/props?slip=`, which runs `SyncGameProps` for that one game and answers 200 with
-`Hx-Trigger: board-updated`; `#pick-body` listens for that signal and re-runs its current search. Opening the board,
-opening a game, typing, filtering, and sorting call no sync. A week with no stored games says the slate has not synced. A
-week with games but no odds says the lines have not synced once, above cards that carry no lines. Once every game has
-kicked off, the slate says picks are closed.
+`Hx-Trigger: board-updated`; `#pick-slate` refetches from `/pick/slate` and `#pick-detail` refetches from its resolved tab
+and sort. Opening the board, opening a game, typing, filtering, and sorting call no sync. A week with no stored games says
+the slate has not synced. A week with games but no odds says the lines have not synced once, above cards that carry no
+lines. Once every game has kicked off, the slate says picks are closed.
 
 `GET /games` uses the old Games link as a 303 to `/groups/{active}/week`, where the week route opens the group's newest
 slip. Without an active group it redirects to `/`.
@@ -324,7 +330,7 @@ rest) answer 422 with the message from [Slips](../concepts/slips.md). The form s
 | ------------- | ------- |
 | `HX-Redirect` | Navigate the browser to a new page without swapping an empty body. |
 | `HX-Refresh`  | Reload the current page, used after a group switch, invite reset, or leave. |
-| `HX-Trigger`  | Fire a client event. `leg-saved` closes the leg form's bottom sheet. `tray-updated` refreshes the pick dock and tray, and `board-updated` refreshes the pick body. |
+| `HX-Trigger`  | Fire a client event. `leg-saved` closes the leg form's bottom sheet. `tray-updated` refreshes the pick dock and tray, and `board-updated` refreshes `#pick-slate` and the open game's `#pick-detail`. |
 
 Writes that change the slip return the refreshed panel, so the page reflects the new state without a reload. Partials
 listen with `hx-trigger="slip-updated from:body"` for live updates.

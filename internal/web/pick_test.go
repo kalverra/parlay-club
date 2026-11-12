@@ -17,10 +17,19 @@ import (
 )
 
 // addSecondGame writes another week game with its own teams.
-func addSecondGame(t *testing.T, fixture *slipFixture, id, away, home, awayName, homeName string) db.Game {
+func addSecondGame(t *testing.T, fixture *slipFixture) db.Game {
 	t.Helper()
 
-	return addSecondGameAt(t, fixture, id, away, home, awayName, homeName, gameKickoff().Add(24*time.Hour))
+	return addSecondGameAt(
+		t,
+		fixture,
+		"401772099",
+		"CIN",
+		"CLE",
+		"Cincinnati Bengals",
+		"Cleveland Browns",
+		gameKickoff().Add(24*time.Hour),
+	)
 }
 
 // addSecondGameAt writes another week game at a chosen kickoff.
@@ -348,7 +357,7 @@ func TestPickBoardKeepsEachGamesProps(t *testing.T) {
 
 	fixture := newSlipFixture(t, 2)
 	first := addGame(t, fixture, gameKickoff())
-	second := addSecondGame(t, fixture, "401772099", "CIN", "CLE", "Cincinnati Bengals", "Cleveland Browns")
+	second := addSecondGame(t, fixture)
 	fetched := time.Date(2026, time.November, 7, 15, 42, 0, 0, time.UTC)
 	_, err := fixture.store.UpsertOdds(t.Context(), []db.Odds{
 		{
@@ -384,7 +393,7 @@ func TestPickResultsNamesAPropGameThatIsNotLoaded(t *testing.T) {
 	fixture := newSlipFixture(t, 2)
 	game := addGame(t, fixture, gameKickoff())
 	addGameOdds(t, fixture.store, game.ID)
-	other := addSecondGame(t, fixture, "401772099", "CIN", "CLE", "Cincinnati Bengals", "Cleveland Browns")
+	other := addSecondGame(t, fixture)
 	addSpreadOdds(t, fixture.store, other.ID, "CIN")
 	require.NoError(t, fixture.store.UpsertRosterPlayers(t.Context(), []db.RosterPlayer{{
 		AthleteID: "99",
@@ -411,7 +420,7 @@ func TestPickBoardNeverSyncsPropsOnItsOwn(t *testing.T) {
 	fixture := newSlipFixture(t, 2)
 	game := addGame(t, fixture, gameKickoff())
 	addGameOdds(t, fixture.store, game.ID)
-	other := addSecondGame(t, fixture, "401772099", "CIN", "CLE", "Cincinnati Bengals", "Cleveland Browns")
+	other := addSecondGame(t, fixture)
 	addSpreadOdds(t, fixture.store, other.ID, "CIN")
 	refresher := &stubRefresher{}
 	handler := gamesHandlerWithRefresher(t, fixture, fixture.user, refresher)
@@ -1257,6 +1266,108 @@ func TestPickDetailKeepsTheOpenTabAndSortInEveryLink(t *testing.T) {
 		fixture.slip.ID, game.ID))
 }
 
+func TestPickDetailKeepsTheTabThroughALiveRefreshAndSearch(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	game := addGame(t, fixture, gameKickoff())
+	addGameOdds(t, fixture.store, game.ID)
+	addPropOdds(t, fixture.store, game.ID, "PASS_YDS", "Josh Allen", 245.5, -110)
+	addPropOdds(t, fixture.store, game.ID, "REC_YDS", "Ja'Marr Chase", 72.5, -115)
+
+	query := "game=" + game.ID + "&cat=passing&sort=odds"
+	boardBody := html.UnescapeString(pickBoard(t, fixture, query).Body.String())
+	assert.Contains(t, boardBody, `data-category="passing"`)
+	assert.Contains(t, boardBody, `data-sort="odds"`)
+	assert.Contains(t, boardBody, `id="pick-cat" type="hidden" name="cat" value="passing"`,
+		"the search form keeps the open tab")
+	assert.Contains(t, boardBody, `id="pick-sort" type="hidden" name="sort" value="odds"`,
+		"the search form keeps the open sort")
+	assert.Contains(
+		t,
+		boardBody,
+		fmt.Sprintf(`hx-get="/slips/%d/pick/detail?cat=passing&game=%s&sort=odds"`, fixture.slip.ID, game.ID),
+		"the detail refreshes itself from the resolved tab and sort",
+	)
+	assert.Contains(t, boardBody, `hx-include="#pick-q, #pick-cat, #pick-win, #pick-sort, #pick-game"`,
+		"the slate refresh sends the current filters")
+
+	detailBody := html.UnescapeString(pickDetail(t, fixture, query).Body.String())
+	assert.Contains(t, detailBody, `id="pick-cat" type="hidden" name="cat" value="passing" hx-swap-oob="true"`,
+		"a tab swap syncs the search form out of band")
+	assert.Contains(t, detailBody, `id="pick-sort" type="hidden" name="sort" value="odds" hx-swap-oob="true"`,
+		"a sort swap syncs the search form out of band")
+
+	slate := httptest.NewRecorder()
+	fixture.handler.ServeHTTP(slate, httptest.NewRequestWithContext(
+		t.Context(), http.MethodGet,
+		fmt.Sprintf("/slips/%d/pick/slate?%s", fixture.slip.ID, query), nil))
+	require.Equal(t, http.StatusOK, slate.Code, slate.Body.String())
+	slateBody := html.UnescapeString(slate.Body.String())
+	assert.NotContains(t, slateBody, `id="pick-detail"`, "a slate refresh leaves the detail alone")
+	assert.Contains(t, slateBody, `id="pick-cat" type="hidden" name="cat" value="passing"`,
+		"a slate refresh keeps the open tab")
+	assert.Contains(t, slateBody, `id="pick-sort" type="hidden" name="sort" value="odds"`,
+		"a slate refresh keeps the open sort")
+
+	search := httptest.NewRecorder()
+	fixture.handler.ServeHTTP(search, httptest.NewRequestWithContext(
+		t.Context(), http.MethodGet,
+		fmt.Sprintf("/slips/%d/pick/results?%s&q=Allen", fixture.slip.ID, query), nil))
+	require.Equal(t, http.StatusOK, search.Code, search.Body.String())
+	searchBody := html.UnescapeString(search.Body.String())
+	assert.Contains(t, searchBody, `data-category="passing"`, "a search keeps the open tab")
+	assert.Contains(t, searchBody, `data-sort="odds"`, "a search keeps the open sort")
+	assert.Contains(t, searchBody, `id="pick-cat" type="hidden" name="cat" value="passing"`)
+}
+
+func TestPickSearchPushesTheFullPageURL(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	game := addGame(t, fixture, gameKickoff())
+	addGameOdds(t, fixture.store, game.ID)
+	addPropOdds(t, fixture.store, game.ID, "PASS_YDS", "Josh Allen", 245.5, -110)
+
+	target := fmt.Sprintf(
+		"/slips/%d/pick/results?q=Allen&game=%s&cat=passing&sort=odds",
+		fixture.slip.ID,
+		game.ID,
+	)
+	recorder := httptest.NewRecorder()
+	fixture.handler.ServeHTTP(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodGet, target, nil))
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+
+	assert.Equal(
+		t,
+		fmt.Sprintf("/slips/%d/pick?cat=passing&game=%s&q=Allen&sort=odds", fixture.slip.ID, game.ID),
+		recorder.Header().Get("Hx-Push-Url"),
+		"a search writes the full page URL into the address bar",
+	)
+}
+
+func TestPickControlsMeetTheTouchTarget(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	game := addGame(t, fixture, gameKickoff())
+	addGameOdds(t, fixture.store, game.ID)
+	addPropOdds(t, fixture.store, game.ID, "PASS_YDS", "Josh Allen", 245.5, -110)
+
+	body := html.UnescapeString(pickBoard(t, fixture, "game="+game.ID+"&cat=passing").Body.String())
+
+	assert.Contains(t, body, "inline-flex min-h-12 items-center rounded-full px-2.5 py-1",
+		"the window chips reach 48px")
+	assert.Contains(t, body, "inline-flex min-h-12 shrink-0 items-center rounded-full px-2.5 py-1",
+		"the tab chips reach 48px")
+	assert.Contains(t, body, "inline-flex min-h-12 items-center rounded-full px-2 py-0.5",
+		"the sort chips reach 48px")
+	assert.Contains(t, body, "inline-flex min-h-12 items-center rounded-md border",
+		"the back link reaches 48px")
+	assert.Contains(t, body, "inline-flex min-h-12 shrink-0 items-center rounded-lg bg-sky-600 px-4 py-2",
+		"the dock button reaches 48px")
+}
+
 func TestPickDetailSortsByOddsAndLine(t *testing.T) {
 	t.Parallel()
 
@@ -1301,7 +1412,7 @@ func TestPickDetailSearchStaysInsideTheOpenGame(t *testing.T) {
 	fixture := newSlipFixture(t, 2)
 	bills := addGame(t, fixture, gameKickoff())
 	addPropOdds(t, fixture.store, bills.ID, "PASS_YDS", "Josh Allen", 245.5, -110)
-	bengals := addSecondGame(t, fixture, "401772099", "CIN", "CLE", "Cincinnati Bengals", "Cleveland Browns")
+	bengals := addSecondGame(t, fixture)
 	addPropOdds(t, fixture.store, bengals.ID, "PASS_YDS", "Joe Burrow", 255.5, -110)
 
 	body := html.UnescapeString(pickDetail(t, fixture, "game="+bills.ID+"&q=pass").Body.String())

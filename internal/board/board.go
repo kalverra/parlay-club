@@ -110,15 +110,10 @@ type Sort string
 
 // The ways the pick board can order its rows.
 const (
-	SortKickoff  Sort = "kickoff"
-	SortPlayer   Sort = "player"
-	SortCategory Sort = "category"
-	SortOdds     Sort = "odds"
-	SortLine     Sort = "line"
+	SortPlayer Sort = "player"
+	SortOdds   Sort = "odds"
+	SortLine   Sort = "line"
 )
-
-// Sorts lists the slate's sort chips in display order.
-var Sorts = []Sort{SortKickoff, SortPlayer, SortCategory, SortOdds}
 
 // DetailSorts lists the open game's sort chips in display order. One game has
 // one kickoff, so kickoff drops out and player is the default.
@@ -127,12 +122,8 @@ var DetailSorts = []Sort{SortPlayer, SortOdds, SortLine}
 // Label is the chip text.
 func (s Sort) Label() string {
 	switch s {
-	case SortKickoff:
-		return "Kickoff"
 	case SortPlayer:
 		return "Player"
-	case SortCategory:
-		return "Category"
 	case SortOdds:
 		return "Odds"
 	case SortLine:
@@ -240,13 +231,6 @@ type GameDetail struct {
 	Players  []PlayerGroup
 }
 
-// UnloadedGame is a game whose props were never fetched, offered as a prompt.
-type UnloadedGame struct {
-	GameID  string
-	Matchup string
-	Kickoff time.Time
-}
-
 // Query is one search, filter, and sort request.
 type Query struct {
 	Q        string
@@ -256,13 +240,6 @@ type Query struct {
 	GameID   string
 	// Now is the app clock. A zero time uses time.Now.
 	Now time.Time
-}
-
-// Result is the filtered rows and the prompts around them.
-type Result struct {
-	Rows     []Row
-	Unloaded []UnloadedGame
-	Started  int
 }
 
 // eastern is the zone the kickoff windows use.
@@ -373,7 +350,7 @@ func Build(
 		}
 	}
 
-	sortRows(rows, SortKickoff)
+	sortRows(rows)
 	return rows
 }
 
@@ -573,75 +550,19 @@ func matchPlayer(roster []db.RosterPlayer, name, team string) (string, string) {
 	return fallback.AthleteID, fallback.Position
 }
 
-// Search filters and sorts built rows. It also names games whose props were
-// never fetched when the query matches their team or a roster player on it.
-func Search(rows []Row, games []db.Game, roster []db.RosterPlayer, q Query) Result {
-	now := q.Now
+// StartedCount counts the games that had kicked off by now, so the slate can
+// name how many it hides.
+func StartedCount(games []db.Game, now time.Time) int {
 	if now.IsZero() {
 		now = time.Now()
 	}
-
-	byGame := make(map[string]db.Game, len(games))
-	for _, game := range games {
-		byGame[game.ID] = game
-	}
-
-	result := Result{Started: 0}
+	count := 0
 	for _, game := range games {
 		if !now.Before(game.Kickoff) {
-			result.Started++
+			count++
 		}
 	}
-
-	needle := normalize(q.Q)
-	hasProps := make(map[string]bool, len(games))
-	for _, row := range rows {
-		if row.Category != CategoryLines {
-			hasProps[row.GameID] = true
-		}
-	}
-
-	for _, row := range rows {
-		if !now.Before(row.Kickoff) {
-			continue
-		}
-		if q.Category != "" && row.Category != q.Category {
-			continue
-		}
-		if q.Window != "" && row.Window != q.Window {
-			continue
-		}
-		if q.GameID != "" && row.GameID != q.GameID {
-			continue
-		}
-		if needle != "" && !rowMatches(row, byGame[row.GameID], needle) {
-			continue
-		}
-		result.Rows = append(result.Rows, row)
-	}
-
-	for _, game := range games {
-		if !now.Before(game.Kickoff) || hasProps[game.ID] {
-			continue
-		}
-		if !gameMatchesQuery(game, roster, needle) {
-			continue
-		}
-		result.Unloaded = append(result.Unloaded, UnloadedGame{
-			GameID:  game.ID,
-			Matchup: game.AwayTeam + " @ " + game.HomeTeam,
-			Kickoff: game.Kickoff,
-		})
-	}
-
-	sortRows(result.Rows, q.Sort)
-	sort.SliceStable(result.Unloaded, func(i, j int) bool {
-		if !result.Unloaded[i].Kickoff.Equal(result.Unloaded[j].Kickoff) {
-			return result.Unloaded[i].Kickoff.Before(result.Unloaded[j].Kickoff)
-		}
-		return result.Unloaded[i].GameID < result.Unloaded[j].GameID
-	})
-	return result
+	return count
 }
 
 // Slates shapes one week's built rows into the game cards the slate shows.
@@ -1291,32 +1212,10 @@ func gameMatchesQuery(game db.Game, roster []db.RosterPlayer, needle string) boo
 	return false
 }
 
-// sortRows orders rows by sort, defaulting to kickoff.
-func sortRows(rows []Row, mode Sort) {
+// sortRows orders rows by kickoff, then by the stable tiebreaks a list needs.
+func sortRows(rows []Row) {
 	sort.SliceStable(rows, func(i, j int) bool {
 		left, right := rows[i], rows[j]
-		switch mode {
-		case SortPlayer:
-			if left.PlayerName != right.PlayerName {
-				if left.PlayerName == "" {
-					return false
-				}
-				if right.PlayerName == "" {
-					return true
-				}
-				return left.PlayerName < right.PlayerName
-			}
-		case SortCategory:
-			if left.Category != right.Category {
-				return categoryOrder(left.Category) < categoryOrder(right.Category)
-			}
-		case SortOdds:
-			leftDecimal := parlay.AmericanToDecimal(left.Odds)
-			rightDecimal := parlay.AmericanToDecimal(right.Odds)
-			if leftDecimal != rightDecimal {
-				return leftDecimal < rightDecimal
-			}
-		}
 		if !left.Kickoff.Equal(right.Kickoff) {
 			return left.Kickoff.Before(right.Kickoff)
 		}

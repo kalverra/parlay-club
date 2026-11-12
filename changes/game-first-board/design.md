@@ -5,7 +5,8 @@
 The pick board already has the data it needs. `internal/board` is pure and turns stored odds into one `Row` per
 selection, using the viewer's home book when it prices the selection and the median across books otherwise. `Row`
 carries the game, market, team, player, side, line, price, display text, category, kickoff window, and the viewer's leg
-id when the selection is picked. `board.Search` filters those rows by query, category, window, one game, and sort.
+id when the selection is picked. `board.Slates` groups those rows into one card per upcoming game, `board.Detail` shapes
+the open game's tabs and rows, and `board.Pair` folds both sides of one line into a group.
 `internal/web/pick.go` loads the slip's legs, the week's games, odds, and rosters once, then shapes the views. The
 templates in `web/templates/pick.html` and the `pick-*` partials in `partials.html` render the flat list and a tray.
 
@@ -37,9 +38,10 @@ The current shape:
 flowchart LR
   DB[(games, odds, roster, legs)] --> H[pick handlers]
   H --> B[board.Build → flat rows]
-  B --> S[board.Search: q, cat, win, game, sort]
-  S --> R[pick-results row list]
-  H --> T[pick-tray rail at lg, below the list on a phone]
+  B --> S[board.Slates → game cards]
+  B --> D[board.Detail → open game lines and props]
+  S --> R[pick-slate partial]
+  D --> P[pick-detail partial]
 ```
 
 ## Approach
@@ -287,9 +289,9 @@ and `good-vibes check`.
   screen off-center. Check every `max-w-3xl` use and test at 1024.
 - **Scroll resets.** Replacing `#pick-body` can throw the slate back to the top. The save/restore handler is the only
   mitigation; test game switches after scrolling deep in the list.
-- **Stale detail refresh URL.** `#pick-body` carries its live refresh URL from page load. A tab or sort swap replaces
-  only `#pick-detail`, so a later `board-updated` refetches the body with the old tab and sort and resets them. Phase 4
-  can give the detail its own refresh when the dock takes over the body refresh.
+- **Stale detail refresh URL.** Closed by the split refresh. `#pick-slate` and `#pick-detail` each carry their own live
+  URL, the detail's includes its resolved tab and sort, and a tab or sort swap out-of-band syncs the search form's hidden
+  values, so a later `board-updated` or search keeps the open tab.
 - **Stale pair rows.** A live update or a second tab can change the picked side. The row is rebuilt from stored legs on
   every board or tray signal; if a stale update lands, `UpdateLeg` still checks the owner and kickoff, so the failure is
   a 422, not a bad write.

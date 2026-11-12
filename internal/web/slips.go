@@ -64,6 +64,7 @@ func (h *slipHandlers) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /slips/{id}", h.slipPage)
 	mux.HandleFunc("GET /slips/{id}/pick", h.pickBoard)
 	mux.HandleFunc("GET /slips/{id}/pick/results", h.pickResults)
+	mux.HandleFunc("GET /slips/{id}/pick/slate", h.pickSlate)
 	mux.HandleFunc("GET /slips/{id}/pick/detail", h.pickDetail)
 	mux.HandleFunc("GET /slips/{id}/pick/swap", h.pickSwap)
 	mux.HandleFunc("GET /slips/{id}/pick/dock", h.pickDock)
