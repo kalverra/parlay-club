@@ -187,15 +187,23 @@ Game selection replaces `#pick-body`, which can reset the slate's scroll. `app.j
 element with a UTC ISO value, a neutral ET fallback from the server ("Mon 3:04 PM ET"), and the reader's local zone from
 `app.js` after each swap.
 
+`board.Pair` is the one pairing rule, shared by the detail and every refreshed row. It folds rows that share a line into
+one group: a spread or moneyline keys on the market alone so both teams sit together, a game total on the market and
+number, and a team total or prop on its market, team, player, and number. `board.LineKey` names that identity, so the
+row's element id and the update path agree. Options come back in a fixed order, never in input order: away then home on
+a spread or moneyline, Over then Under on a total or prop, and the single Yes on an anytime touchdown. A line with no
+stored price on one side keeps one option, and a line with both sides picked, which the custom form can produce, paints
+both and lets either be removed.
+
 Tapping a side of an unpicked line adds it with the normal add-leg route (`quick=1&from=board`), and tapping a picked
 side removes that leg. Tapping the other side of a line that already holds a pick sends `PUT /legs/{id}` with the new
 side's fields, so the pair holds one leg instead of two; `UpdateLeg` enforces the owner, the lock in, and kickoff on both
-games, and its activity entry reads "Adam changed X to Y". Every board answer is the refreshed pair row, both sides with
-their current picks, and fires `tray-updated`, so only that line swaps and the tray refreshes without a reload. A
-switch that moves the leg to another line also fires `board-updated`, because the old line's row is still on screen. At
-the limit, a line with neither side picked opens "Swap which pick?" and lists the viewer's legs that are not
-kickoff-locked. Choosing one sends `PUT /legs/{old}` with the new pick's fields; a line that already holds a pick
-switches sides in place and needs no free slot.
+games, and its activity entry reads "Adam changed X to Y". Add, update, and delete answer the same way: the refreshed
+pair row for that line, both sides with their current picks, plus `tray-updated`. Only that row swaps, and the tray
+refreshes without a reload. A switch that moves the leg to another line also fires `board-updated`, because the old
+line's row is still on screen and must lose its delete button. At the limit, a line with neither side picked opens
+"Swap which pick?" and lists the viewer's legs that are not kickoff-locked. Choosing one sends `PUT /legs/{old}` with the
+new pick's fields; a line that already holds a pick switches sides in place and needs no free slot.
 
 A game whose props were never fetched appears as a prompt on the slate when the search matches its team, its matchup, or
 a roster player on it: "Props for BUF @ MIA aren't loaded yet." The "Load them" button calls

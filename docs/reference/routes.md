@@ -225,11 +225,17 @@ game" placeholder, not the slate.
 
 A side of an unpicked line posts `POST /slips/{id}/legs` with `quick=1&from=board`; the picked side sends
 `DELETE /legs/{id}?from=board`. The other side of a line that already holds a pick sends `PUT /legs/{id}` with the new
-side's fields, so the pair keeps one leg. Every board answer is the refreshed pair row and fires
-`Hx-Trigger: tray-updated`. At the limit, a line with neither side picked opens `GET /slips/{id}/pick/swap`, which lists
-the viewer's unlocked legs; a choice sends `PUT /legs/{old}` with `from=board` and the new pick's fields, and the handler
-answers with the refreshed pair row and `Hx-Trigger: tray-updated`. A switch that moves the leg to another line also
-fires `board-updated`, so the line left behind loses its stale delete button.
+side's fields, so the pair keeps one leg. All three answer with the same partial: the refreshed `pick-line-group` for
+that line, both sides carrying their current picks, plus `Hx-Trigger: tray-updated`. The row swaps with
+`hx-target="closest .pick-line-group"` and `hx-swap="outerHTML"`, so only that line changes. A line the board can no
+longer rebuild, such as a hand-typed leg with no stored odds, answers one option for that leg so the row still adds,
+removes, or switches.
+
+At the limit, a line with neither side picked opens `GET /slips/{id}/pick/swap`, which lists the viewer's unlocked legs;
+a choice sends `PUT /legs/{old}` with `from=board` and the new pick's fields. The sheet sits outside the row, so its form
+targets the row's `pick-line-...` id instead of `closest`, and the handler answers with the same refreshed pair row and
+`Hx-Trigger: tray-updated`. A switch that moves the leg to another line adds `board-updated` to the trigger, so the line
+left behind loses its stale delete button.
 
 `GET /slips/{id}/tray` renders the viewer's legs with remove buttons (`DELETE /legs/{id}?from=tray`), progress, the
 analyzer warnings that name one of their legs, and one action back to the hub. It refreshes on `tray-updated` and
