@@ -2,8 +2,8 @@
 id: slips
 title: Slips
 type: concept
-summary: How a group builds one shared parlay a week from the slate, with the hub's next-step banner and deadline, the searchable pick board and its tray, members, legs, votes, quick-add, create-slip defaults, grading, the editing and locking rules, and research.
-tags: [slips, weeks, legs, members, locking, grading, results, activity, groups, games, quick-add, nfelo, props, autocomplete, research, next-step, hub, pick-board, search, tray, votes, voting]
+summary: How a group builds one shared parlay a week from the slate, with the hub's next-step banner and deadline, the game-first pick board and its tray, members, legs, votes, quick-add, create-slip defaults, grading, the editing and locking rules, and research.
+tags: [slips, weeks, legs, members, locking, grading, results, activity, groups, games, quick-add, nfelo, props, autocomplete, research, next-step, hub, pick-board, slate, drilldown, search, tray, votes, voting]
 sources: [internal/slips/slips.go, internal/slips/rules.go, internal/slips/next.go, internal/board/board.go, internal/db/slips.go, internal/db/legs.go, internal/db/votes.go, internal/db/odds.go, internal/db/players.go, internal/db/weeks.go, internal/db/games.go, internal/web/games.go, internal/web/pick.go, internal/web/slips.go, internal/web/home.go, internal/web/research.go, web/static/app.js]
 last_verified: 2026-11-11
 ---
@@ -133,39 +133,60 @@ keeps its own price. The formulas are in [Odds math](../reference/odds-math.md).
 
 ## The pick board
 
-The hub's pick step opens `GET /slips/{id}/pick`, a focused screen with a back link to the hub and no bottom bar. A tray
-holds the viewer's own picks beside the list on wide screens and below it on a phone. The page carries the slip's
-`data-live-url`, so it still opens one stream per page.
+The hub's pick step opens `GET /slips/{id}/pick`, a focused screen with a back link to the hub and no bottom bar. It is a
+game slate with the open game's picks beside it. On a phone the slate fills the screen and a game opens a drilldown with
+an "All games" back link; at `lg` the slate and detail sit in a `22rem + 1fr` grid and scroll on their own while the page
+body stays put. A tray holds the viewer's own picks beside the body at `lg` and below it on a phone. The page sets
+`Page.Wide`, so the header and main widen to `max-w-6xl`, and carries the slip's `data-live-url`, so it still opens one
+stream per page.
 
 `internal/board` turns the week's stored odds into rows. It reads nothing itself. `board.Build` folds one row per
 selection, using the viewer's home book when it prices the selection and the median across every book otherwise. Rows
 from an older odds sync are dropped first, the same as the old Games board. A game that has kicked off is left out and
-counted. Each row carries its game, market, team, player, side, line, price, display text, a category, and a kickoff
-window.
+counted. Each row carries its game, market, team, player, the roster athlete ID and position, side, line, price, display
+text, a category, and a kickoff window.
 
-Search is case- and accent-insensitive over the row text, team abbreviation and name, player, and matchup. The input
-debounces at 250 ms and swaps the results partial. Chips filter by category (lines, team totals, passing, rushing,
-receiving, TDs, kicking) and by Eastern-time window (Sunday morning before noon, Sunday early before 4, Sunday late
-before 7, Sunday night, Monday). A Monday-night game that lands on Tuesday in UTC still reads Monday. Chips only appear
-for categories and windows with rows. Sorts are kickoff (default), player, category, and odds (shortest price first).
-Chips and sorts are links that swap the same partial and push the full page URL.
+`board.Slates` shapes those rows into one card per game still ahead. It filters by the search text and the kickoff window,
+orders cards by kickoff, and derives each card's spread, total, and moneyline from the built rows. A game with no stored
+odds still gets a card, with no lines and no props. The prop count is every row outside the lines category, so team
+totals count as props.
+
+The slate leads with one search box and the kickoff-window chips. Search is case- and accent-insensitive and matches a
+matchup, a team, a venue, or a roster player on the game. The input debounces at 250 ms and swaps the body partial.
+Window chips filter by Eastern-time kickoff (Sunday morning before noon, Sunday early before 4, Sunday late before 7,
+Sunday night, Monday); a Monday-night game that lands on Tuesday in UTC still reads Monday. A chip shows how many rows it
+covers and appears only when it has rows. Each card shows the matchup, venue, kickoff, spread, total, moneyline, and
+either "Explore N props" or "No props yet", and the open game is highlighted. Cards are links: a plain `href` to the full
+page and an `hx-get` that swaps `#pick-body` and pushes the full page URL.
+
+A card opens the detail: the game's header with its matchup, kickoff, venue, and a Research link, then category and sort
+chips, then the game's rows with both sides of each line beside each other. Category chips are lines, team totals,
+passing, rushing, receiving, TDs, and kicking, counted from that game's rows. Sorts are kickoff (default), player,
+category, and odds (shortest price first). The search text also filters the open game's rows. Every chip and the "All
+games" link swap the same body partial; the back link drops `game` and `cat` and keeps `q` and `win`. An unknown game, a
+kicked-off game, or a game the window hides falls back to the slate instead of a 404.
+
+Game selection replaces `#pick-body`, which can reset the slate's scroll. `app.js` saves the `scrollTop` of the
+`[data-keep-scroll]` pane before an HTMX swap and restores it after. Times keep the existing contract: a `<time>`
+element with a UTC ISO value, a neutral ET fallback from the server ("Mon 3:04 PM ET"), and the reader's local zone from
+`app.js` after each swap.
 
 Tapping an unpicked row adds it with the normal add-leg route (`quick=1&from=board`), and tapping a picked row removes
 that leg. Both answer with the row and fire `tray-updated`, so the tray refreshes without a reload. At the limit, an
 unpicked row opens "Swap which pick?" and lists the viewer's legs that are not kickoff-locked. Choosing one sends
 `PUT /legs/{old}` with the new pick's fields. `UpdateLeg` already enforces the owner, the lock in, and kickoff on both
-games, and its activity entry reads "Adam changed X to Y".
+games, and its activity entry reads "Adam changed X to Y". Its board answer is the refreshed body partial.
 
-`?game=` shows one game with both sides of each line in one row, and a link returns to the whole week.
-
-A game whose props were never fetched appears as a prompt when the search matches its team, its matchup, or a roster
-player on it: "Props for BUF @ MIA aren't loaded yet." The "Load them" button calls `GET /games/{id}/props?slip=`, which
-runs `SyncGameProps` for that one game (credit floors and all) and then fires `board-updated`. The board itself never
-syncs props; opening, typing, filtering, and sorting spend no credits. See [Data refresh](data-refresh.md).
+A game whose props were never fetched appears as a prompt on the slate when the search matches its team, its matchup, or
+a roster player on it: "Props for BUF @ MIA aren't loaded yet." The "Load them" button calls
+`GET /games/{id}/props?slip=`, which runs `SyncGameProps` for that one game (credit floors and all) and then fires
+`board-updated`. The board itself never syncs props; opening a game, typing, filtering, and sorting spend no credits. See
+[Data refresh](data-refresh.md).
 
 The board has its own empty states. A week with no stored games says the slate has not synced. A week with games but no
 odds says the lines have not synced, once, instead of offering "Load them" for every game. Once every game has kicked
-off, it says picks are closed. A search or filter that matches nothing keeps "Nothing matches that search."
+off, it says picks are closed. A search or filter that matches nothing keeps "Nothing matches that search." When only
+some games have started, one line says how many are hidden.
 
 The tray shows the viewer's legs with remove buttons, progress ("1 of 2"), the analyzer warnings that name one of the
 viewer's legs, and one action: "Done" back to the hub, or "Review and lock in" at the limit. It refreshes on
