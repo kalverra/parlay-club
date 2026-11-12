@@ -185,16 +185,21 @@ type SlipMemberView struct {
 
 // LegView is one leg row.
 type LegView struct {
-	ID          int64
-	Selection   string
-	Odds        string
-	Model       string // nfelo chip; "" when there is no fresh model
-	Result      string
-	OwnerName   string
-	CanEdit     bool
-	CanGrade    bool
-	ResearchURL string
-	Votes       VoteView
+	ID              int64
+	Selection       string
+	Odds            string
+	Model           string // nfelo chip; "" when there is no fresh model
+	Result          string
+	OwnerName       string
+	CanEdit         bool
+	CanGrade        bool
+	ResearchURL     string
+	PlayerHeadshot  string
+	PlayerInitials  string
+	TeamLogo        string
+	MatchupAwayLogo string
+	MatchupHomeLogo string
+	Votes           VoteView
 }
 
 // VoteView is one leg's tally and the viewer's own vote. UpValue and DownValue
@@ -1430,11 +1435,11 @@ func (h *slipHandlers) slipPageData(ctx context.Context, slip db.Slip) (SlipPage
 	if err != nil {
 		return SlipPage{}, err
 	}
-	games, err := h.deps.Store.GamesForWeek(ctx, slip.WeekID)
+	allWeekGames, err := h.deps.Store.GamesForWeek(ctx, slip.WeekID)
 	if err != nil {
 		return SlipPage{}, err
 	}
-	games = slips.FilterGamesByScope(games, slip.SlateScope)
+	games := slips.FilterGamesByScope(allWeekGames, slip.SlateScope)
 	entries, err := h.deps.Store.ActivityForSlip(ctx, slip.ID)
 	if err != nil {
 		return SlipPage{}, err
@@ -1457,9 +1462,13 @@ func (h *slipHandlers) slipPageData(ctx context.Context, slip db.Slip) (SlipPage
 	nfelo := h.nfeloForGames(ctx, games)
 	gamesByID := analyzerGameMap(games, nfelo)
 	playerStats := h.playerStatsForLegs(ctx, legs)
+	media, err := h.legMedia(ctx, legs, allWeekGames)
+	if err != nil {
+		return SlipPage{}, err
+	}
 	viewerID := user.ID
 	votesByLeg := voteViews(votes, viewerID)
-	legsByUser := legViews(legs, names, gamesByID, open, hasUser, viewerIsMember, viewerID, votesByLeg)
+	legsByUser := legViews(legs, names, gamesByID, media, open, hasUser, viewerIsMember, viewerID, votesByLeg)
 
 	locked := 0
 	for _, member := range members {
@@ -1547,12 +1556,83 @@ func voteViews(votes []db.LegVote, viewerID int64) map[int64]VoteView {
 	return views
 }
 
+// legMediaIndex holds preloaded player portraits, team logos, and week games
+// for rendering LegView badges without per-leg queries.
+type legMediaIndex struct {
+	players   map[string]db.RosterPlayer
+	teamLogos map[string]string
+	games     map[string]db.Game
+}
+
+func (h *slipHandlers) legMedia(ctx context.Context, legs []db.Leg, weekGames []db.Game) (legMediaIndex, error) {
+	idx := legMediaIndex{
+		teamLogos: make(map[string]string, len(weekGames)*2),
+		games:     make(map[string]db.Game, len(weekGames)),
+	}
+	for _, g := range weekGames {
+		idx.games[g.ID] = g
+		if logo := db.StringValue(g.AwayLogo); logo != "" {
+			idx.teamLogos[g.AwayTeam] = logo
+		}
+		if logo := db.StringValue(g.HomeLogo); logo != "" {
+			idx.teamLogos[g.HomeTeam] = logo
+		}
+	}
+
+	seenPlayers := make(map[string]struct{})
+	var playerIDs []string
+	for _, leg := range legs {
+		if leg.PlayerID == nil || *leg.PlayerID == "" {
+			continue
+		}
+		if _, ok := seenPlayers[*leg.PlayerID]; ok {
+			continue
+		}
+		seenPlayers[*leg.PlayerID] = struct{}{}
+		playerIDs = append(playerIDs, *leg.PlayerID)
+	}
+	if len(playerIDs) > 0 {
+		players, err := h.deps.Store.RosterPlayersByIDs(ctx, playerIDs)
+		if err != nil {
+			return legMediaIndex{}, err
+		}
+		idx.players = players
+	}
+
+	needsGlobalLogos := false
+	for _, leg := range legs {
+		if team := db.StringValue(leg.Team); team != "" && idx.teamLogos[team] == "" {
+			needsGlobalLogos = true
+			break
+		}
+		if leg.PlayerID != nil && *leg.PlayerID != "" {
+			if p, ok := idx.players[*leg.PlayerID]; ok && p.Team != "" && idx.teamLogos[p.Team] == "" {
+				needsGlobalLogos = true
+				break
+			}
+		}
+	}
+	if needsGlobalLogos {
+		globalLogos, err := h.deps.Store.TeamLogos(ctx)
+		if err != nil {
+			return legMediaIndex{}, err
+		}
+		for team, logo := range globalLogos {
+			if idx.teamLogos[team] == "" {
+				idx.teamLogos[team] = logo
+			}
+		}
+	}
+	return idx, nil
+}
+
 // legViews groups a slip's legs by owner for the panel, with each leg's vote
 // tally and the viewer's part in it.
 func legViews(
 	legs []db.Leg,
 	names map[int64]string,
 	games map[string]analyzer.Game,
+	media legMediaIndex,
 	open, hasUser, viewerIsMember bool,
 	viewerID int64,
 	votes map[int64]VoteView,
@@ -1560,7 +1640,7 @@ func legViews(
 	byUser := make(map[int64][]LegView, len(names))
 	for _, leg := range legs {
 		canVote := open && hasUser && viewerIsMember && leg.UserID != viewerID
-		byUser[leg.UserID] = append(byUser[leg.UserID], LegView{
+		view := LegView{
 			ID:          leg.ID,
 			Selection:   leg.Selection,
 			Odds:        formatOdds(leg.Odds),
@@ -1571,9 +1651,45 @@ func legViews(
 			CanGrade:    viewerIsMember,
 			ResearchURL: legResearchURL(leg),
 			Votes:       legVoteView(votes, leg, canVote),
-		})
+		}
+		applyLegMedia(&view, leg, media)
+		byUser[leg.UserID] = append(byUser[leg.UserID], view)
 	}
 	return byUser
+}
+
+func applyLegMedia(view *LegView, leg db.Leg, media legMediaIndex) {
+	if leg.PlayerID != nil && *leg.PlayerID != "" {
+		player, ok := media.players[*leg.PlayerID]
+		name := db.StringValue(leg.PlayerName)
+		if name == "" && ok {
+			name = player.FullName
+		}
+		view.PlayerInitials = Initials(name)
+		if ok {
+			view.PlayerHeadshot = player.HeadshotURL
+		}
+		if view.PlayerHeadshot == "" {
+			team := db.StringValue(leg.Team)
+			if team == "" && ok {
+				team = player.Team
+			}
+			if team != "" {
+				view.TeamLogo = media.teamLogos[team]
+			}
+		}
+		return
+	}
+	if leg.Team != nil && *leg.Team != "" {
+		view.TeamLogo = media.teamLogos[*leg.Team]
+		return
+	}
+	if leg.GameID != nil && *leg.GameID != "" {
+		if g, ok := media.games[*leg.GameID]; ok {
+			view.MatchupAwayLogo = db.StringValue(g.AwayLogo)
+			view.MatchupHomeLogo = db.StringValue(g.HomeLogo)
+		}
+	}
 }
 
 // legResearchURL links a leg to the research view for its player or game.

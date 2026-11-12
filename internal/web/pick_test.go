@@ -1613,3 +1613,84 @@ func TestPickBoardFiltersSlateBySlipSlateScope(t *testing.T) {
 	assert.Contains(t, bodyFull, "win=sun_early")
 	assert.Contains(t, bodyFull, "win=monday")
 }
+
+func TestPickBoardRendersLogosAndPortraits(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixtureAt(t, 3, func() time.Time {
+		return gameKickoff().Add(-24 * time.Hour)
+	})
+	_, err := fixture.store.UpsertGame(t.Context(), db.Game{
+		ID:         "401772001",
+		WeekID:     fixture.week.ID,
+		HomeTeam:   "BUF",
+		AwayTeam:   "MIA",
+		HomeName:   "Buffalo Bills",
+		AwayName:   "Miami Dolphins",
+		HomeESPNID: "2",
+		AwayESPNID: "15",
+		HomeLogo:   new("https://a.espncdn.com/i/teamlogos/nfl/500/buf.png"),
+		AwayLogo:   new("https://a.espncdn.com/i/teamlogos/nfl/500/mia.png"),
+		Kickoff:    gameKickoff(),
+		Status:     db.GameScheduled,
+		UpdatedAt:  time.Now().UTC(),
+	})
+	require.NoError(t, err)
+
+	addSpreadOdds(t, fixture.store, "401772001", "BUF")
+	addPropOdds(t, fixture.store, "401772001", "PASS_YDS", "Josh Allen", 255.5, -110)
+	_, err = fixture.store.UpsertOdds(t.Context(), []db.Odds{{
+		GameID:     "401772001",
+		Book:       "draftkings",
+		MarketType: "PASS_YDS",
+		Team:       "MIA",
+		PlayerName: "Tua Tagovailoa",
+		Side:       "OVER",
+		Line:       new(245.5),
+		Price:      -110,
+		FetchedAt:  time.Date(2026, time.November, 7, 15, 42, 0, 0, time.UTC),
+	}})
+	require.NoError(t, err)
+	require.NoError(t, fixture.store.UpsertRosterPlayers(t.Context(), []db.RosterPlayer{
+		{
+			AthleteID:   "3918298",
+			Team:        "BUF",
+			ESPNTeamID:  "2",
+			FullName:    "Josh Allen",
+			Position:    "QB",
+			HeadshotURL: "https://a.espncdn.com/i/headshots/nfl/players/full/3918298.png",
+			UpdatedAt:   time.Now().UTC(),
+		},
+		{
+			AthleteID:   "4241479",
+			Team:        "MIA",
+			ESPNTeamID:  "15",
+			FullName:    "Tua Tagovailoa",
+			Position:    "QB",
+			HeadshotURL: "",
+			UpdatedAt:   time.Now().UTC(),
+		},
+	}))
+
+	// 1. pick-slate renders matchup logos.
+	slateRec := httptest.NewRecorder()
+	fixture.handler.ServeHTTP(slateRec, httptest.NewRequestWithContext(
+		t.Context(), http.MethodGet, fmt.Sprintf("/slips/%d/pick/slate", fixture.slip.ID), nil,
+	))
+	require.Equal(t, http.StatusOK, slateRec.Code)
+	slateBody := slateRec.Body.String()
+	assert.Contains(t, slateBody, `src="https://a.espncdn.com/i/teamlogos/nfl/500/mia.png"`)
+	assert.Contains(t, slateBody, `src="https://a.espncdn.com/i/teamlogos/nfl/500/buf.png"`)
+
+	// 2. pick-detail header renders matchup logos and PickPlayerView renders
+	//    player portrait + team logo, or initials fallback when headshot is empty.
+	detailRec := pickBoard(t, fixture, "game=401772001&cat=passing")
+	require.Equal(t, http.StatusOK, detailRec.Code)
+	detailBody := detailRec.Body.String()
+	assert.Contains(t, detailBody, `src="https://a.espncdn.com/i/teamlogos/nfl/500/mia.png"`)
+	assert.Contains(t, detailBody, `src="https://a.espncdn.com/i/teamlogos/nfl/500/buf.png"`)
+	assert.Contains(t, detailBody, `src="https://a.espncdn.com/i/headshots/nfl/players/full/3918298.png"`)
+	assert.Contains(t, detailBody, `data-fallback-badge`)
+	assert.Contains(t, detailBody, `>JA</span>`)
+	assert.Contains(t, detailBody, `>TT</span>`)
+}
