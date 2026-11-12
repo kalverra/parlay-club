@@ -289,7 +289,7 @@ new tests).
 
 - [x] Add `board.Slates` and the game-line summaries, with `Position` copied onto prop rows, plus tests for kickoff
       order, the spread/total/moneyline summary, window and query filtering, and dropping kicked-off games.
-- [ ] Replace the flat pick page with `#pick-body`: a game slate and a detail pane that shows the open game's existing
+- [x] Replace the flat pick page with `#pick-body`: a game slate and a detail pane that shows the open game's existing
       rows. Keep the kickoff-window chips and the matchup search on the slate. Add `Page.Wide`, the `lg` grid, the
       phone drilldown and back link, the ET fallback time, and the scroll-restore handler. Link game cards with
       `hx-get` and a plain href fallback.

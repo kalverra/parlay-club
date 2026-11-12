@@ -34,11 +34,28 @@ function formatTimes(root) {
   }
 }
 
+// The pick slate scrolls on its own, and replacing #pick-body would throw it
+// back to the top on every game switch. Save the pane marked for it before an
+// HTMX swap and put the position back after.
+let keptScrollTop = null;
+
+document.addEventListener("htmx:beforeSwap", () => {
+  const pane = document.querySelector("[data-keep-scroll]");
+  keptScrollTop = pane ? pane.scrollTop : null;
+});
+
 // HTMX swaps in partials, so format whatever arrived and whatever was there
 // before the swap.
 document.addEventListener("htmx:afterSwap", (event) => {
   const target = (event.detail && event.detail.target) || document;
   formatTimes(target);
+
+  const pane = document.querySelector("[data-keep-scroll]");
+  if (pane && keptScrollTop !== null) {
+    pane.scrollTop = keptScrollTop;
+  }
+  keptScrollTop = null;
+
   if (target && target.id === "leg-sheet-body") {
     openLegSheet();
   }

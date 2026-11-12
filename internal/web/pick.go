@@ -15,37 +15,84 @@ import (
 	"github.com/kalverra/parlay-club/internal/slips"
 )
 
-// PickPage is the focused pick board: search, rows, and the tray.
+// PickPage is the focused pick board: the game slate, the open game's detail,
+// and the tray.
 type PickPage struct {
 	Page
 	SlipID   int64
 	SlipName string
-	Results  PickResultsView
+	Body     PickBodyView
 	Tray     PickTrayView
 }
 
-// PickResultsView is the results partial: chips, rows, prompts, and one-game
-// groups.
-type PickResultsView struct {
+// PickBodyView is the #pick-body partial: the slate and, when a game is open,
+// its detail.
+type PickBodyView struct {
+	SlipID   int64
+	Search   string
+	Category string
+	Window   string
+	Sort     string
+	Game     string
+	SelfURL  string
+	Slate    PickSlateView
+	Detail   *PickDetailView
+}
+
+// PickSlateView is the game list: the search box, kickoff-window chips, and one
+// card per upcoming game.
+type PickSlateView struct {
 	SlipID     int64
 	Search     string
-	Category   string
 	Window     string
-	Sort       string
 	Game       string
 	SelfURL    string
-	Rows       []PickRowView
-	GameGroups []PickGameGroup
+	Cards      []PickGameCardView
+	Windows    []PickChip
 	Unloaded   []board.UnloadedGame
 	Started    int
 	Empty      bool
 	NoGames    bool
 	NoLines    bool
 	AllStarted bool
-	AtLimit    bool
-	Categories []PickChip
-	Windows    []PickChip
-	Sorts      []PickChip
+}
+
+// PickGameCardView is one game on the slate, with its lines at a glance.
+type PickGameCardView struct {
+	ID              string
+	Matchup         string
+	Venue           string
+	Away            string
+	Home            string
+	KickoffISO      string
+	KickoffFallback string
+	Spread          string
+	Total           string
+	Moneyline       string
+	Props           int
+	HasProps        bool
+	Href            string
+	PushURL         string
+	Active          bool
+}
+
+// PickDetailView is the open game's header, chips, and rows.
+type PickDetailView struct {
+	SlipID          int64
+	GameID          string
+	Matchup         string
+	Venue           string
+	KickoffISO      string
+	KickoffFallback string
+	Search          string
+	Category        string
+	Sort            string
+	BackHref        string
+	BackPushURL     string
+	Categories      []PickChip
+	Sorts           []PickChip
+	GameGroups      []PickGameGroup
+	Empty           bool
 }
 
 // PickChip is one filter or sort link.
@@ -132,12 +179,13 @@ func (h *slipHandlers) pickBoard(w http.ResponseWriter, r *http.Request) {
 	}
 	page := h.pageForGroup(r, "Pick", slip.GroupID)
 	page.Tab = ""
+	page.Wide = true
 	data.Page = page
 	h.renderPage(w, "pick", data)
 }
 
-// pickResults returns the results partial for HTMX searches, filters, and
-// sorts.
+// pickResults returns the #pick-body partial for HTMX searches, filters, game
+// switches, and sorts.
 func (h *slipHandlers) pickResults(w http.ResponseWriter, r *http.Request) {
 	slip, _, _, ok := h.loadSlip(w, r, r.PathValue("id"))
 	if !ok {
@@ -148,7 +196,7 @@ func (h *slipHandlers) pickResults(w http.ResponseWriter, r *http.Request) {
 		h.serverError(w, err)
 		return
 	}
-	h.renderPartial(w, "pick-results", data.Results)
+	h.renderPartial(w, "pick-body", data.Body)
 }
 
 // pickTray returns the tray partial.
@@ -251,48 +299,212 @@ func (h *slipHandlers) pickPageData(
 		return PickPage{}, err
 	}
 
-	atLimit := len(mine) >= slip.LegsPerMember
-	results := PickResultsView{
-		SlipID:     slip.ID,
-		Search:     q.Q,
-		Category:   string(q.Category),
-		Window:     string(q.Window),
-		Sort:       string(q.Sort),
-		Game:       q.GameID,
-		SelfURL:    pickHref(slip.ID, q, "", ""),
-		Unloaded:   result.Unloaded,
-		Started:    result.Started,
-		AtLimit:    atLimit,
-		Categories: categoryChips(slip.ID, rows, q),
-		Windows:    windowChips(slip.ID, rows, q),
-		Sorts:      sortChips(slip.ID, q),
+	// The detail exists even when the current search matches only one of the
+	// open game's rows, so open it from a slate that ignores the search text.
+	openCards := board.Slates(games, rows, roster, board.Query{Window: q.Window, Now: now})
+	openByID := make(map[string]board.GameCard, len(openCards))
+	for _, card := range openCards {
+		openByID[card.ID] = card
 	}
+	if _, ok := openByID[q.GameID]; !ok {
+		// An unknown game, a kicked-off game, or a window change falls back to
+		// the slate instead of 404ing.
+		q.GameID = ""
+	}
+
+	atLimit := len(mine) >= slip.LegsPerMember
+	slateCards := board.Slates(games, rows, roster, q)
+	slate := PickSlateView{
+		SlipID:  slip.ID,
+		Search:  q.Q,
+		Window:  string(q.Window),
+		Game:    q.GameID,
+		SelfURL: pickHref(slip.ID, q, "", ""),
+		Windows: windowChips(slip.ID, rows, q),
+		Started: result.Started,
+	}
+	for _, card := range slateCards {
+		slate.Cards = append(slate.Cards, pickGameCardView(slip.ID, card, q))
+	}
+	slate.Unloaded = result.Unloaded
+	slate.NoGames = len(games) == 0
+	slate.AllStarted = len(games) > 0 && result.Started == len(games)
+	slate.NoLines = !slate.NoGames && !slate.AllStarted && len(rows) == 0
+	if slate.NoLines {
+		// With no lines at all, one "Load them" prompt per game is noise. The
+		// week's empty state says what is missing once.
+		slate.Unloaded = nil
+	}
+	slate.Empty = len(slate.Cards) == 0 && len(slate.Unloaded) == 0 &&
+		!slate.NoGames && !slate.NoLines && !slate.AllStarted
+
 	gamesByID := make(map[string]db.Game, len(games))
 	for _, game := range games {
 		gamesByID[game.ID] = game
 	}
-	for _, row := range result.Rows {
-		results.Rows = append(results.Rows, pickRowView(slip.ID, row, gamesByID[row.GameID], atLimit, q))
+	body := PickBodyView{
+		SlipID:   slip.ID,
+		Search:   q.Q,
+		Category: string(q.Category),
+		Window:   string(q.Window),
+		Sort:     string(q.Sort),
+		Game:     q.GameID,
+		SelfURL:  pickHref(slip.ID, q, "", ""),
+		Slate:    slate,
 	}
-	if q.GameID != "" {
-		results.GameGroups = groupByGame(results.Rows)
+	if card, ok := openByID[q.GameID]; ok {
+		detail := &PickDetailView{
+			SlipID:          slip.ID,
+			GameID:          card.ID,
+			Matchup:         card.Matchup,
+			Venue:           card.Venue,
+			KickoffISO:      kickoffISO(card.Kickoff),
+			KickoffFallback: kickoffFallback(card.Kickoff),
+			Search:          q.Q,
+			Category:        string(q.Category),
+			Sort:            string(q.Sort),
+			BackHref:        pickBackHref(slip.ID, q),
+			BackPushURL:     pickBackPushURL(slip.ID, q),
+			Categories:      categoryChips(slip.ID, rowsForGame(rows, q.GameID), q),
+			Sorts:           sortChips(slip.ID, q),
+		}
+		rowViews := make([]PickRowView, 0, len(result.Rows))
+		for _, row := range result.Rows {
+			rowViews = append(rowViews, pickRowView(slip.ID, row, gamesByID[row.GameID], atLimit, q))
+		}
+		detail.GameGroups = groupByGame(rowViews)
+		detail.Empty = len(rowViews) == 0
+		body.Detail = detail
 	}
-	results.NoGames = len(games) == 0
-	results.AllStarted = len(games) > 0 && result.Started == len(games)
-	results.NoLines = !results.NoGames && !results.AllStarted && len(rows) == 0
-	if results.NoLines {
-		// With no lines at all, one "Load them" prompt per game is noise. The
-		// week's empty state says what is missing once.
-		results.Unloaded = nil
-	}
-	results.Empty = len(result.Rows) == 0 && len(result.Unloaded) == 0 &&
-		!results.NoGames && !results.NoLines && !results.AllStarted
 	return PickPage{
 		SlipID:   slip.ID,
 		SlipName: slip.Name,
-		Results:  results,
+		Body:     body,
 		Tray:     tray,
 	}, nil
+}
+
+// rowsForGame returns one game's built rows for its own category counts.
+func rowsForGame(rows []board.Row, gameID string) []board.Row {
+	gameRows := make([]board.Row, 0)
+	for _, row := range rows {
+		if row.GameID == gameID {
+			gameRows = append(gameRows, row)
+		}
+	}
+	return gameRows
+}
+
+// pickGameCardView maps one slate card to the template's fields.
+func pickGameCardView(slipID int64, card board.GameCard, q board.Query) PickGameCardView {
+	return PickGameCardView{
+		ID:              card.ID,
+		Matchup:         card.Matchup,
+		Venue:           card.Venue,
+		Away:            card.Away,
+		Home:            card.Home,
+		KickoffISO:      kickoffISO(card.Kickoff),
+		KickoffFallback: kickoffFallback(card.Kickoff),
+		Spread:          spreadSummary(card),
+		Total:           totalSummary(card),
+		Moneyline:       moneylineSummary(card),
+		Props:           card.Props,
+		HasProps:        card.HasProps,
+		Href:            pickHref(slipID, q, "game", card.ID),
+		PushURL:         pickPushURL(slipID, q, "game", card.ID),
+		Active:          q.GameID == card.ID,
+	}
+}
+
+// spreadSummary prints both sides of a spread, or nothing when it is missing.
+func spreadSummary(card board.GameCard) string {
+	spread := card.Lines.Spread
+	if spread == nil {
+		return ""
+	}
+	parts := make([]string, 0, 2)
+	if spread.AwayLine != "" {
+		parts = append(parts, withPrice(card.Away+" "+spread.AwayLine, spread.AwayOdds))
+	}
+	if spread.HomeLine != "" {
+		parts = append(parts, withPrice(card.Home+" "+spread.HomeLine, spread.HomeOdds))
+	}
+	return strings.Join(parts, " · ")
+}
+
+// totalSummary prints the over/under line, or nothing when it is missing.
+func totalSummary(card board.GameCard) string {
+	total := card.Lines.Total
+	if total == nil {
+		return ""
+	}
+	parts := make([]string, 0, 2)
+	if total.OverOdds != "" {
+		parts = append(parts, "O "+total.OverOdds)
+	}
+	if total.UnderOdds != "" {
+		parts = append(parts, "U "+total.UnderOdds)
+	}
+	label := "O/U"
+	if total.Line != "" {
+		label += " " + total.Line
+	}
+	if len(parts) > 0 {
+		label += " · " + strings.Join(parts, " · ")
+	}
+	return label
+}
+
+// moneylineSummary prints both moneylines, or nothing when they are missing.
+func moneylineSummary(card board.GameCard) string {
+	moneyline := card.Lines.Moneyline
+	if moneyline == nil {
+		return ""
+	}
+	parts := make([]string, 0, 2)
+	if moneyline.AwayOdds != "" {
+		parts = append(parts, card.Away+" "+moneyline.AwayOdds)
+	}
+	if moneyline.HomeOdds != "" {
+		parts = append(parts, card.Home+" "+moneyline.HomeOdds)
+	}
+	return strings.Join(parts, " · ")
+}
+
+// withPrice appends a price in parentheses when there is one.
+func withPrice(label, price string) string {
+	if price == "" {
+		return label
+	}
+	return label + " (" + price + ")"
+}
+
+// kickoffISO is the UTC value a time element carries.
+func kickoffISO(kickoff time.Time) string {
+	if kickoff.IsZero() {
+		return ""
+	}
+	return kickoff.UTC().Format(timeRFC3339)
+}
+
+// eastern is the zone the server's no-JavaScript fallback reads in.
+var eastern = loadEastern()
+
+func loadEastern() *time.Location {
+	location, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		return time.UTC
+	}
+	return location
+}
+
+// kickoffFallback is the neutral ET time the server renders before app.js
+// replaces it with the reader's local zone.
+func kickoffFallback(kickoff time.Time) string {
+	if kickoff.IsZero() {
+		return ""
+	}
+	return kickoff.In(eastern).Format("Mon 3:04 PM") + " ET"
 }
 
 // pickTrayData loads the tray for a request.
@@ -498,6 +710,28 @@ func pickPushURL(slipID int64, q board.Query, key, value string) string {
 	)
 }
 
+// pickBackHref returns to the slate, dropping the open game and its category
+// while keeping the search and kickoff window.
+func pickBackHref(slipID int64, q board.Query) string {
+	values := url.Values{}
+	if q.Q != "" {
+		values.Set("q", q.Q)
+	}
+	if q.Window != "" {
+		values.Set("win", string(q.Window))
+	}
+	target := fmt.Sprintf("/slips/%d/pick/results", slipID)
+	if encoded := values.Encode(); encoded != "" {
+		target += "?" + encoded
+	}
+	return target
+}
+
+// pickBackPushURL is the full page URL the back link pushes.
+func pickBackPushURL(slipID int64, q board.Query) string {
+	return strings.Replace(pickBackHref(slipID, q), "/pick/results", "/pick", 1)
+}
+
 // pickRowView maps a built row to the template's fields.
 func pickRowView(slipID int64, row board.Row, game db.Game, atLimit bool, q board.Query) PickRowView {
 	view := PickRowView{
@@ -518,9 +752,7 @@ func pickRowView(slipID int64, row board.Row, game db.Game, atLimit bool, q boar
 	if row.Line != nil {
 		view.Line = formatFloat(*row.Line)
 	}
-	if !row.Kickoff.IsZero() {
-		view.KickoffISO = row.Kickoff.UTC().Format(timeRFC3339)
-	}
+	view.KickoffISO = kickoffISO(row.Kickoff)
 	if atLimit && row.Picked == 0 {
 		view.SwapURL = swapURL(slipID, view, q)
 	}
@@ -618,7 +850,7 @@ func (h *slipHandlers) pickRowFromLeg(ctx context.Context, slip db.Slip, leg db.
 	if leg.GameID != nil {
 		if game, err := h.deps.Store.GameByID(ctx, *leg.GameID); err == nil {
 			view.Matchup = game.AwayTeam + " @ " + game.HomeTeam
-			view.KickoffISO = game.Kickoff.UTC().Format(timeRFC3339)
+			view.KickoffISO = kickoffISO(game.Kickoff)
 		}
 	}
 	return view
