@@ -855,18 +855,22 @@ func lineGroups(game db.Game, rows []Row, mode Sort) []LineGroup {
 	return groups
 }
 
-// lineKey names the line a row sits on. A spread or moneyline puts both teams
-// on one line, a total keys on its number, and a team total or prop also keys
-// on its team, player, and number.
+// lineKey names the line a row sits on.
 func lineKey(row Row) string {
-	switch row.Market {
+	return LineKey(row.Market, row.Team, row.PlayerName, row.Line)
+}
+
+// LineKey names the line a selection sits on. A spread or moneyline puts both
+// teams on one line, a total keys on its number, and a team total or prop also
+// keys on its team, player, and number.
+func LineKey(market, team, player string, line *float64) string {
+	switch market {
 	case "SPREAD", "ML":
-		return row.Market
+		return market
 	case "TOTAL":
-		return row.Market + "|" + lineText(row.Line)
+		return market + "|" + lineText(line)
 	default:
-		return strings.Join(
-			[]string{row.Market, row.Team, row.PlayerName, lineText(row.Line)}, "|")
+		return strings.Join([]string{market, team, player, lineText(line)}, "|")
 	}
 }
 

@@ -100,6 +100,7 @@ type PickDetailView struct {
 
 // PickLineGroupView is one line and the sides a person can pick from it.
 type PickLineGroupView struct {
+	ID      string
 	Label   string
 	Options []PickRowView
 }
@@ -137,8 +138,7 @@ type PickRowView struct {
 	Price      string
 	Text       string
 	PickID     int64
-	KickoffISO string
-	Matchup    string
+	UpdateID   int64
 	AtLimit    bool
 	SwapURL    string
 }
@@ -166,6 +166,7 @@ type TrayLegView struct {
 type PickSwapView struct {
 	SlipID int64
 	Text   string
+	Target string
 	Fields PickRowView
 	Legs   []TrayLegView
 	Q      string
@@ -282,6 +283,13 @@ func (h *slipHandlers) pickSwap(w http.ResponseWriter, r *http.Request) {
 		Odds:       intFromString(r.URL.Query().Get("odds")),
 		Text:       r.URL.Query().Get("text"),
 	}
+	view.Target = "#" + pickLineID(
+		view.Fields.GameID,
+		view.Fields.Market,
+		view.Fields.Team,
+		view.Fields.PlayerName,
+		floatPointer(view.Fields.Line),
+	)
 	h.renderPartial(w, "pick-swap", view)
 }
 
@@ -388,7 +396,7 @@ func (h *slipHandlers) pickPageData(
 			Sort:     q.Sort,
 			Now:      now,
 		})
-		detail := pickDetailView(slip.ID, game, model, q, atLimit)
+		detail := pickDetailView(slip.ID, model, q, atLimit)
 		body.Detail = &detail
 		body.Category = string(model.Category)
 		body.Sort = string(model.Sort)
@@ -409,7 +417,6 @@ func (h *slipHandlers) pickPageData(
 // links keep the resolved tab and sort, so changing one keeps the other.
 func pickDetailView(
 	slipID int64,
-	game db.Game,
 	model board.GameDetail,
 	q board.Query,
 	atLimit bool,
@@ -440,7 +447,7 @@ func pickDetailView(
 			slipID, linkQuery, "sort", string(option), option.Label(), 0, option == model.Sort))
 	}
 	for _, group := range model.Lines {
-		view.Lines = append(view.Lines, pickLineGroupView(slipID, game, group, atLimit, linkQuery, false))
+		view.Lines = append(view.Lines, pickLineGroupView(slipID, group, atLimit, linkQuery, false))
 	}
 	for _, player := range model.Players {
 		card := PickPlayerView{
@@ -449,7 +456,7 @@ func pickDetailView(
 			Team:     player.Team,
 		}
 		for _, group := range player.Lines {
-			card.Lines = append(card.Lines, pickLineGroupView(slipID, game, group, atLimit, linkQuery, true))
+			card.Lines = append(card.Lines, pickLineGroupView(slipID, group, atLimit, linkQuery, true))
 		}
 		view.Players = append(view.Players, card)
 	}
@@ -477,18 +484,38 @@ func detailChip(
 
 // pickLineGroupView maps one line's sides to the template. A prop line shows a
 // short option such as "Over 245.5" because the player card already says whose
-// line it is.
+// line it is. When one side is picked, the other side's button updates that leg
+// through PUT instead of adding a second one.
 func pickLineGroupView(
 	slipID int64,
-	game db.Game,
 	group board.LineGroup,
 	atLimit bool,
 	q board.Query,
 	prop bool,
 ) PickLineGroupView {
 	view := PickLineGroupView{Label: lineGroupLabel(group)}
+	if len(group.Options) > 0 {
+		view.ID = pickLineID(
+			group.Options[0].GameID,
+			group.Market,
+			group.Team,
+			group.Player,
+			group.Line,
+		)
+	}
+	pickedID := int64(0)
+	picked := 0
 	for _, row := range group.Options {
-		option := pickRowView(slipID, row, game, atLimit, q)
+		if row.Picked != 0 {
+			pickedID = row.Picked
+			picked++
+		}
+	}
+	for _, row := range group.Options {
+		option := pickRowView(slipID, row, atLimit, q)
+		if option.PickID == 0 && picked == 1 {
+			option.UpdateID = pickedID
+		}
 		if prop {
 			option.Text = propOptionText(row)
 		}
@@ -847,8 +874,23 @@ func pickBackPushURL(slipID int64, q board.Query) string {
 	return strings.Replace(pickBackHref(slipID, q), "/pick/results", "/pick", 1)
 }
 
+// pickLineID is the DOM id of one line's pair row. The swap sheet targets it so
+// an update swaps that row and nothing else.
+func pickLineID(gameID, market, team, player string, line *float64) string {
+	key := gameID + "|" + board.LineKey(market, team, player, line)
+	slug := strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+			return r
+		default:
+			return '-'
+		}
+	}, key)
+	return "pick-line-" + slug
+}
+
 // pickRowView maps a built row to the template's fields.
-func pickRowView(slipID int64, row board.Row, game db.Game, atLimit bool, q board.Query) PickRowView {
+func pickRowView(slipID int64, row board.Row, atLimit bool, q board.Query) PickRowView {
 	view := PickRowView{
 		SlipID:     slipID,
 		GameID:     row.GameID,
@@ -861,13 +903,11 @@ func pickRowView(slipID int64, row board.Row, game db.Game, atLimit bool, q boar
 		Price:      formatOdds(row.Odds),
 		Text:       row.Text,
 		PickID:     row.Picked,
-		Matchup:    game.AwayTeam + " @ " + game.HomeTeam,
 		AtLimit:    atLimit,
 	}
 	if row.Line != nil {
 		view.Line = formatFloat(*row.Line)
 	}
-	view.KickoffISO = kickoffISO(row.Kickoff)
 	if atLimit && row.Picked == 0 {
 		view.SwapURL = swapURL(slipID, view, q)
 	}
@@ -908,9 +948,9 @@ func swapURL(slipID int64, row PickRowView, q board.Query) string {
 	return fmt.Sprintf("/slips/%d/pick/swap?%s", slipID, values.Encode())
 }
 
-// pickRowFromLeg shapes a row for the add or remove response. The leg carries
-// every field the add form posted, so no board rebuild is needed.
-func (h *slipHandlers) pickRowFromLeg(ctx context.Context, slip db.Slip, leg db.Leg) PickRowView {
+// pickRowFromLeg shapes one option from a stored leg. It is the fallback for a
+// line the board can no longer rebuild, such as a custom pick with no odds.
+func pickRowFromLeg(slip db.Slip, leg db.Leg) PickRowView {
 	view := PickRowView{
 		SlipID:     slip.ID,
 		GameID:     db.StringValue(leg.GameID),
@@ -927,13 +967,100 @@ func (h *slipHandlers) pickRowFromLeg(ctx context.Context, slip db.Slip, leg db.
 	if leg.Line != nil {
 		view.Line = formatFloat(*leg.Line)
 	}
-	if leg.GameID != nil {
-		if game, err := h.deps.Store.GameByID(ctx, *leg.GameID); err == nil {
-			view.Matchup = game.AwayTeam + " @ " + game.HomeTeam
-			view.KickoffISO = kickoffISO(game.Kickoff)
+	return view
+}
+
+// pickPairRow rebuilds one line's row after a pick from the board, so both
+// sides come back with their current picked state. picked says whether the leg
+// is still on the slip; a deleted leg has no option left in the rebuilt board.
+func (h *slipHandlers) pickPairRow(
+	ctx context.Context,
+	slip db.Slip,
+	leg db.Leg,
+	picked bool,
+) PickLineGroupView {
+	fallback := func() PickLineGroupView {
+		row := pickRowFromLeg(slip, leg)
+		if !picked {
+			row.PickID = 0
+		}
+		return PickLineGroupView{
+			ID: pickLineID(
+				db.StringValue(leg.GameID),
+				leg.MarketType,
+				db.StringValue(leg.Team),
+				db.StringValue(leg.PlayerName),
+				leg.Line,
+			),
+			Options: []PickRowView{row},
 		}
 	}
-	return view
+	gameID := db.StringValue(leg.GameID)
+	if gameID == "" {
+		return fallback()
+	}
+	game, err := h.deps.Store.GameByID(ctx, gameID)
+	if err != nil {
+		return fallback()
+	}
+	odds, err := h.deps.Store.OddsForGame(ctx, gameID)
+	if err != nil {
+		return fallback()
+	}
+	roster, err := h.deps.Store.RosterForTeams(ctx, []string{game.AwayTeam, game.HomeTeam})
+	if err != nil {
+		return fallback()
+	}
+	legs, err := h.deps.Store.LegsForSlip(ctx, slip.ID)
+	if err != nil {
+		return fallback()
+	}
+	user, _ := h.user(ctx)
+	homeBook := ""
+	if user.HomeBook != nil {
+		homeBook = *user.HomeBook
+	}
+	mine := legsForUser(legs, user.ID)
+	rows := board.Build(
+		[]db.Game{game}, currentOdds(odds), roster, homeBook, mine, h.deps.now())
+	for _, group := range board.Pair(game, rows) {
+		if !groupHoldsLeg(group, leg) {
+			continue
+		}
+		return pickLineGroupView(
+			slip.ID,
+			group,
+			len(mine) >= slip.LegsPerMember,
+			board.Query{},
+			isPlayerMarket(group.Market),
+		)
+	}
+	return fallback()
+}
+
+// sameBoardLine reports whether two legs sit on the same line, so a switch
+// needs only that row refreshed. A leg that moves to another line or game
+// leaves a stale row behind, and the board needs a full refresh.
+func sameBoardLine(left, right db.Leg) bool {
+	if db.StringValue(left.GameID) != db.StringValue(right.GameID) {
+		return false
+	}
+	return board.LineKey(
+		left.MarketType, db.StringValue(left.Team), db.StringValue(left.PlayerName), left.Line,
+	) == board.LineKey(
+		right.MarketType, db.StringValue(right.Team), db.StringValue(right.PlayerName), right.Line,
+	)
+}
+
+// groupHoldsLeg reports whether a line group carries the leg's selection. A
+// picked option matches by id; a just-deleted leg matches by its fields.
+func groupHoldsLeg(group board.LineGroup, leg db.Leg) bool {
+	for _, option := range group.Options {
+		if option.Picked == leg.ID || option.MatchesLeg(leg) {
+			return true
+		}
+	}
+	return false
 }
 
 // pickQuery reads the board's query from the URL or a submitted form.
@@ -1022,4 +1149,13 @@ func intFromString(raw string) int {
 		return 0
 	}
 	return value
+}
+
+// floatPointer parses a decimal, or returns nil when it is blank or invalid.
+func floatPointer(raw string) *float64 {
+	value, err := strconv.ParseFloat(strings.TrimSpace(raw), 64)
+	if err != nil {
+		return nil
+	}
+	return &value
 }

@@ -40,7 +40,7 @@ var partialFiles = map[string]string{
 	"pick-body":         partialsFile,
 	"pick-detail":       partialsFile,
 	"pick-detail-empty": partialsFile,
-	"pick-row":          partialsFile,
+	"pick-line-group":   partialsFile,
 	"pick-tray":         partialsFile,
 	"pick-swap":         partialsFile,
 	"research-game":     partialsFile,

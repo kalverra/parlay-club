@@ -187,11 +187,15 @@ Game selection replaces `#pick-body`, which can reset the slate's scroll. `app.j
 element with a UTC ISO value, a neutral ET fallback from the server ("Mon 3:04 PM ET"), and the reader's local zone from
 `app.js` after each swap.
 
-Tapping an unpicked row adds it with the normal add-leg route (`quick=1&from=board`), and tapping a picked row removes
-that leg. Both answer with the row and fire `tray-updated`, so the tray refreshes without a reload. At the limit, an
-unpicked row opens "Swap which pick?" and lists the viewer's legs that are not kickoff-locked. Choosing one sends
-`PUT /legs/{old}` with the new pick's fields. `UpdateLeg` already enforces the owner, the lock in, and kickoff on both
-games, and its activity entry reads "Adam changed X to Y". Its board answer is the refreshed body partial.
+Tapping a side of an unpicked line adds it with the normal add-leg route (`quick=1&from=board`), and tapping a picked
+side removes that leg. Tapping the other side of a line that already holds a pick sends `PUT /legs/{id}` with the new
+side's fields, so the pair holds one leg instead of two; `UpdateLeg` enforces the owner, the lock in, and kickoff on both
+games, and its activity entry reads "Adam changed X to Y". Every board answer is the refreshed pair row, both sides with
+their current picks, and fires `tray-updated`, so only that line swaps and the tray refreshes without a reload. A
+switch that moves the leg to another line also fires `board-updated`, because the old line's row is still on screen. At
+the limit, a line with neither side picked opens "Swap which pick?" and lists the viewer's legs that are not
+kickoff-locked. Choosing one sends `PUT /legs/{old}` with the new pick's fields; a line that already holds a pick
+switches sides in place and needs no free slot.
 
 A game whose props were never fetched appears as a prompt on the slate when the search matches its team, its matchup, or
 a roster player on it: "Props for BUF @ MIA aren't loaded yet." The "Load them" button calls

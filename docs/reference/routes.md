@@ -135,12 +135,12 @@ slip outside every group is 404.
 | `DELETE /slips/{id}/members/{userID}`      | Remove a member                                                 | Panel partial. |
 | `PATCH /slips/{id}`                        | Change `name` or `legs_per_member`                              | Panel partial. |
 | `GET /slips/{id}/legs/new`                 | Empty leg form with the game picker and player autocomplete     | Optional `?game_id=` and `?quick=`; leg form partial. |
-| `POST /slips/{id}/legs`                    | Add the signed-in member's leg                                  | Panel partial, the `leg-added` partial for a quick add, or the pick row for `from=board`; `Hx-Trigger: leg-saved` or `tray-updated`. |
+| `POST /slips/{id}/legs`                    | Add the signed-in member's leg                                  | Panel partial, the `leg-added` partial for a quick add, or the refreshed pair row for `from=board`; `Hx-Trigger: leg-saved` or `tray-updated`. |
 | `GET /legs/{id}/edit`                      | Edit form filled from the leg with player autocomplete          | Leg form partial. |
-| `PUT /legs/{id}`                           | Save the leg's pick fields                                      | Panel partial with `Hx-Trigger: leg-saved`, or the `#pick-body` partial with `Hx-Trigger: tray-updated` for `from=board`. |
+| `PUT /legs/{id}`                           | Save the leg's pick fields                                      | Panel partial with `Hx-Trigger: leg-saved`, or the refreshed pair row with `Hx-Trigger: tray-updated` for `from=board` (plus `board-updated` when the leg moves to another line). |
 | `PUT /legs/{id}/result`                    | Grade the leg from an upper-case `result`                       | Panel partial. Any member may grade any leg; an unknown result is 422. |
 | `POST /legs/{id}/vote`                     | Vote on someone else's leg with `value` 1, -1, or 0 to clear   | Panel partial. Only slip members vote, not on their own pick; a closed slip is 422. |
-| `DELETE /legs/{id}`                        | Delete the leg                                                  | Panel partial; `?from=board` answers the row, `?from=tray` the tray. |
+| `DELETE /legs/{id}`                        | Delete the leg                                                  | Panel partial; `?from=board` answers the refreshed pair row, `?from=tray` the tray. |
 | `POST /slips/{id}/lock`                    | Record the signed-in member's lock in                           | Panel partial with `Hx-Trigger: slip-updated`. |
 | `POST /slips/{id}/unlock`                  | Clear every member's lock                                       | Panel partial with `Hx-Trigger: slip-updated`. |
 | `GET /slips/{id}/events`                   | Live updates for the slip and its week                          | `text/event-stream`; see below. |
@@ -223,11 +223,13 @@ rows. The Lines tab shows the game lines first, then team totals grouped by team
 with position and team and every market that player has in the tab. Without an open game the route renders the "Pick a
 game" placeholder, not the slate.
 
-An unpicked row posts `POST /slips/{id}/legs` with `quick=1&from=board`; a picked row sends
-`DELETE /legs/{id}?from=board`. Both answer with the row and fire `Hx-Trigger: tray-updated`. At the limit, an unpicked
-row opens `GET /slips/{id}/pick/swap`, which lists the viewer's unlocked legs; a choice sends `PUT /legs/{old}` with
-`from=board` and the new pick's fields, and the handler answers with the refreshed `#pick-body` partial and
-`Hx-Trigger: tray-updated`.
+A side of an unpicked line posts `POST /slips/{id}/legs` with `quick=1&from=board`; the picked side sends
+`DELETE /legs/{id}?from=board`. The other side of a line that already holds a pick sends `PUT /legs/{id}` with the new
+side's fields, so the pair keeps one leg. Every board answer is the refreshed pair row and fires
+`Hx-Trigger: tray-updated`. At the limit, a line with neither side picked opens `GET /slips/{id}/pick/swap`, which lists
+the viewer's unlocked legs; a choice sends `PUT /legs/{old}` with `from=board` and the new pick's fields, and the handler
+answers with the refreshed pair row and `Hx-Trigger: tray-updated`. A switch that moves the leg to another line also
+fires `board-updated`, so the line left behind loses its stale delete button.
 
 `GET /slips/{id}/tray` renders the viewer's legs with remove buttons (`DELETE /legs/{id}?from=tray`), progress, the
 analyzer warnings that name one of their legs, and one action back to the hub. It refreshes on `tray-updated` and

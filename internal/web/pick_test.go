@@ -110,7 +110,7 @@ func TestPickBoardShowsSearchChipsSortsAndTray(t *testing.T) {
 	assert.Contains(t, body, fmt.Sprintf(
 		`hx-get="/slips/%d/pick/detail?cat=passing&game=%s&sort=player"`, fixture.slip.ID, game.ID))
 	assert.Contains(t, body, `name="from" value="board"`)
-	assert.Contains(t, body, `hx-target="closest .pick-row"`)
+	assert.Contains(t, body, `hx-target="closest .pick-line-group"`)
 	assert.Contains(t, body, `id="pick-body"`)
 	assert.Contains(t, body, `id="pick-detail"`)
 	assert.Contains(t, body, `data-category="lines"`, "an open game starts on the Lines tab")
@@ -416,6 +416,188 @@ func TestPickRowTogglesAddAndRemove(t *testing.T) {
 	assert.Equal(t, "tray-updated", remove.Header().Get("Hx-Trigger"))
 }
 
+func TestPickPairRowAddsOneSideAndUpdatesTheOther(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	game := addGame(t, fixture, gameKickoff())
+	addGameOdds(t, fixture.store, game.ID)
+
+	form := url.Values{
+		"quick":       {"1"},
+		"from":        {"board"},
+		"game_id":     {game.ID},
+		"market_type": {"SPREAD"},
+		"team":        {"BUF"},
+		"side":        {"TEAM"},
+		"line":        {"-3"},
+		"odds":        {"-110"},
+	}
+	request := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodPost,
+		fmt.Sprintf("/slips/%d/legs", fixture.slip.ID),
+		strings.NewReader(form.Encode()),
+	)
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.Header.Set("Hx-Request", "true")
+	recorder := httptest.NewRecorder()
+	fixture.handler.ServeHTTP(recorder, request)
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	body := html.UnescapeString(recorder.Body.String())
+
+	legs, err := fixture.store.LegsForSlip(t.Context(), fixture.slip.ID)
+	require.NoError(t, err)
+	require.Len(t, legs, 1)
+
+	assert.Contains(t, body, `class="pick-line-group"`, "the whole pair row comes back")
+	assert.Contains(t, body, "grid-cols-2", "both sides of the line sit in one row")
+	assert.Contains(t, body, "BUF -3")
+	assert.Contains(t, body, "MIA +3", "the opposite side comes back too")
+	assert.Contains(t, body, fmt.Sprintf(`hx-delete="/legs/%d?from=board"`, legs[0].ID))
+	assert.Contains(t, body, fmt.Sprintf(`hx-put="/legs/%d"`, legs[0].ID),
+		"the opposite side updates the picked leg instead of adding another")
+	assert.Contains(t, body, "tap to switch")
+	assert.Contains(t, body, `hx-target="closest .pick-line-group"`)
+	assert.Equal(t, "tray-updated", recorder.Header().Get("Hx-Trigger"))
+}
+
+func TestPickPairRowSwitchesSidesThroughPUT(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	game := addGame(t, fixture, gameKickoff())
+	addGameOdds(t, fixture.store, game.ID)
+	leg := addStoredLeg(t, fixture, db.Leg{
+		UserID:     fixture.user.ID,
+		GameID:     new(game.ID),
+		MarketType: "SPREAD",
+		Selection:  "BUF -3",
+		Team:       new("BUF"),
+		Side:       new("TEAM"),
+		Line:       new(-3.0),
+		Odds:       -110,
+	})
+
+	form := url.Values{
+		"from":        {"board"},
+		"game_id":     {game.ID},
+		"market_type": {"SPREAD"},
+		"team":        {"MIA"},
+		"side":        {"TEAM"},
+		"line":        {"3"},
+		"odds":        {"-110"},
+	}
+	request := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodPut,
+		fmt.Sprintf("/legs/%d", leg.ID),
+		strings.NewReader(form.Encode()),
+	)
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.Header.Set("Hx-Request", "true")
+	recorder := httptest.NewRecorder()
+	fixture.handler.ServeHTTP(recorder, request)
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	body := html.UnescapeString(recorder.Body.String())
+
+	assert.Contains(t, body, `class="pick-line-group"`)
+	assert.Contains(t, body, "MIA +3")
+	assert.Contains(t, body, "tap to remove", "the switched-to side is picked now")
+	assert.Contains(t, body, "BUF -3", "the old side stays on the row")
+	assert.Contains(t, body, fmt.Sprintf(`hx-put="/legs/%d"`, leg.ID))
+	assert.Equal(t, "tray-updated", recorder.Header().Get("Hx-Trigger"))
+
+	legs, err := fixture.store.LegsForSlip(t.Context(), fixture.slip.ID)
+	require.NoError(t, err)
+	require.Len(t, legs, 1, "switching sides updates the leg instead of adding one")
+	assert.Equal(t, "MIA +3", legs[0].Selection)
+}
+
+func TestPickPairRowRefreshesTheBoardWhenTheLegMovesLines(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	game := addGame(t, fixture, gameKickoff())
+	addGameOdds(t, fixture.store, game.ID)
+	leg := addStoredLeg(t, fixture, db.Leg{
+		UserID:     fixture.user.ID,
+		GameID:     new(game.ID),
+		MarketType: "ML",
+		Selection:  "BUF ML",
+		Team:       new("BUF"),
+		Side:       new("TEAM"),
+		Odds:       -150,
+	})
+
+	form := url.Values{
+		"from":        {"board"},
+		"game_id":     {game.ID},
+		"market_type": {"SPREAD"},
+		"team":        {"MIA"},
+		"side":        {"TEAM"},
+		"line":        {"3"},
+		"odds":        {"-110"},
+	}
+	request := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodPut,
+		fmt.Sprintf("/legs/%d", leg.ID),
+		strings.NewReader(form.Encode()),
+	)
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.Header.Set("Hx-Request", "true")
+	recorder := httptest.NewRecorder()
+	fixture.handler.ServeHTTP(recorder, request)
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+
+	assert.Equal(t, "tray-updated, board-updated", recorder.Header().Get("Hx-Trigger"),
+		"a leg that leaves its line needs the old row refreshed too")
+	body := html.UnescapeString(recorder.Body.String())
+	assert.Contains(t, body, "MIA +3")
+	assert.Contains(t, body, "tap to remove")
+}
+
+func TestPickPairRowClearsThePickOnDelete(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	game := addGame(t, fixture, gameKickoff())
+	addGameOdds(t, fixture.store, game.ID)
+	leg := addStoredLeg(t, fixture, db.Leg{
+		UserID:     fixture.user.ID,
+		GameID:     new(game.ID),
+		MarketType: "SPREAD",
+		Selection:  "BUF -3",
+		Team:       new("BUF"),
+		Side:       new("TEAM"),
+		Line:       new(-3.0),
+		Odds:       -110,
+	})
+
+	recorder := httptest.NewRecorder()
+	fixture.handler.ServeHTTP(recorder, httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodDelete,
+		fmt.Sprintf("/legs/%d?from=board", leg.ID),
+		nil,
+	))
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	body := html.UnescapeString(recorder.Body.String())
+
+	assert.Contains(t, body, `class="pick-line-group"`)
+	assert.Contains(t, body, "BUF -3")
+	assert.Contains(t, body, "MIA +3", "the pair row survives the delete")
+	assert.Equal(t, 2, strings.Count(body, "tap to add"), "both sides are open again")
+	assert.NotContains(t, body, "hx-delete=")
+	assert.NotContains(t, body, "hx-put=")
+	assert.Equal(t, "tray-updated", recorder.Header().Get("Hx-Trigger"))
+
+	legs, err := fixture.store.LegsForSlip(t.Context(), fixture.slip.ID)
+	require.NoError(t, err)
+	assert.Empty(t, legs)
+}
+
 func TestPickBoardSwapsAtTheLimit(t *testing.T) {
 	t.Parallel()
 
@@ -466,6 +648,8 @@ func TestPickBoardSwapsAtTheLimit(t *testing.T) {
 	assert.Contains(t, sheetBody, "Swap which pick?")
 	assert.Contains(t, sheetBody, "Swap out BUF ML")
 	assert.Contains(t, sheetBody, `hx-put="/legs/`)
+	assert.Contains(t, sheetBody, `hx-target="#pick-line-`,
+		"the swap switches that line's row instead of the whole board")
 
 	legs, err := fixture.store.LegsForSlip(t.Context(), fixture.slip.ID)
 	require.NoError(t, err)
@@ -495,6 +679,7 @@ func TestPickBoardSwapsAtTheLimit(t *testing.T) {
 	results := html.UnescapeString(recorder.Body.String())
 	assert.Contains(t, results, "MIA ML", "the swapped-in pick's row comes back")
 	assert.Contains(t, results, "tap to remove", "the swapped-in row is now a picked row")
+	assert.Contains(t, results, `id="pick-line-`, "the swap answers with the refreshed pair row")
 
 	stored, err := fixture.store.LegByID(t.Context(), legs[0].ID)
 	require.NoError(t, err)
@@ -863,7 +1048,7 @@ func TestPickDetailReturnsOnlyTheOpenGamesDetail(t *testing.T) {
 	assert.NotContains(t, body, "Ja'Marr Chase", "a passing tab leaves receiving rows out")
 
 	assert.Contains(t, body, fmt.Sprintf(`hx-post="/slips/%d/legs"`, fixture.slip.ID))
-	assert.Contains(t, body, `hx-target="closest .pick-row"`, "add and remove keep working inside each row")
+	assert.Contains(t, body, `hx-target="closest .pick-line-group"`, "add and remove keep working inside each row")
 }
 
 func TestPickDetailLinesTabShowsGameLinesThenTeamTotals(t *testing.T) {
