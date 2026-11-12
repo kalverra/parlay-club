@@ -48,6 +48,9 @@ type Page struct {
 	Slips     []SlipOption
 	Groups    []GroupOption
 	User      *User
+	// Wide widens the header and main column for a two-pane screen. Pages
+	// without it keep the one-column max-w-3xl layout.
+	Wide bool
 }
 
 // CurrentGroup returns the name of the active group, or "" when the page has

@@ -1,13 +1,16 @@
 package web_test
 
 import (
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	webui "github.com/kalverra/parlay-club/internal/web"
+	assets "github.com/kalverra/parlay-club/web"
 )
 
 func TestAssetURL(t *testing.T) {
@@ -60,6 +63,18 @@ func TestStaticHandlerMissingFile(t *testing.T) {
 	handler.ServeHTTP(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/static/missing.css", nil))
 
 	assert.Equal(t, http.StatusNotFound, recorder.Code)
+}
+
+func TestAppJSKeepsThePickSlateScroll(t *testing.T) {
+	t.Parallel()
+
+	source, err := fs.ReadFile(assets.Static, "static/app.js")
+	require.NoError(t, err)
+	script := string(source)
+
+	assert.Contains(t, script, `querySelector("[data-keep-scroll]")`)
+	assert.Contains(t, script, "htmx:beforeSwap", "the handler saves the slate's place")
+	assert.Contains(t, script, "htmx:afterSwap", "the handler restores it after the swap")
 }
 
 func TestStaticHandlerStaysInsideStaticDir(t *testing.T) {

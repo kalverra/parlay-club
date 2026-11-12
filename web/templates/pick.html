@@ -1,5 +1,8 @@
 {{define "content"}}
-<section class="space-y-3" data-live-url="/slips/{{.SlipID}}/events">
+<section
+  class="space-y-3 lg:flex lg:h-full lg:min-h-0 lg:flex-col"
+  data-live-url="/slips/{{.SlipID}}/events"
+>
   <div class="flex items-center justify-between gap-3">
     <a
       href="/slips/{{.SlipID}}"
@@ -9,9 +12,9 @@
     <h1 class="min-w-0 truncate text-lg font-semibold">{{.SlipName}}</h1>
   </div>
 
-  <div class="grid gap-3 lg:grid-cols-[minmax(0,1fr)_20rem]">
-    <div class="min-w-0">{{template "pick-results" .Results}}</div>
-    <aside class="min-w-0 lg:sticky lg:top-20 lg:self-start">
+  <div class="grid min-h-0 gap-3 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_18rem]">
+    <div class="min-h-0 min-w-0 lg:h-full">{{template "pick-body" .Body}}</div>
+    <aside class="min-w-0 lg:min-h-0 lg:overflow-y-auto">
       {{template "pick-tray" .Tray}}
     </aside>
   </div>

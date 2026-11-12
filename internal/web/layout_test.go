@@ -35,6 +35,19 @@ func TestLayoutRendersBottomTabs(t *testing.T) {
 	assert.Contains(t, out, `href="/groups/7/week"`, "This week names the active group")
 }
 
+func TestLayoutWidensForATwoPanePage(t *testing.T) {
+	t.Parallel()
+
+	narrow := renderPage(t, "slip", webui.Page{Title: "Slip", Tab: webui.TabWeek})
+	assert.Contains(t, narrow, "max-w-3xl")
+	assert.NotContains(t, narrow, "max-w-6xl")
+
+	wide := renderPage(t, "slip", webui.Page{Title: "Pick", Wide: true})
+	assert.Contains(t, wide, "max-w-6xl")
+	assert.NotContains(t, wide, "max-w-3xl")
+	assert.Contains(t, wide, "lg:h-[calc(100dvh-3.5rem)]", "the wide page owns the viewport")
+}
+
 func TestLayoutLinksAssets(t *testing.T) {
 	t.Parallel()
 

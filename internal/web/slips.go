@@ -758,7 +758,7 @@ func (h *slipHandlers) updateLeg(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.Header().Set("Hx-Trigger", "tray-updated")
-		h.renderPartial(w, "pick-results", data.Results)
+		h.renderPartial(w, "pick-body", data.Body)
 		return
 	}
 	w.Header().Set("Hx-Trigger", "leg-saved")
