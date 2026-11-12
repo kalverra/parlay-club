@@ -87,6 +87,29 @@ if (document.readyState === "loading") {
   formatTimes(document);
 }
 
+// Image load errors do not bubble, so listen in capture phase to hide any
+// failed team logo or player portrait and reveal its sibling fallback badge.
+document.addEventListener(
+  "error",
+  (event) => {
+    const img = event.target;
+    if (!(img instanceof HTMLImageElement) || !img.matches("img[data-fallback-img]")) {
+      return;
+    }
+    img.classList.add("hidden");
+    const wrapper = img.closest("[data-media]");
+    if (!wrapper) {
+      return;
+    }
+    const badge = wrapper.querySelector("[data-fallback-badge]");
+    if (badge) {
+      badge.classList.remove("hidden");
+      badge.classList.add("flex");
+    }
+  },
+  true,
+);
+
 // Copies text with the clipboard API, falling back to a hidden textarea for
 // browsers that refuse it.
 async function copyText(text) {

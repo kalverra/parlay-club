@@ -2,6 +2,7 @@ package web
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"html/template"
 	"io/fs"
@@ -110,7 +111,7 @@ func (r *Renderer) RenderPartial(name string, data any) ([]byte, error) {
 
 	tmpl, err := template.New("root").
 		Funcs(templateFuncs()).
-		ParseFS(r.fsys, "templates/avatar.html", file)
+		ParseFS(r.fsys, "templates/avatar.html", "templates/media.html", file)
 	if err != nil {
 		return nil, fmt.Errorf("parse partial %s: %w", name, err)
 	}
@@ -139,17 +140,34 @@ func (r *Renderer) template(name string) (*template.Template, error) {
 func templateFuncs() template.FuncMap {
 	return template.FuncMap{
 		"asset":       AssetURL,
+		"dict":        templateDict,
 		"list":        func(values ...string) []string { return values },
 		"inc":         func(value int) int { return value + 1 },
 		"resultClass": resultClass,
 	}
 }
 
+// templateDict builds a map from alternating key/value pairs for template calls.
+func templateDict(values ...any) (map[string]any, error) {
+	if len(values)%2 != 0 {
+		return nil, errors.New("dict requires an even number of arguments")
+	}
+	out := make(map[string]any, len(values)/2)
+	for i := 0; i < len(values); i += 2 {
+		key, ok := values[i].(string)
+		if !ok {
+			return nil, fmt.Errorf("dict key %d must be a string, got %T", i, values[i])
+		}
+		out[key] = values[i+1]
+	}
+	return out, nil
+}
+
 // parse builds one template set from the layout and a page.
 func (r *Renderer) parse(file string) (*template.Template, error) {
 	tmpl, err := template.New("root").
 		Funcs(templateFuncs()).
-		ParseFS(r.fsys, "templates/layout.html", "templates/avatar.html", partialsFile, file)
+		ParseFS(r.fsys, "templates/layout.html", "templates/avatar.html", "templates/media.html", partialsFile, file)
 	if err != nil {
 		return nil, fmt.Errorf("parse templates: %w", err)
 	}
