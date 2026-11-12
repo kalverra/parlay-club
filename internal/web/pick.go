@@ -50,7 +50,6 @@ type PickSlateView struct {
 	SelfURL    string
 	Cards      []PickGameCardView
 	Windows    []PickChip
-	Unloaded   []board.UnloadedGame
 	Started    int
 	Empty      bool
 	NoGames    bool
@@ -58,8 +57,10 @@ type PickSlateView struct {
 	AllStarted bool
 }
 
-// PickGameCardView is one game on the slate, with its lines at a glance.
+// PickGameCardView is one game on the slate, with its lines at a glance. A game
+// with lines but no prop rows offers to load them.
 type PickGameCardView struct {
+	SlipID          int64
 	ID              string
 	Matchup         string
 	Venue           string
@@ -72,6 +73,7 @@ type PickGameCardView struct {
 	Moneyline       string
 	Props           int
 	HasProps        bool
+	Unloaded        bool
 	Href            string
 	PushURL         string
 	Active          bool
@@ -94,6 +96,7 @@ type PickDetailView struct {
 	BackPushURL     string
 	Tabs            []PickChip
 	Sorts           []PickChip
+	Unloaded        bool
 	Lines           []PickLineGroupView
 	Players         []PickPlayerView
 	Empty           bool
@@ -368,6 +371,12 @@ func (h *slipHandlers) pickPageData(
 	}
 
 	atLimit := len(mine) >= slip.LegsPerMember
+	// A game can only offer to load props when it already has lines. A game
+	// with no rows at all is a week-level "no lines" state, not a prompt.
+	rowGames := make(map[string]bool, len(games))
+	for _, row := range rows {
+		rowGames[row.GameID] = true
+	}
 	slateCards := board.Slates(games, rows, roster, q)
 	slate := PickSlateView{
 		SlipID:  slip.ID,
@@ -379,18 +388,13 @@ func (h *slipHandlers) pickPageData(
 		Started: result.Started,
 	}
 	for _, card := range slateCards {
-		slate.Cards = append(slate.Cards, pickGameCardView(slip.ID, card, q))
+		unloaded := !card.HasProps && rowGames[card.ID]
+		slate.Cards = append(slate.Cards, pickGameCardView(slip.ID, card, q, unloaded))
 	}
-	slate.Unloaded = result.Unloaded
 	slate.NoGames = len(games) == 0
 	slate.AllStarted = len(games) > 0 && result.Started == len(games)
 	slate.NoLines = !slate.NoGames && !slate.AllStarted && len(rows) == 0
-	if slate.NoLines {
-		// With no lines at all, one "Load them" prompt per game is noise. The
-		// week's empty state says what is missing once.
-		slate.Unloaded = nil
-	}
-	slate.Empty = len(slate.Cards) == 0 && len(slate.Unloaded) == 0 &&
+	slate.Empty = len(slate.Cards) == 0 &&
 		!slate.NoGames && !slate.NoLines && !slate.AllStarted
 
 	gamesByID := make(map[string]db.Game, len(games))
@@ -415,7 +419,7 @@ func (h *slipHandlers) pickPageData(
 			Sort:     q.Sort,
 			Now:      now,
 		})
-		detail := pickDetailView(slip.ID, model, q, atLimit)
+		detail := pickDetailView(slip.ID, model, q, atLimit, !card.HasProps && rowGames[card.ID])
 		body.Detail = &detail
 		body.Category = string(model.Category)
 		body.Sort = string(model.Sort)
@@ -439,6 +443,7 @@ func pickDetailView(
 	model board.GameDetail,
 	q board.Query,
 	atLimit bool,
+	unloaded bool,
 ) PickDetailView {
 	linkQuery := q
 	linkQuery.Category = model.Category
@@ -456,6 +461,7 @@ func pickDetailView(
 		Sort:            string(model.Sort),
 		BackHref:        pickBackHref(slipID, q),
 		BackPushURL:     pickBackPushURL(slipID, q),
+		Unloaded:        unloaded,
 	}
 	for _, tab := range model.Tabs {
 		view.Tabs = append(view.Tabs, detailChip(
@@ -565,8 +571,9 @@ func propOptionText(row board.Row) string {
 }
 
 // pickGameCardView maps one slate card to the template's fields.
-func pickGameCardView(slipID int64, card board.GameCard, q board.Query) PickGameCardView {
+func pickGameCardView(slipID int64, card board.GameCard, q board.Query, unloaded bool) PickGameCardView {
 	return PickGameCardView{
+		SlipID:          slipID,
 		ID:              card.ID,
 		Matchup:         card.Matchup,
 		Venue:           card.Venue,
@@ -579,6 +586,7 @@ func pickGameCardView(slipID int64, card board.GameCard, q board.Query) PickGame
 		Moneyline:       moneylineSummary(card),
 		Props:           card.Props,
 		HasProps:        card.HasProps,
+		Unloaded:        unloaded,
 		Href:            pickHref(slipID, q, "game", card.ID),
 		PushURL:         pickPushURL(slipID, q, "game", card.ID),
 		Active:          q.GameID == card.ID,

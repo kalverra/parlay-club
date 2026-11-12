@@ -69,6 +69,23 @@ func addPropOdds(t *testing.T, store *db.Store, gameID, market, player string, l
 	require.NoError(t, err)
 }
 
+// addSpreadOdds gives a game one line so its card can offer to load props.
+func addSpreadOdds(t *testing.T, store *db.Store, gameID, team string) {
+	t.Helper()
+
+	_, err := store.UpsertOdds(t.Context(), []db.Odds{{
+		GameID:     gameID,
+		Book:       "draftkings",
+		MarketType: "SPREAD",
+		Team:       team,
+		Side:       "TEAM",
+		Line:       new(-3.0),
+		Price:      -110,
+		FetchedAt:  time.Date(2026, time.November, 7, 15, 42, 0, 0, time.UTC),
+	}})
+	require.NoError(t, err)
+}
+
 func pickBoard(t *testing.T, fixture *slipFixture, query string) *httptest.ResponseRecorder {
 	t.Helper()
 
@@ -368,6 +385,7 @@ func TestPickResultsNamesAPropGameThatIsNotLoaded(t *testing.T) {
 	game := addGame(t, fixture, gameKickoff())
 	addGameOdds(t, fixture.store, game.ID)
 	other := addSecondGame(t, fixture, "401772099", "CIN", "CLE", "Cincinnati Bengals", "Cleveland Browns")
+	addSpreadOdds(t, fixture.store, other.ID, "CIN")
 	require.NoError(t, fixture.store.UpsertRosterPlayers(t.Context(), []db.RosterPlayer{{
 		AthleteID: "99",
 		Team:      "CIN",
@@ -393,6 +411,8 @@ func TestPickBoardNeverSyncsPropsOnItsOwn(t *testing.T) {
 	fixture := newSlipFixture(t, 2)
 	game := addGame(t, fixture, gameKickoff())
 	addGameOdds(t, fixture.store, game.ID)
+	other := addSecondGame(t, fixture, "401772099", "CIN", "CLE", "Cincinnati Bengals", "Cleveland Browns")
+	addSpreadOdds(t, fixture.store, other.ID, "CIN")
 	refresher := &stubRefresher{}
 	handler := gamesHandlerWithRefresher(t, fixture, fixture.user, refresher)
 
@@ -421,6 +441,39 @@ func TestPickBoardNeverSyncsPropsOnItsOwn(t *testing.T) {
 	assert.Equal(t, []string{game.ID}, refresher.propsSynced,
 		"Load them asks for that one game's props")
 	assert.Equal(t, "board-updated", recorder.Header().Get("Hx-Trigger"))
+}
+
+func TestPickLoadPropsPromptSitsOnTheCardAndTheDetail(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	game := addGame(t, fixture, gameKickoff())
+	addGameOdds(t, fixture.store, game.ID) // lines only, no props yet
+	loadHref := fmt.Sprintf(`hx-get="/games/%s/props?slip=%d"`, game.ID, fixture.slip.ID)
+
+	slate := html.UnescapeString(pickBoard(t, fixture, "").Body.String())
+	assert.Contains(t, slate, "Props for MIA @ BUF aren’t loaded yet.",
+		"the prompt lives on the game card")
+	assert.Contains(t, slate, loadHref)
+	assert.Contains(t, slate, "Load them")
+
+	detail := html.UnescapeString(pickBoard(t, fixture, "game="+game.ID).Body.String())
+	assert.Contains(t, detail, "Props for this game aren’t loaded yet.",
+		"the open detail offers the same prompt")
+	assert.Equal(t, 2, strings.Count(detail, "Load them"),
+		"the card and the detail each carry one button")
+	assert.Equal(t, 2, strings.Count(detail, loadHref))
+}
+
+func TestPickGameWithNoLinesShowsTheWeekStateInsteadOfAPropPrompt(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	addGame(t, fixture, gameKickoff())
+
+	body := html.UnescapeString(pickBoard(t, fixture, "").Body.String())
+	assert.Contains(t, body, "No lines for this week yet.")
+	assert.NotContains(t, body, "Load them", "a game with no lines cannot load props")
 }
 
 func TestPickRowTogglesAddAndRemove(t *testing.T) {
