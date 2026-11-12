@@ -153,7 +153,8 @@ odds still gets a card, with no lines and no props. The prop count is every row 
 totals count as props.
 
 The slate leads with one search box and the kickoff-window chips. Search is case- and accent-insensitive and matches a
-matchup, a team, a venue, or a roster player on the game. The input debounces at 250 ms and swaps the body partial.
+matchup, a team, a venue, or a roster player on the game. The input debounces at 250 ms and swaps the body partial, and
+the response pushes the full page URL so `q` survives a refresh or a shared link.
 Window chips filter by Eastern-time kickoff (Sunday morning before noon, Sunday early before 4, Sunday late before 7,
 Sunday night, Monday); a Monday-night game that lands on Tuesday in UTC still reads Monday. A chip shows how many rows it
 covers and appears only when it has rows. Each card shows the matchup, venue, kickoff, spread, total, moneyline, and
@@ -181,7 +182,8 @@ that player has in the tab sits under it, so Receiving Yards and Receptions shar
 The search text also filters the open game's rows. Sorts are player (default), odds (shortest price first), and line
 (highest line first). Kickoff and category drop out because one game has one kickoff. Tab and sort chips swap
 `#pick-detail` only, so the slate keeps its scroll and search; the back link drops `game` and `cat`, keeps `q` and
-`win`, and swaps the whole body.
+`win`, and swaps the whole body. A live board signal refreshes the detail and the slate on their own URLs, so the open
+tab and sort stay put. A tab or sort swap also syncs the search form's hidden tab and sort for the next search.
 
 Game selection replaces `#pick-body`, which can reset the slate's scroll. `app.js` saves the `scrollTop` of the
 `[data-keep-scroll]` pane before an HTMX swap and restores it after. Times keep the existing contract: a `<time>`

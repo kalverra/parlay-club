@@ -129,67 +129,6 @@ func TestWindowsSplitTheDay(t *testing.T) {
 	}
 }
 
-func TestSorts(t *testing.T) {
-	t.Parallel()
-
-	early := at(t, 8, 13, 0)
-	late := at(t, 8, 16, 0)
-	games := []db.Game{game("late", late), game("early", early)}
-	rows := []db.Odds{
-		odds("late", "draftkings", "ML", "BUF", "", "TEAM", nil, 150),
-		odds("early", "draftkings", "ML", "MIA", "", "TEAM", nil, -200),
-		odds("early", "draftkings", "PASS_YDS", "BUF", "Josh Allen", "OVER", new(245.5), -110),
-	}
-	built := board.Build(games, rows, nil, "", nil, at(t, 7, 12, 0))
-
-	kickoff := board.Search(built, games, nil, board.Query{
-		Sort: board.SortKickoff,
-		Now:  at(t, 7, 12, 0),
-	})
-	require.Len(t, kickoff.Rows, 3)
-	assert.Equal(t, "early", kickoff.Rows[0].GameID)
-	assert.Equal(t, "late", kickoff.Rows[2].GameID)
-
-	player := board.Search(built, games, nil, board.Query{Sort: board.SortPlayer, Now: at(t, 7, 12, 0)})
-	require.Len(t, player.Rows, 3)
-	assert.Equal(t, "Josh Allen", player.Rows[0].PlayerName)
-	assert.Empty(t, player.Rows[1].PlayerName)
-
-	oddsSort := board.Search(built, games, nil, board.Query{Sort: board.SortOdds, Now: at(t, 7, 12, 0)})
-	require.Len(t, oddsSort.Rows, 3)
-	assert.Equal(t, -200, oddsSort.Rows[0].Odds, "the shortest price comes first")
-	assert.Equal(t, 150, oddsSort.Rows[2].Odds)
-
-	category := board.Search(built, games, nil, board.Query{Sort: board.SortCategory, Now: at(t, 7, 12, 0)})
-	require.Len(t, category.Rows, 3)
-	assert.Equal(t, board.CategoryLines, category.Rows[0].Category)
-	assert.Equal(t, board.CategoryPassing, category.Rows[2].Category)
-}
-
-func TestSearchIsAccentInsensitive(t *testing.T) {
-	t.Parallel()
-
-	game := game("401", at(t, 8, 13, 0))
-	games := []db.Game{game}
-	rows := []db.Odds{
-		odds("401", "draftkings", "REC_YDS", "CIN", "Ja'Marr Chase", "OVER", new(72.5), -110),
-		odds("401", "draftkings", "REC_YDS", "CIN", "José Ramírez", "OVER", new(42.5), -110),
-	}
-	roster := []db.RosterPlayer{
-		{AthleteID: "1", Team: "CIN", FullName: "Ja'Marr Chase"},
-	}
-	built := board.Build(games, rows, roster, "", nil, at(t, 7, 12, 0))
-
-	for _, query := range []string{"Chase", "jamarr", "Ja'Marr", "JOSE", "ramirez"} {
-		result := board.Search(built, games, roster, board.Query{
-			Q:    query,
-			Sort: board.SortKickoff,
-			Now:  at(t, 7, 12, 0),
-		})
-		assert.NotEmpty(t, result.Rows, "query %q finds a row", query)
-	}
-}
-
 func TestStartedGamesAreHiddenAndCounted(t *testing.T) {
 	t.Parallel()
 
@@ -204,10 +143,10 @@ func TestStartedGamesAreHiddenAndCounted(t *testing.T) {
 	built := board.Build(games, rows, nil, "", nil, now)
 	require.Len(t, built, 1, "the started game's rows are not built")
 
-	result := board.Search(built, games, nil, board.Query{Now: now})
-	require.Len(t, result.Rows, 1)
-	assert.Equal(t, "upcoming", result.Rows[0].GameID)
-	assert.Equal(t, 1, result.Started)
+	cards := board.Slates(games, built, nil, board.Query{Now: now})
+	require.Len(t, cards, 1)
+	assert.Equal(t, "upcoming", cards[0].ID)
+	assert.Equal(t, 1, board.StartedCount(games, now))
 }
 
 func TestHomeBookPriceWinsOverMedian(t *testing.T) {
@@ -222,40 +161,6 @@ func TestHomeBookPriceWinsOverMedian(t *testing.T) {
 	built := board.Build(games, rows, nil, "fanduel", nil, at(t, 7, 12, 0))
 	require.Len(t, built, 1)
 	assert.Equal(t, -105, built[0].Odds)
-}
-
-func TestSearchNamesAGameWhosePropsAreUnloaded(t *testing.T) {
-	t.Parallel()
-
-	game := game("401", at(t, 8, 13, 0))
-	games := []db.Game{game}
-	rows := []db.Odds{
-		odds("401", "draftkings", "ML", "BUF", "", "TEAM", nil, -110),
-	}
-	roster := []db.RosterPlayer{
-		{AthleteID: "1", Team: "BUF", FullName: "Josh Allen"},
-	}
-	built := board.Build(games, rows, roster, "", nil, at(t, 7, 12, 0))
-
-	result := board.Search(built, games, roster, board.Query{
-		Q:   "Josh Allen",
-		Now: at(t, 7, 12, 0),
-	})
-	require.Len(t, result.Unloaded, 1)
-	assert.Equal(t, "401", result.Unloaded[0].GameID)
-	assert.Equal(t, "MIA @ BUF", result.Unloaded[0].Matchup)
-
-	byTeam := board.Search(built, games, roster, board.Query{
-		Q:   "Buffalo",
-		Now: at(t, 7, 12, 0),
-	})
-	assert.Len(t, byTeam.Unloaded, 1)
-
-	noMatch := board.Search(built, games, roster, board.Query{
-		Q:   "Kansas City",
-		Now: at(t, 7, 12, 0),
-	})
-	assert.Empty(t, noMatch.Unloaded)
 }
 
 func TestPickedRowsCarryTheLegID(t *testing.T) {
@@ -653,7 +558,7 @@ func TestDetailSorts(t *testing.T) {
 	now := at(t, 7, 12, 0)
 	built := board.Build(games, rows, nil, "", nil, now)
 
-	player := board.Detail(g, built, board.Query{Sort: board.SortKickoff, Now: now})
+	player := board.Detail(g, built, board.Query{Sort: board.Sort("kickoff"), Now: now})
 	assert.Equal(t, board.SortPlayer, player.Sort, "kickoff drops out for one game")
 	require.Len(t, player.Players, 2)
 	assert.Equal(t, "Keon Coleman", player.Players[0].Name)

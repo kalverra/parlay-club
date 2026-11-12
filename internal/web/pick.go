@@ -35,7 +35,6 @@ type PickBodyView struct {
 	Window   string
 	Sort     string
 	Game     string
-	SelfURL  string
 	Slate    PickSlateView
 	Detail   *PickDetailView
 }
@@ -45,9 +44,12 @@ type PickBodyView struct {
 type PickSlateView struct {
 	SlipID     int64
 	Search     string
+	Category   string
 	Window     string
+	Sort       string
 	Game       string
-	SelfURL    string
+	RefreshURL string
+	Detail     bool
 	Cards      []PickGameCardView
 	Windows    []PickChip
 	Started    int
@@ -92,6 +94,8 @@ type PickDetailView struct {
 	Search          string
 	Category        string
 	Sort            string
+	RefreshURL      string
+	OOB             bool
 	BackHref        string
 	BackPushURL     string
 	Tabs            []PickChip
@@ -213,7 +217,32 @@ func (h *slipHandlers) pickResults(w http.ResponseWriter, r *http.Request) {
 		h.serverError(w, err)
 		return
 	}
+	// A search or filter swap replaces the body, so the browser should carry the
+	// full page URL rather than the partial URL the request used.
+	self := board.Query{
+		Q:        data.Body.Search,
+		Category: board.Category(data.Body.Category),
+		Window:   board.Window(data.Body.Window),
+		Sort:     board.Sort(data.Body.Sort),
+		GameID:   data.Body.Game,
+	}
+	w.Header().Set("Hx-Push-Url", pickPushURL(slip.ID, self, "", ""))
 	h.renderPartial(w, "pick-body", data.Body)
+}
+
+// pickSlate returns the slate alone, so a live board signal refreshes the game
+// cards without touching the open game's tab or sort.
+func (h *slipHandlers) pickSlate(w http.ResponseWriter, r *http.Request) {
+	slip, _, _, ok := h.loadSlip(w, r, r.PathValue("id"))
+	if !ok {
+		return
+	}
+	data, err := h.pickPageData(r.Context(), slip, pickQuery(r, h.deps.now()))
+	if err != nil {
+		h.serverError(w, err)
+		return
+	}
+	h.renderPartial(w, "pick-slate", data.Body.Slate)
 }
 
 // pickDetail returns the #pick-detail partial for a tab or sort change. It
@@ -232,7 +261,11 @@ func (h *slipHandlers) pickDetail(w http.ResponseWriter, r *http.Request) {
 		h.renderPartial(w, "pick-detail-empty", nil)
 		return
 	}
-	h.renderPartial(w, "pick-detail", *data.Body.Detail)
+	detail := *data.Body.Detail
+	// The tab and sort live in the detail's URL, but the search form still posts
+	// hidden copies. Swap them out of band so the next search keeps the tab.
+	detail.OOB = true
+	h.renderPartial(w, "pick-detail", detail)
 }
 
 // pickTray returns the tray partial for the dock's sheet.
@@ -351,7 +384,7 @@ func (h *slipHandlers) pickPageData(
 	q.Now = now
 
 	rows := board.Build(games, currentOdds(odds), roster, homeBook, mine, now)
-	result := board.Search(rows, games, roster, q)
+	started := board.StartedCount(games, now)
 	dock, err := h.dockFrom(ctx, slip, legs, games, mine)
 	if err != nil {
 		return PickPage{}, err
@@ -379,20 +412,20 @@ func (h *slipHandlers) pickPageData(
 	}
 	slateCards := board.Slates(games, rows, roster, q)
 	slate := PickSlateView{
-		SlipID:  slip.ID,
-		Search:  q.Q,
-		Window:  string(q.Window),
-		Game:    q.GameID,
-		SelfURL: pickHref(slip.ID, q, "", ""),
-		Windows: windowChips(slip.ID, rows, q),
-		Started: result.Started,
+		SlipID:     slip.ID,
+		Search:     q.Q,
+		Window:     string(q.Window),
+		Game:       q.GameID,
+		RefreshURL: slateHref(slip.ID),
+		Windows:    windowChips(slip.ID, rows, q),
+		Started:    started,
 	}
 	for _, card := range slateCards {
 		unloaded := !card.HasProps && rowGames[card.ID]
 		slate.Cards = append(slate.Cards, pickGameCardView(slip.ID, card, q, unloaded))
 	}
 	slate.NoGames = len(games) == 0
-	slate.AllStarted = len(games) > 0 && result.Started == len(games)
+	slate.AllStarted = len(games) > 0 && started == len(games)
 	slate.NoLines = !slate.NoGames && !slate.AllStarted && len(rows) == 0
 	slate.Empty = len(slate.Cards) == 0 &&
 		!slate.NoGames && !slate.NoLines && !slate.AllStarted
@@ -408,7 +441,6 @@ func (h *slipHandlers) pickPageData(
 		Window:   string(q.Window),
 		Sort:     string(q.Sort),
 		Game:     q.GameID,
-		SelfURL:  pickHref(slip.ID, q, "", ""),
 		Slate:    slate,
 	}
 	if card, ok := openByID[q.GameID]; ok {
@@ -423,11 +455,10 @@ func (h *slipHandlers) pickPageData(
 		body.Detail = &detail
 		body.Category = string(model.Category)
 		body.Sort = string(model.Sort)
-		selfQuery := q
-		selfQuery.Category = model.Category
-		selfQuery.Sort = model.Sort
-		body.SelfURL = pickHref(slip.ID, selfQuery, "", "")
 	}
+	body.Slate.Category = body.Category
+	body.Slate.Sort = body.Sort
+	body.Slate.Detail = body.Detail != nil
 	return PickPage{
 		SlipID:   slip.ID,
 		SlipName: slip.Name,
@@ -459,6 +490,7 @@ func pickDetailView(
 		Search:          q.Q,
 		Category:        string(model.Category),
 		Sort:            string(model.Sort),
+		RefreshURL:      detailHref(slipID, linkQuery, "", ""),
 		BackHref:        pickBackHref(slipID, q),
 		BackPushURL:     pickBackPushURL(slipID, q),
 		Unloaded:        unloaded,
@@ -807,6 +839,12 @@ func windowChips(slipID int64, rows []board.Row, q board.Query) []PickChip {
 		})
 	}
 	return chips
+}
+
+// slateHref is the slate's own refresh URL. The element includes the search
+// form's current values, so a tab or sort swap reaches the slate too.
+func slateHref(slipID int64) string {
+	return fmt.Sprintf("/slips/%d/pick/slate", slipID)
 }
 
 // pickHref builds a results URL that changes one filter and keeps the rest.
