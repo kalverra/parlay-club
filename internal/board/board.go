@@ -142,6 +142,7 @@ type Row struct {
 	Team       string
 	PlayerName string
 	PlayerID   string
+	Position   string
 	Side       string
 	Line       *float64
 	Odds       int
@@ -150,6 +151,41 @@ type Row struct {
 	Kickoff    time.Time
 	Text       string
 	Picked     int64
+}
+
+// GameCard is one game on the slate: the matchup, its kickoff, the game lines
+// at a glance, and how many props it carries.
+type GameCard struct {
+	ID       string
+	Matchup  string
+	Venue    string
+	Away     string
+	Home     string
+	Kickoff  time.Time
+	Lines    GameLines
+	Props    int
+	HasProps bool
+}
+
+// GameLines is a game's spread, total, and moneyline summaries. A market the
+// board never stored stays nil.
+type GameLines struct {
+	Spread    *LineSummary
+	Total     *LineSummary
+	Moneyline *LineSummary
+}
+
+// LineSummary is one game-line market printed as text. A spread uses the away
+// and home fields, a total uses Line plus OverOdds and UnderOdds, and a
+// moneyline uses only the two odds.
+type LineSummary struct {
+	AwayLine  string
+	AwayOdds  string
+	HomeLine  string
+	HomeOdds  string
+	Line      string
+	OverOdds  string
+	UnderOdds string
 }
 
 // UnloadedGame is a game whose props were never fetched, offered as a prompt.
@@ -255,13 +291,14 @@ func Build(
 		group := groups[key]
 		game := byGame[group.gameID]
 		line, price := selectionPrice(group.rows, homeBook)
-		playerID := matchPlayerID(roster, group.player, group.team)
+		playerID, position := matchPlayer(roster, group.player, group.team)
 		rows = append(rows, Row{
 			GameID:     group.gameID,
 			Market:     group.market,
 			Team:       group.team,
 			PlayerName: group.player,
 			PlayerID:   playerID,
+			Position:   position,
 			Side:       group.side,
 			Line:       line,
 			Odds:       price,
@@ -457,26 +494,31 @@ func marketLabel(market string) string {
 	}
 }
 
-// matchPlayerID finds the roster athlete for a prop row's player name and team.
-// A name on the row's own team wins over the same name on another team.
-func matchPlayerID(roster []db.RosterPlayer, name, team string) string {
+// matchPlayer finds the roster athlete for a prop row's player name and team,
+// returning its ID and position. A name on the row's own team wins over the
+// same name on another team.
+func matchPlayer(roster []db.RosterPlayer, name, team string) (string, string) {
 	if name == "" {
-		return ""
+		return "", ""
 	}
 	want := normalize(name)
-	var fallback string
-	for _, player := range roster {
+	var fallback *db.RosterPlayer
+	for i := range roster {
+		player := &roster[i]
 		if normalize(player.FullName) != want && normalize(player.NormName) != want {
 			continue
 		}
 		if team == "" || player.Team == team {
-			return player.AthleteID
+			return player.AthleteID, player.Position
 		}
-		if fallback == "" {
-			fallback = player.AthleteID
+		if fallback == nil {
+			fallback = player
 		}
 	}
-	return fallback
+	if fallback == nil {
+		return "", ""
+	}
+	return fallback.AthleteID, fallback.Position
 }
 
 // Search filters and sorts built rows. It also names games whose props were
@@ -550,6 +592,143 @@ func Search(rows []Row, games []db.Game, roster []db.RosterPlayer, q Query) Resu
 	return result
 }
 
+// Slates shapes one week's built rows into the game cards the slate shows.
+// It keeps games that have not kicked off, filters by the query's kickoff
+// window and search text, and orders the cards by kickoff.
+func Slates(games []db.Game, rows []Row, roster []db.RosterPlayer, q Query) []GameCard {
+	now := q.Now
+	if now.IsZero() {
+		now = time.Now()
+	}
+	needle := normalize(q.Q)
+
+	byGame := make(map[string][]Row, len(games))
+	for _, row := range rows {
+		byGame[row.GameID] = append(byGame[row.GameID], row)
+	}
+
+	cards := make([]GameCard, 0, len(games))
+	for _, game := range games {
+		if !now.Before(game.Kickoff) {
+			continue
+		}
+		if q.Window != "" && windowFor(game.Kickoff) != q.Window {
+			continue
+		}
+		if !gameMatchesQuery(game, roster, needle) {
+			continue
+		}
+		gameRows := byGame[game.ID]
+		card := GameCard{
+			ID:      game.ID,
+			Matchup: game.AwayTeam + " @ " + game.HomeTeam,
+			Venue:   db.StringValue(game.VenueName),
+			Away:    game.AwayTeam,
+			Home:    game.HomeTeam,
+			Kickoff: game.Kickoff,
+			Lines:   gameLines(game, gameRows),
+			Props:   propCount(gameRows),
+		}
+		card.HasProps = card.Props > 0
+		cards = append(cards, card)
+	}
+
+	sort.SliceStable(cards, func(i, j int) bool {
+		if !cards[i].Kickoff.Equal(cards[j].Kickoff) {
+			return cards[i].Kickoff.Before(cards[j].Kickoff)
+		}
+		if cards[i].Matchup != cards[j].Matchup {
+			return cards[i].Matchup < cards[j].Matchup
+		}
+		return cards[i].ID < cards[j].ID
+	})
+	return cards
+}
+
+// gameLines folds one game's built rows into its spread, total, and moneyline
+// summaries. A market with no stored row stays nil.
+func gameLines(game db.Game, rows []Row) GameLines {
+	var lines GameLines
+	for _, row := range rows {
+		switch row.Market {
+		case "SPREAD":
+			switch row.Team {
+			case game.AwayTeam:
+				if lines.Spread == nil {
+					lines.Spread = &LineSummary{}
+				}
+				lines.Spread.AwayLine = spreadLine(row.Line)
+				lines.Spread.AwayOdds = priceText(row.Odds)
+			case game.HomeTeam:
+				if lines.Spread == nil {
+					lines.Spread = &LineSummary{}
+				}
+				lines.Spread.HomeLine = spreadLine(row.Line)
+				lines.Spread.HomeOdds = priceText(row.Odds)
+			}
+		case "ML":
+			switch row.Team {
+			case game.AwayTeam:
+				if lines.Moneyline == nil {
+					lines.Moneyline = &LineSummary{}
+				}
+				lines.Moneyline.AwayOdds = priceText(row.Odds)
+			case game.HomeTeam:
+				if lines.Moneyline == nil {
+					lines.Moneyline = &LineSummary{}
+				}
+				lines.Moneyline.HomeOdds = priceText(row.Odds)
+			}
+		case "TOTAL":
+			if lines.Total == nil {
+				lines.Total = &LineSummary{}
+			}
+			if row.Line != nil {
+				lines.Total.Line = formatLine(*row.Line)
+			}
+			switch row.Side {
+			case "OVER":
+				lines.Total.OverOdds = priceText(row.Odds)
+			case "UNDER":
+				lines.Total.UnderOdds = priceText(row.Odds)
+			}
+		}
+	}
+	return lines
+}
+
+// propCount counts a game's prop rows, the same rows the props sync owns.
+func propCount(rows []Row) int {
+	count := 0
+	for _, row := range rows {
+		if row.Category != CategoryLines {
+			count++
+		}
+	}
+	return count
+}
+
+// spreadLine prints a spread with its sign, or nothing when the line is
+// missing.
+func spreadLine(line *float64) string {
+	if line == nil {
+		return ""
+	}
+	return signedSpread(*line)
+}
+
+// priceText prints an American price with a plus sign when positive. A zero
+// price reads as a missing one.
+func priceText(odds int) string {
+	if odds == 0 {
+		return ""
+	}
+	if odds > 0 {
+		return "+" + strconv.Itoa(odds)
+	}
+	return strconv.Itoa(odds)
+}
+
 // rowMatches reports whether needle appears in a row's text, teams, player, or
 // matchup. needle is already normalized.
 func rowMatches(row Row, game db.Game, needle string) bool {
@@ -572,14 +751,15 @@ func rowMatches(row Row, game db.Game, needle string) bool {
 	return false
 }
 
-// gameMatchesQuery reports whether an empty query, a team, or a roster player
-// makes a game worth naming as unloaded.
+// gameMatchesQuery reports whether an empty query, a team, a venue, or a
+// roster player makes a game worth showing.
 func gameMatchesQuery(game db.Game, roster []db.RosterPlayer, needle string) bool {
 	if needle == "" {
 		return true
 	}
 	for _, part := range []string{
 		game.AwayTeam, game.HomeTeam, game.AwayName, game.HomeName,
+		db.StringValue(game.VenueName), db.StringValue(game.VenueID),
 		game.AwayTeam + " @ " + game.HomeTeam,
 		game.AwayName + " at " + game.HomeName,
 	} {
