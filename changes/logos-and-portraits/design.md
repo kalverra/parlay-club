@@ -64,7 +64,7 @@ flowchart LR
   fetches or schema changes.
 - **URL validation:** Normalize logo and headshot URLs in `internal/ingest/espn` by trimming whitespace and accepting
   only `https://` URLs (returning `""` otherwise) so bad payloads never reach templates.
-- **Migration `0010_logos_portraits.sql`:**
+- **Migration `0011_logos_portraits.sql`:**
   - `ALTER TABLE games ADD COLUMN home_logo TEXT;`
   - `ALTER TABLE games ADD COLUMN away_logo TEXT;`
   - `ALTER TABLE roster_players ADD COLUMN headshot_url TEXT NOT NULL DEFAULT '';`
@@ -137,7 +137,7 @@ flowchart LR
   - `internal/ingest/espn`: verify real fixtures (`scoreboard_week.json`, `scoreboard_live.json`, `roster.json`,
     `roster_falcons.json`, `summary.json`) parse team logos and player headshots, handle athletes with missing headshots
     (`roster_falcons.json`), and reject non-`https://` URLs.
-  - `internal/db`: verify migration `0010_logos_portraits.sql` applies cleanly on fresh and existing DBs, `UpsertGame`
+  - `internal/db`: verify migration `0011_logos_portraits.sql` applies cleanly on fresh and existing DBs, `UpsertGame`
     persists `home_logo`/`away_logo` and keeps `updated_at` unchanged on identical reruns, `UpsertRosterPlayers`
     persists `headshot_url`, and `RosterPlayersByIDs` / `TeamLogos` return expected maps.
   - `internal/refresh`: verify `syncScoreboard` and `syncRoster` store logos and headshots through `Store`.
@@ -172,7 +172,7 @@ template patterns)
 - [x] Parse `team.logo` in `espn.Scoreboard`, `headshot.href` in `espn.Roster`, and injury
       `team.logo`/`athlete.headshot.href` in `espn.ParseInjuries` (normalizing to `https://` only), with fixture tests
       covering present and missing URLs.
-- [ ] Add `0010_logos_portraits.sql` (`games.home_logo`, `games.away_logo`, `roster_players.headshot_url`), update
+- [x] Add `0010_logos_portraits.sql` (`games.home_logo`, `games.away_logo`, `roster_players.headshot_url`), update
       `db.Game`, `db.RosterPlayer`, `UpsertGame` idempotency, `RosterPlayersByIDs`/`TeamLogos`, `refresh` syncs, and
       `board` (`GameCard`, `Row`, `PlayerGroup`) with tests.
 - [ ] Docs: update `docs/reference/data-sources.md` and `docs/reference/schema.md` for the new logo and headshot fields

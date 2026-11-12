@@ -61,12 +61,13 @@ func TestRosterPlayers(t *testing.T) {
 
 	players := []db.RosterPlayer{
 		{
-			AthleteID:  "3918298",
-			Team:       "BUF",
-			ESPNTeamID: "2",
-			FullName:   "Josh Allen",
-			Position:   "QB",
-			UpdatedAt:  now,
+			AthleteID:   "3918298",
+			Team:        "BUF",
+			ESPNTeamID:  "2",
+			FullName:    "Josh Allen",
+			Position:    "QB",
+			HeadshotURL: "https://a.espncdn.com/i/headshots/nfl/players/full/3918298.png",
+			UpdatedAt:   now,
 		},
 		{
 			AthleteID:  "4241463",
@@ -94,6 +95,18 @@ func TestRosterPlayers(t *testing.T) {
 	assert.Equal(t, "Josh Allen", player.FullName)
 	assert.Equal(t, "josh allen", player.NormName)
 	assert.Equal(t, "BUF", player.Team)
+	assert.Equal(t, "https://a.espncdn.com/i/headshots/nfl/players/full/3918298.png", player.HeadshotURL)
+
+	// RosterPlayersByIDs
+	emptyByIDs, err := store.RosterPlayersByIDs(t.Context(), nil)
+	require.NoError(t, err)
+	assert.Empty(t, emptyByIDs)
+
+	byIDs, err := store.RosterPlayersByIDs(t.Context(), []string{"3918298", "4361579", "missing"})
+	require.NoError(t, err)
+	require.Len(t, byIDs, 2)
+	assert.Equal(t, "https://a.espncdn.com/i/headshots/nfl/players/full/3918298.png", byIDs["3918298"].HeadshotURL)
+	assert.Empty(t, byIDs["4361579"].HeadshotURL)
 
 	_, err = store.RosterPlayerByID(t.Context(), "missing")
 	require.ErrorIs(t, err, db.ErrPlayerNotFound)
@@ -374,12 +387,13 @@ func TestWeekPlayerNames(t *testing.T) {
 	// Add roster players
 	require.NoError(t, store.UpsertRosterPlayers(t.Context(), []db.RosterPlayer{
 		{
-			AthleteID:  "3918298",
-			Team:       "BUF",
-			ESPNTeamID: "2",
-			FullName:   "Josh Allen",
-			Position:   "QB",
-			UpdatedAt:  now,
+			AthleteID:   "3918298",
+			Team:        "BUF",
+			ESPNTeamID:  "2",
+			FullName:    "Josh Allen",
+			Position:    "QB",
+			HeadshotURL: "https://a.espncdn.com/i/headshots/nfl/players/full/3918298.png",
+			UpdatedAt:   now,
 		},
 		{
 			AthleteID:  "4429013",

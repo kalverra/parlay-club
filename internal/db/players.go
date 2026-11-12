@@ -19,16 +19,17 @@ var (
 
 // RosterPlayer is one athlete on an NFL team's ESPN roster.
 type RosterPlayer struct {
-	AthleteID  string
-	Team       string
-	ESPNTeamID string
-	FullName   string
-	NormName   string
-	Position   string
-	UpdatedAt  time.Time
+	AthleteID   string
+	Team        string
+	ESPNTeamID  string
+	FullName    string
+	NormName    string
+	Position    string
+	HeadshotURL string
+	UpdatedAt   time.Time
 }
 
-const rosterColumns = `athlete_id, team, espn_team_id, full_name, norm_name, position, updated_at`
+const rosterColumns = `athlete_id, team, espn_team_id, full_name, norm_name, position, headshot_url, updated_at`
 
 // PlayerGameLog is one athlete's cached season game log and market stats.
 type PlayerGameLog struct {
@@ -92,14 +93,15 @@ func (s *Store) UpsertRosterPlayers(ctx context.Context, players []RosterPlayer)
 			}
 			_, err := tx.conn().ExecContext(ctx, `
 				INSERT INTO roster_players (
-					athlete_id, team, espn_team_id, full_name, norm_name, position, updated_at
-				) VALUES (?, ?, ?, ?, ?, ?, ?)
+					athlete_id, team, espn_team_id, full_name, norm_name, position, headshot_url, updated_at
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 				ON CONFLICT (athlete_id) DO UPDATE SET
 					team = excluded.team,
 					espn_team_id = excluded.espn_team_id,
 					full_name = excluded.full_name,
 					norm_name = excluded.norm_name,
 					position = excluded.position,
+					headshot_url = excluded.headshot_url,
 					updated_at = excluded.updated_at`,
 				p.AthleteID,
 				p.Team,
@@ -107,6 +109,7 @@ func (s *Store) UpsertRosterPlayers(ctx context.Context, players []RosterPlayer)
 				p.FullName,
 				norm,
 				p.Position,
+				p.HeadshotURL,
 				formatTimestamp(p.UpdatedAt),
 			)
 			if err != nil {
@@ -129,6 +132,39 @@ func (s *Store) RosterPlayerByID(ctx context.Context, athleteID string) (RosterP
 		return RosterPlayer{}, fmt.Errorf("athlete %s: %w", athleteID, err)
 	}
 	return player, nil
+}
+
+// RosterPlayersByIDs returns roster players for multiple athletes indexed by
+// athlete ID.
+func (s *Store) RosterPlayersByIDs(ctx context.Context, athleteIDs []string) (map[string]RosterPlayer, error) {
+	if len(athleteIDs) == 0 {
+		return map[string]RosterPlayer{}, nil
+	}
+	placeholders := strings.Repeat("?,", len(athleteIDs))
+	placeholders = placeholders[:len(placeholders)-1]
+	args := make([]any, len(athleteIDs))
+	for i, id := range athleteIDs {
+		args[i] = id
+	}
+	rows, err := s.conn().QueryContext(ctx,
+		"SELECT "+rosterColumns+" FROM roster_players WHERE athlete_id IN ("+placeholders+")", args...)
+	if err != nil {
+		return nil, fmt.Errorf("roster players by ids: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	result := make(map[string]RosterPlayer, len(athleteIDs))
+	for rows.Next() {
+		p, err := scanRosterPlayer(rows)
+		if err != nil {
+			return nil, fmt.Errorf("roster players by ids: %w", err)
+		}
+		result[p.AthleteID] = p
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("roster players by ids: %w", err)
+	}
+	return result, nil
 }
 
 // RosterForTeam returns all roster players for an NFL team.
@@ -564,6 +600,7 @@ func scanRosterPlayer(row rowScanner) (RosterPlayer, error) {
 		&p.FullName,
 		&p.NormName,
 		&p.Position,
+		&p.HeadshotURL,
 		&updatedAt,
 	); err != nil {
 		return RosterPlayer{}, err

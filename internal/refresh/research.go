@@ -38,12 +38,13 @@ func (s *Service) syncRoster(ctx context.Context, teamAbbr, espnTeamID string, n
 	dbPlayers := make([]db.RosterPlayer, 0, len(players))
 	for _, p := range players {
 		dbPlayers = append(dbPlayers, db.RosterPlayer{
-			AthleteID:  p.ID,
-			Team:       teamAbbr,
-			ESPNTeamID: espnTeamID,
-			FullName:   p.FullName,
-			Position:   p.Position,
-			UpdatedAt:  now,
+			AthleteID:   p.ID,
+			Team:        teamAbbr,
+			ESPNTeamID:  espnTeamID,
+			FullName:    p.FullName,
+			Position:    p.Position,
+			HeadshotURL: p.HeadshotURL,
+			UpdatedAt:   now,
 		})
 	}
 
