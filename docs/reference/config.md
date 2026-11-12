@@ -2,10 +2,10 @@
 id: config
 title: Configuration
 type: reference
-summary: Environment variables the server reads, their dev defaults, the odds provider keys they configure, the offline sandbox switch, and the values it rejects in prod.
-tags: [config, environment, startup, google, oauth, odds, parlay-api, the-odds-api, sandbox, offline]
+summary: Environment variables the server reads, their dev defaults, the odds provider keys and GitHub issue reporting settings they configure, the offline sandbox switch, and the values it rejects in prod.
+tags: [config, environment, startup, google, oauth, odds, parlay-api, the-odds-api, sandbox, offline, github, bug-reports]
 sources: [internal/config/config.go, cmd/server/main.go, cmd/server/sandbox.go, internal/sandbox/*.go, internal/ingest/odds/client.go]
-last_verified: 2026-11-10
+last_verified: 2026-11-12
 ---
 
 # Configuration
@@ -28,6 +28,8 @@ exits with status 1 when any value is invalid.
 | `BASE_URL`             | `http://localhost:{PORT}` | Public base URL without a trailing slash. The redirect URI is `BASE_URL + /auth/google/callback`. Required in prod. |
 | `ODDS_API_KEY`         | empty                    | Parlay API key. Empty disables odds calls.                                    |
 | `THE_ODDS_API_KEY`     | empty                    | The Odds API key for enrichment and fallback lines. Empty disables that provider. |
+| `GITHUB_TOKEN`         | empty                    | GitHub token for creating bug report issues. Optional in dev and prod; empty saves reports to SQLite only. |
+| `GITHUB_REPO`          | `kalverra/parlay-club`   | Target `owner/repo` for bug report issues. Defaults to `kalverra/parlay-club` in dev and prod. |
 | `LOG_LEVEL`            | `debug`                  | A zerolog level: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `panic`, `disabled`. `prod` defaults to `info`. |
 | `SUNDAY_SANDBOX`       | empty                    | `1` runs the offline Sunday sandbox. It fixes the database at `./data/sunday-sandbox.db` and ignores `DB_PATH`. Rejected in prod. |
 | `LITESTREAM_BUCKET`    | unset                    | Read by Litestream, not by the app.                                           |
@@ -38,9 +40,9 @@ falling back.
 
 `SUNDAY_SANDBOX=1` is a development switch, not a deployment mode. It always uses `./data/sunday-sandbox.db`, skips
 history import and Google provider construction, and forces the dev sign-in form. Every ingest client reads the saved
-week 9 responses in `internal/sandbox` through a fail-closed replay transport, so `ODDS_API_KEY` and
-`THE_ODDS_API_KEY` are unused and no credits are spent. `mise run sandbox` sets the variable for the normal hot-reload
-loop; see [Local development](../guides/local-dev.md).
+week 9 responses in `internal/sandbox` through a fail-closed replay transport, so `ODDS_API_KEY` and `THE_ODDS_API_KEY`
+are unused and no credits are spent. `mise run sandbox` sets the variable for the normal hot-reload loop; see
+[Local development](../guides/local-dev.md).
 
 `BASE_URL` is trimmed of trailing slashes. It must match the scheme, host, and port registered on the Google client, or
 sign-in stops at `redirect_uri_mismatch`. The app builds the redirect URI by appending `/auth/google/callback`.
@@ -48,9 +50,13 @@ sign-in stops at `redirect_uri_mismatch`. The app builds the redirect URI by app
 `ODDS_API_KEY` is the Parlay API key and `THE_ODDS_API_KEY` is the key for The Odds API. Both are optional; an empty key
 disables that provider. Parlay API is the primary game-line feed. The Odds API enriches its rows with DraftKings links
 and missing quotes, and serves the whole week when Parlay API is unconfigured, fails, or falls below its credit floor.
-`internal/ingest/odds` defaults the primary base URL to
-`https://parlay-api.com/v1/sports/americanfootball_nfl` and the fallback base URL to
-`https://api.the-odds-api.com/v4/sports/americanfootball_nfl`; tests point `NewClient` at a fake server instead.
+`internal/ingest/odds` defaults the primary base URL to `https://parlay-api.com/v1/sports/americanfootball_nfl` and the
+fallback base URL to `https://api.the-odds-api.com/v4/sports/americanfootball_nfl`; tests point `NewClient` at a fake
+server instead.
+
+`GITHUB_TOKEN` and `GITHUB_REPO` configure GitHub issue creation for in-app bug reports. Both are trimmed of surrounding
+whitespace and are optional in both dev and prod. When `GITHUB_TOKEN` is empty, bug reports still save to SQLite without
+creating a GitHub issue. `GITHUB_REPO` defaults to `kalverra/parlay-club`.
 
 Sign-up is open, so there is no email list to configure. Group membership is what decides who sees which slips; see
 [Groups](../concepts/groups.md).

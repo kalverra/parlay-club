@@ -39,9 +39,18 @@ function formatTimes(root) {
 // HTMX swap and put the position back after.
 let keptScrollTop = null;
 
-document.addEventListener("htmx:beforeSwap", () => {
+document.addEventListener("htmx:beforeSwap", (event) => {
   const pane = document.querySelector("[data-keep-scroll]");
   keptScrollTop = pane ? pane.scrollTop : null;
+
+  if (formForEvent(event)?.id === "bug-report-form" && event.detail?.xhr?.status === 400) {
+    const errorSlot = document.getElementById("bug-report-error");
+    if (errorSlot) {
+      event.detail.shouldSwap = true;
+      event.detail.target = errorSlot;
+      event.detail.isError = false;
+    }
+  }
 });
 
 // HTMX swaps in partials, so format whatever arrived and whatever was there
@@ -194,6 +203,10 @@ document.addEventListener("click", (event) => {
     closeDockSheet();
     return;
   }
+  if (event.target.closest("[data-bug-dialog-close]")) {
+    closeBugDialog();
+    return;
+  }
   closeGroupSwitcher(event);
 });
 
@@ -294,6 +307,13 @@ function showFormError(form, message) {
 }
 
 document.body.addEventListener("htmx:beforeRequest", (event) => {
+  if (formForEvent(event)?.id === "bug-report-form") {
+    const bugError = document.getElementById("bug-report-error");
+    if (bugError) {
+      bugError.replaceChildren();
+    }
+  }
+
   const error = formForEvent(event)?.querySelector("[data-form-error]");
   if (error) {
     error.textContent = "";
@@ -303,7 +323,23 @@ document.body.addEventListener("htmx:beforeRequest", (event) => {
 
 document.body.addEventListener("htmx:responseError", (event) => {
   const xhr = event.detail && event.detail.xhr;
-  if (!xhr || xhr.status !== 422) {
+  if (!xhr) {
+    return;
+  }
+
+  if (formForEvent(event)?.id === "bug-report-form" && xhr.status !== 400) {
+    const bugError = document.getElementById("bug-report-error");
+    if (bugError) {
+      const alert = document.createElement("div");
+      alert.setAttribute("role", "alert");
+      alert.className = "rounded-lg border border-rose-800 bg-rose-950/60 p-3 text-sm text-rose-200";
+      alert.textContent = "Could not submit bug report. Please try again.";
+      bugError.replaceChildren(alert);
+    }
+    return;
+  }
+
+  if (xhr.status !== 422) {
     return;
   }
 
@@ -425,3 +461,173 @@ window.addEventListener("focus", () => {
   refreshLive();
   refreshOnVisible();
 });
+
+// Bug report modal: captures the current viewport with html2canvas (downscaled
+// to at most 1280px wide as JPEG), populates the preview and diagnostic fields,
+// and resets back to the initial form when closed.
+const bugTrigger = document.getElementById("bug-report-trigger");
+const bugDialog = document.getElementById("bug-report-dialog");
+const bugReportBody = document.getElementById("bug-report-body");
+const initialBugBodyHTML = bugReportBody ? bugReportBody.innerHTML : "";
+const maxBugScreenshotWidth = 1280;
+const maxBugScreenshotDataURLLength = 1300000;
+let html2canvasPromise = null;
+
+function loadHtml2Canvas() {
+  if (typeof window.html2canvas === "function") {
+    return Promise.resolve(window.html2canvas);
+  }
+  if (html2canvasPromise) {
+    return html2canvasPromise;
+  }
+
+  const src = bugTrigger?.getAttribute("data-html2canvas-src");
+  if (!src) {
+    return Promise.resolve(null);
+  }
+
+  html2canvasPromise = new Promise((resolve) => {
+    const script = document.createElement("script");
+    script.src = src;
+    script.async = true;
+    script.onload = () => resolve(typeof window.html2canvas === "function" ? window.html2canvas : null);
+    script.onerror = () => {
+      html2canvasPromise = null;
+      resolve(null);
+    };
+    document.head.append(script);
+  });
+  return html2canvasPromise;
+}
+
+function scaleBugCanvas(canvas) {
+  if (!canvas || !canvas.width || !canvas.height) {
+    return canvas;
+  }
+  if (canvas.width <= maxBugScreenshotWidth) {
+    return canvas;
+  }
+
+  const ratio = maxBugScreenshotWidth / canvas.width;
+  const scaled = document.createElement("canvas");
+  scaled.width = maxBugScreenshotWidth;
+  scaled.height = Math.max(1, Math.round(canvas.height * ratio));
+
+  const ctx = scaled.getContext("2d");
+  if (!ctx) {
+    return canvas;
+  }
+  ctx.drawImage(canvas, 0, 0, scaled.width, scaled.height);
+  return scaled;
+}
+
+async function captureBugScreenshot() {
+  const capture = await loadHtml2Canvas();
+  if (typeof capture !== "function") {
+    return "";
+  }
+
+  try {
+    const canvas = await capture(document.body, {
+      useCORS: true,
+      logging: false,
+      x: window.scrollX,
+      y: window.scrollY,
+      width: window.innerWidth,
+      height: window.innerHeight,
+    });
+    const output = scaleBugCanvas(canvas);
+    let dataURL = output.toDataURL("image/jpeg", 0.8);
+    if (dataURL.length > maxBugScreenshotDataURLLength) {
+      dataURL = output.toDataURL("image/jpeg", 0.5);
+    }
+    if (!dataURL.startsWith("data:image/jpeg;base64,") || dataURL.length > maxBugScreenshotDataURLLength) {
+      return "";
+    }
+    return dataURL;
+  } catch {
+    return "";
+  }
+}
+
+function renderBugPreview(dataURL) {
+  const slot = document.getElementById("bug-preview-slot");
+  if (!slot) {
+    return;
+  }
+  if (!dataURL) {
+    slot.replaceChildren();
+    slot.classList.add("hidden");
+    return;
+  }
+
+  const img = document.createElement("img");
+  img.id = "bug-preview";
+  img.alt = "Screenshot preview";
+  img.className = "max-h-48 w-full object-contain";
+  img.src = dataURL;
+  slot.replaceChildren(img);
+  slot.classList.remove("hidden");
+}
+
+function populateBugDiagnostics(dataURL) {
+  const screenshotInput = document.getElementById("bug-input-screenshot");
+  const pageURLInput = document.getElementById("bug-input-page-url");
+  const screenSizeInput = document.getElementById("bug-input-screen-size");
+  const userAgentInput = document.getElementById("bug-input-user-agent");
+
+  if (screenshotInput) {
+    screenshotInput.value = dataURL;
+  }
+  if (pageURLInput) {
+    pageURLInput.value = window.location.href;
+  }
+  if (screenSizeInput) {
+    screenSizeInput.value = `${window.innerWidth}x${window.innerHeight}`;
+  }
+  if (userAgentInput) {
+    userAgentInput.value = navigator.userAgent || "";
+  }
+  renderBugPreview(dataURL);
+}
+
+function resetBugDialog() {
+  if (bugReportBody && initialBugBodyHTML) {
+    bugReportBody.innerHTML = initialBugBodyHTML;
+    if (window.htmx) {
+      window.htmx.process(bugReportBody);
+    }
+  }
+  renderBugPreview("");
+}
+
+function closeBugDialog() {
+  if (bugDialog && bugDialog.open) {
+    bugDialog.close();
+  }
+}
+
+async function openBugDialog() {
+  if (!bugDialog || bugDialog.open) {
+    return;
+  }
+  if (bugTrigger) {
+    bugTrigger.disabled = true;
+  }
+  try {
+    const dataURL = await captureBugScreenshot();
+    populateBugDiagnostics(dataURL);
+    if (!bugDialog.open) {
+      bugDialog.showModal();
+    }
+  } finally {
+    if (bugTrigger) {
+      bugTrigger.disabled = false;
+    }
+  }
+}
+
+if (bugTrigger && bugDialog) {
+  bugTrigger.addEventListener("click", openBugDialog);
+  bugDialog.addEventListener("close", resetBugDialog);
+}

@@ -4,7 +4,7 @@ title: Routes
 type: reference
 summary: Every HTTP route the server serves, the middleware in front of them, and the status codes, HTMX headers, and SSE frames handlers return.
 tags: [routes, http, handlers, middleware, htmx, sse, props, research, schedules]
-sources: [cmd/server/main.go, cmd/server/sandbox.go, internal/auth/handlers.go, internal/groups/handlers.go, internal/board/board.go, internal/web/routes.go, internal/web/home.go, internal/web/games.go, internal/web/pick.go, internal/web/slips.go, internal/web/schedules.go, internal/web/research.go, internal/web/export.go, internal/sandbox/seed.go, internal/sandbox/plan.go, internal/live/stream.go, web/templates/home.html, web/templates/pick.html, web/templates/week.html, web/templates/sandbox.html]
+sources: [cmd/server/main.go, cmd/server/sandbox.go, internal/auth/handlers.go, internal/groups/handlers.go, internal/board/board.go, internal/web/routes.go, internal/web/home.go, internal/web/games.go, internal/web/pick.go, internal/web/slips.go, internal/web/schedules.go, internal/web/research.go, internal/web/export.go, internal/web/bugs.go, internal/web/screenshots.go, internal/sandbox/seed.go, internal/sandbox/plan.go, internal/live/stream.go, web/templates/home.html, web/templates/pick.html, web/templates/week.html, web/templates/sandbox.html]
 last_verified: 2026-11-12
 ---
 
@@ -18,9 +18,9 @@ One `http.ServeMux` holds every route, using Go 1.22 method patterns. Handlers s
 
 ## Middleware
 
-All routes except `/healthz`, `/static/`, `/login`, `POST /logout`, the Google sign-in routes, and the dev sign-in
-routes need a signed-in user. Those public routes are registered first. Everything else runs through three wrappers,
-outermost first. See [Access](../concepts/access.md) for cookies and sign-in.
+All routes except `/healthz`, `/static/`, `/screenshots/{token}.jpg`, `/login`, `POST /logout`, the Google sign-in
+routes, and the dev sign-in routes need a signed-in user. Those public routes are registered first. Everything else runs
+through three wrappers, outermost first. See [Access](../concepts/access.md) for cookies and sign-in.
 
 | Middleware    | Rejects                                                        | Response                          |
 | ------------- | -------------------------------------------------------------- | --------------------------------- |
@@ -40,6 +40,7 @@ of their groups makes that group active instead.
 | ----------------------------------- | ----------------------------------------------------------------------- | ----- |
 | `GET /healthz`                      | Liveness probe                                                          | Always 200 `ok`. |
 | `GET /static/{path...}`             | Embedded CSS, JS, and other assets                                      | One-year cache. A missing or escaping path is 404. |
+| `GET /screenshots/{token}.jpg`      | Capability URL for a bug report screenshot                              | Registered as `GET /screenshots/{file}` and checks the `.jpg` suffix. One-year immutable cache with `nosniff`; unknown token, missing image, or non-`.jpg` suffix is 404. |
 | `GET /login`                        | Sign-in page                                                            | Shows the Google button, plus a dev link when Google is off. |
 | `POST /logout`                      | Clear the session and active-group cookies                              | 303 to `/login`. |
 | `GET /auth/google/start`            | Start the Google round trip                                             | Registered only when a Google client is configured. Redirects to Google. |
@@ -325,6 +326,16 @@ odds and legs, and returns the refreshed game research partial.
 `POST /users/{id}/active` answers 422 for "You can't turn yourself off." and for a value that is not on or off. A user
 outside the active group is 404.
 
+### Bug reports
+
+| Method + path      | Purpose                                                                      | Response |
+| ------------------ | ---------------------------------------------------------------------------- | -------- |
+| `POST /bug-reports` | Save a bug report (`description`, optional `page_url`, `screen_size`, `user_agent`, and base64 `screenshot` data URL) and optionally file a GitHub issue | 200 `bug-report-success` partial, or 400 `bug-report-error` partial on validation failure. |
+
+`POST /bug-reports` caps request bodies at 2 MiB and accepts `image/jpeg`, `image/png`, or `image/webp` `data:` URLs for
+`screenshot`. It persists the report in SQLite before attempting GitHub issue creation, so the user gets a 200
+confirmation even when GitHub is unconfigured or unreachable.
+
 ## Responses
 
 ### Status codes
@@ -335,7 +346,7 @@ outside the active group is 404.
 | 201  | A created resource for JSON requests, such as adding a recurring schedule. |
 | 204  | A successful write with no content returned, such as deleting a schedule. |
 | 303  | A plain form redirect or landing redirect, such as create slip, save profile, logout, joining a group, or the one-group landing. |
-| 400  | A malformed form body, or a failed Google round trip. |
+| 400  | A malformed form body, a bug report validation error, or a failed Google round trip. |
 | 403  | A non-GET request without `HX-Request: true`. |
 | 404  | A missing slip, leg, member, or group; a resource in another group; or an unknown invite token. |
 | 422  | A fixable rule refusal or form error. The body is the short message shown in the form. |

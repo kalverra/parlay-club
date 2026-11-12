@@ -7,6 +7,7 @@ import (
 
 	"github.com/rs/zerolog"
 
+	"github.com/kalverra/parlay-club/internal/bugs"
 	"github.com/kalverra/parlay-club/internal/db"
 	"github.com/kalverra/parlay-club/internal/live"
 	"github.com/kalverra/parlay-club/internal/slips"
@@ -55,6 +56,7 @@ type Dependencies struct {
 	SetGroup   SetGroup
 	Store      *db.Store
 	Slips      *slips.Service
+	Bugs       *bugs.Service
 	Stream     *live.Stream
 	Refresh    Refresher
 	// Now supplies the app's clock. A nil Now uses time.Now; the sandbox passes
@@ -104,6 +106,8 @@ func NewWithDeps(deps Dependencies) http.Handler {
 	gameRoutes.Routes(mux)
 	researchRoutes := &researchHandlers{deps: deps}
 	researchRoutes.Routes(mux)
+	bugRoutes := &bugHandlers{deps: deps}
+	bugRoutes.Routes(mux)
 
 	for _, route := range pageRoutes {
 		mux.Handle(route.pattern, pageHandler(deps.Logger, deps.Renderer, route, deps.UserFrom, deps.GroupsFrom))

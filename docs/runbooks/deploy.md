@@ -69,7 +69,9 @@ push, so a broken gate fails before it can block or allow a deploy.
 4. Builds the `Dockerfile` and pushes the image to Artifact Registry tagged with the commit SHA.
 5. Runs `gcloud run deploy` with one instance at most, concurrency 80, 1 CPU, 512 MiB, a 3600 second timeout, CPU boost,
    public access, the runtime account, `APP_ENV=prod`, `DB_PATH=/data/parlay.db`, `LITESTREAM_BUCKET`, `BASE_URL`, and
-   the four Secret Manager secrets.
+   the four Secret Manager secrets. `GITHUB_TOKEN` and `GITHUB_REPO` (default `kalverra/parlay-club`) are optional; when
+   `GITHUB_TOKEN` is set, in-app bug reports also open GitHub issues, and when unset, reports still save locally in
+   SQLite.
 6. Reads the service URL and retries once with `BASE_URL` set to that URL if the first revision could not boot. That is
    the first-deploy path; later deploys get `BASE_URL` from the repo variable.
 7. Waits for `GET /healthz` on the new revision, then writes the image and URL to the job summary.
