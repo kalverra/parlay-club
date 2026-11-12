@@ -1,6 +1,6 @@
 ---
 slug: logos-and-portraits
-status: designed
+status: implementing
 created: "2026-11-12"
 accepted_by:
     - adamhamrick

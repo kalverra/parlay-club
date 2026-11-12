@@ -13,16 +13,18 @@ type TeamInjuries struct {
 	Team         string   `json:"team"`
 	TeamID       string   `json:"team_id"`
 	Abbreviation string   `json:"abbreviation"`
+	LogoURL      string   `json:"logo_url"`
 	Injuries     []Injury `json:"injuries"`
 }
 
 // Injury holds one player's injury report.
 type Injury struct {
-	AthleteID string `json:"athlete_id"`
-	FullName  string `json:"full_name"`
-	Position  string `json:"position"`
-	Status    string `json:"status"`
-	Detail    string `json:"detail"`
+	AthleteID   string `json:"athlete_id"`
+	FullName    string `json:"full_name"`
+	Position    string `json:"position"`
+	HeadshotURL string `json:"headshot_url"`
+	Status      string `json:"status"`
+	Detail      string `json:"detail"`
 }
 
 // SummaryInjuries fetches GET /summary?event={eventID} and returns the raw
@@ -61,6 +63,7 @@ type rawInjuryTeam struct {
 		ID           string `json:"id"`
 		DisplayName  string `json:"displayName"`
 		Abbreviation string `json:"abbreviation"`
+		Logo         string `json:"logo"`
 	} `json:"team"`
 	Injuries []struct {
 		Status  string `json:"status"`
@@ -70,6 +73,9 @@ type rawInjuryTeam struct {
 			Position struct {
 				Abbreviation string `json:"abbreviation"`
 			} `json:"position"`
+			Headshot struct {
+				Href string `json:"href"`
+			} `json:"headshot"`
 		} `json:"athlete"`
 		Details struct {
 			Type   string `json:"type"`
@@ -118,11 +124,12 @@ func ParseInjuries(rawJSON string) ([]TeamInjuries, error) {
 			}
 
 			injuries = append(injuries, Injury{
-				AthleteID: item.Athlete.ID,
-				FullName:  item.Athlete.FullName,
-				Position:  item.Athlete.Position.Abbreviation,
-				Status:    item.Status,
-				Detail:    detail,
+				AthleteID:   item.Athlete.ID,
+				FullName:    item.Athlete.FullName,
+				Position:    item.Athlete.Position.Abbreviation,
+				HeadshotURL: normalizeHTTPSURL(item.Athlete.Headshot.Href),
+				Status:      item.Status,
+				Detail:      detail,
 			})
 		}
 
@@ -130,6 +137,7 @@ func ParseInjuries(rawJSON string) ([]TeamInjuries, error) {
 			Team:         teamName,
 			TeamID:       rawTeam.Team.ID,
 			Abbreviation: rawTeam.Team.Abbreviation,
+			LogoURL:      normalizeHTTPSURL(rawTeam.Team.Logo),
 			Injuries:     injuries,
 		})
 	}

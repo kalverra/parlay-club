@@ -38,6 +38,7 @@ type Team struct {
 	ID           string
 	Abbreviation string
 	Name         string
+	Logo         string
 	Score        *int
 }
 
@@ -157,6 +158,7 @@ type teamResponse struct {
 	ID           string `json:"id"`
 	Abbreviation string `json:"abbreviation"`
 	DisplayName  string `json:"displayName"`
+	Logo         string `json:"logo"`
 }
 
 // venueResponse is the slice of a venue this app reads.
@@ -281,6 +283,7 @@ func parseTeam(competitor competitorResponse, status Status) (Team, error) {
 		ID:           competitor.Team.ID,
 		Abbreviation: competitor.Team.Abbreviation,
 		Name:         competitor.Team.DisplayName,
+		Logo:         normalizeHTTPSURL(competitor.Team.Logo),
 	}
 	if status == Scheduled || competitor.Score == "" {
 		return team, nil
