@@ -322,7 +322,7 @@ new tests).
 - [x] Add `GET /slips/{id}/pick/detail`, the detail view model, and the pinned header plus horizontal tab bar. Render
       the Lines tab as game lines then team totals, and prop tabs as player cards with their lines. Keep the existing
       add/remove buttons inside each row.
-- [ ] Docs: update the pick board section in `docs/concepts/slips.md` and the detail route in
+- [x] Docs: update the pick board section in `docs/concepts/slips.md` and the detail route in
       `docs/reference/routes.md`.
 
 ### Phase 3: Pair both sides of one line
