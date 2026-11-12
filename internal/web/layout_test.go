@@ -214,6 +214,58 @@ func TestPlaceholderPages(t *testing.T) {
 	}
 }
 
+func TestLayoutBugReportTriggerAndDialog(t *testing.T) {
+	t.Parallel()
+
+	anon := renderPage(t, "slip", webui.Page{Title: "Slip", Tab: webui.TabWeek})
+	assert.NotContains(t, anon, `id="bug-report-trigger"`)
+	assert.NotContains(t, anon, `id="bug-report-dialog"`)
+	assert.NotContains(t, anon, "html2canvas")
+
+	authed := renderPage(t, "slip", webui.Page{
+		Title: "Slip",
+		Tab:   webui.TabWeek,
+		User:  &webui.User{Name: "Adam Hamrick", Initials: "AH", AvatarClass: "bg-sky-500"},
+	})
+	assert.Contains(t, authed, `id="bug-report-trigger"`)
+	assert.Contains(t, authed, `data-html2canvas-src="/static/html2canvas-pro.min.js`)
+	assert.Contains(t, authed, `<dialog id="bug-report-dialog" class="leg-sheet"`)
+	assert.Contains(t, authed, `hx-post="/bug-reports"`)
+	assert.Contains(t, authed, `hx-disabled-elt="find button[type=submit]"`)
+	assert.Contains(t, authed, `id="bug-preview-slot"`)
+	assert.Contains(t, authed, `id="bug-input-screenshot"`)
+	assert.Contains(t, authed, `id="bug-input-page-url"`)
+	assert.Contains(t, authed, `id="bug-input-screen-size"`)
+	assert.Contains(t, authed, `id="bug-input-user-agent"`)
+}
+
+func TestLayoutMatchesAppJSBugReportIDs(t *testing.T) {
+	t.Parallel()
+
+	source, err := fs.ReadFile(assets.Static, "static/app.js")
+	require.NoError(t, err)
+
+	matches := regexp.MustCompile(`getElementById\("(bug-[^"]+)"\)`).FindAllStringSubmatch(string(source), -1)
+	require.NotEmpty(t, matches)
+
+	authed := renderPage(t, "slip", webui.Page{
+		Title: "Slip",
+		Tab:   webui.TabWeek,
+		User:  &webui.User{Name: "Adam Hamrick", Initials: "AH", AvatarClass: "bg-sky-500"},
+	})
+
+	for _, match := range matches {
+		id := match[1]
+		assert.Contains(
+			t,
+			authed,
+			`id="`+id+`"`,
+			"app.js references #%s which is missing from rendered layout/dialog",
+			id,
+		)
+	}
+}
+
 // renderPage parses the layout and one page file the way the server does, then
 // returns the HTML.
 func renderPage(t *testing.T, page string, data webui.Page) string {
