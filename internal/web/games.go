@@ -38,10 +38,12 @@ type GamePropsView struct {
 
 // GamePlayerPropsView groups prop lines for one athlete.
 type GamePlayerPropsView struct {
-	Name     string
-	Team     string
-	PlayerID string
-	Pills    []GameLineView
+	Name        string
+	Team        string
+	PlayerID    string
+	HeadshotURL string
+	Initials    string
+	Pills       []GameLineView
 }
 
 // GameLineView is one market selection with the price quick-add posts.
@@ -158,12 +160,16 @@ func groupProps(game db.Game, rows []board.Row) ([]GameLineView, []GamePlayerPro
 			player, ok := byPlayer[row.PlayerName]
 			if !ok {
 				player = &GamePlayerPropsView{
-					Name:     row.PlayerName,
-					Team:     row.Team,
-					PlayerID: row.PlayerID,
+					Name:        row.PlayerName,
+					Team:        row.Team,
+					PlayerID:    row.PlayerID,
+					HeadshotURL: row.HeadshotURL,
+					Initials:    Initials(row.PlayerName),
 				}
 				byPlayer[row.PlayerName] = player
 				order = append(order, row.PlayerName)
+			} else if player.HeadshotURL == "" && row.HeadshotURL != "" {
+				player.HeadshotURL = row.HeadshotURL
 			}
 			player.Pills = append(player.Pills, line)
 		}

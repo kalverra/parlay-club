@@ -425,3 +425,61 @@ func TestGamePropsHandler(t *testing.T) {
 	assert.Contains(t, bodyLocked, "BUF Over 24.5")
 	assert.Contains(t, bodyLocked, "Over 265.5 Pass Yds")
 }
+
+func TestGamePropsRendersPlayerPortraitsAndFallback(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	game := addGame(t, fixture, gameKickoff())
+	handler := gamesHandlerWithRefresher(t, fixture, fixture.user, &stubRefresher{})
+
+	now := time.Now().UTC()
+	require.NoError(t, fixture.store.UpsertRosterPlayers(t.Context(), []db.RosterPlayer{
+		{
+			AthleteID:   "3918298",
+			Team:        "BUF",
+			ESPNTeamID:  "2",
+			FullName:    "Josh Allen",
+			Position:    "QB",
+			HeadshotURL: "https://a.espncdn.com/i/headshots/nfl/players/full/3918298.png",
+			UpdatedAt:   now,
+		},
+	}))
+
+	_, err := fixture.store.UpsertOdds(t.Context(), []db.Odds{
+		{
+			GameID:     game.ID,
+			Book:       "draftkings",
+			MarketType: "PASS_YDS",
+			Team:       "BUF",
+			PlayerName: "Josh Allen",
+			Side:       "OVER",
+			Line:       new(265.5),
+			Price:      -110,
+			FetchedAt:  now,
+		},
+		{
+			GameID:     game.ID,
+			Book:       "draftkings",
+			MarketType: "REC_YDS",
+			Team:       "MIA",
+			PlayerName: "Unknown Player",
+			Side:       "OVER",
+			Line:       new(35.5),
+			Price:      -115,
+			FetchedAt:  now,
+		},
+	})
+	require.NoError(t, err)
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/games/"+game.ID+"/props", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	body := rec.Body.String()
+	assert.Contains(t, body, `src="https://a.espncdn.com/i/headshots/nfl/players/full/3918298.png"`)
+	assert.Contains(t, body, `data-fallback-img`)
+	assert.Contains(t, body, `>JA</span>`)
+	assert.Contains(t, body, `>UP</span>`)
+}

@@ -540,3 +540,172 @@ func TestResearchLinksOnSlipLegs(t *testing.T) {
 	assert.Contains(t, body, "/research?game_id="+game.ID+"&amp;leg_id=2")
 	assert.Contains(t, body, "Research &rarr;")
 }
+
+func TestResearchGameRendersLogosAndPortraits(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	now := time.Now().UTC()
+	injuriesJSON := `[
+		{
+			"team": {
+				"id": "2",
+				"displayName": "Buffalo Bills",
+				"abbreviation": "BUF",
+				"logo": "https://a.espncdn.com/i/teamlogos/nfl/500/buf-inj.png"
+			},
+			"injuries": [
+				{
+					"status": "Questionable",
+					"athlete": {
+						"id": "4362628",
+						"fullName": "Dalton Kincaid",
+						"position": {"abbreviation": "TE"},
+						"headshot": {"href": "https://a.espncdn.com/i/headshots/nfl/players/full/4362628.png"}
+					},
+					"details": {"type": "Knee", "detail": "Limited"}
+				},
+				{
+					"status": "Out",
+					"athlete": {
+						"id": "9999999",
+						"fullName": "Rookie Tackle",
+						"position": {"abbreviation": "OT"}
+					},
+					"details": {"type": "Ankle", "detail": "DNP"}
+				}
+			]
+		}
+	]`
+
+	game, err := fixture.store.UpsertGame(t.Context(), db.Game{
+		ID:         "401772099",
+		WeekID:     fixture.week.ID,
+		HomeTeam:   "BUF",
+		AwayTeam:   "MIA",
+		HomeName:   "Buffalo Bills",
+		AwayName:   "Miami Dolphins",
+		HomeLogo:   new("https://a.espncdn.com/i/teamlogos/nfl/500/buf.png"),
+		AwayLogo:   new("https://a.espncdn.com/i/teamlogos/nfl/500/mia.png"),
+		HomeESPNID: "2",
+		AwayESPNID: "15",
+		Kickoff:    gameKickoff(),
+		Status:     db.GameScheduled,
+		UpdatedAt:  now,
+	})
+	require.NoError(t, err)
+	_, err = fixture.store.SetGameInjuries(t.Context(), game.ID, injuriesJSON)
+	require.NoError(t, err)
+
+	require.NoError(t, fixture.store.UpsertRosterPlayers(t.Context(), []db.RosterPlayer{
+		{
+			AthleteID:   "3918298",
+			Team:        "BUF",
+			ESPNTeamID:  "2",
+			FullName:    "Josh Allen",
+			Position:    "QB",
+			HeadshotURL: "https://a.espncdn.com/i/headshots/nfl/players/full/3918298.png",
+			UpdatedAt:   now,
+		},
+	}))
+
+	_, err = fixture.store.UpsertOdds(t.Context(), []db.Odds{
+		{
+			GameID:     game.ID,
+			Book:       "draftkings",
+			MarketType: "PASS_YDS",
+			Team:       "BUF",
+			PlayerName: "Josh Allen",
+			Side:       "OVER",
+			Line:       new(265.5),
+			Price:      -110,
+			FetchedAt:  now,
+		},
+	})
+	require.NoError(t, err)
+
+	handler := researchHandlerWithRefresher(t, fixture, fixture.user, &researchTestRefresher{})
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/research/games/"+game.ID, nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	body := rec.Body.String()
+	// Matchup header logos
+	assert.Contains(t, body, `src="https://a.espncdn.com/i/teamlogos/nfl/500/mia.png"`)
+	assert.Contains(t, body, `src="https://a.espncdn.com/i/teamlogos/nfl/500/buf.png"`)
+	// Injury team logo
+	assert.Contains(t, body, `src="https://a.espncdn.com/i/teamlogos/nfl/500/buf-inj.png"`)
+	// Injury row portrait + missing headshot initials fallback
+	assert.Contains(t, body, `src="https://a.espncdn.com/i/headshots/nfl/players/full/4362628.png"`)
+	assert.Contains(t, body, `>DK</span>`)
+	assert.Contains(t, body, `>RT</span>`)
+	// Matched player portrait
+	assert.Contains(t, body, `src="https://a.espncdn.com/i/headshots/nfl/players/full/3918298.png"`)
+	assert.Contains(t, body, `>JA</span>`)
+}
+
+func TestResearchPlayerRendersPortraitAndTeamLogo(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	now := time.Now().UTC()
+
+	_, err := fixture.store.UpsertGame(t.Context(), db.Game{
+		ID:         "401772088",
+		WeekID:     fixture.week.ID,
+		HomeTeam:   "BUF",
+		AwayTeam:   "MIA",
+		HomeName:   "Buffalo Bills",
+		AwayName:   "Miami Dolphins",
+		HomeLogo:   new("https://a.espncdn.com/i/teamlogos/nfl/500/buf.png"),
+		AwayLogo:   new("https://a.espncdn.com/i/teamlogos/nfl/500/mia.png"),
+		HomeESPNID: "2",
+		AwayESPNID: "15",
+		Kickoff:    gameKickoff(),
+		Status:     db.GameScheduled,
+		UpdatedAt:  now,
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, fixture.store.UpsertRosterPlayers(t.Context(), []db.RosterPlayer{
+		{
+			AthleteID:   "3918298",
+			Team:        "BUF",
+			ESPNTeamID:  "2",
+			FullName:    "Josh Allen",
+			Position:    "QB",
+			HeadshotURL: "https://a.espncdn.com/i/headshots/nfl/players/full/3918298.png",
+			UpdatedAt:   now,
+		},
+		{
+			AthleteID:   "4361579",
+			Team:        "MIA",
+			ESPNTeamID:  "15",
+			FullName:    "De'Von Achane",
+			Position:    "RB",
+			HeadshotURL: "",
+			UpdatedAt:   now,
+		},
+	}))
+
+	handler := researchHandlerWithRefresher(t, fixture, fixture.user, &researchTestRefresher{})
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/research/players/3918298", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	body := rec.Body.String()
+	assert.Contains(t, body, `src="https://a.espncdn.com/i/headshots/nfl/players/full/3918298.png"`)
+	assert.Contains(t, body, `src="https://a.espncdn.com/i/teamlogos/nfl/500/buf.png"`)
+	assert.Contains(t, body, `>JA</span>`)
+
+	reqNoImg := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/research/players/4361579", nil)
+	recNoImg := httptest.NewRecorder()
+	handler.ServeHTTP(recNoImg, reqNoImg)
+	assert.Equal(t, http.StatusOK, recNoImg.Code)
+	bodyNoImg := recNoImg.Body.String()
+	assert.Contains(t, bodyNoImg, `src="https://a.espncdn.com/i/teamlogos/nfl/500/mia.png"`)
+	assert.Contains(t, bodyNoImg, `>DA</span>`)
+	assert.NotContains(t, bodyNoImg, `src=""`)
+}

@@ -686,14 +686,17 @@
       <p class="text-[11px] font-medium text-slate-400">Player Props</p>
       {{range .Players}}
         <div>
-          <div class="flex items-center justify-between text-xs">
-            <span class="font-medium text-slate-200">
-              {{.Name}} {{if .Team}}<span class="text-slate-400">({{.Team}})</span>{{end}}
-            </span>
+          <div class="flex items-center justify-between gap-2 text-xs">
+            <div class="flex min-w-0 items-center gap-2">
+              {{template "player-portrait" (dict "URL" .HeadshotURL "Initials" .Initials "Size" "h-7 w-7" "TextSize" "text-[10px]")}}
+              <span class="min-w-0 truncate font-medium text-slate-200">
+                {{.Name}} {{if .Team}}<span class="text-slate-400">({{.Team}})</span>{{end}}
+              </span>
+            </div>
             {{if .PlayerID}}
               <a
                 href="/research?player_id={{.PlayerID}}"
-                class="font-medium text-sky-400 hover:text-sky-300"
+                class="shrink-0 font-medium text-sky-400 hover:text-sky-300"
               >
                 Research &rarr;
               </a>
@@ -740,7 +743,10 @@
 {{define "research-game"}}
 <div class="space-y-4">
   <div class="rounded-xl border border-slate-800 bg-slate-900 p-4">
-    <h2 class="text-lg font-semibold">{{.GameTitle}}</h2>
+    <div class="flex min-w-0 items-center gap-2">
+      {{template "matchup-logos" (dict "AwayURL" .AwayLogo "HomeURL" .HomeLogo "Size" "h-6 w-6")}}
+      <h2 class="min-w-0 truncate text-lg font-semibold">{{.GameTitle}}</h2>
+    </div>
 
     <!-- Injuries -->
     <div class="mt-4">
@@ -748,20 +754,24 @@
       <div class="mt-2 space-y-3">
         {{range .Injuries}}
           <div class="rounded-lg border border-slate-800 bg-slate-950/40 p-3">
-            <h4 class="text-xs font-medium text-slate-300">{{.Team}}</h4>
+            <div class="flex items-center gap-2">
+              {{template "team-logo" (dict "URL" .LogoURL "Size" "h-4 w-4")}}
+              <h4 class="text-xs font-medium text-slate-300">{{.Team}}</h4>
+            </div>
             {{if .Injuries}}
               <ul class="mt-2 space-y-1.5">
                 {{range .Injuries}}
-                  <li class="flex items-center justify-between text-xs">
-                    <div class="flex items-center gap-2">
-                      <span class="rounded bg-slate-800 px-1.5 py-0.5 text-[10px] font-semibold text-slate-300">{{.Position}}</span>
+                  <li class="flex items-center justify-between gap-2 text-xs">
+                    <div class="flex min-w-0 items-center gap-2">
+                      {{template "player-portrait" (dict "URL" .HeadshotURL "Initials" .Initials "Size" "h-6 w-6" "TextSize" "text-[10px]")}}
+                      <span class="shrink-0 rounded bg-slate-800 px-1.5 py-0.5 text-[10px] font-semibold text-slate-300">{{.Position}}</span>
                       {{if .AthleteID}}
-                        <a href="/research?player_id={{.AthleteID}}" class="font-medium text-slate-200 hover:text-sky-400">{{.FullName}}</a>
+                        <a href="/research?player_id={{.AthleteID}}" class="min-w-0 truncate font-medium text-slate-200 hover:text-sky-400">{{.FullName}}</a>
                       {{else}}
-                        <span class="font-medium text-slate-200">{{.FullName}}</span>
+                        <span class="min-w-0 truncate font-medium text-slate-200">{{.FullName}}</span>
                       {{end}}
                     </div>
-                    <div class="flex items-center gap-2 text-right text-slate-400">
+                    <div class="flex shrink-0 items-center gap-2 text-right text-slate-400">
                       {{if .Detail}}<span class="text-[11px] text-slate-500">{{.Detail}}</span>{{end}}
                       <span class="rounded px-1.5 py-0.5 text-[10px] font-medium bg-amber-950/60 text-amber-300 border border-amber-800/60">{{.Status}}</span>
                     </div>
@@ -790,13 +800,14 @@
       {{if .Matches}}
         <div class="mt-3 space-y-2">
           {{range .Matches}}
-            <div class="flex items-center justify-between rounded-lg border border-slate-800 bg-slate-950/40 px-3 py-2 text-xs">
+            <div class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-800 bg-slate-950/40 px-3 py-2 text-xs">
               <div class="min-w-0">
                 <span class="font-medium text-slate-200">{{.OddsName}}</span>
                 {{if .Team}}<span class="text-slate-500">({{.Team}})</span>{{end}}
               </div>
-              <div class="flex items-center gap-2">
+              <div class="flex shrink-0 items-center gap-2">
                 {{if .Matched}}
+                  {{template "player-portrait" (dict "URL" .HeadshotURL "Initials" .Initials "Size" "h-6 w-6" "TextSize" "text-[10px]")}}
                   <span class="text-slate-400">
                     &rarr; <a href="/research?player_id={{.ESPNAthleteID}}" class="text-sky-400 hover:underline">{{.AthleteName}} ({{.Position}})</a>
                   </span>
@@ -885,13 +896,17 @@
   <div class="rounded-xl border border-slate-800 bg-slate-900 p-4">
     <!-- Header -->
     <div class="flex items-start justify-between gap-3">
-      <div>
-        <h2 class="text-lg font-semibold">{{.Name}}</h2>
-        <p class="text-xs text-slate-400">
-          {{if .Team}}{{.Team}}{{end}} {{if .Position}}· {{.Position}}{{end}}
-        </p>
+      <div class="flex min-w-0 items-center gap-3">
+        {{template "player-portrait" (dict "URL" .HeadshotURL "Initials" .Initials "Size" "h-12 w-12" "TextSize" "text-sm")}}
+        <div class="min-w-0">
+          <h2 class="truncate text-lg font-semibold">{{.Name}}</h2>
+          <p class="mt-0.5 flex items-center gap-1.5 text-xs text-slate-400">
+            {{template "team-logo" (dict "URL" .TeamLogo "Size" "h-4 w-4")}}
+            <span>{{if .Team}}{{.Team}}{{end}}{{if and .Team .Position}} &middot; {{end}}{{if .Position}}{{.Position}}{{end}}</span>
+          </p>
+        </div>
       </div>
-      <div class="rounded-full border border-slate-700 bg-slate-800 px-2.5 py-1 text-xs font-medium text-slate-300">
+      <div class="shrink-0 rounded-full border border-slate-700 bg-slate-800 px-2.5 py-1 text-xs font-medium text-slate-300">
         {{.GamesPlayed}} GP
       </div>
     </div>
