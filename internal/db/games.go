@@ -50,6 +50,8 @@ type Game struct {
 	AwayName     string
 	HomeESPNID   string
 	AwayESPNID   string
+	HomeLogo     *string
+	AwayLogo     *string
 	Kickoff      time.Time
 	Status       GameStatus
 	VenueID      *string
@@ -68,9 +70,9 @@ type Game struct {
 // gameColumns is the column list every game query scans, in scanGame order.
 const gameColumns = `
 	id, week_id, odds_event_id, home_team, away_team, home_name, away_name,
-	home_espn_id, away_espn_id, kickoff_utc, status, venue_id, venue_name,
-	is_indoor, temp_f, wind_mph, wind_gust_mph, precip_in, home_score,
-	away_score, injuries_json, updated_at`
+	home_espn_id, away_espn_id, home_logo, away_logo, kickoff_utc, status,
+	venue_id, venue_name, is_indoor, temp_f, wind_mph, wind_gust_mph, precip_in,
+	home_score, away_score, injuries_json, updated_at`
 
 // UpsertGame inserts a game, or updates the fields the slate sync owns when
 // they changed. A rerun with the same data leaves the row and its updated_at
@@ -83,9 +85,10 @@ func (s *Store) UpsertGame(ctx context.Context, game Game) (Game, error) {
 	_, err := s.conn().ExecContext(ctx, `
 		INSERT INTO games (
 			id, week_id, home_team, away_team, home_name, away_name,
-			home_espn_id, away_espn_id, kickoff_utc, status, venue_id,
-			venue_name, is_indoor, home_score, away_score, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			home_espn_id, away_espn_id, home_logo, away_logo, kickoff_utc,
+			status, venue_id, venue_name, is_indoor, home_score, away_score,
+			updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (id) DO UPDATE SET
 			week_id = excluded.week_id,
 			home_team = excluded.home_team,
@@ -94,6 +97,8 @@ func (s *Store) UpsertGame(ctx context.Context, game Game) (Game, error) {
 			away_name = excluded.away_name,
 			home_espn_id = excluded.home_espn_id,
 			away_espn_id = excluded.away_espn_id,
+			home_logo = excluded.home_logo,
+			away_logo = excluded.away_logo,
 			kickoff_utc = excluded.kickoff_utc,
 			status = excluded.status,
 			venue_id = excluded.venue_id,
@@ -109,6 +114,8 @@ func (s *Store) UpsertGame(ctx context.Context, game Game) (Game, error) {
 			OR games.away_name IS NOT excluded.away_name
 			OR games.home_espn_id IS NOT excluded.home_espn_id
 			OR games.away_espn_id IS NOT excluded.away_espn_id
+			OR games.home_logo IS NOT excluded.home_logo
+			OR games.away_logo IS NOT excluded.away_logo
 			OR games.kickoff_utc IS NOT excluded.kickoff_utc
 			OR games.status IS NOT excluded.status
 			OR games.venue_id IS NOT excluded.venue_id
@@ -124,6 +131,8 @@ func (s *Store) UpsertGame(ctx context.Context, game Game) (Game, error) {
 		game.AwayName,
 		game.HomeESPNID,
 		game.AwayESPNID,
+		nullableString(game.HomeLogo),
+		nullableString(game.AwayLogo),
 		formatTimestamp(game.Kickoff),
 		game.Status,
 		nullableString(game.VenueID),
@@ -322,11 +331,48 @@ func (s *Store) SetGameInjuries(ctx context.Context, gameID, injuriesJSON string
 	return false, nil
 }
 
+// TeamLogos returns the most recent non-empty logo URL for each team
+// abbreviation stored in games.
+func (s *Store) TeamLogos(ctx context.Context) (map[string]string, error) {
+	rows, err := s.conn().QueryContext(ctx, `
+		SELECT team, logo FROM (
+			SELECT home_team AS team, home_logo AS logo, kickoff_utc
+			FROM games
+			WHERE home_team != '' AND home_logo IS NOT NULL AND home_logo != ''
+			UNION ALL
+			SELECT away_team AS team, away_logo AS logo, kickoff_utc
+			FROM games
+			WHERE away_team != '' AND away_logo IS NOT NULL AND away_logo != ''
+		)
+		ORDER BY kickoff_utc DESC`)
+	if err != nil {
+		return nil, fmt.Errorf("team logos: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	logos := make(map[string]string)
+	for rows.Next() {
+		var team, logo string
+		if err := rows.Scan(&team, &logo); err != nil {
+			return nil, fmt.Errorf("team logos: %w", err)
+		}
+		if _, ok := logos[team]; !ok {
+			logos[team] = logo
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("team logos: %w", err)
+	}
+	return logos, nil
+}
+
 // scanGame reads the columns every game query selects, in order.
 func scanGame(row rowScanner) (Game, error) {
 	var (
 		game        Game
 		oddsEventID sql.NullString
+		homeLogo    sql.NullString
+		awayLogo    sql.NullString
 		kickoff     string
 		status      string
 		venueID     sql.NullString
@@ -350,6 +396,8 @@ func scanGame(row rowScanner) (Game, error) {
 		&game.AwayName,
 		&game.HomeESPNID,
 		&game.AwayESPNID,
+		&homeLogo,
+		&awayLogo,
 		&kickoff,
 		&status,
 		&venueID,
@@ -377,6 +425,8 @@ func scanGame(row rowScanner) (Game, error) {
 	}
 
 	game.OddsEventID = nullableStringPtr(oddsEventID)
+	game.HomeLogo = nullableStringPtr(homeLogo)
+	game.AwayLogo = nullableStringPtr(awayLogo)
 	game.Kickoff = kickoffTime
 	game.Status = GameStatus(status)
 	game.VenueID = nullableStringPtr(venueID)

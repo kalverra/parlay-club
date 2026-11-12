@@ -812,3 +812,54 @@ func optionTeams(group board.LineGroup) []string {
 	}
 	return teams
 }
+
+func TestLogosAndHeadshots(t *testing.T) {
+	t.Parallel()
+
+	g := game("401", at(t, 8, 13, 0))
+	g.AwayLogo = new("https://a.espncdn.com/mia.png")
+	g.HomeLogo = new("https://a.espncdn.com/buf.png")
+
+	roster := []db.RosterPlayer{
+		{
+			AthleteID:   "3918298",
+			Team:        "BUF",
+			FullName:    "Josh Allen",
+			NormName:    "josh allen",
+			Position:    "QB",
+			HeadshotURL: "https://a.espncdn.com/allen.png",
+		},
+		{
+			AthleteID: "4241463",
+			Team:      "BUF",
+			FullName:  "James Cook",
+			NormName:  "james cook",
+			Position:  "RB",
+		},
+	}
+	rows := []db.Odds{
+		odds("401", "fanduel", "PASS_YDS", "BUF", "Josh Allen", "OVER", new(250.5), -110),
+		odds("401", "fanduel", "RUSH_YDS", "BUF", "James Cook", "OVER", new(65.5), -110),
+		odds("401", "fanduel", "REC_YDS", "MIA", "Unmatched Player", "OVER", new(45.5), -110),
+	}
+
+	built := board.Build([]db.Game{g}, rows, roster, "fanduel", nil, at(t, 7, 12, 0))
+
+	cards := board.Slates([]db.Game{g}, built, roster, board.Query{Now: at(t, 8, 10, 0)})
+	require.Len(t, cards, 1)
+	assert.Equal(t, "https://a.espncdn.com/mia.png", cards[0].AwayLogo)
+	assert.Equal(t, "https://a.espncdn.com/buf.png", cards[0].HomeLogo)
+
+	detail := board.Detail(g, built, board.Query{Category: board.CategoryPassing})
+	require.Len(t, detail.Players, 1)
+	assert.Equal(t, "https://a.espncdn.com/allen.png", detail.Players[0].HeadshotURL)
+	assert.Equal(t, "https://a.espncdn.com/allen.png", detail.Players[0].Lines[0].Options[0].HeadshotURL)
+
+	rushing := board.Detail(g, built, board.Query{Category: board.CategoryRushing})
+	require.Len(t, rushing.Players, 1)
+	assert.Empty(t, rushing.Players[0].HeadshotURL)
+
+	receiving := board.Detail(g, built, board.Query{Category: board.CategoryReceiving})
+	require.Len(t, receiving.Players, 1)
+	assert.Empty(t, receiving.Players[0].HeadshotURL)
+}

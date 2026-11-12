@@ -21,6 +21,8 @@ func testSlateGame(week db.Week) db.Game {
 		AwayName:   "Miami Dolphins",
 		HomeESPNID: "2",
 		AwayESPNID: "15",
+		HomeLogo:   new("https://a.espncdn.com/i/teamlogos/nfl/500/buf.png"),
+		AwayLogo:   new("https://a.espncdn.com/i/teamlogos/nfl/500/mia.png"),
 		Kickoff:    time.Date(2026, time.November, 8, 18, 0, 0, 0, time.UTC),
 		Status:     db.GameScheduled,
 		VenueID:    new("3915"),
@@ -151,4 +153,45 @@ func TestGameByIDReportsAMissingGame(t *testing.T) {
 
 	_, err := store.GameByID(t.Context(), "401772001")
 	require.ErrorIs(t, err, db.ErrGameNotFound)
+}
+
+func TestTeamLogos(t *testing.T) {
+	t.Parallel()
+
+	store, _ := openTestStore(t)
+	week8 := createTestWeek(t, store, 8)
+	week9 := createTestWeek(t, store, 9)
+
+	empty, err := store.TeamLogos(t.Context())
+	require.NoError(t, err)
+	assert.Empty(t, empty)
+
+	// Earlier game has an older logo for BUF and no logo for KC.
+	_, err = store.UpsertGame(t.Context(), db.Game{
+		ID:         "401772000",
+		WeekID:     week8.ID,
+		HomeTeam:   "BUF",
+		AwayTeam:   "KC",
+		HomeName:   "Buffalo Bills",
+		AwayName:   "Kansas City Chiefs",
+		HomeESPNID: "2",
+		AwayESPNID: "12",
+		HomeLogo:   new("https://a.espncdn.com/old-buf.png"),
+		AwayLogo:   new(""),
+		Kickoff:    time.Date(2026, time.November, 1, 18, 0, 0, 0, time.UTC),
+		Status:     db.GameFinal,
+		UpdatedAt:  time.Date(2026, time.November, 1, 22, 0, 0, 0, time.UTC),
+	})
+	require.NoError(t, err)
+
+	// Later game updates BUF's logo and provides MIA's logo.
+	_, err = store.UpsertGame(t.Context(), testSlateGame(week9))
+	require.NoError(t, err)
+
+	logos, err := store.TeamLogos(t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{
+		"BUF": "https://a.espncdn.com/i/teamlogos/nfl/500/buf.png",
+		"MIA": "https://a.espncdn.com/i/teamlogos/nfl/500/mia.png",
+	}, logos)
 }

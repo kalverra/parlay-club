@@ -14,7 +14,7 @@ import (
 )
 
 // latestSchemaVersion is the version the last migration records.
-const latestSchemaVersion = 10
+const latestSchemaVersion = 11
 
 func TestMigrateFreshDatabase(t *testing.T) {
 	t.Parallel()
@@ -233,6 +233,49 @@ func TestMigration0010BugReports(t *testing.T) {
 	assert.Equal(t, "0123456789abcdef0123456789abcdef", token)
 	assert.Equal(t, "Button does not respond", description)
 	assert.Equal(t, "image/jpeg", screenshotMIME)
+}
+
+func TestMigration0011LogosPortraits(t *testing.T) {
+	t.Parallel()
+
+	database := openTestDB(t)
+	require.NoError(t, db.Migrate(t.Context(), database))
+
+	_, err := database.ExecContext(t.Context(), `
+		INSERT INTO weeks (id, season, season_type, week_num)
+		VALUES (2026209, 2026, 2, 9);
+		INSERT INTO games (
+			id, week_id, home_team, away_team, home_name, away_name,
+			home_espn_id, away_espn_id, home_logo, away_logo, kickoff_utc,
+			status, is_indoor, updated_at
+		) VALUES (
+			'401772001', 2026209, 'BUF', 'MIA', 'Buffalo Bills', 'Miami Dolphins',
+			'2', '15', 'https://a.espncdn.com/buf.png', NULL, '2026-11-08T18:00:00Z',
+			'SCHEDULED', 0, '2026-11-07T12:00:00Z'
+		);
+		INSERT INTO roster_players (
+			athlete_id, team, espn_team_id, full_name, norm_name, position, updated_at
+		) VALUES (
+			'3918298', 'BUF', '2', 'Josh Allen', 'josh allen', 'QB', '2026-11-07T12:00:00Z'
+		);`)
+	require.NoError(t, err)
+
+	var (
+		homeLogo    sql.NullString
+		awayLogo    sql.NullString
+		headshotURL string
+	)
+	require.NoError(t, database.QueryRowContext(t.Context(),
+		"SELECT home_logo, away_logo FROM games WHERE id = '401772001'").
+		Scan(&homeLogo, &awayLogo))
+	assert.True(t, homeLogo.Valid)
+	assert.Equal(t, "https://a.espncdn.com/buf.png", homeLogo.String)
+	assert.False(t, awayLogo.Valid)
+
+	require.NoError(t, database.QueryRowContext(t.Context(),
+		"SELECT headshot_url FROM roster_players WHERE athlete_id = '3918298'").
+		Scan(&headshotURL))
+	assert.Empty(t, headshotURL)
 }
 
 // schemaVersion reads PRAGMA user_version, the migration runner's record of the

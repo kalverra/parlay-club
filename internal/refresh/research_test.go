@@ -131,7 +131,12 @@ func TestOpeningSameGameTwiceWithinCacheWindowSpendsCreditsOnce(t *testing.T) {
 
 	espnClient := &fakeESPNResearch{
 		rosters: map[string][]espn.RosterPlayer{
-			"2":  {{ID: "3918298", FullName: "Josh Allen", Position: "QB"}},
+			"2": {{
+				ID:          "3918298",
+				FullName:    "Josh Allen",
+				Position:    "QB",
+				HeadshotURL: "https://a.espncdn.com/allen.png",
+			}},
 			"15": {{ID: "4241479", FullName: "Tua Tagovailoa", Position: "QB"}},
 		},
 	}
@@ -178,6 +183,10 @@ func TestOpeningSameGameTwiceWithinCacheWindowSpendsCreditsOnce(t *testing.T) {
 	require.Len(t, oddsRows, 1)
 	assert.Equal(t, "Josh Allen", oddsRows[0].PlayerName)
 	assert.Equal(t, "BUF", oddsRows[0].Team, "resolved team via player matching")
+
+	allen, err := store.RosterPlayerByID(t.Context(), "3918298")
+	require.NoError(t, err)
+	assert.Equal(t, "https://a.espncdn.com/allen.png", allen.HeadshotURL)
 
 	// 2. Open again within the 2-hour cache window (1 hour later).
 	clock.Advance(1 * time.Hour)

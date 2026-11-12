@@ -136,20 +136,21 @@ func (s Sort) Label() string {
 // Row is one selection a person can add to their slip. The fields after Text
 // are what the add-leg form posts.
 type Row struct {
-	GameID     string
-	Market     string
-	Team       string
-	PlayerName string
-	PlayerID   string
-	Position   string
-	Side       string
-	Line       *float64
-	Odds       int
-	Category   Category
-	Window     Window
-	Kickoff    time.Time
-	Text       string
-	Picked     int64
+	GameID      string
+	Market      string
+	Team        string
+	PlayerName  string
+	PlayerID    string
+	Position    string
+	HeadshotURL string
+	Side        string
+	Line        *float64
+	Odds        int
+	Category    Category
+	Window      Window
+	Kickoff     time.Time
+	Text        string
+	Picked      int64
 }
 
 // GameCard is one game on the slate: the matchup, its kickoff, the game lines
@@ -160,6 +161,8 @@ type GameCard struct {
 	Venue    string
 	Away     string
 	Home     string
+	AwayLogo string
+	HomeLogo string
 	Kickoff  time.Time
 	Lines    GameLines
 	Props    int
@@ -212,11 +215,12 @@ type LineGroup struct {
 // PlayerGroup is one player's card in a prop tab: who they are and the lines
 // they carry across markets. Receiving yards and receptions share a card.
 type PlayerGroup struct {
-	Name     string
-	PlayerID string
-	Position string
-	Team     string
-	Lines    []LineGroup
+	Name        string
+	PlayerID    string
+	Position    string
+	HeadshotURL string
+	Team        string
+	Lines       []LineGroup
 }
 
 // GameDetail is the open game's header, its tabs, and the rows of the active
@@ -312,21 +316,22 @@ func Build(
 		group := groups[key]
 		game := byGame[group.gameID]
 		line, price := selectionPrice(group.rows, homeBook)
-		playerID, position := matchPlayer(roster, group.player, group.team)
+		playerID, position, headshotURL := matchPlayer(roster, group.player, group.team)
 		rows = append(rows, Row{
-			GameID:     group.gameID,
-			Market:     group.market,
-			Team:       group.team,
-			PlayerName: group.player,
-			PlayerID:   playerID,
-			Position:   position,
-			Side:       group.side,
-			Line:       line,
-			Odds:       price,
-			Category:   categoryFor(group.market),
-			Window:     windowFor(game.Kickoff),
-			Kickoff:    game.Kickoff,
-			Text:       rowText(group.market, group.team, group.player, group.side, line),
+			GameID:      group.gameID,
+			Market:      group.market,
+			Team:        group.team,
+			PlayerName:  group.player,
+			PlayerID:    playerID,
+			Position:    position,
+			HeadshotURL: headshotURL,
+			Side:        group.side,
+			Line:        line,
+			Odds:        price,
+			Category:    categoryFor(group.market),
+			Window:      windowFor(game.Kickoff),
+			Kickoff:     game.Kickoff,
+			Text:        rowText(group.market, group.team, group.player, group.side, line),
 		})
 	}
 
@@ -519,11 +524,11 @@ func marketLabel(market string) string {
 }
 
 // matchPlayer finds the roster athlete for a prop row's player name and team,
-// returning its ID and position. A name on the row's own team wins over the
-// same name on another team.
-func matchPlayer(roster []db.RosterPlayer, name, team string) (string, string) {
+// returning its ID, position, and headshot URL. A name on the row's own team
+// wins over the same name on another team.
+func matchPlayer(roster []db.RosterPlayer, name, team string) (string, string, string) {
 	if name == "" {
-		return "", ""
+		return "", "", ""
 	}
 	want := normalize(name)
 	var fallback *db.RosterPlayer
@@ -533,16 +538,16 @@ func matchPlayer(roster []db.RosterPlayer, name, team string) (string, string) {
 			continue
 		}
 		if team == "" || player.Team == team {
-			return player.AthleteID, player.Position
+			return player.AthleteID, player.Position, player.HeadshotURL
 		}
 		if fallback == nil {
 			fallback = player
 		}
 	}
 	if fallback == nil {
-		return "", ""
+		return "", "", ""
 	}
-	return fallback.AthleteID, fallback.Position
+	return fallback.AthleteID, fallback.Position, fallback.HeadshotURL
 }
 
 // StartedCount counts the games that had kicked off by now, so the slate can
@@ -605,14 +610,16 @@ func Slates(games []db.Game, rows []Row, roster []db.RosterPlayer, q Query) []Ga
 // cardFor shapes one game and its built rows into a slate card.
 func cardFor(game db.Game, rows []Row) GameCard {
 	card := GameCard{
-		ID:      game.ID,
-		Matchup: game.AwayTeam + " @ " + game.HomeTeam,
-		Venue:   db.StringValue(game.VenueName),
-		Away:    game.AwayTeam,
-		Home:    game.HomeTeam,
-		Kickoff: game.Kickoff,
-		Lines:   gameLines(game, rows),
-		Props:   propCount(rows),
+		ID:       game.ID,
+		Matchup:  game.AwayTeam + " @ " + game.HomeTeam,
+		Venue:    db.StringValue(game.VenueName),
+		Away:     game.AwayTeam,
+		Home:     game.HomeTeam,
+		AwayLogo: db.StringValue(game.AwayLogo),
+		HomeLogo: db.StringValue(game.HomeLogo),
+		Kickoff:  game.Kickoff,
+		Lines:    gameLines(game, rows),
+		Props:    propCount(rows),
 	}
 	card.HasProps = card.Props > 0
 	return card
@@ -995,11 +1002,12 @@ func playerGroups(game db.Game, rows []Row, mode Sort) []PlayerGroup {
 		playerRows := byPlayer[key]
 		first := playerRows[0]
 		players = append(players, PlayerGroup{
-			Name:     first.PlayerName,
-			PlayerID: first.PlayerID,
-			Position: first.Position,
-			Team:     first.Team,
-			Lines:    lineGroups(game, playerRows, mode),
+			Name:        first.PlayerName,
+			PlayerID:    first.PlayerID,
+			Position:    first.Position,
+			HeadshotURL: first.HeadshotURL,
+			Team:        first.Team,
+			Lines:       lineGroups(game, playerRows, mode),
 		})
 	}
 	sortPlayers(players, mode)
