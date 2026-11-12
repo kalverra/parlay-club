@@ -191,5 +191,5 @@ template patterns)
 - [x] Render team logos and player portraits on `research-game` (matchup header, injury team headers, injury rows,
       matched players), `research-player` (header portrait and team logo), and `game-props` player headers, with
       handler/render tests.
-- [ ] Docs: update `docs/concepts/slips.md` to describe team logos and player portraits across the pick board, slip
+- [x] Docs: update `docs/concepts/slips.md` to describe team logos and player portraits across the pick board, slip
       legs, and research views.

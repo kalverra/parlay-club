@@ -4,7 +4,7 @@ title: Slips
 type: concept
 summary: How a group builds shared parlays from the slate, with slate scopes and deadline isolation, multi-slip week views, sibling slip switching, one-off slip creation, the hub's next-step banner and deadline, the game-first pick board and its pick dock, members, legs, votes, quick-add, create-slip defaults, grading, the editing and locking rules, and research.
 tags: [slips, weeks, legs, members, locking, grading, results, activity, groups, games, quick-add, nfelo, props, autocomplete, research, next-step, hub, pick-board, slate, drilldown, tabs, search, dock, tray, votes, voting, slate-scopes, deadlines, multi-slip]
-sources: [internal/slips/slips.go, internal/slips/rules.go, internal/slips/next.go, internal/board/board.go, internal/db/slips.go, internal/db/legs.go, internal/db/votes.go, internal/db/odds.go, internal/db/players.go, internal/db/weeks.go, internal/db/games.go, internal/web/games.go, internal/web/pick.go, internal/web/slips.go, internal/web/home.go, internal/web/research.go, web/templates/week.html, web/static/app.js]
+sources: [internal/slips/slips.go, internal/slips/rules.go, internal/slips/next.go, internal/board/board.go, internal/db/slips.go, internal/db/legs.go, internal/db/votes.go, internal/db/odds.go, internal/db/players.go, internal/db/weeks.go, internal/db/games.go, internal/web/games.go, internal/web/pick.go, internal/web/slips.go, internal/web/home.go, internal/web/research.go, web/templates/media.html, web/templates/week.html, web/static/app.js]
 last_verified: 2026-11-12
 ---
 
@@ -154,10 +154,13 @@ line, American odds, and a display `selection` generated from those fields.
 - A leg needs a game, except on a slip for a past week, where the game is optional and `OTHER` is the usual market.
 - `OTHER` legs skip the analyzer and grade by hand.
 
-The slip panel draws each leg as a row: the selection, then the odds, a "Research &rarr;" link when the leg has a
-resolved player or game, the model chip, and the result. A `SPREAD` or `ML` leg with a fresh nfelo model shows it beside
-the odds, from that leg's team's side: `nfelo -5.0` for a spread or `nfelo 76%` for a moneyline. Totals and props show
-no chip, and a missing row, a fetch older than 72 hours, or a live game leaves it off.
+The slip panel draws each leg as a row: a leading media badge when available, then the selection, the odds, a "Research
+&rarr;" link when the leg has a resolved player or game, the model chip, and the result. A matched player leg shows the
+player's portrait (or the team logo if no headshot URL is stored, or player initials if neither image exists); a
+team-scoped leg shows the team logo; a game `TOTAL` leg shows paired away and home logos; and an unlinked custom or
+historical leg stays plain text. A `SPREAD` or `ML` leg with a fresh nfelo model shows it beside the odds, from that
+leg's team's side: `nfelo -5.0` for a spread or `nfelo 76%` for a moneyline. Totals and props show no chip, and a
+missing row, a fetch older than 72 hours, or a live game leaves it off.
 
 `db.Store.CreateLeg` starts every leg `PENDING` and treats an odds value of 0 as -110.
 
@@ -193,13 +196,14 @@ matchup, a team, a venue, or a roster player on the game. The input debounces at
 the response pushes the full page URL so `q` survives a refresh or a shared link. Window chips filter by Eastern-time
 kickoff (Thursday, Sunday morning before noon, Sunday early before 4, Sunday late before 7, Sunday night, Monday); a
 Thursday- or Monday-night game that lands on the next day in UTC still reads by its local Eastern day. A chip shows how
-many rows it covers and appears only when it has rows. Each card shows the matchup, venue, kickoff, spread, total,
-moneyline, and either "Explore N props" or "No props yet", and the open game is highlighted. Cards are links: a plain
-`href` to the full page and an `hx-get` that swaps `#pick-body` and pushes the full page URL.
+many rows it covers and appears only when it has rows. Each card shows paired away and home team logos beside the
+matchup, venue, kickoff, spread, total, moneyline, and either "Explore N props" or "No props yet", and the open game is
+highlighted. Cards are links: a plain `href` to the full page and an `hx-get` that swaps `#pick-body` and pushes the
+full page URL.
 
-A card opens the detail: a pinned header with the matchup, kickoff, venue, a Research link, and an "All games" back
-link, then a horizontal tab bar and the sort chips. The header and tab bar stay below the top bar while the rows scroll,
-and the tab bar scrolls sideways on a phone with no visible scrollbar.
+A card opens the detail: a pinned header with paired matchup logos, the matchup, kickoff, venue, a Research link, and an
+"All games" back link, then a horizontal tab bar and the sort chips. The header and tab bar stay below the top bar while
+the rows scroll, and the tab bar scrolls sideways on a phone with no visible scrollbar.
 
 The tabs are Lines, Passing, Rushing, Receiving, TDs, and Kicking. Team totals fold into Lines, so they have no tab of
 their own. A tab appears only when it has rows or is open, and its badge counts the rows it holds, so the Lines count
@@ -211,9 +215,10 @@ The Lines tab shows the game lines first (spread, moneyline, total) and then tea
 with its sides beside each other: away before home on a spread or moneyline, Over before Under on a total or a prop, and
 the one Yes on an anytime touchdown. A side with no stored price leaves one full-width button instead of a dead half.
 
-A prop tab clusters that tab's rows by player. One card carries the player's name, position, and team, and every market
-that player has in the tab sits under it, so Receiving Yards and Receptions share a card. Prop buttons read short ("Over
-245.5", "Yes") because the card already names the player; the pick they post is unchanged.
+A prop tab clusters that tab's rows by player. One card carries the player's portrait (or initials), name, position, and
+team (with team logo), and every market that player has in the tab sits under it, so Receiving Yards and Receptions
+share a card. Prop buttons stay text-only and read short ("Over 245.5", "Yes") because the card already names the
+player; the pick they post is unchanged.
 
 The search text also filters the open game's rows. Sorts are player (default), odds (shortest price first), and line
 (highest line first). Kickoff and category drop out because one game has one kickoff. Tab and sort chips swap
@@ -269,7 +274,7 @@ removed anywhere updates the count and price without a reload.
 
 `GET /games` is a 303 to the active group's week, so old links still land somewhere useful. `GET /games/{id}/props`
 without `?slip=` still renders the standalone prop partial for one game, with team totals and player props grouped under
-each athlete and links to game research and player research.
+each athlete (with player portrait) and links to game research and player research.
 
 ## Votes
 
@@ -292,14 +297,18 @@ transaction, so the tally drops with them and rejoining starts clean. Votes are 
 The Research page (`GET /research`) offers game injury reports and player hit bars. It opens from a player, prop, leg,
 or game link. It is not a bottom-bar tab.
 
-- **Game research (`GET /research/games/{id}`):** fetches ESPN summary injuries on demand and displays injuries filtered
-  to key positions (`QB`, `RB`, `WR`, `TE`, `LT`, `OT`, `C`, `CB`, `S`). A player-match section lists sportsbook prop
-  names against matched ESPN roster athletes, with a manual match form (`POST /research/matches`) to fix unmatched names
-  or corrections.
-- **Player research (`GET /research/players/{espnID}`):** fetches the player's ESPN game log on demand and displays
-  last-5 hit bars (green over the line, red under), callouts for the last-5 median and season mean, and total games
-  played this season. Opening from a slip leg or prop pill preselects that market and line; otherwise it picks the
-  player's primary prop line or the first available market.
+- **Game research (`GET /research/games/{id}`):** fetches ESPN summary injuries on demand, shows paired matchup logos in
+  the header, and displays injuries filtered to key positions (`QB`, `RB`, `WR`, `TE`, `LT`, `OT`, `C`, `CB`, `S`) with
+  team logos on team headers and player portraits on injury rows. A player-match section lists sportsbook prop names
+  against matched ESPN roster athletes (with player portraits when matched), plus a manual match form
+  (`POST /research/matches`) to fix unmatched names or corrections.
+- **Player research (`GET /research/players/{espnID}`):** fetches the player's ESPN game log on demand, shows the
+  player's portrait and team logo in the header, and displays last-5 hit bars (green over the line, red under), callouts
+  for the last-5 median and season mean, and total games played this season. Opening from a slip leg or prop pill
+  preselects that market and line; otherwise it picks the player's primary prop line or the first available market.
+- **Media fallbacks:** Team logos and player portraits (`web/templates/media.html`) load lazily from stored ESPN CDN
+  URLs. When a URL is missing or fails to load in the browser, `app.js` hides the broken image and reveals the initials
+  or text fallback badge.
 - **Responsive layout:** Phone and desktop screens keep Research in a single column, reached from the page or leg that
   names the player or game.
 
