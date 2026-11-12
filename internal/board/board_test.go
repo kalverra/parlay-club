@@ -433,6 +433,14 @@ func TestSlatesFilterByWindowAndQuery(t *testing.T) {
 	require.Len(t, byTeam, 1)
 	assert.Equal(t, "early", byTeam[0].ID)
 
+	byMatchup := board.Slates(games, built, roster, board.Query{Q: "MIA @ BUF", Now: now})
+	require.Len(t, byMatchup, 1)
+	assert.Equal(t, "early", byMatchup[0].ID)
+
+	byNames := board.Slates(games, built, roster, board.Query{Q: "Dolphins at Buffalo", Now: now})
+	require.Len(t, byNames, 1)
+	assert.Equal(t, "early", byNames[0].ID)
+
 	byVenue := board.Slates(games, built, roster, board.Query{Q: "highmark", Now: now})
 	require.Len(t, byVenue, 1)
 	assert.Equal(t, "early", byVenue[0].ID)

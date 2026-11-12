@@ -347,7 +347,7 @@ new tests).
 
 ### Phase 5: Finish search, sorts, and lazy prompts
 
-- [ ] Scope `q` to the open game in the detail, add the odds and line sorts and their tests, and keep the slate search
+- [x] Scope `q` to the open game in the detail, add the odds and line sorts and their tests, and keep the slate search
       at matchup, team, venue, and roster player.
 - [ ] Move the unloaded-props prompt onto the slate and the open detail, move the week empty states to the slate, and
       add the test that browsing never syncs while "Load them" syncs one game.
