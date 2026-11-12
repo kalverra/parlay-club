@@ -90,8 +90,16 @@ func TestHealthz(t *testing.T) {
 	t.Parallel()
 
 	recorder := httptest.NewRecorder()
-	newMux(http.NotFoundHandler(), http.NotFoundHandler(), newTestHandlers(), nil, passthrough, nil, nil).
-		ServeHTTP(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/healthz", nil))
+	newMux(
+		http.NotFoundHandler(),
+		http.NotFoundHandler(),
+		http.NotFoundHandler(),
+		newTestHandlers(),
+		nil,
+		passthrough,
+		nil,
+		nil,
+	).ServeHTTP(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/healthz", nil))
 
 	assert.Equal(t, http.StatusOK, recorder.Code)
 	assert.Equal(t, "ok", recorder.Body.String())
@@ -104,7 +112,16 @@ func TestMuxProtectsShell(t *testing.T) {
 	shell := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	})
-	mux := newMux(shell, http.NotFoundHandler(), newTestHandlers(), nil, passthrough, nil, nil)
+	mux := newMux(
+		shell,
+		http.NotFoundHandler(),
+		http.NotFoundHandler(),
+		newTestHandlers(),
+		nil,
+		passthrough,
+		nil,
+		nil,
+	)
 
 	recorder := httptest.NewRecorder()
 	mux.ServeHTTP(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/games", nil))
@@ -119,7 +136,16 @@ func TestMuxServesStaticWithoutAuth(t *testing.T) {
 	static := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	})
-	mux := newMux(http.NotFoundHandler(), static, newTestHandlers(), nil, passthrough, nil, nil)
+	mux := newMux(
+		http.NotFoundHandler(),
+		static,
+		http.NotFoundHandler(),
+		newTestHandlers(),
+		nil,
+		passthrough,
+		nil,
+		nil,
+	)
 
 	recorder := httptest.NewRecorder()
 	mux.ServeHTTP(recorder, httptest.NewRequestWithContext(
@@ -130,6 +156,34 @@ func TestMuxServesStaticWithoutAuth(t *testing.T) {
 	))
 
 	assert.Equal(t, http.StatusNoContent, recorder.Code, "static files load on the login page")
+}
+
+func TestMuxServesScreenshotsWithoutAuth(t *testing.T) {
+	t.Parallel()
+
+	screenshots := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux := newMux(
+		http.NotFoundHandler(),
+		http.NotFoundHandler(),
+		screenshots,
+		newTestHandlers(),
+		nil,
+		passthrough,
+		nil,
+		nil,
+	)
+
+	recorder := httptest.NewRecorder()
+	mux.ServeHTTP(recorder, httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodGet,
+		"/screenshots/0123456789abcdef0123456789abcdef.jpg",
+		nil,
+	))
+
+	assert.Equal(t, http.StatusNoContent, recorder.Code, "capability screenshot URLs are public")
 }
 
 // newTestHandlers builds auth handlers that need no database or templates.
@@ -166,7 +220,16 @@ func TestMuxScopesShellToActiveGroup(t *testing.T) {
 		w.WriteHeader(http.StatusNoContent)
 	})
 	kicks := 0
-	mux := newMux(shell, http.NotFoundHandler(), handlers, nil, scope, func() { kicks++ }, nil)
+	mux := newMux(
+		shell,
+		http.NotFoundHandler(),
+		http.NotFoundHandler(),
+		handlers,
+		nil,
+		scope,
+		func() { kicks++ },
+		nil,
+	)
 
 	signed := httptest.NewRecorder()
 	cookies.SetSession(signed, user.ID)
@@ -639,4 +702,44 @@ func fakeOdds(t *testing.T) *httptest.Server {
 	}))
 	t.Cleanup(server.Close)
 	return server
+}
+
+func TestMuxProtectsBugReports(t *testing.T) {
+	t.Parallel()
+
+	shell := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux := newMux(
+		shell,
+		http.NotFoundHandler(),
+		http.NotFoundHandler(),
+		newTestHandlers(),
+		nil,
+		passthrough,
+		nil,
+		nil,
+	)
+
+	t.Run("rejects non-HTMX POST", func(t *testing.T) {
+		t.Parallel()
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/bug-reports", nil)
+		mux.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusForbidden, rec.Code)
+	})
+
+	t.Run("redirects unauthenticated HTMX POST to login", func(t *testing.T) {
+		t.Parallel()
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/bug-reports", nil)
+		req.Header.Set("Hx-Request", "true")
+		mux.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusOK, rec.Code)
+		assert.Equal(t, "/login", rec.Header().Get("Hx-Redirect"))
+	})
 }

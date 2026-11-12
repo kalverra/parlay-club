@@ -23,6 +23,7 @@ const (
 const (
 	defaultPort       = 8080
 	defaultDBPath     = "./data/parlay.db"
+	defaultGitHubRepo = "kalverra/parlay-club"
 	devSessionKey     = "dev-session-key-not-for-production"
 	minSessionKeySize = 32
 
@@ -43,6 +44,8 @@ type Config struct {
 	BaseURL            string
 	OddsAPIKey         string
 	TheOddsAPIKey      string
+	GitHubToken        string
+	GitHubRepo         string
 	LogLevel           zerolog.Level
 	Sandbox            bool
 }
@@ -78,6 +81,8 @@ func Load(env Env) (Config, error) {
 		BaseURL:            baseURLOr(env, port, prod),
 		OddsAPIKey:         oddsAPIKeyOr(env),
 		TheOddsAPIKey:      theOddsAPIKeyOr(env),
+		GitHubToken:        strings.TrimSpace(env("GITHUB_TOKEN")),
+		GitHubRepo:         gitHubRepoOr(env),
 		LogLevel:           levelOr(env, prod, &problems),
 		Sandbox:            sandbox,
 	}
@@ -198,4 +203,12 @@ func theOddsAPIKeyOr(env Env) string {
 		return env("ODDS_API_KEY")
 	}
 	return ""
+}
+
+// gitHubRepoOr returns the target GitHub repository, defaulting to kalverra/parlay-club.
+func gitHubRepoOr(env Env) string {
+	if repo := strings.TrimSpace(env("GITHUB_REPO")); repo != "" {
+		return repo
+	}
+	return defaultGitHubRepo
 }

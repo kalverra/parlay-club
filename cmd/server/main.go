@@ -18,6 +18,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/kalverra/parlay-club/internal/auth"
+	"github.com/kalverra/parlay-club/internal/bugs"
 	"github.com/kalverra/parlay-club/internal/config"
 	"github.com/kalverra/parlay-club/internal/db"
 	"github.com/kalverra/parlay-club/internal/groups"
@@ -140,6 +141,13 @@ func run() error {
 	groupHandlers := groups.NewHandlers(logger, store, auth.UserFrom, cookies, renderer)
 
 	stream := live.NewStream(hub, refresher.LiveWindow)
+	bugService := bugs.NewService(bugs.Deps{
+		Store:       store,
+		Repo:        cfg.GitHubRepo,
+		BaseURL:     cfg.BaseURL,
+		GitHubToken: cfg.GitHubToken,
+		Logger:      logger,
+	})
 	shell := web.NewWithDeps(web.Dependencies{
 		Logger:     logger,
 		Renderer:   renderer,
@@ -149,6 +157,7 @@ func run() error {
 		SetGroup:   cookies.SetGroup,
 		Store:      store,
 		Slips:      slipService,
+		Bugs:       bugService,
 		Stream:     stream,
 		Refresh:    refresher,
 		Now:        appNow,
@@ -159,6 +168,7 @@ func run() error {
 		Handler: newMux(
 			shell,
 			web.StaticHandler(),
+			web.ScreenshotHandler(store, logger),
 			handlers,
 			groupHandlers,
 			scope,
@@ -279,7 +289,7 @@ func newLogger(cfg config.Config, out io.Writer) zerolog.Logger {
 // plain forms. mountExtra adds dev-only routes behind those same checks; it may
 // be nil outside sandbox mode.
 func newMux(
-	shell, static http.Handler,
+	shell, static, screenshots http.Handler,
 	handlers *auth.Handlers,
 	groupHandlers *groups.Handlers,
 	scope func(http.Handler) http.Handler,
@@ -289,6 +299,7 @@ func newMux(
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", healthz)
 	mux.Handle("GET /static/{path...}", static)
+	mux.Handle("GET /screenshots/{file}", screenshots)
 	handlers.Routes(mux)
 
 	app := http.NewServeMux()

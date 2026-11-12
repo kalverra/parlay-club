@@ -1462,3 +1462,99 @@
   </div>
 </div>
 {{end}}
+
+{{define "bug-report-dialog"}}
+<dialog id="bug-report-dialog" class="leg-sheet" aria-label="Report a bug">
+  <div
+    class="rounded-t-2xl border border-slate-800 bg-slate-900 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-2xl sm:rounded-2xl"
+  >
+    <div class="flex items-center justify-between gap-3">
+      <h2 class="text-lg font-semibold">Report a bug</h2>
+      <button
+        type="button"
+        class="rounded-md border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800"
+        data-bug-dialog-close
+      >
+        Close
+      </button>
+    </div>
+    <div id="bug-report-body" class="mt-3">
+      <div id="bug-report-error" class="mb-3 empty:hidden"></div>
+      <form
+        id="bug-report-form"
+        class="space-y-3"
+        hx-post="/bug-reports"
+        hx-target="#bug-report-body"
+        hx-swap="innerHTML"
+        hx-disabled-elt="find button[type=submit]"
+      >
+        <input type="hidden" name="screenshot" id="bug-input-screenshot">
+        <input type="hidden" name="page_url" id="bug-input-page-url">
+        <input type="hidden" name="screen_size" id="bug-input-screen-size">
+        <input type="hidden" name="user_agent" id="bug-input-user-agent">
+        <div
+          id="bug-preview-slot"
+          class="hidden overflow-hidden rounded-lg border border-slate-800 bg-slate-950"
+        ></div>
+        <label class="block text-xs text-slate-400">
+          What broke or looks wrong?
+          <textarea
+            name="description"
+            id="bug-input-description"
+            required
+            rows="3"
+            placeholder="Describe what happened..."
+            class="mt-1 w-full rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-sky-500 focus:outline-none"
+          ></textarea>
+        </label>
+        <button
+          type="submit"
+          class="w-full rounded-lg bg-sky-600 px-3 py-2 text-sm font-semibold text-white hover:bg-sky-500 disabled:opacity-50"
+        >
+          Submit Bug Report
+        </button>
+      </form>
+    </div>
+  </div>
+</dialog>
+{{end}}
+
+{{define "bug-report-success"}}
+<div class="space-y-3" data-bug-report-success>
+  <div class="rounded-lg border border-emerald-800 bg-emerald-950/60 p-3 text-sm text-emerald-200">
+    <p class="font-semibold">Bug report submitted.</p>
+    {{if .IssueURL}}
+      <p class="mt-1 text-emerald-300">
+        Tracked on GitHub:
+        <a
+          href="{{.IssueURL}}"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="font-medium underline hover:text-emerald-100"
+        >
+          {{if .IssueNum}}Issue #{{.IssueNum}}{{else}}View issue{{end}}
+        </a>
+      </p>
+    {{else}}
+      <p class="mt-1 text-emerald-300">Saved locally for review.</p>
+    {{end}}
+  </div>
+  <button
+    type="button"
+    data-bug-dialog-close
+    class="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm font-medium text-slate-200 hover:bg-slate-700"
+  >
+    Done
+  </button>
+</div>
+{{end}}
+
+{{define "bug-report-error"}}
+<div
+  data-bug-report-error
+  role="alert"
+  class="rounded-lg border border-rose-800 bg-rose-950/60 p-3 text-sm text-rose-200"
+>
+  {{.Message}}
+</div>
+{{end}}

@@ -33,6 +33,8 @@ func TestLoadDevDefaults(t *testing.T) {
 	assert.Equal(t, "http://localhost:8080", cfg.BaseURL)
 	assert.Empty(t, cfg.OddsAPIKey)
 	assert.Empty(t, cfg.TheOddsAPIKey)
+	assert.Empty(t, cfg.GitHubToken)
+	assert.Equal(t, "kalverra/parlay-club", cfg.GitHubRepo)
 	assert.Equal(t, zerolog.DebugLevel, cfg.LogLevel)
 }
 
@@ -58,6 +60,8 @@ func TestLoadOverridesEveryValue(t *testing.T) {
 		"BASE_URL":             "https://parlay.example.com/",
 		"ODDS_API_KEY":         "odds-key",
 		"THE_ODDS_API_KEY":     "the-odds-key",
+		"GITHUB_TOKEN":         "  ghp_secret  ",
+		"GITHUB_REPO":          "  other/repo  ",
 		"LOG_LEVEL":            "warn",
 	}))
 	require.NoError(t, err)
@@ -71,6 +75,8 @@ func TestLoadOverridesEveryValue(t *testing.T) {
 	assert.Equal(t, "https://parlay.example.com", cfg.BaseURL, "the trailing slash is trimmed")
 	assert.Equal(t, "odds-key", cfg.OddsAPIKey)
 	assert.Equal(t, "the-odds-key", cfg.TheOddsAPIKey)
+	assert.Equal(t, "ghp_secret", cfg.GitHubToken)
+	assert.Equal(t, "other/repo", cfg.GitHubRepo)
 	assert.Equal(t, zerolog.WarnLevel, cfg.LogLevel)
 }
 
@@ -96,6 +102,8 @@ func TestLoadProdDefaults(t *testing.T) {
 	assert.Equal(t, "https://parlay.example.com", cfg.BaseURL)
 	assert.Empty(t, cfg.OddsAPIKey)
 	assert.Empty(t, cfg.TheOddsAPIKey)
+	assert.Empty(t, cfg.GitHubToken)
+	assert.Equal(t, "kalverra/parlay-club", cfg.GitHubRepo)
 	assert.Equal(t, zerolog.InfoLevel, cfg.LogLevel)
 }
 
@@ -287,4 +295,14 @@ func TestLoadOddsAPIKeysWithParlayAndOddsAPI(t *testing.T) {
 		assert.Equal(t, "parlay-key", cfg.OddsAPIKey)
 		assert.Equal(t, "the-odds-key", cfg.TheOddsAPIKey)
 	})
+}
+
+func TestLoadBlankGitHubRepoUsesDefault(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := config.Load(envFrom(map[string]string{
+		"GITHUB_REPO": "   ",
+	}))
+	require.NoError(t, err)
+	assert.Equal(t, "kalverra/parlay-club", cfg.GitHubRepo)
 }

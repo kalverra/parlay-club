@@ -4,8 +4,8 @@ title: Persistence
 type: concept
 summary: How one SQLite file holds every slip and every cached response, how Litestream restores and replicates it on Cloud Run, why only one process may write to it, and how the local sandbox keeps its own file and stage row.
 tags: [persistence, sqlite, litestream, gcs, backup, restore, cloud-run, single-instance, wal, sandbox]
-sources: [Dockerfile, deploy/entrypoint.sh, deploy/litestream.yml, internal/db/db.go, internal/sandbox/state.go, internal/sandbox/scenario.go, internal/sandbox/reset.go, internal/sandbox/seed.go, cmd/server/main.go, cmd/server/sandbox.go]
-last_verified: 2026-11-10
+sources: [Dockerfile, deploy/entrypoint.sh, deploy/litestream.yml, internal/db/db.go, internal/db/migrations/0010_bug_reports.sql, internal/sandbox/state.go, internal/sandbox/scenario.go, internal/sandbox/reset.go, internal/sandbox/seed.go, cmd/server/main.go, cmd/server/sandbox.go]
+last_verified: 2026-11-12
 ---
 
 # Persistence
@@ -31,8 +31,9 @@ and it must stay that way. Two instances would mean two writers on one file and 
 events published by the other. Keep shared state in SQLite or the hub, never in a second process. See
 [Live updates](live-updates.md) and [Groups](groups.md).
 
-Slips, users, groups, weeks, games, odds, the sync state, and the raw response archive all share this file. That is why
-Litestream backs up the archive for free. See [Response archive](archive.md).
+Slips, users, groups, weeks, games, odds, the sync state, bug reports (including capability-token screenshot blobs from
+migration `0010_bug_reports.sql`), and the raw response archive all share this file. That is why Litestream backs up
+both the domain data and the archive for free. See [Response archive](archive.md).
 
 ## The sandbox database
 
