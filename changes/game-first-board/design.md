@@ -293,7 +293,7 @@ new tests).
       rows. Keep the kickoff-window chips and the matchup search on the slate. Add `Page.Wide`, the `lg` grid, the
       phone drilldown and back link, the ET fallback time, and the scroll-restore handler. Link game cards with
       `hx-get` and a plain href fallback.
-- [ ] Docs: rewrite the pick board section in `docs/concepts/slips.md` and the pick board routes and parameters in
+- [x] Docs: rewrite the pick board section in `docs/concepts/slips.md` and the pick board routes and parameters in
       `docs/reference/routes.md`.
 
 ### Phase 2: Open a game with tabs and player clusters
