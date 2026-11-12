@@ -29,20 +29,22 @@ const partialsFile = "templates/partials.html"
 
 // partialFiles names the fragments the slip screen can render on its own.
 var partialFiles = map[string]string{
-	"group-list":      partialsFile,
-	"slip-panel":      partialsFile,
-	"slip-export":     partialsFile,
-	"slip-activity":   partialsFile,
-	"slip-payout":     partialsFile,
-	"leg-form":        partialsFile,
-	"leg-added":       partialsFile,
-	"game-props":      partialsFile,
-	"pick-body":       partialsFile,
-	"pick-row":        partialsFile,
-	"pick-tray":       partialsFile,
-	"pick-swap":       partialsFile,
-	"research-game":   partialsFile,
-	"research-player": partialsFile,
+	"group-list":        partialsFile,
+	"slip-panel":        partialsFile,
+	"slip-export":       partialsFile,
+	"slip-activity":     partialsFile,
+	"slip-payout":       partialsFile,
+	"leg-form":          partialsFile,
+	"leg-added":         partialsFile,
+	"game-props":        partialsFile,
+	"pick-body":         partialsFile,
+	"pick-detail":       partialsFile,
+	"pick-detail-empty": partialsFile,
+	"pick-row":          partialsFile,
+	"pick-tray":         partialsFile,
+	"pick-swap":         partialsFile,
+	"research-game":     partialsFile,
+	"research-player":   partialsFile,
 }
 
 // Renderer parses and runs the page templates. It is safe to use from several

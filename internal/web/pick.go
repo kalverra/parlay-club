@@ -76,7 +76,9 @@ type PickGameCardView struct {
 	Active          bool
 }
 
-// PickDetailView is the open game's header, chips, and rows.
+// PickDetailView is the open game's pinned header, its tab bar, and the rows
+// of the active tab. The Lines tab holds the game lines and the team totals; a
+// prop tab holds one card per player with that player's lines.
 type PickDetailView struct {
 	SlipID          int64
 	GameID          string
@@ -89,10 +91,26 @@ type PickDetailView struct {
 	Sort            string
 	BackHref        string
 	BackPushURL     string
-	Categories      []PickChip
+	Tabs            []PickChip
 	Sorts           []PickChip
-	GameGroups      []PickGameGroup
+	Lines           []PickLineGroupView
+	Players         []PickPlayerView
 	Empty           bool
+}
+
+// PickLineGroupView is one line and the sides a person can pick from it.
+type PickLineGroupView struct {
+	Label   string
+	Options []PickRowView
+}
+
+// PickPlayerView is one player's card in a prop tab. A player's markets share
+// the card, so Receiving Yards and Receptions sit together.
+type PickPlayerView struct {
+	Name     string
+	Position string
+	Team     string
+	Lines    []PickLineGroupView
 }
 
 // PickChip is one filter or sort link.
@@ -123,15 +141,6 @@ type PickRowView struct {
 	Matchup    string
 	AtLimit    bool
 	SwapURL    string
-}
-
-// PickGameGroup is one game's rows shown in the one-game view, with both sides
-// of each line beside each other.
-type PickGameGroup struct {
-	GameID     string
-	Matchup    string
-	KickoffISO string
-	Options    []PickRowView
 }
 
 // PickTrayView is the viewer's own picks and the one thing to do next.
@@ -197,6 +206,25 @@ func (h *slipHandlers) pickResults(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.renderPartial(w, "pick-body", data.Body)
+}
+
+// pickDetail returns the #pick-detail partial for a tab or sort change. It
+// leaves the slate alone, so its scroll and the open game stay put.
+func (h *slipHandlers) pickDetail(w http.ResponseWriter, r *http.Request) {
+	slip, _, _, ok := h.loadSlip(w, r, r.PathValue("id"))
+	if !ok {
+		return
+	}
+	data, err := h.pickPageData(r.Context(), slip, pickQuery(r, h.deps.now()))
+	if err != nil {
+		h.serverError(w, err)
+		return
+	}
+	if data.Body.Detail == nil {
+		h.renderPartial(w, "pick-detail-empty", nil)
+		return
+	}
+	h.renderPartial(w, "pick-detail", *data.Body.Detail)
 }
 
 // pickTray returns the tray partial.
@@ -353,28 +381,21 @@ func (h *slipHandlers) pickPageData(
 		Slate:    slate,
 	}
 	if card, ok := openByID[q.GameID]; ok {
-		detail := &PickDetailView{
-			SlipID:          slip.ID,
-			GameID:          card.ID,
-			Matchup:         card.Matchup,
-			Venue:           card.Venue,
-			KickoffISO:      kickoffISO(card.Kickoff),
-			KickoffFallback: kickoffFallback(card.Kickoff),
-			Search:          q.Q,
-			Category:        string(q.Category),
-			Sort:            string(q.Sort),
-			BackHref:        pickBackHref(slip.ID, q),
-			BackPushURL:     pickBackPushURL(slip.ID, q),
-			Categories:      categoryChips(slip.ID, rowsForGame(rows, q.GameID), q),
-			Sorts:           sortChips(slip.ID, q),
-		}
-		rowViews := make([]PickRowView, 0, len(result.Rows))
-		for _, row := range result.Rows {
-			rowViews = append(rowViews, pickRowView(slip.ID, row, gamesByID[row.GameID], atLimit, q))
-		}
-		detail.GameGroups = groupByGame(rowViews)
-		detail.Empty = len(rowViews) == 0
-		body.Detail = detail
+		game := gamesByID[card.ID]
+		model := board.Detail(game, rows, board.Query{
+			Q:        q.Q,
+			Category: q.Category,
+			Sort:     q.Sort,
+			Now:      now,
+		})
+		detail := pickDetailView(slip.ID, game, model, q, atLimit)
+		body.Detail = &detail
+		body.Category = string(model.Category)
+		body.Sort = string(model.Sort)
+		selfQuery := q
+		selfQuery.Category = model.Category
+		selfQuery.Sort = model.Sort
+		body.SelfURL = pickHref(slip.ID, selfQuery, "", "")
 	}
 	return PickPage{
 		SlipID:   slip.ID,
@@ -384,15 +405,117 @@ func (h *slipHandlers) pickPageData(
 	}, nil
 }
 
-// rowsForGame returns one game's built rows for its own category counts.
-func rowsForGame(rows []board.Row, gameID string) []board.Row {
-	gameRows := make([]board.Row, 0)
-	for _, row := range rows {
-		if row.GameID == gameID {
-			gameRows = append(gameRows, row)
-		}
+// pickDetailView maps one game's detail model to the template's fields. The
+// links keep the resolved tab and sort, so changing one keeps the other.
+func pickDetailView(
+	slipID int64,
+	game db.Game,
+	model board.GameDetail,
+	q board.Query,
+	atLimit bool,
+) PickDetailView {
+	linkQuery := q
+	linkQuery.Category = model.Category
+	linkQuery.Sort = model.Sort
+
+	view := PickDetailView{
+		SlipID:          slipID,
+		GameID:          model.Game.ID,
+		Matchup:         model.Game.Matchup,
+		Venue:           model.Game.Venue,
+		KickoffISO:      kickoffISO(model.Game.Kickoff),
+		KickoffFallback: kickoffFallback(model.Game.Kickoff),
+		Search:          q.Q,
+		Category:        string(model.Category),
+		Sort:            string(model.Sort),
+		BackHref:        pickBackHref(slipID, q),
+		BackPushURL:     pickBackPushURL(slipID, q),
 	}
-	return gameRows
+	for _, tab := range model.Tabs {
+		view.Tabs = append(view.Tabs, detailChip(
+			slipID, linkQuery, "cat", string(tab.Category), tab.Label, tab.Count, tab.Active))
+	}
+	for _, option := range board.DetailSorts {
+		view.Sorts = append(view.Sorts, detailChip(
+			slipID, linkQuery, "sort", string(option), option.Label(), 0, option == model.Sort))
+	}
+	for _, group := range model.Lines {
+		view.Lines = append(view.Lines, pickLineGroupView(slipID, game, group, atLimit, linkQuery, false))
+	}
+	for _, player := range model.Players {
+		card := PickPlayerView{
+			Name:     player.Name,
+			Position: player.Position,
+			Team:     player.Team,
+		}
+		for _, group := range player.Lines {
+			card.Lines = append(card.Lines, pickLineGroupView(slipID, game, group, atLimit, linkQuery, true))
+		}
+		view.Players = append(view.Players, card)
+	}
+	view.Empty = len(view.Lines) == 0 && len(view.Players) == 0
+	return view
+}
+
+// detailChip builds one tab or sort link for the open game's detail.
+func detailChip(
+	slipID int64,
+	q board.Query,
+	key, value, label string,
+	count int,
+	active bool,
+) PickChip {
+	return PickChip{
+		Value:   value,
+		Label:   label,
+		Href:    detailHref(slipID, q, key, value),
+		PushURL: detailPushURL(slipID, q, key, value),
+		Count:   count,
+		Active:  active,
+	}
+}
+
+// pickLineGroupView maps one line's sides to the template. A prop line shows a
+// short option such as "Over 245.5" because the player card already says whose
+// line it is.
+func pickLineGroupView(
+	slipID int64,
+	game db.Game,
+	group board.LineGroup,
+	atLimit bool,
+	q board.Query,
+	prop bool,
+) PickLineGroupView {
+	view := PickLineGroupView{Label: lineGroupLabel(group)}
+	for _, row := range group.Options {
+		option := pickRowView(slipID, row, game, atLimit, q)
+		if prop {
+			option.Text = propOptionText(row)
+		}
+		view.Options = append(view.Options, option)
+	}
+	return view
+}
+
+// lineGroupLabel names a line above its sides. A team total reads with its team
+// so the Lines tab does not show two anonymous totals.
+func lineGroupLabel(group board.LineGroup) string {
+	if group.Market == "TEAM_TOTAL" && group.Team != "" {
+		return group.Team + " team total"
+	}
+	return group.Label
+}
+
+// propOptionText is a prop side's short label inside a player card.
+func propOptionText(row board.Row) string {
+	if row.Market == "ANYTIME_TD" || row.Side == "YES" {
+		return "Yes"
+	}
+	text := titleSide(row.Side)
+	if row.Line != nil {
+		text += " " + formatFloat(*row.Line)
+	}
+	return text
 }
 
 // pickGameCardView maps one slate card to the template's fields.
@@ -594,35 +717,6 @@ func (h *slipHandlers) trayFrom(
 	return view, nil
 }
 
-// categoryChips builds the category filter links.
-func categoryChips(slipID int64, rows []board.Row, q board.Query) []PickChip {
-	counts := make(map[board.Category]int)
-	for _, row := range rows {
-		counts[row.Category]++
-	}
-	chips := []PickChip{{
-		Value:   "",
-		Label:   "All",
-		Href:    pickHref(slipID, q, "cat", ""),
-		PushURL: pickPushURL(slipID, q, "cat", ""),
-		Active:  q.Category == "",
-	}}
-	for _, category := range board.Categories {
-		if counts[category] == 0 && q.Category != category {
-			continue
-		}
-		chips = append(chips, PickChip{
-			Value:   string(category),
-			Label:   category.Label(),
-			Href:    pickHref(slipID, q, "cat", string(category)),
-			PushURL: pickPushURL(slipID, q, "cat", string(category)),
-			Count:   counts[category],
-			Active:  q.Category == category,
-		})
-	}
-	return chips
-}
-
 // windowChips builds the kickoff-window filter links.
 func windowChips(slipID int64, rows []board.Row, q board.Query) []PickChip {
 	counts := make(map[board.Window]int)
@@ -647,25 +741,6 @@ func windowChips(slipID int64, rows []board.Row, q board.Query) []PickChip {
 			PushURL: pickPushURL(slipID, q, "win", string(window)),
 			Count:   counts[window],
 			Active:  q.Window == window,
-		})
-	}
-	return chips
-}
-
-// sortChips builds the sort links.
-func sortChips(slipID int64, q board.Query) []PickChip {
-	sort := q.Sort
-	if sort == "" {
-		sort = board.SortKickoff
-	}
-	chips := make([]PickChip, 0, len(board.Sorts))
-	for _, option := range board.Sorts {
-		chips = append(chips, PickChip{
-			Value:   string(option),
-			Label:   option.Label(),
-			Href:    pickHref(slipID, q, "sort", string(option)),
-			PushURL: pickPushURL(slipID, q, "sort", string(option)),
-			Active:  sort == option,
 		})
 	}
 	return chips
@@ -705,6 +780,46 @@ func pickPushURL(slipID int64, q board.Query, key, value string) string {
 	return strings.Replace(
 		pickHref(slipID, q, key, value),
 		"/pick/results",
+		"/pick",
+		1,
+	)
+}
+
+// detailHref builds a detail URL that changes one tab or sort and keeps the
+// rest of the query, so the open game and its search stay put.
+func detailHref(slipID int64, q board.Query, key, value string) string {
+	values := url.Values{}
+	if q.Q != "" {
+		values.Set("q", q.Q)
+	}
+	set := func(name, current string) {
+		if name == key {
+			if value != "" {
+				values.Set(name, value)
+			}
+			return
+		}
+		if current != "" {
+			values.Set(name, current)
+		}
+	}
+	set("cat", string(q.Category))
+	set("sort", string(q.Sort))
+	set("win", string(q.Window))
+	set("game", q.GameID)
+	encoded := values.Encode()
+	target := fmt.Sprintf("/slips/%d/pick/detail", slipID)
+	if encoded != "" {
+		target += "?" + encoded
+	}
+	return target
+}
+
+// detailPushURL is the full page URL a tab or sort chip pushes.
+func detailPushURL(slipID int64, q board.Query, key, value string) string {
+	return strings.Replace(
+		detailHref(slipID, q, key, value),
+		"/pick/detail",
 		"/pick",
 		1,
 	)
@@ -793,41 +908,6 @@ func swapURL(slipID int64, row PickRowView, q board.Query) string {
 	return fmt.Sprintf("/slips/%d/pick/swap?%s", slipID, values.Encode())
 }
 
-// groupByGame pairs both sides of each line for the one-game view.
-func groupByGame(rows []PickRowView) []PickGameGroup {
-	groups := make([]PickGameGroup, 0)
-	index := make(map[string]int)
-	for _, row := range rows {
-		key := pairKey(row)
-		position, ok := index[key]
-		if !ok {
-			position = len(groups)
-			index[key] = position
-			groups = append(groups, PickGameGroup{
-				GameID:     row.GameID,
-				Matchup:    row.Matchup,
-				KickoffISO: row.KickoffISO,
-			})
-		}
-		groups[position].Options = append(groups[position].Options, row)
-	}
-	return groups
-}
-
-// pairKey groups the two sides of one line together.
-func pairKey(row PickRowView) string {
-	switch row.Market {
-	case "SPREAD", "ML":
-		return row.GameID + "|" + row.Market
-	case "TOTAL":
-		return row.GameID + "|TOTAL|" + row.Line
-	case "TEAM_TOTAL":
-		return row.GameID + "|TEAM_TOTAL|" + row.Team + "|" + row.Line
-	default:
-		return row.GameID + "|" + row.Market + "|" + row.PlayerName + "|" + row.Line
-	}
-}
-
 // pickRowFromLeg shapes a row for the add or remove response. The leg carries
 // every field the add form posted, so no board rebuild is needed.
 func (h *slipHandlers) pickRowFromLeg(ctx context.Context, slip db.Slip, leg db.Leg) PickRowView {
@@ -882,7 +962,7 @@ func pickQuery(r *http.Request, now time.Time) board.Query {
 		q.Window = ""
 	}
 	if !knownSort(q.Sort) {
-		q.Sort = board.SortKickoff
+		q.Sort = ""
 	}
 	return q
 }
@@ -905,7 +985,7 @@ func knownSort(sort board.Sort) bool {
 	if sort == "" {
 		return true
 	}
-	return slices.Contains(board.Sorts, sort)
+	return slices.Contains(board.DetailSorts, sort)
 }
 
 // legsForUser returns one person's legs.
