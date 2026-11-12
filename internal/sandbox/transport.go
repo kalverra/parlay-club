@@ -16,6 +16,14 @@ import (
 // callers can treat this as a hard scenario failure.
 var ErrNoResponse = errors.New("sandbox replay has no response")
 
+// FallbackHeader marks a response the registry synthesized as an empty body
+// because the scenario captures no data for that optional request. A captured
+// response never carries it.
+const FallbackHeader = "X-Sandbox-Replay"
+
+// FallbackEmpty is the FallbackHeader value for an empty fallback body.
+const FallbackEmpty = "empty"
+
 // credentialKey names the query parameters that identify a caller rather than
 // a resource. They are ignored when matching so a synthetic key still replays
 // a captured request.
@@ -70,6 +78,9 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 	saved, ok := t.registry.responses[key]
 	if !ok {
+		saved, ok = t.registry.fallback(key)
+	}
+	if !ok {
 		return nil, fmt.Errorf(
 			"%w: %s %s at stage %q",
 			ErrNoResponse,
@@ -79,13 +90,18 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 		)
 	}
 
+	header := saved.header.Clone()
+	if saved.empty {
+		header.Set(FallbackHeader, FallbackEmpty)
+	}
+
 	return &http.Response{
 		Status:        fmt.Sprintf("%d %s", saved.status, http.StatusText(saved.status)),
 		StatusCode:    saved.status,
 		Proto:         "HTTP/1.1",
 		ProtoMajor:    1,
 		ProtoMinor:    1,
-		Header:        saved.header.Clone(),
+		Header:        header,
 		Body:          io.NopCloser(bytes.NewReader(saved.body)),
 		ContentLength: int64(len(saved.body)),
 		Request:       req,

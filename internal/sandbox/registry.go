@@ -83,6 +83,29 @@ var week9PropAthletes = []struct {
 	{Name: "Evan McPherson", AthleteID: "4360234", Slug: "mcpherson"},
 }
 
+// Fallback answers an optional request whose exact response the scenario does
+// not capture. Its file is a provider-shaped empty body, so an ordinary screen
+// renders its empty state instead of failing the refresh. An exact fixture
+// always wins, so a fallback can never mask a captured response.
+type Fallback struct {
+	// Name identifies the fallback in errors, tests, and docs.
+	Name string
+	// Stage is the scenario stage that selects this fallback.
+	Stage Stage
+	// Method is the HTTP method the request must use.
+	Method string
+	// URL is the request pattern the fallback answers. A '*' matches one path
+	// segment, as in path.Match. Query parameters are ignored.
+	URL string
+	// File is the empty body's path in the registry's filesystem.
+	File string
+	// Header is the response header the fallback returns. The registry adds a
+	// content type from the file extension when this leaves it empty.
+	Header http.Header
+	// Note explains why the scenario leaves this surface empty.
+	Note string
+}
+
 // Fixture describes one registered replay response.
 type Fixture struct {
 	// Name identifies the fixture in errors, tests, and docs.
@@ -111,6 +134,7 @@ type Fixture struct {
 // NewRegistry or Week9; it is read-only after construction and safe to share.
 type Registry struct {
 	fixtures  []Fixture
+	fallbacks []emptyResponse
 	responses map[requestKey]response
 }
 
@@ -119,12 +143,31 @@ type response struct {
 	status int
 	header http.Header
 	body   []byte
+	// empty marks a fallback body the scenario synthesized instead of
+	// capturing. The transport labels it with FallbackHeader.
+	empty bool
+}
+
+// emptyResponse is one loaded fallback: the path pattern it answers and the
+// empty body it returns.
+type emptyResponse struct {
+	stage       Stage
+	method      string
+	host        string
+	pathPattern string
+	response    response
 }
 
 // NewRegistry validates every fixture, reads its file, and builds the lookup
 // table. A missing file, a duplicate request, or an incomplete fixture is an
 // error, so the scenario cannot start with a partial replay set.
 func NewRegistry(fsys fs.FS, fixtures []Fixture) (*Registry, error) {
+	return NewRegistryWithFallbacks(fsys, fixtures, nil)
+}
+
+// NewRegistryWithFallbacks adds empty fallbacks for optional requests the
+// scenario does not capture. An exact fixture always wins over a fallback.
+func NewRegistryWithFallbacks(fsys fs.FS, fixtures []Fixture, fallbacks []Fallback) (*Registry, error) {
 	if fsys == nil {
 		return nil, errors.New("sandbox: nil fixture filesystem")
 	}
@@ -134,6 +177,7 @@ func NewRegistry(fsys fs.FS, fixtures []Fixture) (*Registry, error) {
 
 	registry := &Registry{
 		fixtures:  make([]Fixture, 0, len(fixtures)),
+		fallbacks: make([]emptyResponse, 0, len(fallbacks)),
 		responses: make(map[requestKey]response, len(fixtures)),
 	}
 	for _, fixture := range fixtures {
@@ -181,7 +225,81 @@ func NewRegistry(fsys fs.FS, fixtures []Fixture) (*Registry, error) {
 			body:   body,
 		}
 	}
+
+	for _, fallback := range fallbacks {
+		empty, err := loadFallback(fsys, fallback)
+		if err != nil {
+			return nil, err
+		}
+		for _, existing := range registry.fallbacks {
+			if existing.stage == empty.stage &&
+				existing.method == empty.method &&
+				existing.host == empty.host &&
+				existing.pathPattern == empty.pathPattern {
+				return nil, fmt.Errorf(
+					"fallback %q: another fallback already answers %s %s at stage %q",
+					fallback.Name,
+					fallback.Method,
+					fallback.URL,
+					fallback.Stage,
+				)
+			}
+		}
+		registry.fallbacks = append(registry.fallbacks, empty)
+	}
 	return registry, nil
+}
+
+// loadFallback validates one fallback and reads its empty body.
+func loadFallback(fsys fs.FS, fallback Fallback) (emptyResponse, error) {
+	location, err := fallback.validate()
+	if err != nil {
+		return emptyResponse{}, err
+	}
+
+	body, err := fs.ReadFile(fsys, fallback.File)
+	if err != nil {
+		return emptyResponse{}, fmt.Errorf("fallback %q: read %s: %w", fallback.Name, fallback.File, err)
+	}
+
+	header := fallback.Header.Clone()
+	if header == nil {
+		header = make(http.Header)
+	}
+	if header.Get("Content-Type") == "" {
+		header.Set("Content-Type", contentTypeFor(fallback.File))
+	}
+
+	return emptyResponse{
+		stage:       fallback.Stage,
+		method:      strings.ToUpper(fallback.Method),
+		host:        strings.ToLower(location.Host),
+		pathPattern: location.EscapedPath(),
+		response: response{
+			status: http.StatusOK,
+			header: header,
+			body:   body,
+			empty:  true,
+		},
+	}, nil
+}
+
+// fallback returns the empty response for a request the registry does not
+// answer exactly. The first matching pattern wins.
+func (r *Registry) fallback(key requestKey) (response, bool) {
+	for _, empty := range r.fallbacks {
+		if empty.stage != key.stage || empty.method != key.method || empty.host != key.host {
+			continue
+		}
+		matched, err := path.Match(empty.pathPattern, key.path)
+		if err != nil {
+			continue // NewRegistryWithFallbacks already rejected a bad pattern.
+		}
+		if matched {
+			return empty.response, true
+		}
+	}
+	return response{}, false
 }
 
 // Fixtures returns the registered fixtures in registration order. The returned
@@ -229,6 +347,42 @@ func (f Fixture) validate() (*url.URL, error) {
 	return location, nil
 }
 
+// validate checks a fallback and returns its parsed location pattern.
+func (f Fallback) validate() (*url.URL, error) {
+	switch {
+	case f.Name == "":
+		return nil, errors.New("sandbox: fallback has no name")
+	case f.Stage == "":
+		return nil, fmt.Errorf("fallback %q: no stage", f.Name)
+	case f.Method == "":
+		return nil, fmt.Errorf("fallback %q: no method", f.Name)
+	case f.URL == "":
+		return nil, fmt.Errorf("fallback %q: no URL", f.Name)
+	case f.File == "":
+		return nil, fmt.Errorf("fallback %q: no file", f.Name)
+	case strings.TrimSpace(f.Note) == "":
+		return nil, fmt.Errorf("fallback %q: an empty response needs a note", f.Name)
+	}
+
+	location, err := url.Parse(f.URL)
+	if err != nil {
+		return nil, fmt.Errorf("fallback %q: parse URL: %w", f.Name, err)
+	}
+	if location.Scheme != "http" && location.Scheme != "https" {
+		return nil, fmt.Errorf("fallback %q: URL scheme %q is not HTTP", f.Name, location.Scheme)
+	}
+	if location.Host == "" {
+		return nil, fmt.Errorf("fallback %q: URL has no host", f.Name)
+	}
+	if location.Path == "" {
+		return nil, fmt.Errorf("fallback %q: URL has no path", f.Name)
+	}
+	if _, err := path.Match(location.EscapedPath(), ""); err != nil {
+		return nil, fmt.Errorf("fallback %q: path %q is not a match pattern: %w", f.Name, location.Path, err)
+	}
+	return location, nil
+}
+
 // contentTypeFor guesses the saved response's content type from its extension.
 func contentTypeFor(file string) string {
 	switch strings.ToLower(path.Ext(file)) {
@@ -248,7 +402,63 @@ func Week9(fsys fs.FS) (*Registry, error) {
 	if err != nil {
 		return nil, err
 	}
-	return NewRegistry(fsys, fixtures)
+	return NewRegistryWithFallbacks(fsys, fixtures, week9Fallbacks())
+}
+
+// week9Fallbacks answer optional research and prop requests for games the
+// scenario does not capture. The bodies are provider-shaped empty payloads, so
+// opening another slate game renders its normal empty state instead of failing
+// the sync. The featured game's exact fixtures still win.
+func week9Fallbacks() []Fallback {
+	empties := []struct {
+		name   string
+		url    string
+		file   string
+		header http.Header
+		note   string
+	}{
+		{
+			name:   "props-empty",
+			url:    odds.DefaultBaseURL + "/props",
+			file:   "internal/ingest/odds/testdata/props_empty.json",
+			header: creditHeader(614, 6, 3),
+			note:   "An empty prop board for a slate game the scenario does not cover; only the featured game has captured props.",
+		},
+		{
+			name: "summary-empty",
+			url:  espn.DefaultBaseURL + "/summary",
+			file: "internal/ingest/espn/testdata/summary_empty.json",
+			note: "An empty summary for a slate game the scenario does not cover, so its research page shows no injuries.",
+		},
+		{
+			name: "roster-empty",
+			url:  espn.DefaultBaseURL + "/teams/*/roster",
+			file: "internal/ingest/espn/testdata/roster_empty.json",
+			note: "An empty roster for a team the scenario does not capture; only the featured game's two teams have real rosters.",
+		},
+		{
+			name: "gamelog-empty",
+			url:  espn.DefaultWebBaseURL + "/athletes/*/gamelog",
+			file: "internal/ingest/espn/testdata/gamelog_empty.json",
+			note: "An empty game log for an athlete the scenario does not capture, so player research shows no games.",
+		},
+	}
+
+	fallbacks := make([]Fallback, 0, len(Stages())*len(empties))
+	for _, stage := range Stages() {
+		for _, empty := range empties {
+			fallbacks = append(fallbacks, Fallback{
+				Name:   empty.name + "-" + string(stage),
+				Stage:  stage,
+				Method: http.MethodGet,
+				URL:    empty.url,
+				File:   empty.file,
+				Header: empty.header,
+				Note:   empty.note,
+			})
+		}
+	}
+	return fallbacks
 }
 
 // week9Fixtures is the complete registry. The event and line fixtures were

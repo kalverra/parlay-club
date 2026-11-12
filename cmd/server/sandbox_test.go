@@ -327,6 +327,28 @@ func TestSandboxFeaturedGameResearchReplaysWithoutAMiss(t *testing.T) {
 	assert.Positive(t, log.GamesPlayed, "player research has last-5 games")
 }
 
+func TestSandboxUncapturedGameResearchFallsBackToEmpty(t *testing.T) {
+	t.Parallel()
+
+	_, store, runtime := openSandbox(t, &live.Hub{}, sandboxCookies())
+
+	// Miami at Detroit is on the slate but is not the featured game, so the
+	// scenario answers its optional research with labeled empty bodies.
+	const gameID = "401873042"
+	require.NoError(t, runtime.refresher.SyncGameProps(t.Context(), gameID))
+	rows, err := store.OddsForGame(t.Context(), gameID)
+	require.NoError(t, err)
+	for _, row := range rows {
+		assert.Empty(t, row.PlayerName, "a game without captured props shows no player props")
+	}
+
+	require.NoError(t, runtime.refresher.SyncGameResearch(t.Context(), gameID))
+	game, err := store.GameByID(t.Context(), gameID)
+	require.NoError(t, err)
+	require.NotNil(t, game.InjuriesJSON)
+	assert.Equal(t, "[]", *game.InjuriesJSON, "a game without a captured summary shows no injuries")
+}
+
 func TestSandboxRestartRestoresStageAndClock(t *testing.T) {
 	t.Parallel()
 

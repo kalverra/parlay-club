@@ -134,9 +134,10 @@ feature has to respect.
   fresh seed, and the controls page reads personas and groups from the database.
 - Replayed credit headers are static per response, so a repeated call sees the same balance. Both balances stay above
   the floors, which is what the guards need.
-- Only the featured game's card and research surface is registered: its prop board, both rosters, its summary, and the
-  game logs of its props players. Opening another game's props or research fails visibly; the scenario is not a tour of
-  every props surface.
+- Only the featured game's card and research surface is captured: its prop board, both rosters, its summary, and the
+  game logs of its props players. Every other game answers props, summary, roster, and game log requests with a labeled
+  empty fallback, so opening it renders the normal empty state instead of a replay miss. A request outside those four
+  surfaces still fails visibly; the scenario is not a tour of every props surface.
 - With the outsider, the shared invite join works but leaves Dex in their own group, so switching back to Dex after
   joining hides the shared slip again until a reset. That is deliberate for the control and is not the ordinary member
   experience.
@@ -145,8 +146,8 @@ feature has to respect.
 
 - Replace the three hand-derived stage scoreboards with a generator over the captured slate, so a fixture reshuffle is
   one command instead of three edited JSON files.
-- Register prop boards for every slate game, or make an unregistered prop board fall back to a labeled empty state, so
-  props research outside the featured game does not fail closed.
+- Register prop boards for every slate game so props research outside the featured game has real lines instead of the
+  labeled empty fallback.
 - Give a failed stage a recovery path better than a full reset: verify the rebuild before saving the stage row, or add a
   per-stage rollback.
 - Embed the fixtures with `go:embed` so a packaged binary can serve the sandbox outside the checkout.

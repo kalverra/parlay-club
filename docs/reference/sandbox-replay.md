@@ -2,8 +2,8 @@
 id: sandbox-replay
 title: Sandbox replay
 type: reference
-summary: The fail-closed HTTP transport and named week 9 response registry behind the local Sunday sandbox, the requests they answer, which fixtures are real captures versus derived snapshots, and how startup, reset, stages, seeded people, and scripted grades replay them.
-tags: [sandbox, replay, fixtures, testing, espn, weather, parlay-api, nfelo, provenance, offline, startup, clock, reset, seeding, personas, stages, grading]
+summary: The fail-closed HTTP transport and named week 9 response registry behind the local Sunday sandbox, the requests they answer or leave as labeled empty fallbacks, which fixtures are real captures versus derived snapshots, and how startup, reset, stages, seeded people, and scripted grades replay them.
+tags: [sandbox, replay, fixtures, fallbacks, testing, espn, weather, parlay-api, nfelo, provenance, offline, startup, clock, reset, seeding, personas, stages, grading]
 sources: [internal/sandbox/registry.go, internal/sandbox/transport.go, internal/sandbox/scenario.go, internal/sandbox/state.go, internal/sandbox/reset.go, internal/sandbox/seed.go, internal/sandbox/plan.go, internal/sandbox/sandbox_test.go, internal/sandbox/state_test.go, cmd/server/sandbox.go, cmd/server/main.go, internal/config/config.go, internal/ingest/espn/testdata/README.md, internal/ingest/odds/testdata/README.md, internal/ingest/weather/testdata/README.md, internal/ingest/nfelo/testdata/README.md]
 last_verified: 2026-11-11
 ---
@@ -24,7 +24,8 @@ their `*http.Client` changes.
   key passed to `odds.NewClient` therefore never has to match the key in a capture.
 - The transport has no base transport and no network fallback. An unregistered request returns `sandbox.ErrNoResponse`
   with the method, credential-free URL, and stage. Missing files, duplicate requests, and incomplete fixtures fail
-  `NewRegistry` before startup.
+  `NewRegistry` before startup. The registry may also hold fallbacks for optional research surfaces; a fallback answers
+  only when no exact fixture matches, and its response carries `X-Sandbox-Replay: empty`.
 - Responses carry the saved status, headers, and body bytes. Each call gets a fresh body reader, so the transport is
   safe for the concurrent source goroutines.
 - Nothing here touches the response archive. The sandbox client's transport is the replay transport, not an
@@ -146,11 +147,29 @@ The four indoor week 9 venues need no forecast. `forecast_highmark.json` remains
 9 sandbox does not register it because Buffalo plays at U.S. Bank Stadium, an indoor venue. The registry holds 88
 fixtures: the 22 morning responses plus a 22-response set for each of the three later stages.
 
-The featured game is the one game whose whole card and research surface is replayed. Opening its props syncs both
-rosters, so its prop board resolves real players instead of logging a replay miss, and the research page and player
+The featured game is the one game whose whole card and research surface is captured. Opening its props syncs both
+rosters, so its prop board resolves real players instead of showing an empty state, and the research page and player
 pages have an injury report and last-5 game logs. Joe Mixon has prop lines but is not on the captured Bengals roster, so
-his lines stay unmatched and exercise the manual-match flow. Every other game still fails closed on props and research,
-which is the intended visible error.
+his lines stay unmatched and exercise the manual-match flow.
+
+### Empty fallbacks
+
+Every other slate game answers its optional research and props requests with an empty fallback instead of failing the
+sync. A fallback is a request pattern, not a capture. It applies only when no exact fixture matches, and the transport
+marks its response with `X-Sandbox-Replay: empty`, so a debugging session can tell the two apart.
+
+| Fallback | Request pattern | Body | Why |
+| --- | --- | --- | --- |
+| `props-empty` | `GET parlay-api.com/.../props` | `[]` | Only the featured game has a captured prop board. The empty array still carries credit headers above the props floor. |
+| `summary-empty` | `GET site.api.espn.com/.../summary` | `{}` | A game outside the featured one has no captured injury report. |
+| `roster-empty` | `GET site.api.espn.com/.../teams/*/roster` | `{"athletes":[]}` | Only the featured game's two teams have captured rosters. |
+| `gamelog-empty` | `GET site.web.api.espn.com/.../athletes/*/gamelog` | `{}` | Only the featured prop board's players have captured game logs. |
+
+The paths use `path.Match` patterns, so `*` matches one path segment and query parameters are ignored. Each stage
+registers the same four fallbacks. The game card then renders its normal "No prop lines available yet." message and the
+research page shows no injuries instead of logging a replay miss. A request outside these four surfaces still fails
+closed, and the sandbox tests keep the featured game's captures non-empty so a client change or fixture drift cannot
+hide behind a fallback.
 
 ### Provenance
 
@@ -174,7 +193,9 @@ normal event, line, and lazy prop paths enforce their floors instead of silently
 2. Add a `sandbox.Fixture` to `morningFixtures`, `week9Weather`, or `week9StageScoreboards` with the exact method, URL,
    query, stage, and provenance. A derived file must explain what it was built from in `Note`. A stage scoreboard is
    picked up by `stageFixtures`, which reuses the morning supporting responses under that stage.
-3. Run `go test ./internal/sandbox`. The tests drive the real clients, so a changed query, week, team name, or kickoff
+3. If the request is an optional surface that most games do not capture, add a `sandbox.Fallback` to `week9Fallbacks`
+   instead, with a provider-shaped empty body and a note saying why the scenario leaves it empty.
+4. Run `go test ./internal/sandbox`. The tests drive the real clients, so a changed query, week, team name, or kickoff
    fails visibly instead of falling through to a provider.
 
 ## Tests
@@ -190,7 +211,8 @@ normal event, line, and lazy prop paths enforce their floors instead of silently
 - the featured prop board parses through Parlay API's flat `/props` shape;
 - the featured game's rosters parse, its summary yields key-position injuries, and its four prop-board players have game
   logs with games played;
-- an unknown week, an unregistered The Odds API request, an unknown stage, and a missing fixture file all fail closed.
+- another game's props, summary, rosters, and game logs return labeled empty bodies instead of replay misses, while an
+  unknown week, an unregistered The Odds API request, an unknown stage, and a missing fixture file all fail closed.
 
 `internal/sandbox/state_test.go` covers the one-row stage record, rejects a stage the registry does not know, and checks
 the scenario clock and every stage name and time. `cmd/server/sandbox_test.go` boots a fresh sandbox through the real
@@ -201,10 +223,11 @@ that manual edits and a stale failure backoff disappear; shows a sentinel normal
 post-commit week and slip signals; and proves the signed-in persona keeps a working session and shared group after
 reset. One server test opens the featured game the way a browser does: it syncs props, resolves Joe Burrow against the
 replayed roster, reads the injury report, and fetches his game log, so a missing research fixture fails the suite
-instead of only showing up in the logs.
+instead of only showing up in the logs. Another opens a non-featured game and checks that its props and research land as
+empty rather than failing the sync.
 
 For stages, the server tests select each target directly and in sequence, reset back to morning, and check that early
 loss settles the slip `LOST` while five legs stay pending, all-clear wins every leg with every Sunday game final, and
 Sunday completion makes all 14 games final. They exercise the HTTP stage route with real cookies and render the
-controls, pick board, and hub pages, reject unknown stages without changing rows, clock, or cookies, race a page-load kick
-against a stage change, and prove the stage route is absent outside sandbox mode.
+controls, pick board, and hub pages, reject unknown stages without changing rows, clock, or cookies, race a page-load
+kick against a stage change, and prove the stage route is absent outside sandbox mode.
