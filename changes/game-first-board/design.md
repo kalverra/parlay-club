@@ -75,9 +75,22 @@ type LineGroup struct {
     Options                                  []Row // 1 or 2
 }
 
+type PlayerGroup struct {
+    Name, PlayerID, Position, Team string
+    Lines                          []LineGroup
+}
+
+type Tab struct {
+    Category Category
+    Label    string
+    Count    int
+    Active   bool
+}
+
 type GameDetail struct {
     Game      GameCard
     Category  Category
+    Sort      Sort
     Tabs      []Tab
     Lines     []LineGroup // Lines tab: SPREAD, ML, TOTAL, TEAM_TOTAL
     Players   []PlayerGroup
@@ -86,7 +99,9 @@ type GameDetail struct {
 
 `Slates(games, rows, roster, query)` returns one `GameCard` per game that has not kicked off, filtered by the query and
 kickoff window. It derives the spread, total, and moneyline from the built rows, and counts prop rows for the
-"Explore N props" label. `Detail(game, rows, roster, category, query, sort)` groups the rows for one game.
+"Explore N props" label. `Detail(game, rows, query)` groups one game's rows into the open tab's lines or player cards.
+It takes no roster because `Build` already copies the player's ID and position onto each row, and it builds the header
+card through the same helper `Slates` uses. `Tab.Count` counts visible rows, with team totals counted in Lines.
 
 Pairing is a keyed fold, not a second data source:
 
@@ -103,6 +118,7 @@ first tab with rows. Within a prop tab, rows cluster under the player, so Receiv
 share a card. The Lines tab shows the game lines first, then team totals grouped by team.
 
 The default detail sort is player. The other sorts are odds (shortest price first) and line (highest line first).
+`board.DetailSorts` names those three chips, and `Detail` resolves kickoff, category, or an unknown sort to player.
 Kickoff sort drops out because one game has one kickoff. Search stays one `q`: on the slate it matches a matchup,
 team, venue, or roster player; in the detail it matches the rows of the open game.
 
@@ -298,7 +314,7 @@ new tests).
 
 ### Phase 2: Open a game with tabs and player clusters
 
-- [ ] Add `board.Detail`, `GameDetail`, `LineGroup`, and `PlayerGroup`, with tests for tab order, folding team totals
+- [x] Add `board.Detail`, `GameDetail`, `LineGroup`, and `PlayerGroup`, with tests for tab order, folding team totals
       into Lines, and player clustering across markets.
 - [ ] Add `GET /slips/{id}/pick/detail`, the detail view model, and the pinned header plus horizontal tab bar. Render
       the Lines tab as game lines then team totals, and prop tabs as player cards with their lines. Keep the existing

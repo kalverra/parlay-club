@@ -463,3 +463,240 @@ func TestSlatesDropKickedOffGames(t *testing.T) {
 	require.Len(t, cards, 1)
 	assert.Equal(t, "upcoming", cards[0].ID)
 }
+
+func TestDetailOrdersTabsAndFoldsTeamTotals(t *testing.T) {
+	t.Parallel()
+
+	g := game("401", at(t, 8, 13, 0))
+	games := []db.Game{g}
+	rows := []db.Odds{
+		odds("401", "draftkings", "ML", "BUF", "", "TEAM", nil, -150),
+		odds("401", "draftkings", "TEAM_TOTAL", "BUF", "", "OVER", new(24.5), -110),
+		odds("401", "draftkings", "PASS_YDS", "BUF", "Josh Allen", "OVER", new(245.5), -110),
+		odds("401", "draftkings", "KICKER_PTS", "BUF", "Tyler Bass", "OVER", new(7.5), -110),
+	}
+	now := at(t, 7, 12, 0)
+	built := board.Build(games, rows, nil, "", nil, now)
+
+	detail := board.Detail(g, built, board.Query{Now: now})
+	assert.Equal(t, board.CategoryLines, detail.Category, "an empty category opens Lines")
+	assert.Equal(t, board.SortPlayer, detail.Sort, "player is the default detail sort")
+	assert.Equal(t, "401", detail.Game.ID)
+	assert.Equal(t, "MIA @ BUF", detail.Game.Matchup)
+
+	categories := make([]board.Category, 0, len(detail.Tabs))
+	counts := make([]int, 0, len(detail.Tabs))
+	for _, tab := range detail.Tabs {
+		categories = append(categories, tab.Category)
+		counts = append(counts, tab.Count)
+	}
+	assert.Equal(t, []board.Category{
+		board.CategoryLines, board.CategoryPassing, board.CategoryKicking,
+	}, categories, "tabs follow the chip order and empty ones stay hidden")
+	assert.Equal(t, []int{2, 1, 1}, counts, "the moneyline and the team total share Lines")
+	assert.True(t, detail.Tabs[0].Active)
+	assert.Equal(t, "Lines", detail.Tabs[0].Label)
+}
+
+func TestDetailLinesShowGameLinesThenTeamTotals(t *testing.T) {
+	t.Parallel()
+
+	g := game("401", at(t, 8, 13, 0))
+	games := []db.Game{g}
+	rows := []db.Odds{
+		odds("401", "draftkings", "TEAM_TOTAL", "BUF", "", "UNDER", new(24.5), -110),
+		odds("401", "draftkings", "TEAM_TOTAL", "BUF", "", "OVER", new(24.5), -110),
+		odds("401", "draftkings", "SPREAD", "MIA", "", "TEAM", new(7.5), -105),
+		odds("401", "draftkings", "SPREAD", "BUF", "", "TEAM", new(-7.5), -115),
+		odds("401", "draftkings", "TOTAL", "", "", "UNDER", new(47.5), -110),
+		odds("401", "draftkings", "TOTAL", "", "", "OVER", new(47.5), -105),
+		odds("401", "draftkings", "ML", "MIA", "", "TEAM", nil, 260),
+		odds("401", "draftkings", "ML", "BUF", "", "TEAM", nil, -320),
+	}
+	now := at(t, 7, 12, 0)
+	built := board.Build(games, rows, nil, "", nil, now)
+
+	detail := board.Detail(g, built, board.Query{Now: now})
+	require.Len(t, detail.Lines, 4, "a team total stays on the Lines tab")
+
+	assert.Equal(t, "SPREAD", detail.Lines[0].Market)
+	assert.Equal(t, "Spread", detail.Lines[0].Label)
+	require.Len(t, detail.Lines[0].Options, 2)
+	assert.Equal(t, "MIA", detail.Lines[0].Options[0].Team, "the away side comes first")
+	assert.Equal(t, "BUF", detail.Lines[0].Options[1].Team)
+	assert.Empty(t, detail.Lines[0].Team, "a game-wide line carries no team")
+
+	assert.Equal(t, "ML", detail.Lines[1].Market)
+	require.Len(t, detail.Lines[1].Options, 2)
+	assert.Equal(t, "MIA", detail.Lines[1].Options[0].Team)
+
+	assert.Equal(t, "TOTAL", detail.Lines[2].Market)
+	require.Len(t, detail.Lines[2].Options, 2)
+	assert.Equal(t, "OVER", detail.Lines[2].Options[0].Side, "Over comes before Under")
+	assert.Equal(t, "UNDER", detail.Lines[2].Options[1].Side)
+	assert.Empty(t, detail.Lines[2].Team)
+
+	assert.Equal(t, "TEAM_TOTAL", detail.Lines[3].Market)
+	assert.Equal(t, "Team total", detail.Lines[3].Label)
+	assert.Equal(t, "BUF", detail.Lines[3].Team)
+	require.Len(t, detail.Lines[3].Options, 2)
+	assert.Equal(t, "OVER", detail.Lines[3].Options[0].Side)
+	assert.Equal(t, "UNDER", detail.Lines[3].Options[1].Side)
+}
+
+func TestDetailClustersPlayerLinesAcrossMarkets(t *testing.T) {
+	t.Parallel()
+
+	g := game("401", at(t, 8, 13, 0))
+	games := []db.Game{g}
+	rows := []db.Odds{
+		odds("401", "draftkings", "REC_YDS", "BUF", "Khalil Shakir", "OVER", new(52.5), -110),
+		odds("401", "draftkings", "REC_YDS", "BUF", "Khalil Shakir", "UNDER", new(52.5), -110),
+		odds("401", "draftkings", "RECEPTIONS", "BUF", "Khalil Shakir", "OVER", new(4.5), -120),
+		odds("401", "draftkings", "REC_YDS", "BUF", "Keon Coleman", "OVER", new(41.5), -110),
+	}
+	roster := []db.RosterPlayer{
+		{AthleteID: "10", Team: "BUF", FullName: "Khalil Shakir", Position: "WR"},
+		{AthleteID: "11", Team: "BUF", FullName: "Keon Coleman", Position: "WR"},
+	}
+	now := at(t, 7, 12, 0)
+	built := board.Build(games, rows, roster, "", nil, now)
+
+	detail := board.Detail(g, built, board.Query{Category: board.CategoryReceiving, Now: now})
+	require.Len(t, detail.Players, 2, "each receive picks one player card")
+	assert.Empty(t, detail.Lines)
+
+	assert.Equal(t, "Keon Coleman", detail.Players[0].Name)
+	shakir := detail.Players[1]
+	assert.Equal(t, "Khalil Shakir", shakir.Name)
+	assert.Equal(t, "10", shakir.PlayerID)
+	assert.Equal(t, "WR", shakir.Position)
+	assert.Equal(t, "BUF", shakir.Team)
+
+	require.Len(t, shakir.Lines, 2, "yards and receptions share one card")
+	assert.Equal(t, "Rec Yds", shakir.Lines[0].Label)
+	require.Len(t, shakir.Lines[0].Options, 2)
+	assert.Equal(t, "OVER", shakir.Lines[0].Options[0].Side)
+	assert.Equal(t, "UNDER", shakir.Lines[0].Options[1].Side)
+	assert.Equal(t, "Receptions", shakir.Lines[1].Label)
+	require.Len(t, shakir.Lines[1].Options, 1, "an unpriced side leaves one button")
+}
+
+func TestDetailFoldsTeamTotalsIntoTheOpenTab(t *testing.T) {
+	t.Parallel()
+
+	g := game("401", at(t, 8, 13, 0))
+	games := []db.Game{g}
+	rows := []db.Odds{
+		odds("401", "draftkings", "TEAM_TOTAL", "BUF", "", "OVER", new(24.5), -110),
+	}
+	now := at(t, 7, 12, 0)
+	built := board.Build(games, rows, nil, "", nil, now)
+
+	detail := board.Detail(g, built, board.Query{
+		Category: board.CategoryTeamTotals,
+		Now:      now,
+	})
+	assert.Equal(t, board.CategoryLines, detail.Category, "team totals open the Lines tab")
+	require.Len(t, detail.Tabs, 1)
+	assert.Equal(t, board.CategoryLines, detail.Tabs[0].Category)
+	assert.True(t, detail.Tabs[0].Active)
+	assert.Len(t, detail.Lines, 1)
+	assert.Equal(t, "TEAM_TOTAL", detail.Lines[0].Market)
+}
+
+func TestDetailFallsBackToTheFirstTabWithRows(t *testing.T) {
+	t.Parallel()
+
+	g := game("401", at(t, 8, 13, 0))
+	games := []db.Game{g}
+	rows := []db.Odds{
+		odds("401", "draftkings", "PASS_YDS", "BUF", "Josh Allen", "OVER", new(245.5), -110),
+		odds("401", "draftkings", "ANYTIME_TD", "BUF", "James Cook", "YES", nil, 150),
+	}
+	now := at(t, 7, 12, 0)
+	built := board.Build(games, rows, nil, "", nil, now)
+
+	detail := board.Detail(g, built, board.Query{Category: "bogus", Now: now})
+	assert.Equal(t, board.CategoryPassing, detail.Category,
+		"an unknown category falls back past empty Lines to the first tab with rows")
+	require.Len(t, detail.Tabs, 2)
+	assert.Equal(t, board.CategoryPassing, detail.Tabs[0].Category)
+	assert.True(t, detail.Tabs[0].Active)
+	assert.Equal(t, board.CategoryTDs, detail.Tabs[1].Category)
+	require.Len(t, detail.Players, 1)
+	assert.Equal(t, "Josh Allen", detail.Players[0].Name)
+}
+
+func TestDetailSorts(t *testing.T) {
+	t.Parallel()
+
+	g := game("401", at(t, 8, 13, 0))
+	games := []db.Game{g}
+	rows := []db.Odds{
+		odds("401", "draftkings", "REC_YDS", "BUF", "Khalil Shakir", "OVER", new(72.5), 120),
+		odds("401", "draftkings", "REC_YDS", "BUF", "Keon Coleman", "OVER", new(41.5), -150),
+	}
+	now := at(t, 7, 12, 0)
+	built := board.Build(games, rows, nil, "", nil, now)
+
+	player := board.Detail(g, built, board.Query{Sort: board.SortKickoff, Now: now})
+	assert.Equal(t, board.SortPlayer, player.Sort, "kickoff drops out for one game")
+	require.Len(t, player.Players, 2)
+	assert.Equal(t, "Keon Coleman", player.Players[0].Name)
+
+	oddsSort := board.Detail(g, built, board.Query{Sort: board.SortOdds, Now: now})
+	require.Len(t, oddsSort.Players, 2)
+	assert.Equal(t, "Keon Coleman", oddsSort.Players[0].Name, "the shortest price comes first")
+
+	lineSort := board.Detail(g, built, board.Query{Sort: board.SortLine, Now: now})
+	assert.Equal(t, board.SortLine, lineSort.Sort)
+	require.Len(t, lineSort.Players, 2)
+	assert.Equal(t, "Khalil Shakir", lineSort.Players[0].Name, "the highest line comes first")
+}
+
+func TestDetailFiltersRowsBySearch(t *testing.T) {
+	t.Parallel()
+
+	g := game("401", at(t, 8, 13, 0))
+	games := []db.Game{g}
+	rows := []db.Odds{
+		odds("401", "draftkings", "SPREAD", "BUF", "", "TEAM", new(-3.0), -110),
+		odds("401", "draftkings", "PASS_YDS", "BUF", "Josh Allen", "OVER", new(245.5), -110),
+		odds("401", "draftkings", "REC_YDS", "BUF", "Khalil Shakir", "OVER", new(52.5), -110),
+	}
+	now := at(t, 7, 12, 0)
+	built := board.Build(games, rows, nil, "", nil, now)
+
+	detail := board.Detail(g, built, board.Query{Q: "shakir", Now: now})
+	require.Len(t, detail.Tabs, 1, "a tab with no matching row stays hidden")
+	assert.Equal(t, board.CategoryReceiving, detail.Tabs[0].Category)
+	require.Len(t, detail.Players, 1)
+	assert.Equal(t, "Khalil Shakir", detail.Players[0].Name)
+	require.NotNil(t, detail.Game.Lines.Spread, "the header keeps the whole game")
+
+	byTeam := board.Detail(g, built, board.Query{Q: "bills", Now: now})
+	require.Len(t, byTeam.Tabs, 3, "a team name matches every row of the game")
+	assert.Len(t, byTeam.Lines, 1)
+}
+
+func TestDetailOfAGameWithNoRows(t *testing.T) {
+	t.Parallel()
+
+	g := game("401", at(t, 8, 13, 0))
+	other := game("402", at(t, 8, 16, 0))
+	rows := []db.Odds{
+		odds("402", "draftkings", "ML", "BUF", "", "TEAM", nil, -110),
+	}
+	built := board.Build([]db.Game{g, other}, rows, nil, "", nil, at(t, 7, 12, 0))
+
+	detail := board.Detail(g, built, board.Query{})
+	assert.Equal(t, "401", detail.Game.ID)
+	assert.Zero(t, detail.Game.Props)
+	assert.False(t, detail.Game.HasProps)
+	require.Len(t, detail.Tabs, 1)
+	assert.Equal(t, board.CategoryLines, detail.Tabs[0].Category)
+	assert.Zero(t, detail.Tabs[0].Count)
+	assert.Empty(t, detail.Lines, "another game's rows stay out of the detail")
+	assert.Empty(t, detail.Players)
+}

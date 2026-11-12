@@ -4,6 +4,7 @@ package board
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -113,10 +114,15 @@ const (
 	SortPlayer   Sort = "player"
 	SortCategory Sort = "category"
 	SortOdds     Sort = "odds"
+	SortLine     Sort = "line"
 )
 
-// Sorts lists the sort chips in display order.
+// Sorts lists the slate's sort chips in display order.
 var Sorts = []Sort{SortKickoff, SortPlayer, SortCategory, SortOdds}
+
+// DetailSorts lists the open game's sort chips in display order. One game has
+// one kickoff, so kickoff drops out and player is the default.
+var DetailSorts = []Sort{SortPlayer, SortOdds, SortLine}
 
 // Label is the chip text.
 func (s Sort) Label() string {
@@ -129,6 +135,8 @@ func (s Sort) Label() string {
 		return "Category"
 	case SortOdds:
 		return "Odds"
+	case SortLine:
+		return "Line"
 	default:
 		return string(s)
 	}
@@ -186,6 +194,50 @@ type LineSummary struct {
 	Line      string
 	OverOdds  string
 	UnderOdds string
+}
+
+// Tab is one category tab in the open game's tab bar. Team totals fold into
+// Lines, so there is no tab of their own.
+type Tab struct {
+	Category Category
+	Label    string
+	Count    int
+	Active   bool
+}
+
+// LineGroup is one line and the sides a person can pick from it. Options holds
+// one row when a side is unpriced and two when both sides are stored.
+type LineGroup struct {
+	Market   string
+	Team     string
+	Player   string
+	PlayerID string
+	Position string
+	Label    string
+	Line     *float64
+	Options  []Row
+}
+
+// PlayerGroup is one player's card in a prop tab: who they are and the lines
+// they carry across markets. Receiving yards and receptions share a card.
+type PlayerGroup struct {
+	Name     string
+	PlayerID string
+	Position string
+	Team     string
+	Lines    []LineGroup
+}
+
+// GameDetail is the open game's header, its tabs, and the rows of the active
+// tab. Lines holds the game lines when Lines is active; Players holds the
+// player cards otherwise.
+type GameDetail struct {
+	Game     GameCard
+	Category Category
+	Sort     Sort
+	Tabs     []Tab
+	Lines    []LineGroup
+	Players  []PlayerGroup
 }
 
 // UnloadedGame is a game whose props were never fetched, offered as a prompt.
@@ -619,18 +671,7 @@ func Slates(games []db.Game, rows []Row, roster []db.RosterPlayer, q Query) []Ga
 			continue
 		}
 		gameRows := byGame[game.ID]
-		card := GameCard{
-			ID:      game.ID,
-			Matchup: game.AwayTeam + " @ " + game.HomeTeam,
-			Venue:   db.StringValue(game.VenueName),
-			Away:    game.AwayTeam,
-			Home:    game.HomeTeam,
-			Kickoff: game.Kickoff,
-			Lines:   gameLines(game, gameRows),
-			Props:   propCount(gameRows),
-		}
-		card.HasProps = card.Props > 0
-		cards = append(cards, card)
+		cards = append(cards, cardFor(game, gameRows))
 	}
 
 	sort.SliceStable(cards, func(i, j int) bool {
@@ -643,6 +684,447 @@ func Slates(games []db.Game, rows []Row, roster []db.RosterPlayer, q Query) []Ga
 		return cards[i].ID < cards[j].ID
 	})
 	return cards
+}
+
+// cardFor shapes one game and its built rows into a slate card.
+func cardFor(game db.Game, rows []Row) GameCard {
+	card := GameCard{
+		ID:      game.ID,
+		Matchup: game.AwayTeam + " @ " + game.HomeTeam,
+		Venue:   db.StringValue(game.VenueName),
+		Away:    game.AwayTeam,
+		Home:    game.HomeTeam,
+		Kickoff: game.Kickoff,
+		Lines:   gameLines(game, rows),
+		Props:   propCount(rows),
+	}
+	card.HasProps = card.Props > 0
+	return card
+}
+
+// Detail shapes one game's built rows into the header, tabs, and lines the open
+// game shows. The query supplies the search text, the open tab, and the sort;
+// an unknown or empty category falls back to the first tab with rows.
+func Detail(game db.Game, rows []Row, q Query) GameDetail {
+	gameRows := rowsForGame(rows, game.ID)
+	needle := normalize(q.Q)
+	visible := make([]Row, 0, len(gameRows))
+	for _, row := range gameRows {
+		if needle != "" && !rowMatches(row, game, needle) {
+			continue
+		}
+		visible = append(visible, row)
+	}
+
+	counts := tabCounts(visible)
+	category := tabCategory(q.Category, counts)
+	mode := detailSort(q.Sort)
+	detail := GameDetail{
+		Game:     cardFor(game, gameRows),
+		Category: category,
+		Sort:     mode,
+	}
+	for _, known := range tabCategories {
+		if counts[known] == 0 && known != category {
+			continue
+		}
+		detail.Tabs = append(detail.Tabs, Tab{
+			Category: known,
+			Label:    known.Label(),
+			Count:    counts[known],
+			Active:   known == category,
+		})
+	}
+
+	tabRows := make([]Row, 0, len(visible))
+	for _, row := range visible {
+		if foldCategory(row.Category) == category {
+			tabRows = append(tabRows, row)
+		}
+	}
+	if category == CategoryLines {
+		detail.Lines = lineGroups(game, tabRows, mode)
+	} else {
+		detail.Players = playerGroups(game, tabRows, mode)
+	}
+	return detail
+}
+
+// tabCategories lists the open game's tabs in display order.
+var tabCategories = []Category{
+	CategoryLines,
+	CategoryPassing,
+	CategoryRushing,
+	CategoryReceiving,
+	CategoryTDs,
+	CategoryKicking,
+}
+
+// foldCategory maps a row's category to the tab that shows it. Team totals fold
+// into Lines, and an unknown category reads as Lines.
+func foldCategory(category Category) Category {
+	switch category {
+	case CategoryTeamTotals:
+		return CategoryLines
+	case CategoryPassing, CategoryRushing, CategoryReceiving, CategoryTDs, CategoryKicking:
+		return category
+	default:
+		return CategoryLines
+	}
+}
+
+// tabCounts counts the visible rows in each tab, folding team totals into
+// Lines.
+func tabCounts(rows []Row) map[Category]int {
+	counts := make(map[Category]int, len(tabCategories))
+	for _, row := range rows {
+		counts[foldCategory(row.Category)]++
+	}
+	return counts
+}
+
+// tabCategory picks the tab to show. A requested tab with rows wins; otherwise
+// the detail falls back to Lines, then to the first tab with rows.
+func tabCategory(requested Category, counts map[Category]int) Category {
+	wanted := foldCategory(requested)
+	if counts[wanted] > 0 {
+		return wanted
+	}
+	if counts[CategoryLines] > 0 {
+		return CategoryLines
+	}
+	for _, category := range tabCategories {
+		if counts[category] > 0 {
+			return category
+		}
+	}
+	return CategoryLines
+}
+
+// detailSort resolves the open game's sort. Kickoff and category drop out, so
+// anything unknown reads as player.
+func detailSort(mode Sort) Sort {
+	switch mode {
+	case SortPlayer, SortOdds, SortLine:
+		return mode
+	default:
+		return SortPlayer
+	}
+}
+
+// rowsForGame returns one game's built rows.
+func rowsForGame(rows []Row, gameID string) []Row {
+	gameRows := make([]Row, 0, len(rows))
+	for _, row := range rows {
+		if row.GameID == gameID {
+			gameRows = append(gameRows, row)
+		}
+	}
+	return gameRows
+}
+
+// lineGroups folds rows into one group per line, ordering each group's sides
+// and then the groups themselves for the sort.
+func lineGroups(game db.Game, rows []Row, mode Sort) []LineGroup {
+	groups := make([]LineGroup, 0, len(rows))
+	index := make(map[string]int, len(rows))
+	for _, row := range rows {
+		key := lineKey(row)
+		if at, ok := index[key]; ok {
+			groups[at].Options = append(groups[at].Options, row)
+			continue
+		}
+		index[key] = len(groups)
+		groups = append(groups, newLineGroup(row))
+	}
+	for i := range groups {
+		sortOptions(game, groups[i].Options)
+	}
+	sortLineGroups(groups, mode)
+	return groups
+}
+
+// lineKey names the line a row sits on. A spread or moneyline puts both teams
+// on one line, a total keys on its number, and a team total or prop also keys
+// on its team, player, and number.
+func lineKey(row Row) string {
+	switch row.Market {
+	case "SPREAD", "ML":
+		return row.Market
+	case "TOTAL":
+		return row.Market + "|" + lineText(row.Line)
+	default:
+		return strings.Join(
+			[]string{row.Market, row.Team, row.PlayerName, lineText(row.Line)}, "|")
+	}
+}
+
+// newLineGroup starts a group from its first row. A game-wide line carries no
+// team of its own.
+func newLineGroup(row Row) LineGroup {
+	group := LineGroup{
+		Market:   row.Market,
+		Player:   row.PlayerName,
+		PlayerID: row.PlayerID,
+		Position: row.Position,
+		Label:    marketHeading(row.Market),
+		Line:     row.Line,
+		Options:  []Row{row},
+	}
+	switch row.Market {
+	case "SPREAD", "ML", "TOTAL":
+		// The teams and the number already live on the options.
+	default:
+		group.Team = row.Team
+	}
+	return group
+}
+
+// marketHeading is the label a line group shows above its sides.
+func marketHeading(market string) string {
+	switch market {
+	case "SPREAD":
+		return "Spread"
+	case "ML":
+		return "Moneyline"
+	case "TOTAL":
+		return "Total"
+	case "TEAM_TOTAL":
+		return "Team total"
+	default:
+		return marketLabel(market)
+	}
+}
+
+// sortOptions orders one line's sides: away then home for a spread or
+// moneyline, Over then Under for a total or a prop, and the single Yes for an
+// anytime touchdown.
+func sortOptions(game db.Game, options []Row) {
+	sort.SliceStable(options, func(i, j int) bool {
+		return optionRank(game, options[i]) < optionRank(game, options[j])
+	})
+}
+
+// optionRank is a side's position on its line.
+func optionRank(game db.Game, row Row) int {
+	switch row.Market {
+	case "SPREAD", "ML":
+		switch row.Team {
+		case game.AwayTeam:
+			return 0
+		case game.HomeTeam:
+			return 1
+		default:
+			return 2
+		}
+	default:
+		switch row.Side {
+		case "OVER", "YES":
+			return 0
+		case "UNDER":
+			return 1
+		default:
+			return 2
+		}
+	}
+}
+
+// lineText prints an optional line for a grouping key.
+func lineText(line *float64) string {
+	if line == nil {
+		return ""
+	}
+	return formatLine(*line)
+}
+
+// sortLineGroups orders line groups by the detail's sort, falling back to the
+// market order for ties.
+func sortLineGroups(groups []LineGroup, mode Sort) {
+	sort.SliceStable(groups, func(i, j int) bool {
+		left, right := groups[i], groups[j]
+		switch mode {
+		case SortOdds:
+			if a, b := shortestPrice(left), shortestPrice(right); a != b {
+				return a < b
+			}
+		case SortLine:
+			if a, b := highestLine(left), highestLine(right); a != b {
+				return a > b
+			}
+		}
+		return lineGroupLess(left, right)
+	})
+}
+
+// lineGroupLess is the natural order: the game lines first, then props by
+// category and stat, then by team and number.
+func lineGroupLess(left, right LineGroup) bool {
+	if marketRank(left.Market) != marketRank(right.Market) {
+		return marketRank(left.Market) < marketRank(right.Market)
+	}
+	if categoryOrder(categoryFor(left.Market)) != categoryOrder(categoryFor(right.Market)) {
+		return categoryOrder(categoryFor(left.Market)) < categoryOrder(categoryFor(right.Market))
+	}
+	if left.Label != right.Label {
+		return left.Label < right.Label
+	}
+	if left.Team != right.Team {
+		return left.Team < right.Team
+	}
+	if a, b := lineValue(left.Line), lineValue(right.Line); a != b {
+		return a < b
+	}
+	if left.Player != right.Player {
+		return left.Player < right.Player
+	}
+	return left.PlayerID < right.PlayerID
+}
+
+// marketRank is a market's position inside the Lines tab: the game lines first
+// in display order, then team totals, then every prop.
+func marketRank(market string) int {
+	switch market {
+	case "SPREAD":
+		return 0
+	case "ML":
+		return 1
+	case "TOTAL":
+		return 2
+	case "TEAM_TOTAL":
+		return 3
+	default:
+		return 4
+	}
+}
+
+// shortestPrice is a line's best price as decimal odds, preferring a priced
+// side. A line with no price sorts last.
+func shortestPrice(group LineGroup) float64 {
+	best := math.Inf(1)
+	for _, option := range group.Options {
+		if option.Odds == 0 {
+			continue
+		}
+		if decimal := parlay.AmericanToDecimal(option.Odds); decimal < best {
+			best = decimal
+		}
+	}
+	return best
+}
+
+// highestLine is a line's largest number, with a missing line sorting last.
+func highestLine(group LineGroup) float64 {
+	highest := math.Inf(-1)
+	for _, option := range group.Options {
+		if option.Line != nil && *option.Line > highest {
+			highest = *option.Line
+		}
+	}
+	return highest
+}
+
+// lineValue is an optional line as a number, with a missing line sorting first.
+func lineValue(line *float64) float64 {
+	if line == nil {
+		return math.Inf(-1)
+	}
+	return *line
+}
+
+// playerGroups folds prop rows into one card per player, clustering a player's
+// markets under their name.
+func playerGroups(game db.Game, rows []Row, mode Sort) []PlayerGroup {
+	order := make([]string, 0, len(rows))
+	byPlayer := make(map[string][]Row, len(rows))
+	for _, row := range rows {
+		key := playerKey(row)
+		if _, ok := byPlayer[key]; !ok {
+			order = append(order, key)
+		}
+		byPlayer[key] = append(byPlayer[key], row)
+	}
+
+	players := make([]PlayerGroup, 0, len(order))
+	for _, key := range order {
+		playerRows := byPlayer[key]
+		first := playerRows[0]
+		players = append(players, PlayerGroup{
+			Name:     first.PlayerName,
+			PlayerID: first.PlayerID,
+			Position: first.Position,
+			Team:     first.Team,
+			Lines:    lineGroups(game, playerRows, mode),
+		})
+	}
+	sortPlayers(players, mode)
+	return players
+}
+
+// playerKey identifies one player's card. A roster ID wins; otherwise the name
+// and team keep two players with the same name apart.
+func playerKey(row Row) string {
+	if row.PlayerID != "" {
+		return "id:" + row.PlayerID
+	}
+	return "name:" + normalize(row.PlayerName) + "|" + row.Team
+}
+
+// sortPlayers orders player cards for the sort, falling back to the player's
+// name.
+func sortPlayers(players []PlayerGroup, mode Sort) {
+	sort.SliceStable(players, func(i, j int) bool {
+		left, right := players[i], players[j]
+		switch mode {
+		case SortOdds:
+			if a, b := playerPrice(left), playerPrice(right); a != b {
+				return a < b
+			}
+		case SortLine:
+			if a, b := playerLine(left), playerLine(right); a != b {
+				return a > b
+			}
+		}
+		return playerLess(left, right)
+	})
+}
+
+// playerLess orders players by name, with an unnamed card last.
+func playerLess(left, right PlayerGroup) bool {
+	if left.Name != right.Name {
+		if left.Name == "" {
+			return false
+		}
+		if right.Name == "" {
+			return true
+		}
+		return left.Name < right.Name
+	}
+	if left.Team != right.Team {
+		return left.Team < right.Team
+	}
+	return left.PlayerID < right.PlayerID
+}
+
+// playerPrice is a player's best price across their lines.
+func playerPrice(player PlayerGroup) float64 {
+	best := math.Inf(1)
+	for _, line := range player.Lines {
+		if price := shortestPrice(line); price < best {
+			best = price
+		}
+	}
+	return best
+}
+
+// playerLine is a player's largest line across their markets.
+func playerLine(player PlayerGroup) float64 {
+	highest := math.Inf(-1)
+	for _, line := range player.Lines {
+		if guess := highestLine(line); guess > highest {
+			highest = guess
+		}
+	}
+	return highest
 }
 
 // gameLines folds one game's built rows into its spread, total, and moneyline
