@@ -1204,6 +1204,62 @@ func TestPickDetailKeepsTheOpenTabAndSortInEveryLink(t *testing.T) {
 		fixture.slip.ID, game.ID))
 }
 
+func TestPickDetailSortsByOddsAndLine(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	game := addGame(t, fixture, gameKickoff())
+	addPropOdds(t, fixture.store, game.ID, "REC_YDS", "Keon Coleman", 41.5, 150)
+	addPropOdds(t, fixture.store, game.ID, "REC_YDS", "Zay Flowers", 55.5, -200)
+	addPropOdds(t, fixture.store, game.ID, "REC_YDS", "Khalil Shakir", 72.5, 120)
+
+	order := func(sort string) []int {
+		t.Helper()
+
+		body := html.UnescapeString(pickDetail(t, fixture,
+			"game="+game.ID+"&cat=receiving&sort="+sort).Body.String())
+		indexes := []int{
+			strings.Index(body, "Keon Coleman"),
+			strings.Index(body, "Zay Flowers"),
+			strings.Index(body, "Khalil Shakir"),
+		}
+		for _, at := range indexes {
+			require.GreaterOrEqual(t, at, 0, "every player card is on the tab")
+		}
+		return indexes
+	}
+
+	player := order("player")
+	assert.Less(t, player[0], player[2], "the default sort is by player name")
+	assert.Less(t, player[2], player[1])
+
+	odds := order("odds")
+	assert.Less(t, odds[1], odds[2], "the shortest price comes first")
+	assert.Less(t, odds[2], odds[0])
+
+	line := order("line")
+	assert.Less(t, line[2], line[1], "the highest line comes first")
+	assert.Less(t, line[1], line[0])
+}
+
+func TestPickDetailSearchStaysInsideTheOpenGame(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	bills := addGame(t, fixture, gameKickoff())
+	addPropOdds(t, fixture.store, bills.ID, "PASS_YDS", "Josh Allen", 245.5, -110)
+	bengals := addSecondGame(t, fixture, "401772099", "CIN", "CLE", "Cincinnati Bengals", "Cleveland Browns")
+	addPropOdds(t, fixture.store, bengals.ID, "PASS_YDS", "Joe Burrow", 255.5, -110)
+
+	body := html.UnescapeString(pickDetail(t, fixture, "game="+bills.ID+"&q=pass").Body.String())
+	assert.Contains(t, body, "Josh Allen", "the search matches the open game's rows")
+	assert.NotContains(t, body, "Joe Burrow", "another game's rows stay out of the detail")
+
+	empty := html.UnescapeString(pickDetail(t, fixture, "game="+bills.ID+"&q=burrow").Body.String())
+	assert.Contains(t, empty, "Nothing matches that search.",
+		"a player on another game does not leak into the open game")
+}
+
 func TestPickDetailFallsBackFromTeamTotalsAndUnknownTabs(t *testing.T) {
 	t.Parallel()
 
