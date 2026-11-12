@@ -751,7 +751,7 @@ func TestPairPutsTheAwaySideFirst(t *testing.T) {
 	spread := pairGroup(t, groups, "SPREAD", "", "")
 	assert.Equal(t, []string{"MIA", "BUF"}, optionTeams(spread), "the away side comes first")
 	require.Len(t, spread.Options, 2)
-	assert.Equal(t, -3.0, *spread.Options[1].Line)
+	assert.InDelta(t, -3.0, *spread.Options[1].Line, 1e-9)
 
 	moneyline := pairGroup(t, groups, "ML", "", "")
 	assert.Equal(t, []string{"MIA", "BUF"}, optionTeams(moneyline))

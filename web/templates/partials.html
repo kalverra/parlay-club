@@ -956,7 +956,7 @@
   {{if .PickID}}
     <form
       hx-delete="/legs/{{.PickID}}?from=board"
-      hx-target="closest .pick-row"
+      hx-target="closest .pick-line-group"
       hx-swap="outerHTML"
     >
       <button
@@ -965,6 +965,29 @@
       >
         <span class="block truncate">{{.Text}}</span>
         <span class="text-xs font-normal text-emerald-400/80">{{.Price}} &middot; tap to remove</span>
+      </button>
+    </form>
+  {{else if .UpdateID}}
+    <form
+      hx-put="/legs/{{.UpdateID}}"
+      hx-target="closest .pick-line-group"
+      hx-swap="outerHTML"
+    >
+      <input type="hidden" name="from" value="board">
+      <input type="hidden" name="game_id" value="{{.GameID}}">
+      <input type="hidden" name="market_type" value="{{.Market}}">
+      <input type="hidden" name="team" value="{{.Team}}">
+      <input type="hidden" name="side" value="{{.Side}}">
+      <input type="hidden" name="player_name" value="{{.PlayerName}}">
+      {{if .PlayerID}}<input type="hidden" name="player_id" value="{{.PlayerID}}">{{end}}
+      {{if .Line}}<input type="hidden" name="line" value="{{.Line}}">{{end}}
+      <input type="hidden" name="odds" value="{{.Odds}}">
+      <button
+        type="submit"
+        class="w-full rounded-lg border border-slate-700 bg-slate-800/60 px-3 py-2 text-left text-sm font-medium text-slate-200 hover:bg-slate-800"
+      >
+        <span class="block truncate">{{.Text}}</span>
+        <span class="text-xs font-normal text-slate-400">{{.Price}} &middot; tap to switch</span>
       </button>
     </form>
   {{else if .AtLimit}}
@@ -981,7 +1004,7 @@
   {{else}}
     <form
       hx-post="/slips/{{.SlipID}}/legs"
-      hx-target="closest .pick-row"
+      hx-target="closest .pick-line-group"
       hx-swap="outerHTML"
     >
       <input type="hidden" name="quick" value="1">
@@ -1003,24 +1026,6 @@
       </button>
     </form>
   {{end}}
-{{end}}
-
-{{define "pick-row"}}
-<div class="pick-row flex items-center justify-between gap-3 rounded-lg border border-slate-800 bg-slate-950/40 px-3 py-2">
-  <div class="min-w-0">
-    <p class="truncate text-sm font-medium">{{.Text}}</p>
-    <p class="mt-0.5 text-xs text-slate-500">
-      <a
-        href="/slips/{{.SlipID}}/pick?game={{.GameID}}"
-        class="hover:text-slate-300"
-        >{{.Matchup}}</a
-      >{{if .KickoffISO}} &middot;
-        <time datetime="{{.KickoffISO}}">{{.KickoffISO}}</time>
-      {{end}}
-    </p>
-  </div>
-  <div class="w-40 shrink-0">{{template "pick-option" .}}</div>
-</div>
 {{end}}
 
 {{define "pick-body"}}
@@ -1255,7 +1260,7 @@
 {{end}}
 
 {{define "pick-line-group"}}
-<div>
+<div id="{{.ID}}" class="pick-line-group">
   {{if .Label}}<p class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{{.Label}}</p>{{end}}
   <div class="mt-1 grid gap-2 {{if eq (len .Options) 1}}grid-cols-1{{else}}grid-cols-2{{end}}">
     {{range .Options}}
@@ -1350,7 +1355,7 @@
     {{range .Legs}}
       <form
         hx-put="/legs/{{.ID}}"
-        hx-target="#pick-body"
+        hx-target="{{$.Target}}"
         hx-swap="outerHTML"
       >
         <input type="hidden" name="from" value="board">

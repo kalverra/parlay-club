@@ -719,7 +719,7 @@ func (h *slipHandlers) addLeg(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.PostForm.Get("from") == "board" {
 		w.Header().Set("Hx-Trigger", "tray-updated")
-		h.renderPartial(w, "pick-row", h.pickRowFromLeg(r.Context(), slip, created))
+		h.renderPartial(w, "pick-line-group", h.pickPairRow(r.Context(), slip, created, true))
 		return
 	}
 	// Tell the browser the bottom sheet can close now that the leg landed.
@@ -743,7 +743,8 @@ func (h *slipHandlers) updateLeg(w http.ResponseWriter, r *http.Request) {
 	}
 	leg.ID = existing.ID
 
-	if _, err := h.deps.Slips.UpdateLeg(r.Context(), user.ID, leg); err != nil {
+	updated, err := h.deps.Slips.UpdateLeg(r.Context(), user.ID, leg)
+	if err != nil {
 		h.respondError(w, err)
 		return
 	}
@@ -753,13 +754,14 @@ func (h *slipHandlers) updateLeg(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.PostForm.Get("from") == "board" {
-		data, err := h.pickPageData(r.Context(), slip, pickQuery(r, h.deps.now()))
-		if err != nil {
-			h.serverError(w, err)
-			return
+		trigger := "tray-updated"
+		if !sameBoardLine(existing, updated) {
+			// The swapped-out line is still on screen. Refresh the board so it
+			// does not keep a delete button for a leg that moved away.
+			trigger = "tray-updated, board-updated"
 		}
-		w.Header().Set("Hx-Trigger", "tray-updated")
-		h.renderPartial(w, "pick-body", data.Body)
+		w.Header().Set("Hx-Trigger", trigger)
+		h.renderPartial(w, "pick-line-group", h.pickPairRow(r.Context(), slip, updated, true))
 		return
 	}
 	w.Header().Set("Hx-Trigger", "leg-saved")
@@ -841,10 +843,8 @@ func (h *slipHandlers) deleteLeg(w http.ResponseWriter, r *http.Request) {
 		h.renderPartial(w, "pick-tray", tray)
 		return
 	case "board":
-		row := h.pickRowFromLeg(r.Context(), slip, leg)
-		row.PickID = 0
 		w.Header().Set("Hx-Trigger", "tray-updated")
-		h.renderPartial(w, "pick-row", row)
+		h.renderPartial(w, "pick-line-group", h.pickPairRow(r.Context(), slip, leg, false))
 		return
 	}
 	h.renderPanel(w, r, slip)

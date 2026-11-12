@@ -329,7 +329,7 @@ new tests).
 
 - [x] Add `board.Pair` and its tests: Over/Under, away/home spread and moneyline, the single `ANYTIME_TD` side, a
       missing side, and deterministic option order.
-- [ ] Render one row per line with two side buttons. A picked side deletes, the opposite side updates that leg through
+- [x] Render one row per line with two side buttons. A picked side deletes, the opposite side updates that leg through
       `PUT /legs/{id}`, and an empty side adds. Return the refreshed pair row from the board update path and keep
       `Hx-Trigger: tray-updated`. Add handler tests for all three paths.
 - [ ] Docs: document pairing and the update response in `docs/concepts/slips.md` and `docs/reference/routes.md`.
