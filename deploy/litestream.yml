@@ -1,6 +1,6 @@
 # Litestream 0.5 configuration. Environment variables are expanded in this file.
 #
-# `entrypoint.sh` defaults the replica URL to gcs://$LITESTREAM_BUCKET/parlay.db
+# `entrypoint.sh` defaults the replica URL to gs://$LITESTREAM_BUCKET/parlay.db
 # and lets LITESTREAM_REPLICA_URL override it, which local smoke tests use to
 # replicate to a file instead.
 dbs:

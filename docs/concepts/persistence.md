@@ -67,8 +67,8 @@ exec litestream replicate -config /etc/litestream.yml -exec /app/server
 ```
 
 - `DB_PATH` defaults to `/data/parlay.db`.
-- The replica URL is `LITESTREAM_REPLICA_URL` when set, otherwise `gcs://$LITESTREAM_BUCKET/parlay.db`. With neither
-  set, the entrypoint exits 1 rather than starting without a backup.
+- The replica URL is `LITESTREAM_REPLICA_URL` when set, otherwise `gs://$LITESTREAM_BUCKET/parlay.db`. With neither set,
+  the entrypoint exits 1 rather than starting without a backup.
 - `-if-db-not-exists` keeps the file a warm instance already has, so a restart on the same instance does not restore
   over newer writes.
 - `-if-replica-exists` lets the first boot start with an empty replica and create the database fresh.
@@ -84,14 +84,14 @@ image, so the config and the binary always match.
 
 ## Replication and shutdown
 
-Litestream tails the WAL and ships new frames to `gcs://$LITESTREAM_BUCKET/parlay.db`. Cloud Run throttles CPU between
+Litestream tails the WAL and ships new frames to `gs://$LITESTREAM_BUCKET/parlay.db`. Cloud Run throttles CPU between
 requests, so replication can lag until the next request or shutdown. That is fine at this traffic, but it sets the loss
 window: a write is durable on the instance disk before it reaches GCS.
 
 On SIGTERM the server ends open SSE streams, drains in-flight requests for up to 8 seconds (`http.Server.Shutdown`),
-then cancels and waits for background refreshes inside that same budget. `database.Close()` runs only after both
-drains, and then Litestream forwards the exit, syncs, and stops. Cloud Run allows 10 seconds, so the two seconds of
-slack are deliberate. Keep the server from needing more. See [Data refresh](data-refresh.md) for the refresh drain.
+then cancels and waits for background refreshes inside that same budget. `database.Close()` runs only after both drains,
+and then Litestream forwards the exit, syncs, and stops. Cloud Run allows 10 seconds, so the two seconds of slack are
+deliberate. Keep the server from needing more. See [Data refresh](data-refresh.md) for the refresh drain.
 
 ## Two writers during a deploy
 

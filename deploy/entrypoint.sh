@@ -10,7 +10,7 @@ if [ -z "${LITESTREAM_REPLICA_URL:-}" ]; then
 		echo "entrypoint: set LITESTREAM_BUCKET or LITESTREAM_REPLICA_URL" >&2
 		exit 1
 	fi
-	LITESTREAM_REPLICA_URL="gcs://${LITESTREAM_BUCKET}/parlay.db"
+	LITESTREAM_REPLICA_URL="gs://${LITESTREAM_BUCKET}/parlay.db"
 fi
 
 export DB_PATH LITESTREAM_REPLICA_URL
