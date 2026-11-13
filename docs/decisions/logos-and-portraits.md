@@ -1,11 +1,9 @@
 ---
-slug: logos-and-portraits
-status: implementing
-created: "2026-11-12"
-accepted_by:
-    - adamhamrick
-accepted_at: "2026-11-12T18:34:52Z"
-effort: easy
+id: adr-logos-and-portraits
+title: Team Logos and Player Portraits
+type: decision
+summary: Capture official team logo and player headshot URLs from the existing ESPN scoreboard and roster syncs, store them alongside our game and roster records, and surface them in view models for screens where visual identity aids scanning.
+last_verified: "2026-11-12"
 ---
 
 # Team Logos and Player Portraits
@@ -72,3 +70,39 @@ Cloud Run bandwidth use.
 
 The `effort: easy` rating fits because the image URLs already live in existing ESPN payloads and the work follows
 established ingestion, storage, and template patterns with minimal architectural uncertainty.
+
+## Consequences
+
+- Visual scanning on phone-width screens is faster because team logos and player portraits appear across slate cards,
+  detail headers, player prop groups, slip legs, and research views without adding network requests or spending Odds API
+  credits.
+- Direct `https://` ESPN CDN URLs avoid asset licensing, repo bloat, and Cloud Run egress, at the cost of depending on
+  ESPN CDN availability (mitigated by lazy loading and client-side fallback badges).
+- Adding a shared template partial (`web/templates/media.html`) requires keeping both `Renderer.parse` and
+  `Renderer.RenderPartial` in sync when new partials are introduced, and regenerating `web/static/app.css` via
+  `go generate ./web` whenever template utility classes change.
+
+## Alternatives considered
+
+- **Separate `teams` table for logos:** Rejected in favor of storing `home_logo`/`away_logo` on `games` and
+  `headshot_url` on `roster_players` so scoreboard and roster upserts stay single-table without extra joins or table
+  synchronization.
+- **Hardcoded team maps or guessed CDN paths:** Rejected because ESPN scoreboard and roster payloads already supply
+  authoritative URLs that stay current across rebrands and roster photo updates.
+- **Bundling or proxying images from the app server:** Rejected to avoid copyrighted asset storage, binary growth, and
+  Cloud Run bandwidth overhead.
+- **Inline `onerror` attributes on `<img>` tags:** Rejected in favor of a single capturing `error` listener on
+  `document` in `web/static/app.js` so templates stay CSP-clean and HTMX partial swaps work automatically.
+
+## Implementation notes
+
+- The design planned migration `0010_logos_portraits.sql`, but `0010_bug_reports.sql` already occupied version 10 on
+  `main`; the migration was created as `0011_logos_portraits.sql` instead.
+- In `web/templates/media.html`, `[data-fallback-badge]` uses `hidden` when an image URL is present and `flex` only when
+  the URL is empty, because Tailwind v4 emits display utilities after `.hidden` in `web/static/app.css`.
+- Cross-game team logo lookups in `Store.TeamLogos` derive logos from synced `games` rows, so teams without a synced
+  game yet fall back to text or initials.
+
+## Follow-ups
+
+None.
