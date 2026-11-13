@@ -177,7 +177,7 @@ func run() error {
 		),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
-	return listenAndServe(ctx, logger, server)
+	return listenAndServe(ctx, logger, server, stream.Shutdown)
 }
 
 // loadHistory imports seed/history.yaml after migrations. A bad file logs and
@@ -353,17 +353,31 @@ func healthz(w http.ResponseWriter, _ *http.Request) {
 	_, _ = w.Write([]byte("ok"))
 }
 
-// listenAndServe serves server.Addr until ctx is cancelled.
-func listenAndServe(ctx context.Context, logger zerolog.Logger, server *http.Server) error {
+// listenAndServe serves server.Addr until ctx is cancelled. beforeShutdown runs
+// first so open streams end before the HTTP drain starts; it may be nil.
+func listenAndServe(
+	ctx context.Context,
+	logger zerolog.Logger,
+	server *http.Server,
+	beforeShutdown func(),
+) error {
 	listener, err := (&net.ListenConfig{}).Listen(ctx, "tcp", server.Addr)
 	if err != nil {
 		return fmt.Errorf("listen on %s: %w", server.Addr, err)
 	}
-	return serve(ctx, logger, server, listener)
+	return serve(ctx, logger, server, listener, beforeShutdown)
 }
 
 // serve serves until ctx is cancelled, then drains for up to shutdownTimeout.
-func serve(ctx context.Context, logger zerolog.Logger, server *http.Server, listener net.Listener) error {
+// beforeShutdown ends long-lived handlers that would otherwise hold the drain
+// open; it may be nil.
+func serve(
+	ctx context.Context,
+	logger zerolog.Logger,
+	server *http.Server,
+	listener net.Listener,
+	beforeShutdown func(),
+) error {
 	logger.Info().Str("addr", listener.Addr().String()).Msg("listening")
 
 	done := make(chan error, 1)
@@ -376,6 +390,9 @@ func serve(ctx context.Context, logger zerolog.Logger, server *http.Server, list
 	}
 
 	logger.Info().Msg("shutting down")
+	if beforeShutdown != nil {
+		beforeShutdown()
+	}
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 	if err := server.Shutdown(shutdownCtx); err != nil {
