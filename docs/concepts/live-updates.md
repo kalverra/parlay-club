@@ -4,7 +4,7 @@ title: Live updates
 type: concept
 summary: How a slip page hears about changes through one SSE stream, and how the hub, deadlines, and client reconnect keep that stream cheap.
 tags: [live, sse, hub, eventsource, deadlines, hub-topics]
-sources: [internal/live/hub.go, internal/live/stream.go, internal/refresh/live.go, internal/slips/rules.go, cmd/server/sandbox.go, web/static/app.js]
+sources: [internal/live/hub.go, internal/live/stream.go, internal/refresh/live.go, internal/slips/rules.go, cmd/server/main.go, cmd/server/sandbox.go, web/static/app.js]
 last_verified: 2026-11-13
 ---
 
@@ -85,10 +85,16 @@ failure, so it waits for the tab to become visible instead of reconnecting at on
 
 ### Shutdown
 
-When the instance stops, `Stream.Shutdown` closes every open stream before `http.Server.Shutdown` begins. `ServeSlip`
-returns immediately and sends no `bye`, so the browser's `EventSource` reconnects on its own after the usual retry
-delay, landing on the replacement instance. `bye` stays reserved for the stream's own deadlines. Calling `Shutdown`
-twice is safe, and a stream opened after it returns immediately.
+When the instance stops, the server calls `Stream.Shutdown` before `http.Server.Shutdown` begins. The call closes the
+stream's `done` channel once, and every open `ServeSlip` returns at its next loop step without sending `bye`. The
+browser's `EventSource` then reconnects on its own after the usual retry delay, landing on the replacement instance.
+`bye` stays reserved for the stream's own deadlines. Calling `Shutdown` twice is safe, and a stream that starts after it
+returns is closed at once.
+
+This order matters. `http.Server.Shutdown` waits for active handlers but does not cancel their request contexts, so an
+open stream would hold the drain until its deadline expired. Ending the streams first leaves the whole stop inside the
+8 second budget that Litestream needs to sync; see [Persistence](persistence.md). The refresh drain runs after the HTTP
+drain, on the same budget. See [Data refresh](data-refresh.md).
 
 The `IsLive` func passed to `live.NewStream` is `refresh.Service.LiveWindow`: a week is live when a game is live or a
 scheduled game kicks off within 30 minutes. A read error falls back to the idle deadline. The stream takes its timers

@@ -165,17 +165,22 @@ window.
 
 ## Shutdown
 
-`Service.Shutdown(ctx)` stops new passes, cancels the ones in flight, and waits for them. The server runs it after
-`http.Server.Shutdown` drains HTTP handlers and before `database.Close()`, so no sync can write through a closing
-database. Both drains share the same 8 second budget, described in [Persistence](persistence.md).
+`Service.Shutdown(ctx)` stops new passes, cancels the sources in flight, and waits for them. The stop runs in this
+order: end the SSE streams, drain HTTP handlers, drain refresh, then close the database. Sharing one 8 second budget
+keeps the whole stop inside Cloud Run's 10 second kill window, and no sync can write through a closing database. See
+[Persistence](persistence.md) and [Live updates](live-updates.md).
 
-- `Kick()` returns at once once a stop has begun, so a page load during the drain starts no new pass.
+- `Kick()` returns at once once a stop has begun, so a page load during the drain starts no new pass. The stop check
+  and the goroutine start happen together, so no pass can slip in just after the wait begins.
 - Every source's context cancels on the stop, so a fetch already in flight ends instead of waiting out its 30 second
   timeout. That counts as a stop, not a failure: it logs no outage and leaves no failure backoff behind.
-- A source that ignores its context past the caller's deadline makes `Shutdown` return `context.DeadlineExceeded`, so
-  the stop is never held open past Cloud Run's kill window.
+- The drain still runs when the HTTP drain expires, because a sync mid-write is the worst thing to leave open while the
+  database closes.
+- A source that ignores its context past the caller's deadline makes `Shutdown` return `context.DeadlineExceeded` and
+  the process exits non-zero, so the stop is never held open past Cloud Run's kill window.
 - Sandbox mode drains the same way. `sandboxRuntime.Shutdown` cancels the serialized page-load pass, waits for it, and
-  then drains the refresher it owns.
+  then drains the refresher it owns. Stage and reset syncs run inside their HTTP handlers, so the HTTP drain covers
+  them.
 
 ## Publishing changed weeks
 

@@ -134,7 +134,7 @@ Effort: medium (coordinates shutdown across SSE, refresh workers, and SQLite wit
 
 - [x] Add `Stream.Shutdown()` in `internal/live/stream.go` so open SSE streams exit immediately on server stop without sending `bye`, and test SSE + normal HTTP shutdown together.
 - [x] Add lifecycle cancellation and `Service.Shutdown(ctx)` in `internal/refresh/refresh.go` (and matching `sandboxRuntime.Shutdown(ctx)` in `cmd/server/sandbox.go`), wire both into `serve` in `cmd/server/main.go` before `database.Close()`, and test cancellation and timeout behavior.
-- [ ] Docs: update `docs/concepts/live-updates.md` and `docs/concepts/data-refresh.md` for shutdown behavior.
+- [x] Docs: update `docs/concepts/live-updates.md` and `docs/concepts/data-refresh.md` for shutdown behavior.
 
 ### Phase 2: Harden startup validation, OIDC discovery, and health checks
 
