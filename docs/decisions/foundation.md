@@ -114,7 +114,8 @@ What we would revisit:
 - Name length (1–24 characters) is enforced in the auth handler, not in `db.CreateUser`. Another caller of the store can
   write a longer name.
 - `RequireUser` re-reads the user row on every request, so deactivating someone takes effect on their next page load.
-- `/healthz` reports the process, not SQLite. It never queries the database.
+- `/healthz` pings SQLite, so a closed or unreachable database fails the probe. The SQLite error is logged, never
+  returned: the probe body stays `ok` or `unavailable`.
 - Shell pages send no `Cache-Control`; auth pages send `no-store`. Change 2 adds user data to the shell and should
   decide the shell policy then.
 - The avatar links to `/me`, which belongs to change 2 and 404s until then.
