@@ -311,6 +311,7 @@ func newMux(
 ) http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("GET /healthz", healthz)
+	mux.Handle("GET /readyz", healthz)
 	mux.Handle("GET /static/{path...}", static)
 	mux.Handle("GET /screenshots/{file}", screenshots)
 	handlers.Routes(mux)
