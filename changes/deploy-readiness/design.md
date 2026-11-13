@@ -146,7 +146,7 @@ Effort: medium (coordinates shutdown across SSE, refresh workers, and SQLite wit
 
 Effort: easy (single handler dependency addition and fallback preservation)
 
-- [ ] Thread `cfg.BaseURL` into `groups.NewHandlers` (`internal/groups/handlers.go`, `cmd/server/main.go`) so `inviteURL` uses `BASE_URL` when set and falls back to `r.Host` when empty, with proxy-Host tests in `internal/groups/handlers_test.go`, and update `docs/concepts/groups.md` and `docs/runbooks/custom-domain.md`.
+- [x] Thread `cfg.BaseURL` into `groups.NewHandlers` (`internal/groups/handlers.go`, `cmd/server/main.go`) so `inviteURL` uses `BASE_URL` when set and falls back to `r.Host` when empty, with proxy-Host tests in `internal/groups/handlers_test.go`, and update `docs/concepts/groups.md` and `docs/runbooks/custom-domain.md`.
 
 ### Phase 4: Align GCP secrets, build caching, and deploy preflight
 

@@ -102,7 +102,7 @@ func openSandboxApp(t *testing.T) *sandboxApp {
 	handlers := auth.NewHandlers(zerolog.Nop(), store, runtime.cookies, renderer, nil, true)
 	scope := groups.Scope(zerolog.Nop(), store, auth.UserFrom, runtime.cookies)
 	groupHandlers := groups.NewHandlers(
-		zerolog.Nop(), store, auth.UserFrom, runtime.cookies, renderer)
+		zerolog.Nop(), store, auth.UserFrom, runtime.cookies, renderer, "")
 	shell := webui.NewWithDeps(webui.Dependencies{
 		Logger:     zerolog.Nop(),
 		Renderer:   renderer,

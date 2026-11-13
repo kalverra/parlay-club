@@ -147,7 +147,7 @@ func run() error {
 
 	handlers := auth.NewHandlers(logger, store, cookies, renderer, provider, devLogin)
 	scope := groups.Scope(logger, store, auth.UserFrom, cookies)
-	groupHandlers := groups.NewHandlers(logger, store, auth.UserFrom, cookies, renderer)
+	groupHandlers := groups.NewHandlers(logger, store, auth.UserFrom, cookies, renderer, cfg.BaseURL)
 
 	stream := live.NewStream(hub, refresher.LiveWindow)
 	bugService := bugs.NewService(bugs.Deps{

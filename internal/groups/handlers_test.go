@@ -45,6 +45,14 @@ func (s *shellProbe) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 func newJoinFixture(t *testing.T) *joinFixture {
 	t.Helper()
 
+	return newJoinFixtureWithBaseURL(t, "")
+}
+
+// newJoinFixtureWithBaseURL wires the invite screens with a configured public
+// origin, as cmd/server does from cfg.BaseURL.
+func newJoinFixtureWithBaseURL(t *testing.T, baseURL string) *joinFixture {
+	t.Helper()
+
 	database, err := db.Open(filepath.Join(t.TempDir(), "parlay.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { assert.NoError(t, database.Close()) })
@@ -61,7 +69,7 @@ func newJoinFixture(t *testing.T) *joinFixture {
 	require.NoError(t, err)
 
 	authHandlers := auth.NewHandlers(zerolog.Nop(), store, cookies, renderer, nil, true)
-	groupHandlers := groups.NewHandlers(zerolog.Nop(), store, auth.UserFrom, cookies, renderer)
+	groupHandlers := groups.NewHandlers(zerolog.Nop(), store, auth.UserFrom, cookies, renderer, baseURL)
 	scope := groups.Scope(zerolog.Nop(), store, auth.UserFrom, cookies)
 
 	shell := &shellProbe{}
@@ -326,6 +334,39 @@ func TestGroupsPageListsGroupsAndInviteLinks(t *testing.T) {
 	assert.Equal(t, 2, strings.Count(body, ">Active</span"),
 		"one Active badge on the card, one in the top-bar switcher")
 	assert.Contains(t, body, "data-group-switcher", "two groups show the top-bar switcher")
+}
+
+// proxyHost is the Cloud Run hostname a rewriting proxy sends as Host, which
+// is not the public URL people should paste.
+const proxyHost = "parlay-club-xyz.us-central1.run.app"
+
+func TestGroupsPageBuildsInviteLinksFromTheConfiguredBaseURL(t *testing.T) {
+	t.Parallel()
+
+	f := newJoinFixtureWithBaseURL(t, "https://parlay.example.com/")
+	req := request(t, http.MethodGet, "/groups")
+	req.Host = proxyHost
+
+	recorder := f.serve(t, req, f.sessionCookie(t, f.member.ID))
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	body := recorder.Body.String()
+	assert.Contains(t, body, "https://parlay.example.com/join/"+f.group.InviteToken)
+	assert.NotContains(t, body, proxyHost, "the proxy's Host never reaches the invite link")
+}
+
+func TestGroupsPageFallsBackToTheRequestHostWithoutABaseURL(t *testing.T) {
+	t.Parallel()
+
+	f := newJoinFixture(t)
+	req := request(t, http.MethodGet, "/groups")
+	req.Host = proxyHost
+	req.Header.Set("X-Forwarded-Proto", "https")
+
+	recorder := f.serve(t, req, f.sessionCookie(t, f.member.ID))
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	assert.Contains(t, recorder.Body.String(), "https://"+proxyHost+"/join/"+f.group.InviteToken)
 }
 
 func TestGroupsPageRefusesToLeaveTheOnlyGroup(t *testing.T) {

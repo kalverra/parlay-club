@@ -33,15 +33,19 @@ type Handlers struct {
 	userFrom UserFrom
 	cookies  GroupCookie
 	renderer Renderer
+	baseURL  string
 }
 
-// NewHandlers builds the invite screens.
+// NewHandlers builds the invite screens. baseURL is the public origin, such as
+// https://parlay.example.com, used to build invite links. Empty means build
+// them from the request instead.
 func NewHandlers(
 	logger zerolog.Logger,
 	store InviteStore,
 	userFrom UserFrom,
 	cookies GroupCookie,
 	renderer Renderer,
+	baseURL string,
 ) *Handlers {
 	return &Handlers{
 		logger:   logger,
@@ -49,6 +53,7 @@ func NewHandlers(
 		userFrom: userFrom,
 		cookies:  cookies,
 		renderer: renderer,
+		baseURL:  strings.TrimRight(baseURL, "/"),
 	}
 }
 
@@ -251,7 +256,7 @@ func (h *Handlers) renderGroups(w http.ResponseWriter, r *http.Request, user db.
 		cards = append(cards, GroupCard{
 			ID:        group.ID,
 			Name:      group.Name,
-			InviteURL: inviteURL(r, group.InviteToken),
+			InviteURL: h.inviteURL(r, group.InviteToken),
 			Current:   group.ID == active.ID,
 			CanLeave:  canLeave,
 		})
@@ -356,8 +361,13 @@ func memberViews(members []db.User) []webui.User {
 	return views
 }
 
-// inviteURL builds the absolute link a person can paste into a message.
-func inviteURL(r *http.Request, token string) string {
+// inviteURL builds the absolute link a person can paste into a message. A
+// configured base URL wins, because a proxy may rewrite Host to an internal
+// hostname. Without one, the request's own host and scheme are the best guess.
+func (h *Handlers) inviteURL(r *http.Request, token string) string {
+	if h.baseURL != "" {
+		return h.baseURL + "/join/" + token
+	}
 	scheme := "http"
 	if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
 		scheme = "https"

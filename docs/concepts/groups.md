@@ -5,7 +5,7 @@ type: concept
 summary: How groups split people into shared clubs, how invites and leaving work, how recurring slip schedules automate weekly slips, and how the active group scopes what a person sees.
 tags: [groups, membership, invites, solo, scope, cookies, schedules]
 sources: [internal/groups/groups.go, internal/groups/handlers.go, internal/db/groups.go, internal/db/schedules.go, internal/db/migrations/0001_init.sql, internal/db/migrations/0009_multi_slip_events.sql, internal/auth/signin.go, internal/auth/cookies.go, internal/auth/middleware.go, internal/web/home.go, internal/web/slips.go, internal/web/schedules.go, internal/slips/slips.go, cmd/server/main.go, web/templates/home.html, web/templates/groups.html, web/templates/join.html, web/templates/layout.html, web/static/app.js]
-last_verified: 2026-11-12
+last_verified: 2026-11-13
 ---
 
 # Groups
@@ -81,6 +81,11 @@ the cookie to another group.
 Every group has one `invite_token`: 16 random bytes as 32 lowercase hex characters. It is a bearer secret. The `/groups`
 page shows the full link with a copy button. Resetting the link mints a new token and kills the old one immediately.
 
+The link is `BASE_URL + /join/{token}` when `BASE_URL` is set. Without it, the app falls back to the request's host and
+`X-Forwarded-Proto`. That fallback is right on a direct HTTP request, but a proxy that rewrites `Host` (Cloudflare in
+front of Cloud Run) makes the request host an internal hostname. `BASE_URL` is what keeps a pasted link on the public
+domain.
+
 - `GET /join/{token}` shows "Join {group}?" and the group's active members. It names the group and the people, nothing
   else.
 - A signed-out visitor is sent to `/login` with the invite path kept in the signed `pc_oauth` cookie. Only a `/join/`
@@ -134,6 +139,8 @@ and reloads the page.
   a boundary for what people see, not a permission system.
 - Invite links are bearer secrets. 128-bit tokens, one-click reset, and a join page that shows only names limit the
   harm.
+- Invite links trust `BASE_URL` over request headers, so a rewriting proxy cannot leak an internal hostname into a
+  pasted link. The cost is that a request on another hostname still gets the configured one.
 - Open sign-up means a stranger can reach the app. The shared cache and the credit floors bound the cost, and a stranger
   sees only their own solo group.
 - You cannot leave your last group, so there is always somewhere for a slip to live.
