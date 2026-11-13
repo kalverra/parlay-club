@@ -53,6 +53,39 @@ jobs:
         if: ${{ github.event.inputs.force != 'true' }}
         run: deploy/blackout.sh
 
+      # Every variable the deploy reads must exist before any GCP call, so a
+      # typo fails in seconds instead of halfway through a deploy.
+      - name: Check the deployment variables
+        env:
+          GCP_PROJECT: ${{ vars.GCP_PROJECT }}
+          GCP_REGION: ${{ vars.GCP_REGION }}
+          WIF_PROVIDER: ${{ vars.WIF_PROVIDER }}
+          DEPLOY_SA: ${{ vars.DEPLOY_SA }}
+          RUNTIME_SA: ${{ vars.RUNTIME_SA }}
+          LITESTREAM_BUCKET: ${{ vars.LITESTREAM_BUCKET }}
+          AR_REPO: ${{ vars.AR_REPO }}
+          BASE_URL: ${{ vars.BASE_URL }}
+        run: |
+          set -euo pipefail
+
+          missing=()
+          for name in GCP_PROJECT GCP_REGION WIF_PROVIDER DEPLOY_SA RUNTIME_SA LITESTREAM_BUCKET AR_REPO; do
+            if [ -z "${!name:-}" ]; then
+              missing+=("$name")
+            fi
+          done
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error::missing GitHub repository variables: ${missing[*]}. Run deploy/setup.sh, then set the values it prints."
+            exit 1
+          fi
+
+          # Same rule as config.Load: BASE_URL is optional, but a set value must
+          # be http or https with a host.
+          if [ -n "${BASE_URL:-}" ] && ! [[ "$BASE_URL" =~ ^https?://[^/?#[:space:]]+ ]]; then
+            echo "::error::BASE_URL must be an http or https URL with a host, got '$BASE_URL'"
+            exit 1
+          fi
+
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v3
         with:
@@ -65,18 +98,91 @@ jobs:
         with:
           project_id: ${{ vars.GCP_PROJECT }}
 
-      - name: Build and push the image
+      # Cloud Run rejects a revision that points at a missing resource or an
+      # empty secret, so check everything before spending minutes on a build.
+      - name: Pre-flight the GCP project
+        env:
+          PROJECT: ${{ vars.GCP_PROJECT }}
+          REGION: ${{ vars.GCP_REGION }}
+          AR_REPO: ${{ vars.AR_REPO }}
+          BUCKET: ${{ vars.LITESTREAM_BUCKET }}
+        run: |
+          set -euo pipefail
+
+          failed=0
+
+          if ! gcloud artifacts repositories describe "$AR_REPO" \
+            --project "$PROJECT" --location "$REGION" >/dev/null; then
+            echo "::error::Artifact Registry repo $AR_REPO is missing in $REGION; run deploy/setup.sh"
+            failed=1
+          fi
+
+          if ! gcloud storage buckets describe "gs://$BUCKET" --project "$PROJECT" >/dev/null; then
+            echo "::error::Litestream bucket gs://$BUCKET is missing; run deploy/setup.sh"
+            failed=1
+          fi
+
+          for secret in session-key google-client-id google-client-secret odds-api-key the-odds-api-key; do
+            if ! versions=$(gcloud secrets versions list "$secret" \
+              --project "$PROJECT" \
+              --filter='state=ENABLED' \
+              --limit=1 \
+              --format='value(name)' 2>&1); then
+              echo "::error::cannot read secret $secret; run deploy/setup.sh to create it and grant roles/secretmanager.viewer: $versions"
+              failed=1
+            elif [ -z "$versions" ]; then
+              echo "::error::secret $secret has no ENABLED version; add one (see docs/guides/gcp-setup.md)"
+              failed=1
+            fi
+          done
+
+          # github-token is optional. Mount it only when someone added a
+          # version; an empty secret would fail the revision at boot.
+          if versions=$(gcloud secrets versions list github-token \
+            --project "$PROJECT" \
+            --filter='state=ENABLED' \
+            --limit=1 \
+            --format='value(name)' 2>/dev/null) && [ -n "$versions" ]; then
+            echo "MOUNT_GITHUB_TOKEN=true" >> "$GITHUB_ENV"
+            echo "github-token has an ENABLED version; bug reports will open GitHub issues"
+          else
+            echo "::notice::github-token has no ENABLED version; bug reports stay in SQLite"
+          fi
+
+          if [ "$failed" -ne 0 ]; then
+            exit 1
+          fi
+
+      - name: Resolve the image tag
+        id: image
         env:
           PROJECT: ${{ vars.GCP_PROJECT }}
           REGION: ${{ vars.GCP_REGION }}
           AR_REPO: ${{ vars.AR_REPO }}
           SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
         run: |
-          IMAGE="${REGION}-docker.pkg.dev/${PROJECT}/${AR_REPO}/${SERVICE}:${SHA}"
-          gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
-          docker build -t "$IMAGE" .
-          docker push "$IMAGE"
-          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+          tag="${REGION}-docker.pkg.dev/${PROJECT}/${AR_REPO}/${SERVICE}:${SHA}"
+          echo "IMAGE=$tag" >> "$GITHUB_ENV"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Configure Docker for Artifact Registry
+        env:
+          REGION: ${{ vars.GCP_REGION }}
+        run: gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+
+      # Cache layers in the GitHub Actions cache, not Artifact Registry: the
+      # registry's free tier is 0.5 GB and the cache does not count against it.
+      - name: Build and push the image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.image.outputs.tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       - name: Deploy to Cloud Run
         env:
@@ -85,6 +191,7 @@ jobs:
           RUNTIME_SA: ${{ vars.RUNTIME_SA }}
           BUCKET: ${{ vars.LITESTREAM_BUCKET }}
           BASE_URL_VAR: ${{ vars.BASE_URL }}
+          REPO: ${{ vars.ISSUES_REPO || github.repository }}
         run: |
           set -euo pipefail
 
@@ -96,9 +203,13 @@ jobs:
 
           run_deploy() {
             local base_url="$1"
-            local env_vars="APP_ENV=prod,DB_PATH=/data/parlay.db,LITESTREAM_BUCKET=$BUCKET"
+            local env_vars="APP_ENV=prod,DB_PATH=/data/parlay.db,LITESTREAM_BUCKET=$BUCKET,GITHUB_REPO=$REPO"
             if [ -n "$base_url" ]; then
               env_vars="$env_vars,BASE_URL=$base_url"
+            fi
+            local secrets="SESSION_KEY=session-key:latest,GOOGLE_CLIENT_ID=google-client-id:latest,GOOGLE_CLIENT_SECRET=google-client-secret:latest,ODDS_API_KEY=odds-api-key:latest,THE_ODDS_API_KEY=the-odds-api-key:latest"
+            if [ "${MOUNT_GITHUB_TOKEN:-}" = "true" ]; then
+              secrets="$secrets,GITHUB_TOKEN=github-token:latest"
             fi
             gcloud run deploy "$SERVICE" \
               --project "$PROJECT" \
@@ -114,7 +225,7 @@ jobs:
               --allow-unauthenticated \
               --service-account "$RUNTIME_SA" \
               --update-env-vars "$env_vars" \
-              --set-secrets "SESSION_KEY=session-key:latest,GOOGLE_CLIENT_ID=google-client-id:latest,GOOGLE_CLIENT_SECRET=google-client-secret:latest,ODDS_API_KEY=odds-api-key:latest,THE_ODDS_API_KEY=the-odds-api-key:latest"
+              --set-secrets "$secrets"
           }
 
           # BASE_URL is required in prod and holds the service's own URL. On the

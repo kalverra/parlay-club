@@ -101,8 +101,8 @@ flowchart TD
 - **`.github/workflows/deploy.yml`:**
   - Add a pre-auth variables check verifying `GCP_PROJECT`, `GCP_REGION`, `WIF_PROVIDER`, `DEPLOY_SA`, `RUNTIME_SA`, `LITESTREAM_BUCKET`, `AR_REPO`, and valid `http`/`https` `BASE_URL` (when set).
   - Add a post-auth GCP pre-flight step checking the Artifact Registry repo, GCS bucket, and that each required secret (`session-key`, `google-client-id`, `google-client-secret`, `odds-api-key`, `the-odds-api-key`) has at least one `ENABLED` version; check `github-token` separately and set an env flag (`MOUNT_GITHUB_TOKEN`) only if it has an `ENABLED` version.
-  - Replace raw `docker build` / `docker push` with `docker/setup-buildx-action@v3` and `docker/build-push-action@v6` using `cache-from: type=gha` and `cache-to: type=gha,mode=max` (avoids consuming Artifact Registry's 0.5 GB free tier with cache layers).
-  - Pass `GITHUB_REPO=${{ vars.GITHUB_REPO || github.repository }}` in `--update-env-vars` and append `GITHUB_TOKEN=github-token:latest` to `--set-secrets` when `MOUNT_GITHUB_TOKEN=true`.
+  - Replace raw `docker build` / `docker push` with `docker/setup-buildx-action@v4` and `docker/build-push-action@v7` using `cache-from: type=gha` and `cache-to: type=gha,mode=max` (avoids consuming Artifact Registry's 0.5 GB free tier with cache layers).
+  - Pass `GITHUB_REPO=${{ vars.ISSUES_REPO || github.repository }}` in `--update-env-vars` and append `GITHUB_TOKEN=github-token:latest` to `--set-secrets` when `MOUNT_GITHUB_TOKEN=true`. GitHub reserves the `GITHUB_` prefix for configuration variable names, so the optional repo variable is `ISSUES_REPO` and the app still receives it as the `GITHUB_REPO` env var.
 
 ## Verification
 
@@ -153,5 +153,5 @@ Effort: easy (single handler dependency addition and fallback preservation)
 Effort: easy (script, Dockerfile cache mounts, and workflow steps with doc updates)
 
 - [x] Add `github-token` secret and deployer viewer bindings (`secretmanager.viewer`, `storage.bucketViewer`) to `deploy/setup.sh`, and add BuildKit cache mounts to `Dockerfile`.
-- [ ] Update `.github/workflows/deploy.yml` with pre-auth variable checks, post-auth GCP/secret preflight, Buildx GHA layer caching, `GITHUB_REPO` env var, and conditional `GITHUB_TOKEN` secret wiring.
+- [x] Update `.github/workflows/deploy.yml` with pre-auth variable checks, post-auth GCP/secret preflight, Buildx GHA layer caching, `GITHUB_REPO` env var, and conditional `GITHUB_TOKEN` secret wiring.
 - [ ] Docs: update `docs/guides/gcp-setup.md` and `docs/runbooks/deploy.md` to document the six secrets, deployer viewer permissions, pre-flight checks, and build caching.
