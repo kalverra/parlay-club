@@ -5,7 +5,7 @@ type: guide
 summary: Create the Google Cloud project resources once, add the secrets and GitHub variables, and run the first deploy that puts the app on Cloud Run.
 tags: [gcp, setup, cloud-run, artifact-registry, secret-manager, workload-identity, github, deploy, litestream]
 sources: [deploy/setup.sh, deploy/entrypoint.sh, .github/workflows/deploy.yml, Dockerfile, internal/config/config.go, .github/workflows/ci.yml]
-last_verified: 2026-11-09
+last_verified: 2026-11-13
 ---
 
 # GCP setup
@@ -53,9 +53,9 @@ The script stops at the first failure and prints what it finished. It creates:
 | APIs                 | Cloud Run, Artifact Registry, Secret Manager, IAM, STS, billing budgets, GCS              |
 | GCS bucket           | `gs://PROJECT_ID-parlay-litestream` in `us-central1`, for Litestream                      |
 | Artifact Registry    | Docker repo `parlay-club` with a cleanup policy that keeps the last 3 images               |
-| Secrets              | `session-key`, `google-client-id`, `google-client-secret`, `odds-api-key`, `the-odds-api-key`, all empty |
-| Runtime account      | `parlay-runtime`, read/write on the bucket and read on the five secrets                  |
-| Deployer account     | `parlay-deployer`, `run.admin` and `artifactregistry.writer`, act-as on the runtime account |
+| Secrets              | `session-key`, `google-client-id`, `google-client-secret`, `odds-api-key`, `the-odds-api-key`, all empty; `github-token`, empty and optional |
+| Runtime account      | `parlay-runtime`, read/write on the bucket and read on all six secrets                   |
+| Deployer account     | `parlay-deployer`, `run.admin`, `artifactregistry.writer`, and `secretmanager.viewer`, plus `storage.bucketViewer` on the bucket and act-as on the runtime account |
 | Cloud Run agent      | read on the image repo, so Cloud Run can pull the image                                   |
 | Workload Identity    | pool `github` and provider `github`, limited to `kalverra/parlay-club`                    |
 | Billing budget       | `$5` a month with email alerts at 50%, 90%, and 100%                                       |
@@ -79,15 +79,20 @@ GITHUB_REPO=you/parlay-club deploy/setup.sh PROJECT_ID BILLING_ACCOUNT
 
 The script prints the values you need in the next steps. Copy them.
 
+Re-run it once on a project that was set up before the deploy pre-flight checks existed. The script adds the
+`github-token` secret and grants `parlay-deployer` the read access the checks need; every other step finds its resource
+and skips it.
+
 ### 2. Create the Google OAuth client
 
 The app needs a Web client before it can boot in prod. Follow [Google OAuth setup](../runbooks/google-oauth-setup.md) to
 create it, set the consent screen to production, and register the local redirect URI. Leave the prod redirect URI for
 step 6, after the Cloud Run URL exists.
 
-### 3. Add a version to every secret
+### 3. Add a version to each required secret
 
-Cloud Run refuses to start a revision that points at a secret with no version, so add one to all five now.
+Cloud Run refuses to start a revision that points at a secret with no version. The deploy pre-flight also fails before
+the build when a required secret has no `ENABLED` version. Add a version to all five required secrets now.
 
 The session key signs cookies. Generate 32 or more random bytes and keep it secret:
 
@@ -118,6 +123,17 @@ printf '%s' "$THE_ODDS_API_KEY" | gcloud secrets versions add the-odds-api-key -
 To replace a value later, add a new version of that secret and deploy again. `:latest` points Cloud Run at the newest
 version, so no flag changes.
 
+The sixth secret, `github-token`, is optional. With a version, in-app bug reports open GitHub issues; without one,
+reports still save in SQLite. Add a fine-grained personal access token with **Issues: read and write** on the repo, or a
+classic token with the `repo` scope:
+
+```sh
+printf '%s' "$GH_ISSUES_TOKEN" | gcloud secrets versions add github-token --data-file=-
+```
+
+The deploy checks for an `ENABLED` version and mounts the secret only when one exists, so leaving it empty is safe.
+Tokens expire: when the issue call starts failing, add a new version and deploy again.
+
 ### 4. Set the GitHub repository variables
 
 The deploy workflow reads these from **Settings → Secrets and variables → Actions → Variables**. They are variables, not
@@ -132,8 +148,11 @@ secrets: none of them is sensitive.
 | `RUNTIME_SA`        | `parlay-runtime@PROJECT_ID.iam.gserviceaccount.com`     |
 | `LITESTREAM_BUCKET` | the bucket name, without `gs://`                        |
 | `AR_REPO`           | `parlay-club` unless you changed it                     |
+| `ISSUES_REPO`       | optional; `owner/repo` for bug report issues, default the repo that runs the workflow |
 
-`BASE_URL` comes after the first deploy, in step 6. Set all of these at once with the GitHub CLI:
+`BASE_URL` comes after the first deploy, in step 6. `ISSUES_REPO` is optional: leave it unset to file bug issues against
+the repo itself. The workflow always passes it to the container as `GITHUB_REPO`. The workflow checks the seven required
+variables before it talks to Google Cloud, so a typo fails in seconds. Set all of them at once with the GitHub CLI:
 
 ```sh
 gh variable set GCP_PROJECT --body PROJECT_ID
@@ -151,6 +170,9 @@ The setup script prints the exact `gh` commands with your values filled in.
 
 Open **Actions → Deploy → Run workflow**, choose `main`, and leave `force` off unless a game is on; the
 [deploy runbook](../runbooks/deploy.md#the-blackout) explains the gate. The first deploy takes a few minutes.
+
+Before it builds, the workflow checks the Artifact Registry repo, the Litestream bucket, and an `ENABLED` version for
+each required secret. A red job names the missing resource before any build time is spent.
 
 The app needs `BASE_URL`, and no service URL exists yet, so the first revision can fail to boot. The workflow notices,
 reads the new service's URL, and redeploys once with it. A yellow `first revision had no BASE_URL; retrying with ...`
@@ -227,10 +249,17 @@ The free-tier pieces this app leans on:
 | `cannot read project`                                | Wrong project ID, or your account cannot see it. Check `gcloud projects list`.           |
 | Permission denied while granting roles or creating a budget | You need Owner on the project and Billing Account Administrator on the billing account. |
 | The deploy cannot authenticate to Google Cloud       | A GitHub variable is wrong or missing. Recheck `WIF_PROVIDER`, `DEPLOY_SA`, `GCP_PROJECT`. |
+| `missing GitHub repository variables`                | One of the seven required variables is unset. Set it to the value the setup script printed. |
+| `BASE_URL must be an http or https URL with a host`  | Fix the `BASE_URL` variable, or unset it on the first deploy.                            |
+| `cannot read secret ...`                             | `parlay-deployer` lacks `roles/secretmanager.viewer`. Re-run `deploy/setup.sh`.          |
+| `secret ... has no ENABLED version`                  | A required secret is empty. Add a version, as in step 3.                                 |
+| `Litestream bucket gs://... is missing`              | `LITESTREAM_BUCKET` is wrong, or the bucket was never created. Re-run `deploy/setup.sh`.  |
+| `Artifact Registry repo ... is missing`              | `AR_REPO` or `GCP_REGION` is wrong, or the repo was never created. Re-run `deploy/setup.sh`. |
 | Startup says `GOOGLE_CLIENT_ID is required in prod`  | `google-client-id` has no version, or the client value is empty. Add one.                |
 | Startup says `BASE_URL is required in prod`          | Set the `BASE_URL` repo variable, then deploy again.                                     |
 | Startup says `entrypoint: set LITESTREAM_BUCKET`     | `LITESTREAM_BUCKET` is missing from the repo variables.                                  |
-| `secret ... not found` on deploy                     | Run `deploy/setup.sh` first; it creates the five secrets.                                |
+| `secret ... not found` on deploy                     | Run `deploy/setup.sh` first; it creates the six secrets.                                 |
+| Bug reports save but never open a GitHub issue       | `github-token` has no version, so the deploy skipped it. Add one and deploy again.        |
 | Cloud Run cannot pull the image                      | Re-run `deploy/setup.sh`; it grants the Cloud Run service agent read on the repo.        |
 | History does not appear                              | No group existed at boot, or the history belongs to another group. Create the first group and redeploy. |
 | Budget emails never arrive                           | Add yourself as a billing administrator or user on the billing account.                  |
