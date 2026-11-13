@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"io"
@@ -1207,6 +1208,36 @@ func TestSandboxStageChangeWinsOverPageLoadKick(t *testing.T) {
 		assert.Equal(t, db.GameFinal, game.Status,
 			"a late page-load pass cannot put a scheduled morning game back")
 	}
+}
+
+// TestSandboxShutdownCancelsPageLoadKick proves a stopped runtime refuses new
+// page-load passes and that a second shutdown is safe.
+func TestSandboxShutdownCancelsPageLoadKick(t *testing.T) {
+	t.Parallel()
+
+	_, _, runtime := openSandbox(t, &live.Hub{}, sandboxCookies())
+
+	require.NoError(t, runtime.Shutdown(t.Context()))
+	runtime.Kick()
+	assert.False(t, runtime.kickPending.Load(), "a stopped runtime starts no page-load pass")
+	require.NoError(t, runtime.Shutdown(t.Context()), "a second shutdown is safe")
+	assert.False(t, runtime.kickPending.Load(), "the kick is still refused")
+}
+
+// TestSandboxShutdownReportsTheDrainDeadline holds a pass that never finishes,
+// so Shutdown hands the caller its deadline error instead of blocking the stop
+// past Cloud Run's kill window.
+func TestSandboxShutdownReportsTheDrainDeadline(t *testing.T) {
+	t.Parallel()
+
+	_, _, runtime := openSandbox(t, &live.Hub{}, sandboxCookies())
+
+	runtime.kickWg.Add(1) // a pass that never finishes
+	defer runtime.kickWg.Done()
+
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	require.ErrorIs(t, runtime.Shutdown(ctx), context.DeadlineExceeded)
 }
 
 // assertStageApplied checks the clock, replay stage, stage row, slip lock

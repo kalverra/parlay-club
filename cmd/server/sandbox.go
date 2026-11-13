@@ -61,6 +61,14 @@ type sandboxRuntime struct {
 	mu          sync.Mutex
 	kickPending atomic.Bool
 	seed        sandbox.Seed
+
+	// stopCtx cancels a page-load pass when the server stops. stopMu keeps the
+	// "not stopping" check and the goroutine start one step, and kickWg lets
+	// Shutdown wait for that pass before the database closes.
+	stopCtx    context.Context
+	stopCancel context.CancelFunc
+	stopMu     sync.Mutex
+	kickWg     sync.WaitGroup
 }
 
 // newSandboxRuntime wires every ingest client to the week 9 replay. A fresh
@@ -110,6 +118,10 @@ func newSandboxRuntime(
 		client:    client,
 		state:     state,
 	}
+
+	stopCtx, stopCancel := context.WithCancel(ctx)
+	runtime.stopCtx = stopCtx
+	runtime.stopCancel = stopCancel
 
 	saved, err := state.Load(ctx)
 	switch {
@@ -291,21 +303,37 @@ func (r *sandboxRuntime) publishSeed(seed sandbox.Seed) {
 
 // Kick starts one serialized background refresh pass for a full-page load. A
 // burst of page loads queues at most one pass, and a pass never overlaps a
-// reset.
+// reset. Once the server is shutting down, a kick does nothing.
 func (r *sandboxRuntime) Kick() {
+	r.stopMu.Lock()
+	defer r.stopMu.Unlock()
+
+	if r.stopCtx.Err() != nil {
+		return
+	}
 	if !r.kickPending.CompareAndSwap(false, true) {
 		return
 	}
-	go func() {
+	r.kickWg.Go(func() {
 		defer r.kickPending.Store(false)
-
-		r.mu.Lock()
 		defer r.mu.Unlock()
 
-		if err := r.refresher.RunOnce(context.Background()); err != nil {
+		r.mu.Lock()
+		if err := r.refresher.RunOnce(r.stopCtx); err != nil && r.stopCtx.Err() == nil {
 			r.logger.Error().Err(err).Msg("sandbox page-load refresh")
 		}
-	}()
+	})
+}
+
+// Shutdown cancels a page-load pass in flight and waits for it, then drains the
+// refresher. It returns ctx's error when the wait outlives the caller's
+// deadline. Calling it twice is safe.
+func (r *sandboxRuntime) Shutdown(ctx context.Context) error {
+	r.stopMu.Lock()
+	r.stopCancel()
+	r.stopMu.Unlock()
+
+	return errors.Join(waitForGroup(ctx, &r.kickWg), r.refresher.Shutdown(ctx))
 }
 
 // sandboxPersonaView is one switch control on the sandbox page.

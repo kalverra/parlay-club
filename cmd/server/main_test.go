@@ -312,7 +312,7 @@ func TestServeDrainsInflightRequestOnShutdown(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	done := make(chan error, 1)
-	go func() { done <- serve(ctx, zerolog.Nop(), server, listener, nil) }()
+	go func() { done <- serve(ctx, zerolog.Nop(), server, listener, shutdownHooks{}) }()
 
 	url := fmt.Sprintf("http://%s/slow", listener.Addr())
 	response := make(chan error, 1)
@@ -355,12 +355,26 @@ func TestServeDrainsInflightRequestOnShutdown(t *testing.T) {
 	}
 }
 
-// TestServeDrainsOpenStreamAndInflightRequestsOnShutdown holds one SSE stream
-// and one slow request open, then cancels the serve context. The shutdown hook
-// must release the stream without a bye, and the drain must still wait for the
-// slow request instead of timing out.
+// TestServeDrainsOpenStreamAndInflightRequestsOnShutdown holds one SSE stream,
+// one slow request, and one refresh sync open, then cancels the serve context.
+// The streams drain first without a bye, the slow request holds the HTTP drain,
+// and the refresh drain cancels the sync only after the HTTP drain finishes.
 func TestServeDrainsOpenStreamAndInflightRequestsOnShutdown(t *testing.T) {
 	t.Parallel()
+
+	database, err := db.Open(filepath.Join(t.TempDir(), "parlay.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { assert.NoError(t, database.Close()) })
+	require.NoError(t, db.Migrate(t.Context(), database))
+
+	sync := &blockingScoreboard{entered: make(chan struct{}), left: make(chan struct{})}
+	refresher := refresh.New(refresh.Deps{
+		Store:      db.NewStore(database),
+		Scoreboard: sync,
+		Logger:     zerolog.Nop(),
+	})
+	refresher.KickContext(t.Context())
+	<-sync.entered
 
 	var hub live.Hub
 	stream := live.NewStream(&hub, nil)
@@ -384,7 +398,12 @@ func TestServeDrainsOpenStreamAndInflightRequestsOnShutdown(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	done := make(chan error, 1)
-	go func() { done <- serve(ctx, zerolog.Nop(), server, listener, stream.Shutdown) }()
+	go func() {
+		done <- serve(ctx, zerolog.Nop(), server, listener, shutdownHooks{
+			beforeHTTP: stream.Shutdown,
+			afterHTTP:  refresher.Shutdown,
+		})
+	}()
 
 	baseURL := fmt.Sprintf("http://%s", listener.Addr())
 
@@ -433,6 +452,12 @@ func TestServeDrainsOpenStreamAndInflightRequestsOnShutdown(t *testing.T) {
 	case <-time.After(100 * time.Millisecond):
 		// The drain still waits on the slow handler, as it should.
 	}
+	select {
+	case <-sync.left:
+		t.Fatal("the refresh drain ran before the HTTP drain finished")
+	default:
+		// The sync is still running, as it should be.
+	}
 
 	close(release)
 	require.NoError(t, <-response)
@@ -442,6 +467,60 @@ func TestServeDrainsOpenStreamAndInflightRequestsOnShutdown(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("serve did not return after the slow request finished")
 	}
+	select {
+	case <-sync.left:
+	default:
+		t.Fatal("serve returned before the refresh drain finished")
+	}
+}
+
+// TestServeReportsTheRefreshDrainError checks that a drain which outlives its
+// deadline fails the serve, so a sync still writing is never mistaken for a
+// clean stop.
+func TestServeReportsTheRefreshDrainError(t *testing.T) {
+	t.Parallel()
+
+	listener, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	server := &http.Server{Handler: http.NotFoundHandler(), ReadHeaderTimeout: time.Second}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		done <- serve(ctx, zerolog.Nop(), server, listener, shutdownHooks{
+			afterHTTP: func(context.Context) error {
+				return context.DeadlineExceeded
+			},
+		})
+	}()
+
+	cancel()
+	select {
+	case err := <-done:
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+	case <-time.After(5 * time.Second):
+		t.Fatal("serve did not return")
+	}
+}
+
+// blockingScoreboard holds its fetch until its context ends, so a test can see
+// when the refresh drain cancels an in-flight sync.
+type blockingScoreboard struct {
+	entered chan struct{}
+	left    chan struct{}
+}
+
+// Scoreboard signals that it started, waits for cancellation, and signals that
+// it returned.
+func (b *blockingScoreboard) Scoreboard(
+	ctx context.Context,
+	_ espn.ScoreboardParams,
+) (espn.Scoreboard, error) {
+	close(b.entered)
+	<-ctx.Done()
+	close(b.left)
+	return espn.Scoreboard{}, ctx.Err()
 }
 
 // The fixed instant and kickoff the ingest wiring test works against: the

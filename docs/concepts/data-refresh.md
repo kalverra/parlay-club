@@ -2,10 +2,10 @@
 id: data-refresh
 title: Data refresh
 type: concept
-summary: How page loads and on-demand views drive lazy syncs of the slate, weather, game lines, props, rosters, injuries, game logs, and nfelo projections, with per-source staleness windows, single-flight, failure backoff, tiered Parlay API and The Odds API credit floors, an archive of every successful response, and a synchronous sandbox bootstrap.
-tags: [refresh, sync, lazy, staleness, singleflight, backoff, credits, odds, parlay-api, the-odds-api, enrichment, fallback, props, weather, slate, live-window, nfelo, projections, archive, raw-responses, roster, gamelog, injuries, player-matching, sandbox, clock, pick-board]
+summary: How page loads and on-demand views drive lazy syncs of the slate, weather, game lines, props, rosters, injuries, game logs, and nfelo projections, with per-source staleness windows, single-flight, failure backoff, tiered Parlay API and The Odds API credit floors, an archive of every successful response, a synchronous sandbox bootstrap, and a shutdown drain that cancels in-flight syncs.
+tags: [refresh, sync, lazy, staleness, singleflight, backoff, credits, odds, parlay-api, the-odds-api, enrichment, fallback, props, weather, slate, live-window, nfelo, projections, archive, raw-responses, roster, gamelog, injuries, player-matching, sandbox, clock, pick-board, shutdown, drain]
 sources: [internal/refresh/refresh.go, internal/refresh/rules.go, internal/refresh/sources.go, internal/refresh/research.go, internal/refresh/nfelo.go, internal/refresh/publish.go, internal/refresh/live.go, internal/sandbox/*.go, internal/board/board.go, internal/db/sync.go, internal/db/players.go, internal/db/odds.go, internal/db/nfelo.go, internal/web/pick.go, internal/web/games.go, internal/ingest/nfelo/client.go, internal/ingest/archive/transport.go, cmd/server/main.go, cmd/server/sandbox.go]
-last_verified: 2026-11-12
+last_verified: 2026-11-13
 ---
 
 # Data refresh
@@ -31,7 +31,7 @@ credits. Health, static files, and the sign-in screens sit outside the wrapper.
 
 `Kick()` returns immediately. Its work detaches from the request with `context.WithoutCancel`, so a finished response
 does not cancel a sync, and every source gets its own 30 second timeout. Tests wait for the background work through a
-`WaitGroup`; the server never waits.
+`WaitGroup`; the server waits only at shutdown.
 
 `RunOnce(ctx)` is the synchronous counterpart. It runs the same scoreboard-first pass, waits for every source it starts,
 and returns the failures joined. Normal page loads still use `Kick()`; the sandbox bootstrap calls `RunOnce` so the app
@@ -163,6 +163,20 @@ A source's row writes run inside one transaction, so a failure part way through 
 succeeds with no row changes still records `fetched_at`, so a repeated response is not fetched again until the next
 window.
 
+## Shutdown
+
+`Service.Shutdown(ctx)` stops new passes, cancels the ones in flight, and waits for them. The server runs it after
+`http.Server.Shutdown` drains HTTP handlers and before `database.Close()`, so no sync can write through a closing
+database. Both drains share the same 8 second budget, described in [Persistence](persistence.md).
+
+- `Kick()` returns at once once a stop has begun, so a page load during the drain starts no new pass.
+- Every source's context cancels on the stop, so a fetch already in flight ends instead of waiting out its 30 second
+  timeout. That counts as a stop, not a failure: it logs no outage and leaves no failure backoff behind.
+- A source that ignores its context past the caller's deadline makes `Shutdown` return `context.DeadlineExceeded`, so
+  the stop is never held open past Cloud Run's kill window.
+- Sandbox mode drains the same way. `sandboxRuntime.Shutdown` cancels the serialized page-load pass, waits for it, and
+  then drains the refresher it owns.
+
 ## Publishing changed weeks
 
 After a transaction commits and only when it changed rows, refresh publishes live topics:
@@ -189,6 +203,7 @@ see [Live updates](live-updates.md).
 - Page loads are the only trigger. Adding a cron or scheduled job needs a plan change, because it spends free-tier
   credits and keeps the instance warm.
 - Keep the work detached from the request and bounded by its own timeout.
+- Put background writes in the service's `WaitGroup`, so the shutdown drain waits for them before the database closes.
 - Check each provider's credit floor after its free event list and before its paid call. Never buy lines on a stale or
   missing balance.
 - Publish once per committed change, never inside the transaction.

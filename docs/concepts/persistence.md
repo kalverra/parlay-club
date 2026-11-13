@@ -5,7 +5,7 @@ type: concept
 summary: How one SQLite file holds every slip and every cached response, how Litestream restores and replicates it on Cloud Run, why only one process may write to it, and how the local sandbox keeps its own file and stage row.
 tags: [persistence, sqlite, litestream, gcs, backup, restore, cloud-run, single-instance, wal, sandbox]
 sources: [Dockerfile, deploy/entrypoint.sh, deploy/litestream.yml, internal/db/db.go, internal/db/migrations/0010_bug_reports.sql, internal/sandbox/state.go, internal/sandbox/scenario.go, internal/sandbox/reset.go, internal/sandbox/seed.go, cmd/server/main.go, cmd/server/sandbox.go]
-last_verified: 2026-11-12
+last_verified: 2026-11-13
 ---
 
 # Persistence
@@ -88,9 +88,10 @@ Litestream tails the WAL and ships new frames to `gcs://$LITESTREAM_BUCKET/parla
 requests, so replication can lag until the next request or shutdown. That is fine at this traffic, but it sets the loss
 window: a write is durable on the instance disk before it reaches GCS.
 
-On SIGTERM the server drains in-flight requests for up to 8 seconds (`http.Server.Shutdown`), then Litestream forwards
-the exit, syncs, and stops. Cloud Run allows 10 seconds, so the two seconds of slack are deliberate. Keep the server
-from needing more.
+On SIGTERM the server ends open SSE streams, drains in-flight requests for up to 8 seconds (`http.Server.Shutdown`),
+then cancels and waits for background refreshes inside that same budget. `database.Close()` runs only after both
+drains, and then Litestream forwards the exit, syncs, and stops. Cloud Run allows 10 seconds, so the two seconds of
+slack are deliberate. Keep the server from needing more. See [Data refresh](data-refresh.md) for the refresh drain.
 
 ## Two writers during a deploy
 
