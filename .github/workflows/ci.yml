@@ -19,10 +19,10 @@ jobs:
     timeout-minutes: 15
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7.0.1
 
       # Installs Go, golangci-lint, and the pinned Tailwind CLI from mise.toml.
-      - uses: jdx/mise-action@v3
+      - uses: jdx/mise-action@v5.2.8
 
       # app.css is generated and committed; a diff means a template changed
       # without regenerating the stylesheet.
