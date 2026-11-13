@@ -5,7 +5,7 @@ type: reference
 summary: Environment variables the server reads, their dev defaults, the odds provider keys and GitHub issue reporting settings they configure, the offline sandbox switch, and the values it rejects in prod.
 tags: [config, environment, startup, google, oauth, odds, parlay-api, the-odds-api, sandbox, offline, github, bug-reports]
 sources: [internal/config/config.go, cmd/server/main.go, cmd/server/sandbox.go, internal/sandbox/*.go, internal/ingest/odds/client.go]
-last_verified: 2026-11-12
+last_verified: 2026-11-13
 ---
 
 # Configuration
@@ -25,7 +25,7 @@ exits with status 1 when any value is invalid.
 | `SESSION_KEY`          | fixed dev string         | Required in prod, at least 32 bytes. Signs both cookies.                       |
 | `GOOGLE_CLIENT_ID`     | empty                    | The OAuth Web client ID. Empty in dev means the dev sign-in form. Required in prod. |
 | `GOOGLE_CLIENT_SECRET` | empty                    | The OAuth Web client secret. Required in prod.                                |
-| `BASE_URL`             | `http://localhost:{PORT}` | Public base URL without a trailing slash. The redirect URI is `BASE_URL + /auth/google/callback`. Required in prod. |
+| `BASE_URL`             | `http://localhost:{PORT}` | Absolute public base URL without a trailing slash. Must be an `http` or `https` URL with a host. The redirect URI is `BASE_URL + /auth/google/callback`. Required in prod. |
 | `ODDS_API_KEY`         | empty                    | Parlay API key. Empty disables odds calls.                                    |
 | `THE_ODDS_API_KEY`     | empty                    | The Odds API key for enrichment and fallback lines. Empty disables that provider. |
 | `GITHUB_TOKEN`         | empty                    | GitHub token for creating bug report issues. Optional in dev and prod; empty saves reports to SQLite only. |
@@ -44,7 +44,9 @@ week 9 responses in `internal/sandbox` through a fail-closed replay transport, s
 are unused and no credits are spent. `mise run sandbox` sets the variable for the normal hot-reload loop; see
 [Local development](../guides/local-dev.md).
 
-`BASE_URL` is trimmed of trailing slashes. It must match the scheme, host, and port registered on the Google client, or
+`BASE_URL` is trimmed of trailing slashes and must be an `http` or `https` URL with a host, in both dev and prod. A bare
+hostname, a missing host, or another scheme such as `ftp://` fails startup. `http` stays allowed so local dev and
+loopback smoke tests work without TLS. It must match the scheme, host, and port registered on the Google client, or
 sign-in stops at `redirect_uri_mismatch`. The app builds the redirect URI by appending `/auth/google/callback`.
 
 `ODDS_API_KEY` is the Parlay API key and `THE_ODDS_API_KEY` is the key for The Odds API. Both are optional; an empty key
@@ -73,6 +75,7 @@ The server prints every problem it finds, one per line, and exits 1. It does not
 | `GOOGLE_CLIENT_ID` is empty in prod      | `GOOGLE_CLIENT_ID is required in prod`                         |
 | `GOOGLE_CLIENT_SECRET` is empty in prod  | `GOOGLE_CLIENT_SECRET is required in prod`                     |
 | `BASE_URL` is empty in prod              | `BASE_URL is required in prod`                                 |
+| `BASE_URL` has no `http`/`https` scheme or host | `BASE_URL must be an http or https URL with a host, got "..."` |
 | `SUNDAY_SANDBOX` is true in prod         | `SUNDAY_SANDBOX is not allowed in prod`                        |
 | `SUNDAY_SANDBOX` is not a boolean        | `SUNDAY_SANDBOX must be a boolean, got "..."`                  |
 | `LOG_LEVEL` is not a known level         | `LOG_LEVEL is not a known level, got "..."`                    |
