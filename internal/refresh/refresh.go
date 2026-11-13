@@ -198,6 +198,14 @@ type Service struct {
 	mu      sync.Mutex
 	backoff map[string]time.Time
 
+	// stopCtx cancels the work Shutdown must not outlive: a sync still
+	// fetching or writing while the database closes. stopMu makes the check
+	// in KickContext and the goroutine it starts one step, so Shutdown cannot
+	// wait on a pass that starts just after the wait begins.
+	stopCtx    context.Context
+	stopCancel context.CancelFunc
+	stopMu     sync.Mutex
+
 	wg sync.WaitGroup
 }
 
@@ -234,6 +242,7 @@ func New(deps Deps) *Service {
 			fallbackProps = fpc
 		}
 	}
+	stopCtx, stopCancel := context.WithCancel(context.Background())
 	return &Service{
 		store:         deps.Store,
 		scoreboard:    deps.Scoreboard,
@@ -248,6 +257,8 @@ func New(deps Deps) *Service {
 		now:           now,
 		logger:        deps.Logger,
 		backoff:       make(map[string]time.Time),
+		stopCtx:       stopCtx,
+		stopCancel:    stopCancel,
 	}
 }
 
@@ -258,12 +269,54 @@ func (s *Service) Kick() {
 }
 
 // KickContext is Kick with a parent context. The work still detaches from its
-// cancellation, so it runs until its own timeout.
+// cancellation, so it runs until its own timeout. Shutdown does reach it, so a
+// stopped service starts no new pass and an in-flight one ends promptly.
 func (s *Service) KickContext(ctx context.Context) {
+	s.stopMu.Lock()
+	defer s.stopMu.Unlock()
+
+	if s.stopping() {
+		return // the server is stopping, so a new pass would only be cut short.
+	}
+
 	ctx = context.WithoutCancel(ctx)
 	s.wg.Go(func() {
 		s.kick(ctx)
 	})
+}
+
+// Shutdown stops starting passes, cancels the ones in flight, and waits for
+// them to finish. It returns ctx's error when the wait outlives the caller's
+// deadline, so a source that ignores its context cannot hold the process open
+// past Cloud Run's kill window. Calling it twice is safe.
+func (s *Service) Shutdown(ctx context.Context) error {
+	s.stopMu.Lock()
+	s.stopCancel()
+	s.stopMu.Unlock()
+
+	return waitFor(ctx, &s.wg)
+}
+
+// stopping reports whether Shutdown has begun.
+func (s *Service) stopping() bool {
+	return s.stopCtx.Err() != nil
+}
+
+// waitFor blocks until wg is done or ctx is cancelled. An expired ctx leaves
+// one goroutine behind until the work it waits on finishes.
+func waitFor(ctx context.Context, wg *sync.WaitGroup) error {
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // kick runs the slate first, then the sources that depend on it. The slate
@@ -409,7 +462,7 @@ func (s *Service) runSources(ctx context.Context, now time.Time, sources []sourc
 }
 
 // wait blocks until every sync this service started has finished. It exists
-// for tests; the server never waits.
+// for tests that keep the service running; the server calls Shutdown instead.
 func (s *Service) wait() {
 	s.wg.Wait()
 }
@@ -421,10 +474,24 @@ func (s *Service) refresh(parent context.Context, src source, now time.Time) {
 
 // refreshWithTimeout runs one source under the shared per-source timeout. Kick
 // and RunOnce both come through here, so neither can hold a caller's lock
-// forever on a stuck store call or fetch.
+// forever on a stuck store call or fetch. Shutdown cancels it too, so a stop
+// ends the fetch instead of waiting out the timeout.
 func (s *Service) refreshWithTimeout(parent context.Context, src source, now time.Time) error {
+	if err := parent.Err(); err != nil {
+		return fmt.Errorf("refresh %s: %w", src.key, err)
+	}
+	if s.stopping() {
+		// A pass that outlived the stop starts no further source work.
+		return fmt.Errorf("refresh %s: %w", src.key, context.Canceled)
+	}
 	ctx, cancel := context.WithTimeout(parent, syncTimeout)
 	defer cancel()
+
+	ctx, stopWork := context.WithCancel(ctx)
+	defer stopWork()
+	unregister := context.AfterFunc(s.stopCtx, stopWork)
+	defer unregister()
+
 	return s.refreshSync(ctx, src, now)
 }
 
@@ -441,6 +508,9 @@ func (s *Service) refreshSync(parent context.Context, src source, now time.Time)
 
 	due, err := s.shouldRun(ctx, src)
 	if err != nil {
+		if s.stopping() {
+			return err // a shutdown cancelled the read; do not pause the source.
+		}
 		s.logger.Error().Err(err).Str("source", src.key).Msg("check refresh source")
 		s.backOff(src.key, now)
 		return err
@@ -459,6 +529,11 @@ func (s *Service) refreshSync(parent context.Context, src source, now time.Time)
 		return src.run(ctx)
 	})
 	if err != nil {
+		if s.stopping() {
+			// A shutdown cancelled the fetch. That is not a source failure, so
+			// it neither logs an outage nor pauses a source the next boot retries.
+			return err
+		}
 		s.logger.Error().Err(err).Str("source", src.key).Msg("refresh failed")
 		s.backOff(src.key, now)
 		return err

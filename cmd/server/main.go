@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -101,6 +102,7 @@ func run() error {
 		slipService *slips.Service
 		appNow      func() time.Time
 		kick        func()
+		drain       func(context.Context) error
 		sandboxApp  func(*http.ServeMux)
 	)
 	if cfg.Sandbox {
@@ -118,6 +120,7 @@ func run() error {
 		slipService = runtime.slips
 		appNow = runtime.scenario.Now
 		kick = runtime.Kick
+		drain = runtime.Shutdown
 		sandboxApp = runtime.MountRoutes
 	} else {
 		loadHistory(ctx, logger, store)
@@ -134,6 +137,7 @@ func run() error {
 		})
 		slipService = slips.New(store, hub, nil)
 		kick = refresher.Kick
+		drain = refresher.Shutdown
 	}
 
 	handlers := auth.NewHandlers(logger, store, cookies, renderer, provider, devLogin)
@@ -177,7 +181,10 @@ func run() error {
 		),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
-	return listenAndServe(ctx, logger, server, stream.Shutdown)
+	return listenAndServe(ctx, logger, server, shutdownHooks{
+		beforeHTTP: stream.Shutdown,
+		afterHTTP:  drain,
+	})
 }
 
 // loadHistory imports seed/history.yaml after migrations. A bad file logs and
@@ -353,30 +360,40 @@ func healthz(w http.ResponseWriter, _ *http.Request) {
 	_, _ = w.Write([]byte("ok"))
 }
 
-// listenAndServe serves server.Addr until ctx is cancelled. beforeShutdown runs
-// first so open streams end before the HTTP drain starts; it may be nil.
+// shutdownHooks are the drains serve runs around http.Server.Shutdown. Both use
+// the same shutdown context, so the whole stop fits Cloud Run's kill window.
+type shutdownHooks struct {
+	// beforeHTTP ends handlers that would otherwise hold the drain open, such
+	// as open SSE streams. It may be nil.
+	beforeHTTP func()
+	// afterHTTP waits for background work that writes to SQLite, so it cannot
+	// outlive the database. It may be nil.
+	afterHTTP func(context.Context) error
+}
+
+// listenAndServe serves server.Addr until ctx is cancelled. The hooks drain the
+// server's long-lived handlers and its background work; either may be nil.
 func listenAndServe(
 	ctx context.Context,
 	logger zerolog.Logger,
 	server *http.Server,
-	beforeShutdown func(),
+	hooks shutdownHooks,
 ) error {
 	listener, err := (&net.ListenConfig{}).Listen(ctx, "tcp", server.Addr)
 	if err != nil {
 		return fmt.Errorf("listen on %s: %w", server.Addr, err)
 	}
-	return serve(ctx, logger, server, listener, beforeShutdown)
+	return serve(ctx, logger, server, listener, hooks)
 }
 
 // serve serves until ctx is cancelled, then drains for up to shutdownTimeout.
-// beforeShutdown ends long-lived handlers that would otherwise hold the drain
-// open; it may be nil.
+// The hooks end long-lived handlers and background writers in that order.
 func serve(
 	ctx context.Context,
 	logger zerolog.Logger,
 	server *http.Server,
 	listener net.Listener,
-	beforeShutdown func(),
+	hooks shutdownHooks,
 ) error {
 	logger.Info().Str("addr", listener.Addr().String()).Msg("listening")
 
@@ -390,16 +407,45 @@ func serve(
 	}
 
 	logger.Info().Msg("shutting down")
-	if beforeShutdown != nil {
-		beforeShutdown()
+	if hooks.beforeHTTP != nil {
+		hooks.beforeHTTP()
 	}
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
-	if err := server.Shutdown(shutdownCtx); err != nil {
-		return fmt.Errorf("shut down: %w", err)
+
+	shutdownErr := server.Shutdown(shutdownCtx)
+	if shutdownErr != nil {
+		shutdownErr = fmt.Errorf("shut down: %w", shutdownErr)
+	}
+	// The background drain runs even when the HTTP drain expired: a sync still
+	// writing is the worst thing to leave open while the database closes.
+	if hooks.afterHTTP != nil {
+		if err := hooks.afterHTTP(shutdownCtx); err != nil {
+			return errors.Join(shutdownErr, fmt.Errorf("drain refresh: %w", err))
+		}
+	}
+	if shutdownErr != nil {
+		return shutdownErr
 	}
 	if err := <-done; err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
 	return nil
+}
+
+// waitForGroup blocks until wg is done or ctx is cancelled. An expired ctx
+// leaves one goroutine behind until the work it waits on finishes.
+func waitForGroup(ctx context.Context, wg *sync.WaitGroup) error {
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
