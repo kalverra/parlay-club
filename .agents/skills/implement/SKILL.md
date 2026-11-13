@@ -24,6 +24,9 @@ description: Implement one phase of a good-vibes change, following changes/<slug
 
 ## Rules
 
+- When you need handoff content, read `changes/<slug>/handoffs/phase-<n>.md`. Do not read `.log` files under
+  `.good-vibes/runs/<id>/` as handoffs; those are transcripts for diagnosing a turn. Reading one is fine when you are
+  debugging a turn.
 - In an orchestrated run (`good-vibes implement --style orchestrated`), the binary ticks boxes, commits, and runs
   verify. Follow the prompt you are given; do not tick, commit, or run `good-vibes done`.
 - Do not reword an open task. If the design is wrong, update `design.md` first, then implement.
