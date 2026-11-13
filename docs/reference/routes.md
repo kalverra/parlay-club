@@ -5,7 +5,7 @@ type: reference
 summary: Every HTTP route the server serves, the middleware in front of them, and the status codes, HTMX headers, and SSE frames handlers return.
 tags: [routes, http, handlers, middleware, htmx, sse, props, research, schedules]
 sources: [cmd/server/main.go, cmd/server/sandbox.go, internal/auth/handlers.go, internal/groups/handlers.go, internal/board/board.go, internal/web/routes.go, internal/web/home.go, internal/web/games.go, internal/web/pick.go, internal/web/slips.go, internal/web/schedules.go, internal/web/research.go, internal/web/export.go, internal/web/bugs.go, internal/web/screenshots.go, internal/sandbox/seed.go, internal/sandbox/plan.go, internal/live/stream.go, web/templates/home.html, web/templates/pick.html, web/templates/week.html, web/templates/sandbox.html]
-last_verified: 2026-11-12
+last_verified: 2026-11-13
 ---
 
 # Routes
@@ -38,7 +38,7 @@ of their groups makes that group active instead.
 
 | Method + path                       | Purpose                                                                 | Notes |
 | ----------------------------------- | ----------------------------------------------------------------------- | ----- |
-| `GET /healthz`                      | Liveness probe                                                          | Always 200 `ok`. |
+| `GET /healthz`                      | Startup and liveness probe                                              | Pings SQLite with a two-second timeout. 200 `ok` when it answers, 503 `unavailable` when it does not; the SQLite error goes to the log. |
 | `GET /static/{path...}`             | Embedded CSS, JS, and other assets                                      | One-year cache. A missing or escaping path is 404. |
 | `GET /screenshots/{token}.jpg`      | Capability URL for a bug report screenshot                              | Registered as `GET /screenshots/{file}` and checks the `.jpg` suffix. One-year immutable cache with `nosniff`; unknown token, missing image, or non-`.jpg` suffix is 404. |
 | `GET /login`                        | Sign-in page                                                            | Shows the Google button, plus a dev link when Google is off. |
@@ -46,6 +46,11 @@ of their groups makes that group active instead.
 | `GET /auth/google/start`            | Start the Google round trip                                             | Registered only when a Google client is configured. Redirects to Google. |
 | `GET /auth/google/callback`         | Finish Google sign-in                                                   | Bad `state`, code exchange, or identity answers 400 with the sign-in page. |
 | `GET /dev/login`, `POST /dev/login` | Local sign-in form and submit                                           | Registered only when `APP_ENV=dev` and `GOOGLE_CLIENT_ID` is empty. |
+
+`GET /healthz` is what Cloud Run's startup and liveness probes call. It pings SQLite with a two-second timeout derived
+from the request, so a probe never waits on a busy database. A healthy handle answers 200 with the body `ok`; a closed
+or unreachable one answers 503 with `unavailable`, and the SQLite error goes to the log instead of the response. The
+route stays outside auth, so a revision whose database failed can still be replaced.
 
 ### Sandbox-only routes
 

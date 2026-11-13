@@ -90,21 +90,42 @@ func TestKickOnPageRunsOnlyForFullPageGETs(t *testing.T) {
 func TestHealthz(t *testing.T) {
 	t.Parallel()
 
-	recorder := httptest.NewRecorder()
-	newMux(
+	database, err := db.Open(filepath.Join(t.TempDir(), "parlay.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = database.Close() })
+
+	mux := newMux(
 		http.NotFoundHandler(),
 		http.NotFoundHandler(),
 		http.NotFoundHandler(),
+		newHealthzHandler(database, zerolog.Nop()),
 		newTestHandlers(),
 		nil,
 		passthrough,
 		nil,
 		nil,
-	).ServeHTTP(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/healthz", nil))
+	)
 
-	assert.Equal(t, http.StatusOK, recorder.Code)
-	assert.Equal(t, "ok", recorder.Body.String())
-	assert.Equal(t, "text/plain; charset=utf-8", recorder.Header().Get("Content-Type"))
+	healthy := httptest.NewRecorder()
+	mux.ServeHTTP(healthy, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/healthz", nil))
+
+	assert.Equal(t, http.StatusOK, healthy.Code)
+	assert.Equal(t, "ok", healthy.Body.String())
+	assert.Equal(t, "text/plain; charset=utf-8", healthy.Header().Get("Content-Type"))
+
+	require.NoError(t, database.Close())
+
+	unhealthy := httptest.NewRecorder()
+	mux.ServeHTTP(
+		unhealthy,
+		httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/healthz", nil),
+	)
+
+	assert.Equal(t, http.StatusServiceUnavailable, unhealthy.Code)
+	assert.Equal(t, "unavailable", unhealthy.Body.String())
+	assert.Equal(t, "text/plain; charset=utf-8", unhealthy.Header().Get("Content-Type"))
+	assert.NotContains(t, unhealthy.Body.String(), "database is closed",
+		"the probe must not leak the SQLite error")
 }
 
 func TestMuxProtectsShell(t *testing.T) {
@@ -115,6 +136,7 @@ func TestMuxProtectsShell(t *testing.T) {
 	})
 	mux := newMux(
 		shell,
+		http.NotFoundHandler(),
 		http.NotFoundHandler(),
 		http.NotFoundHandler(),
 		newTestHandlers(),
@@ -140,6 +162,7 @@ func TestMuxServesStaticWithoutAuth(t *testing.T) {
 	mux := newMux(
 		http.NotFoundHandler(),
 		static,
+		http.NotFoundHandler(),
 		http.NotFoundHandler(),
 		newTestHandlers(),
 		nil,
@@ -169,6 +192,7 @@ func TestMuxServesScreenshotsWithoutAuth(t *testing.T) {
 		http.NotFoundHandler(),
 		http.NotFoundHandler(),
 		screenshots,
+		http.NotFoundHandler(),
 		newTestHandlers(),
 		nil,
 		passthrough,
@@ -223,6 +247,7 @@ func TestMuxScopesShellToActiveGroup(t *testing.T) {
 	kicks := 0
 	mux := newMux(
 		shell,
+		http.NotFoundHandler(),
 		http.NotFoundHandler(),
 		http.NotFoundHandler(),
 		handlers,
@@ -881,6 +906,7 @@ func TestMuxProtectsBugReports(t *testing.T) {
 	})
 	mux := newMux(
 		shell,
+		http.NotFoundHandler(),
 		http.NotFoundHandler(),
 		http.NotFoundHandler(),
 		newTestHandlers(),

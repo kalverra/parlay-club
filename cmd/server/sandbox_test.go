@@ -117,6 +117,7 @@ func openSandboxApp(t *testing.T) *sandboxApp {
 		shell,
 		http.NotFoundHandler(),
 		http.NotFoundHandler(),
+		http.NotFoundHandler(),
 		handlers,
 		groupHandlers,
 		scope,
@@ -576,6 +577,7 @@ func TestSandboxResetRecoversTheCurrentSession(t *testing.T) {
 		shell,
 		http.NotFoundHandler(),
 		http.NotFoundHandler(),
+		http.NotFoundHandler(),
 		handlers,
 		nil,
 		scope,
@@ -886,6 +888,7 @@ func TestSandboxControlRoutesStayOffOutsideSandbox(t *testing.T) {
 	})
 	mux := newMux(
 		shell,
+		http.NotFoundHandler(),
 		http.NotFoundHandler(),
 		http.NotFoundHandler(),
 		handlers,

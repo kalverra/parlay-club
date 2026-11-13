@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"io"
@@ -43,6 +44,10 @@ const shutdownTimeout = 8 * time.Second
 // ingestTimeout bounds one outside API call. It matches the ingest clients'
 // own defaults, which the shared client replaces.
 const ingestTimeout = 10 * time.Second
+
+// healthzPingTimeout bounds a probe's database check, so a busy SQLite cannot
+// hold Cloud Run's probe open.
+const healthzPingTimeout = 2 * time.Second
 
 func main() {
 	if err := run(); err != nil {
@@ -173,6 +178,7 @@ func run() error {
 			shell,
 			web.StaticHandler(),
 			web.ScreenshotHandler(store, logger),
+			newHealthzHandler(database, logger),
 			handlers,
 			groupHandlers,
 			scope,
@@ -296,7 +302,7 @@ func newLogger(cfg config.Config, out io.Writer) zerolog.Logger {
 // plain forms. mountExtra adds dev-only routes behind those same checks; it may
 // be nil outside sandbox mode.
 func newMux(
-	shell, static, screenshots http.Handler,
+	shell, static, screenshots, healthz http.Handler,
 	handlers *auth.Handlers,
 	groupHandlers *groups.Handlers,
 	scope func(http.Handler) http.Handler,
@@ -304,7 +310,7 @@ func newMux(
 	mountExtra func(*http.ServeMux),
 ) http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", healthz)
+	mux.Handle("GET /healthz", healthz)
 	mux.Handle("GET /static/{path...}", static)
 	mux.Handle("GET /screenshots/{file}", screenshots)
 	handlers.Routes(mux)
@@ -354,10 +360,24 @@ func isFullPageGet(r *http.Request) bool {
 	return !strings.HasSuffix(r.URL.Path, "/events")
 }
 
-// healthz answers Cloud Run's startup and liveness probes.
-func healthz(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	_, _ = w.Write([]byte("ok"))
+// newHealthzHandler answers Cloud Run's startup and liveness probes. It pings
+// SQLite, so a revision whose database is closed or unreachable is replaced
+// instead of serving errors. The body is a fixed word: the SQLite error goes to
+// the log, never to the probe.
+func newHealthzHandler(database *sql.DB, logger zerolog.Logger) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), healthzPingTimeout)
+		defer cancel()
+
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		if err := database.PingContext(ctx); err != nil {
+			logger.Error().Err(err).Msg("healthz: ping database")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte("unavailable"))
+			return
+		}
+		_, _ = w.Write([]byte("ok"))
+	})
 }
 
 // shutdownHooks are the drains serve runs around http.Server.Shutdown. Both use
