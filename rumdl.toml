@@ -6,6 +6,7 @@
 
 [global]
 line-length = 120
+disable = ["MD041"]
 
 [MD013]
 line-length = 120

@@ -34,6 +34,9 @@ The folders are configured in `good-vibes.toml`. The default split follows Diát
 
 ## Rules
 
+- Every `concepts/` doc keeps a high-level Mermaid diagram in its Overview: the parts and how they relate. Add more in
+  How it works when the flow needs them. Update the diagram in the same change as the behavior. Other doc types use
+  diagrams only where they clarify.
 - Update the doc in place. Do not append a changelog; history lives in git.
 - Short paragraphs, one idea each. Code samples must run.
 - If a doc describes behavior that no longer exists, delete or rewrite it. A stale doc is worse than no doc.

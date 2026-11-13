@@ -23,6 +23,9 @@ record the change leaves, so the close-out keeps what a future reader needs and 
 
 ## Rules
 
+- When you need handoff content, read `changes/<slug>/handoffs/phase-<n>.md`. Do not read `.log` files under
+  `.good-vibes/runs/<id>/` as handoffs; those are transcripts for diagnosing a turn. Reading one is fine when you are
+  debugging a turn.
 - Distill; do not copy. Phase-by-phase logs, file lists, and task names stay out.
 - Keep a fact only if it is still true and not already in `docs/`. If it describes how the system works now, update the
   doc instead.
