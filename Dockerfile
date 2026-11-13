@@ -7,10 +7,13 @@ FROM golang:1.27.3-alpine AS build
 WORKDIR /src
 
 COPY go.mod go.sum ./
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod \
+	go mod download
 
 COPY . .
-RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/server ./cmd/server
+RUN --mount=type=cache,target=/go/pkg/mod \
+	--mount=type=cache,target=/root/.cache/go-build \
+	CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/server ./cmd/server
 
 # Pin the Litestream release and copy its binary into the runtime image.
 FROM litestream/litestream:0.5.18 AS litestream

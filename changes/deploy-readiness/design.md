@@ -152,6 +152,6 @@ Effort: easy (single handler dependency addition and fallback preservation)
 
 Effort: easy (script, Dockerfile cache mounts, and workflow steps with doc updates)
 
-- [ ] Add `github-token` secret and deployer viewer bindings (`secretmanager.viewer`, `storage.bucketViewer`) to `deploy/setup.sh`, and add BuildKit cache mounts to `Dockerfile`.
+- [x] Add `github-token` secret and deployer viewer bindings (`secretmanager.viewer`, `storage.bucketViewer`) to `deploy/setup.sh`, and add BuildKit cache mounts to `Dockerfile`.
 - [ ] Update `.github/workflows/deploy.yml` with pre-auth variable checks, post-auth GCP/secret preflight, Buildx GHA layer caching, `GITHUB_REPO` env var, and conditional `GITHUB_TOKEN` secret wiring.
 - [ ] Docs: update `docs/guides/gcp-setup.md` and `docs/runbooks/deploy.md` to document the six secrets, deployer viewer permissions, pre-flight checks, and build caching.
