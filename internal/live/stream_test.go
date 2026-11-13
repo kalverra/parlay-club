@@ -98,6 +98,45 @@ func TestStreamSaysByeAtTheIdleDeadline(t *testing.T) {
 	require.ErrorIs(t, err, io.EOF, "the server should close the stream after bye")
 }
 
+func TestStreamShutdownEndsOpenStreamsWithoutBye(t *testing.T) {
+	t.Parallel()
+
+	var hub live.Hub
+	clock := newFakeClock()
+	stream := live.NewStream(&hub, func(int64) bool { return true }, live.WithClock(clock))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		stream.ServeSlip(w, r, 7, 2026209)
+	}))
+	t.Cleanup(server.Close)
+
+	first := dial(t, server.URL)
+	second := dial(t, server.URL)
+
+	stream.Shutdown()
+	stream.Shutdown() // Shutdown is idempotent.
+
+	for _, client := range []*sseClient{first, second} {
+		body, err := io.ReadAll(client.reader)
+		require.NoError(t, err)
+		assert.Empty(t, string(body), "a shutdown must not send bye or any other frame")
+	}
+}
+
+func TestStreamServesAfterShutdownWithoutHanging(t *testing.T) {
+	t.Parallel()
+
+	var hub live.Hub
+	stream := live.NewStream(&hub, nil)
+	stream.Shutdown()
+
+	recorder := httptest.NewRecorder()
+	start := time.Now()
+	stream.ServeSlip(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/events", nil), 7, 2026209)
+
+	assert.Equal(t, http.StatusOK, recorder.Code, "the headers are already sent before the loop")
+	assert.Less(t, time.Since(start), 100*time.Millisecond, "shutdown must end the stream promptly")
+}
+
 func TestStreamPingsWhileItWaits(t *testing.T) {
 	t.Parallel()
 

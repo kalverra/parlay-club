@@ -27,6 +27,7 @@ import (
 	"github.com/kalverra/parlay-club/internal/ingest/espn"
 	"github.com/kalverra/parlay-club/internal/ingest/odds"
 	"github.com/kalverra/parlay-club/internal/ingest/weather"
+	"github.com/kalverra/parlay-club/internal/live"
 	"github.com/kalverra/parlay-club/internal/refresh"
 )
 
@@ -311,7 +312,7 @@ func TestServeDrainsInflightRequestOnShutdown(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	done := make(chan error, 1)
-	go func() { done <- serve(ctx, zerolog.Nop(), server, listener) }()
+	go func() { done <- serve(ctx, zerolog.Nop(), server, listener, nil) }()
 
 	url := fmt.Sprintf("http://%s/slow", listener.Addr())
 	response := make(chan error, 1)
@@ -351,6 +352,95 @@ func TestServeDrainsInflightRequestOnShutdown(t *testing.T) {
 		require.NoError(t, err)
 	case <-time.After(5 * time.Second):
 		t.Fatal("serve did not return after the in-flight request finished")
+	}
+}
+
+// TestServeDrainsOpenStreamAndInflightRequestsOnShutdown holds one SSE stream
+// and one slow request open, then cancels the serve context. The shutdown hook
+// must release the stream without a bye, and the drain must still wait for the
+// slow request instead of timing out.
+func TestServeDrainsOpenStreamAndInflightRequestsOnShutdown(t *testing.T) {
+	t.Parallel()
+
+	var hub live.Hub
+	stream := live.NewStream(&hub, nil)
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /events", func(w http.ResponseWriter, r *http.Request) {
+		stream.ServeSlip(w, r, 7, 2026209)
+	})
+	mux.HandleFunc("GET /slow", func(w http.ResponseWriter, _ *http.Request) {
+		close(started)
+		<-release
+		w.WriteHeader(http.StatusNoContent)
+	})
+
+	listener, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	server := &http.Server{Handler: mux, ReadHeaderTimeout: time.Second}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- serve(ctx, zerolog.Nop(), server, listener, stream.Shutdown) }()
+
+	baseURL := fmt.Sprintf("http://%s", listener.Addr())
+
+	streamRequest, err := http.NewRequestWithContext(t.Context(), http.MethodGet, baseURL+"/events", nil)
+	require.NoError(t, err)
+	streamResponse, err := http.DefaultClient.Do(streamRequest)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		if err := streamResponse.Body.Close(); err != nil {
+			t.Logf("close stream body: %v", err)
+		}
+	})
+	require.Equal(t, http.StatusOK, streamResponse.StatusCode)
+	assert.Equal(t, "text/event-stream", streamResponse.Header.Get("Content-Type"))
+
+	response := make(chan error, 1)
+	go func() {
+		request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, baseURL+"/slow", nil)
+		if err != nil {
+			response <- err
+			return
+		}
+		resp, err := http.DefaultClient.Do(request)
+		if err != nil {
+			response <- err
+			return
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusNoContent {
+			response <- fmt.Errorf("status = %d, want %d", resp.StatusCode, http.StatusNoContent)
+			return
+		}
+		response <- nil
+	}()
+
+	<-started
+	cancel()
+
+	body, err := io.ReadAll(streamResponse.Body)
+	require.NoError(t, err)
+	assert.Empty(t, string(body), "shutdown must end the stream without a bye event")
+
+	select {
+	case err := <-done:
+		t.Fatalf("serve returned before the slow request finished: %v", err)
+	case <-time.After(100 * time.Millisecond):
+		// The drain still waits on the slow handler, as it should.
+	}
+
+	close(release)
+	require.NoError(t, <-response)
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("serve did not return after the slow request finished")
 	}
 }
 
