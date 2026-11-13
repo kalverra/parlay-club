@@ -4,8 +4,8 @@ title: Deploy
 type: runbook
 summary: How a commit reaches Cloud Run, why deploys pause during game windows, how to force one, and how to verify, roll back, and read the spend.
 tags: [deploy, cloud-run, github-actions, blackout, litestream, rollback, runbook]
-sources: [.github/workflows/deploy.yml, .github/workflows/ci.yml, deploy/blackout.sh, deploy/entrypoint.sh, docs/concepts/persistence.md, internal/seed/seed.go, cmd/server/main.go, internal/db/migrate.go]
-last_verified: 2026-11-12
+sources: [.github/workflows/deploy.yml, .github/workflows/ci.yml, deploy/blackout.sh, deploy/setup.sh, deploy/entrypoint.sh, Dockerfile, docs/concepts/persistence.md, internal/seed/seed.go, cmd/server/main.go, internal/db/migrate.go]
+last_verified: 2026-11-13
 ---
 
 # Deploy
@@ -19,7 +19,11 @@ setup lives in [GCP setup](../guides/gcp-setup.md); this runbook covers every de
 
 - The [GCP setup](../guides/gcp-setup.md) is finished: the bucket, secrets, service accounts, Workload Identity, and
   GitHub variables all exist.
-- Every secret has a version. Cloud Run will not start a revision that points at an empty secret.
+- The five required secrets have an `ENABLED` version. `github-token` is optional: with a version, bug reports open
+  GitHub issues; without one, they stay in SQLite.
+- `parlay-deployer` can read Secret Manager metadata and the Litestream bucket. A project set up before the pre-flight
+  checks existed needs `deploy/setup.sh` run once more; it grants `roles/secretmanager.viewer` and
+  `roles/storage.bucketViewer`.
 - You can open the repo's **Actions** tab, or you have `gcloud` signed in for traffic changes and log checks.
 - For a normal deploy, CI passes on `main`. For a manual deploy, you know which branch head will ship.
 - If a game is on, you have decided whether to wait or to force the deploy and accept the write-loss risk.
@@ -64,20 +68,36 @@ push, so a broken gate fails before it can block or allow a deploy.
 
 1. Checks out the tested commit. For a CI-triggered run that is the commit CI ran, not whatever `main` points at now.
 2. Runs the blackout gate unless `force` is set.
-3. Authenticates to Google Cloud through Workload Identity Federation as `parlay-deployer`. No service account key is
+3. Checks the deployment variables before any GCP call. `GCP_PROJECT`, `GCP_REGION`, `WIF_PROVIDER`, `DEPLOY_SA`,
+   `RUNTIME_SA`, `LITESTREAM_BUCKET`, and `AR_REPO` must be set, and a set `BASE_URL` must be `http` or `https` with a
+   host. A missing or malformed value fails in seconds and names the variable.
+4. Authenticates to Google Cloud through Workload Identity Federation as `parlay-deployer`. No service account key is
    stored in GitHub.
-4. Builds the `Dockerfile` and pushes the image to Artifact Registry tagged with the commit SHA.
-5. Runs `gcloud run deploy` with one instance at most, concurrency 80, 1 CPU, 512 MiB, a 3600 second timeout, CPU boost,
+5. Pre-flights the GCP project: the Artifact Registry repo, the Litestream bucket, and an `ENABLED` version of each
+   required secret. It collects every failure, then exits before the build. `github-token` is checked separately; when
+   it has a version the deploy mounts it, and when it does not the job logs a notice and leaves bug reports in SQLite.
+6. Builds the `Dockerfile` with Buildx and pushes the image to Artifact Registry tagged with the commit SHA, reusing
+   layers from the GitHub Actions cache.
+7. Runs `gcloud run deploy` with one instance at most, concurrency 80, 1 CPU, 512 MiB, a 3600 second timeout, CPU boost,
    public access, the runtime account, `APP_ENV=prod`, `DB_PATH=/data/parlay.db`, `LITESTREAM_BUCKET`, `BASE_URL`, and
-   the four Secret Manager secrets. `GITHUB_TOKEN` and `GITHUB_REPO` (default `kalverra/parlay-club`) are optional; when
-   `GITHUB_TOKEN` is set, in-app bug reports also open GitHub issues, and when unset, reports still save locally in
-   SQLite.
-6. Reads the service URL and retries once with `BASE_URL` set to that URL if the first revision could not boot. That is
+   `GITHUB_REPO` (from the optional `ISSUES_REPO` variable, or the repo that runs the workflow). It mounts the five
+   required Secret Manager secrets, plus `GITHUB_TOKEN` when `github-token` has a version.
+8. Reads the service URL and retries once with `BASE_URL` set to that URL if the first revision could not boot. That is
    the first-deploy path; later deploys get `BASE_URL` from the repo variable.
-7. Waits for `GET /healthz` on the new revision, then writes the image and URL to the job summary.
+9. Waits for `GET /healthz` on the new revision, then writes the image and URL to the job summary.
 
 The image holds the server, the pinned Litestream binary, its config, the entrypoint, `seed/history.yaml`, and `web/`.
 The entrypoint restores the database, then runs the server under `litestream replicate`.
+
+### The build cache
+
+The build runs under Buildx and stores image layers in the GitHub Actions cache (`cache-from` and `cache-to: type=gha`).
+The `Dockerfile` also keeps the Go module cache and the Go build cache in BuildKit cache mounts. A build with a warm
+cache skips dependency downloads and unchanged packages; a cold one compiles everything, so the first run after a cache
+miss takes several minutes longer. Neither outcome changes the image.
+
+GitHub evicts cache entries unused for seven days or beyond 10 GB. A cold build is not a failure. The cache lives in
+GitHub, not Artifact Registry, so it does not count against the registry's 0.5 GB free tier.
 
 ### Deploy by hand
 
@@ -144,6 +164,8 @@ yourself under **Billing → Account management** if those mails never arrive.
 - **Billing → Budgets** shows the budget and its thresholds.
 - Artifact Registry keeps only the last 3 images; older ones are deleted by the setup cleanup policy. If the 0.5 GB free
   tier is a worry, check the repo size after a busy week.
+- Build layers live in the GitHub Actions cache, not Artifact Registry, so caching does not add to the repo size or the
+  0.5 GB free tier.
 - Odds credits are separate from GCP spend. The app tracks them in `sync_state`; see
   [Data refresh](../concepts/data-refresh.md).
 
@@ -153,13 +175,19 @@ yourself under **Billing → Account management** if those mails never arrive.
 | ---------------------------------------------------- | ------------------------------------------------------------------------------------------ |
 | `blackout: deploys paused` and exit 1                | A game window is open. Wait, or dispatch with `force=true` and accept the write-loss risk.  |
 | `blackout: cannot parse NOW`                         | `NOW` is set to something that is not ISO-8601. Unset it or use `2026-11-08T15:00:00Z`.     |
+| `missing GitHub repository variables`                | One of the seven required variables is unset. Set it to the value `deploy/setup.sh` printed. |
+| `BASE_URL must be an http or https URL with a host`  | Fix the `BASE_URL` variable, or unset it on the first deploy.                              |
 | Deploy fails at authentication                       | A GitHub variable is wrong: `WIF_PROVIDER`, `DEPLOY_SA`, or `GCP_PROJECT`.                  |
+| `cannot read secret ...`                             | `parlay-deployer` lacks `roles/secretmanager.viewer`. Re-run `deploy/setup.sh`.            |
+| `secret ... has no ENABLED version`                  | Add a version, then deploy again. See [GCP setup](../guides/gcp-setup.md#3-add-a-version-to-each-required-secret). |
+| `Litestream bucket ... is missing`                   | `LITESTREAM_BUCKET` is wrong, or the bucket was never created. Re-run `deploy/setup.sh`.    |
+| `Artifact Registry repo ... is missing`              | `AR_REPO` or `GCP_REGION` is wrong, or the repo was never created. Re-run `deploy/setup.sh`. |
 | Deploy fails building or pushing the image           | Check the build log. A denied push means `artifactregistry.writer` is missing; rerun setup. |
 | Revision starts, then exits with a config message    | Read the message: a missing secret version, `BASE_URL`, or `LITESTREAM_BUCKET`.             |
 | `entrypoint: set LITESTREAM_BUCKET or ...`           | The `LITESTREAM_BUCKET` variable is unset, so the entrypoint refuses to run without a backup. |
 | Health check times out                               | The revision did not boot. Read Cloud Run logs for the startup error or GCS permission.     |
-| `secret ... has no versions`                          | Add a version, then deploy again. See [GCP setup](../guides/gcp-setup.md#3-add-a-version-to-every-secret). |
 | `first revision had no BASE_URL; retrying` warning   | Expected on the first deploy. Set the `BASE_URL` repo variable to the printed URL.          |
+| Bug reports save but no GitHub issue appears         | `github-token` has no `ENABLED` version, so the deploy skipped it. Add one and deploy again. |
 | History is missing after a deploy                    | No group existed at boot, or it is not the first group. Create the first group, deploy again.|
 | First boot logs `no matching backups found`          | The replica is empty. Normal. The revision starts a fresh database and replicates it.       |
 | A deploy lost writes                                 | It ran during a game window, probably forced. Prefer waiting, or `force` only when quiet.   |
