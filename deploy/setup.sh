@@ -51,7 +51,9 @@ DEPLOY_SA_NAME="parlay-deployer"
 RUNTIME_SA="${RUNTIME_SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
 DEPLOY_SA="${DEPLOY_SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
 
-SECRETS=(session-key google-client-id google-client-secret odds-api-key the-odds-api-key)
+# github-token is optional: the deploy mounts it only when it has a version, so
+# bug reports open GitHub issues. An empty secret leaves reports in SQLite.
+SECRETS=(session-key google-client-id google-client-secret odds-api-key the-odds-api-key github-token)
 
 say() { printf '\n==> %s\n' "$*"; }
 ok() { printf '    %s\n' "$*"; }
@@ -172,12 +174,22 @@ for secret in "${SECRETS[@]}"; do
 done
 
 say "Granting the deployer account what it needs"
-for role in roles/run.admin roles/artifactregistry.writer; do
+# secretmanager.viewer reads secret metadata only, which the deploy pre-flight
+# needs to check for an ENABLED version; it cannot read secret values.
+for role in roles/run.admin roles/artifactregistry.writer roles/secretmanager.viewer; do
 	gcloud projects add-iam-policy-binding "$PROJECT_ID" \
 		--member="serviceAccount:$DEPLOY_SA" \
 		--role="$role" \
 		--quiet
 done
+
+# The pre-flight also describes the Litestream bucket, which needs bucket
+# metadata read on that bucket only.
+gcloud storage buckets add-iam-policy-binding "gs://$BUCKET" \
+	--project="$PROJECT_ID" \
+	--member="serviceAccount:$DEPLOY_SA" \
+	--role=roles/storage.bucketViewer \
+	--quiet
 
 gcloud iam service-accounts add-iam-policy-binding "$RUNTIME_SA" \
 	--project="$PROJECT_ID" \
@@ -272,9 +284,12 @@ Or with the GitHub CLI, from a clone of the repo:
   gh variable set AR_REPO --body "${AR_REPO}"
 
 Next:
-  1. Add a version to each secret: session-key (32+ random bytes), the Google
-     client pair from the OAuth runbook, odds-api-key, and the-odds-api-key.
-     The deploy fails until every secret has a version.
+  1. Add a version to each required secret: session-key (32+ random bytes), the
+     Google client pair from the OAuth runbook, odds-api-key, and
+     the-odds-api-key. The deploy fails until every required secret has a
+     version.
+     github-token is optional. Add a version only if you want in-app bug
+     reports to open GitHub issues; without one they save locally instead.
   2. Deploy once, then set BASE_URL to the Cloud Run URL it prints.
   3. Create a group in the app, then restart the service once so
      seed/history.yaml imports. It waits for a group and only runs at boot.
