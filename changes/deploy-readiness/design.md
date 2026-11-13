@@ -139,7 +139,7 @@ Effort: medium (coordinates shutdown across SSE, refresh workers, and SQLite wit
 ### Phase 2: Harden startup validation, OIDC discovery, and health checks
 
 - [x] Validate `BASE_URL` scheme (`http`/`https`) and non-empty host in `internal/config/config.go` with table tests in `internal/config/config_test.go`, and update `docs/reference/config.md`.
-- [ ] Add bounded retry with backoff and per-attempt timeout to `auth.NewGoogleProvider` in `internal/auth/provider.go` with transient-failure and cancellation tests in `internal/auth/provider_test.go`.
+- [x] Add bounded retry with backoff and per-attempt timeout to `auth.NewGoogleProvider` in `internal/auth/provider.go` with transient-failure and cancellation tests in `internal/auth/provider_test.go`.
 - [ ] Update `/healthz` in `cmd/server/main.go` to ping SQLite (`200 ok` / `503 unavailable`), update `cmd/server/main_test.go`, and update `docs/reference/routes.md`.
 
 ### Phase 3: Build group invite links from configured base URL

@@ -3,7 +3,7 @@ id: adr-google-oauth
 title: Google sign-in
 type: decision
 summary: Replace the passcode and the name picker with Google's OpenID Connect sign-in.
-last_verified: "2026-11-06"
+last_verified: "2026-11-13"
 ---
 
 # Google sign-in
@@ -67,9 +67,10 @@ The gate moved into config. Adding or removing a friend means editing one enviro
 building an admin screen. That is deliberate for a private club, but it puts account management on whoever runs the
 deploy.
 
-Google is now part of startup and sign-in. The server discovers Google's OIDC document at boot, so a Google outage can
-stop an instance from starting. Prod requires four Google values plus `SESSION_KEY`; a missing one fails startup with
-every problem listed.
+Google is now part of startup and sign-in. The server discovers Google's OIDC document at boot, retrying a failed
+attempt three times over about a second, so a brief Google blip does not stop an instance from starting. A longer
+outage still does. Prod requires four Google values plus `SESSION_KEY`; a missing one fails startup with every problem
+listed.
 
 The users table was rebuilt in migration `0002` to drop `UNIQUE(name)` and add the Google columns. That runs on real
 data on the first prod deploy, so the deploy needs a Litestream snapshot first.
@@ -101,8 +102,9 @@ data on the first prod deploy, so the deploy needs a Litestream snapshot first.
   email stays stale and updating `ALLOWED_EMAILS` to the new address will not let that person back in.
 - Only the lowest-id unlinked user is linked for a given `=Name` entry. Two history-import rows with the same display
   name leave one unlinked.
-- The provider discovers OIDC at startup and fails startup if Google is unreachable. That keeps the first callback fast
-  but couples boot to Google.
+- The provider discovers OIDC at startup and fails startup if Google is unreachable. Discovery gets three attempts with
+  200ms and 500ms backoffs, and each attempt has a 5-second deadline from the startup context, so a cancelled startup
+  stops at once. That keeps the first callback fast but still couples boot to Google.
 - The dev login is registered only when `APP_ENV` is not prod and `GOOGLE_CLIENT_ID` is empty. It posts with the same
   CSRF exemption as logout, and it requires an email because `SignIn` cannot own a user without one.
 - `pc_oauth` carries its own issue time, so the ten-minute limit is enforced server-side, not only by the cookie's
@@ -133,5 +135,5 @@ data on the first prod deploy, so the deploy needs a Litestream snapshot first.
 - **Take a Litestream snapshot before the first prod deploy.** Migration `0002` rebuilds `users` on real rows.
 - **Handle duplicate names from the history import.** If two unlinked users share a name, only one can be linked through
   `=Name`; the import needs a merge path or a second email entry.
-- **Consider lazy OIDC discovery.** Startup currently fails if Google's discovery endpoint is unreachable. A retry or
-  first-use discovery would make an instance less brittle.
+- **Consider lazy OIDC discovery.** Startup retries a blip, but a longer Google outage still fails the boot. Discovering
+  on first use would remove the dependency.

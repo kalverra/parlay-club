@@ -1,6 +1,7 @@
 package auth_test
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/json"
@@ -8,6 +9,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -45,13 +47,7 @@ func (s *oidcTestServer) handle(w http.ResponseWriter, r *http.Request) {
 
 	switch r.URL.Path {
 	case "/.well-known/openid-configuration":
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"issuer":                                s.URL,
-			"authorization_endpoint":                s.URL + "/auth",
-			"token_endpoint":                        s.URL + "/token",
-			"jwks_uri":                              s.URL + "/keys",
-			"id_token_signing_alg_values_supported": []string{"RS256"},
-		})
+		_ = json.NewEncoder(w).Encode(discoveryDocument(s.URL))
 	case "/keys":
 		_ = json.NewEncoder(w).Encode(s.keys)
 	case "/token":
@@ -63,6 +59,121 @@ func (s *oidcTestServer) handle(w http.ResponseWriter, r *http.Request) {
 		})
 	default:
 		http.NotFound(w, r)
+	}
+}
+
+// discoveryDocument is the OpenID Connect metadata a test issuer publishes.
+func discoveryDocument(issuer string) map[string]any {
+	return map[string]any{
+		"issuer":                                issuer,
+		"authorization_endpoint":                issuer + "/auth",
+		"token_endpoint":                        issuer + "/token",
+		"jwks_uri":                              issuer + "/keys",
+		"id_token_signing_alg_values_supported": []string{"RS256"},
+	}
+}
+
+// flakyOIDCServer answers discovery with 503 until failures are used up and
+// counts every discovery request it sees. onCall, when set, runs on each one.
+type flakyOIDCServer struct {
+	*httptest.Server
+	failures int32
+	calls    atomic.Int32
+	onCall   func()
+}
+
+func newFlakyOIDCServer(t *testing.T, failures int32, onCall func()) *flakyOIDCServer {
+	t.Helper()
+
+	s := &flakyOIDCServer{failures: failures, onCall: onCall}
+	s.Server = httptest.NewServer(http.HandlerFunc(s.handle))
+	t.Cleanup(s.Close)
+	return s
+}
+
+func (s *flakyOIDCServer) handle(w http.ResponseWriter, _ *http.Request) {
+	if s.onCall != nil {
+		s.onCall()
+	}
+	if s.calls.Add(1) <= s.failures {
+		http.Error(w, "issuer is warming up", http.StatusServiceUnavailable)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(discoveryDocument(s.URL))
+}
+
+func TestGoogleProviderRetriesTransientDiscoveryFailures(t *testing.T) {
+	t.Parallel()
+
+	server := newFlakyOIDCServer(t, 2, nil)
+
+	provider, err := auth.NewGoogleProvider(
+		t.Context(), testClientID, "secret", testRedirectURL, server.URL)
+	require.NoError(t, err)
+	assert.Equal(t, int32(3), server.calls.Load(), "the third attempt succeeds")
+
+	raw := provider.AuthURL("state-1", "nonce-1", "challenge-1")
+	assert.True(t, strings.HasPrefix(raw, server.URL+"/auth?"))
+}
+
+func TestGoogleProviderFailsAfterExhaustingDiscoveryAttempts(t *testing.T) {
+	t.Parallel()
+
+	server := newFlakyOIDCServer(t, 10, nil)
+
+	_, err := auth.NewGoogleProvider(
+		t.Context(), testClientID, "secret", testRedirectURL, server.URL)
+	require.Error(t, err)
+	require.ErrorContains(t, err, "discover identity provider")
+	require.ErrorContains(t, err, "503 Service Unavailable")
+	assert.Equal(t, int32(3), server.calls.Load(), "retries stop after three attempts")
+}
+
+func TestGoogleProviderStopsDiscoveryWhenCancelled(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	server := newFlakyOIDCServer(t, 10, cancel)
+
+	start := time.Now()
+	_, err := auth.NewGoogleProvider(
+		ctx, testClientID, "secret", testRedirectURL, server.URL)
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Equal(t, int32(1), server.calls.Load(), "a cancelled context stops retrying")
+	assert.Less(t, time.Since(start), 200*time.Millisecond,
+		"cancellation ends the request instead of waiting out the backoff")
+}
+
+func TestGoogleProviderBoundsAHungDiscoveryAttempt(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	defer cancel()
+
+	hung := make(chan struct{}, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		select {
+		case hung <- struct{}{}:
+		default:
+		}
+		<-r.Context().Done()
+	}))
+	t.Cleanup(server.Close)
+
+	start := time.Now()
+	_, err := auth.NewGoogleProvider(
+		ctx, testClientID, "secret", testRedirectURL, server.URL)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.Less(t, time.Since(start), time.Second, "a stalled request cannot hang startup")
+
+	select {
+	case <-hung:
+	default:
+		t.Fatal("startup never reached the issuer")
 	}
 }
 

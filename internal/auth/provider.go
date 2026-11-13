@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
 	"golang.org/x/oauth2"
@@ -11,6 +12,20 @@ import (
 
 // GoogleIssuer is Google's OpenID Connect issuer.
 const GoogleIssuer = "https://accounts.google.com"
+
+const (
+	// discoverAttempts is how many times startup asks the issuer for its
+	// discovery document before giving up.
+	discoverAttempts = 3
+	// discoverAttemptTimeout bounds one discovery request, so a stalled DNS
+	// lookup or TLS handshake cannot hold startup for the whole retry budget.
+	discoverAttemptTimeout = 5 * time.Second
+)
+
+// discoverBackoff is the pause before each retry after a failed attempt. The
+// two entries sit before the second and third attempts, so a short blip at boot
+// does not fail a cold start.
+var discoverBackoff = [...]time.Duration{200 * time.Millisecond, 500 * time.Millisecond}
 
 // ErrEmailNotVerified is returned when Google says the signed-in address is not
 // verified, so it cannot prove who the person is.
@@ -40,7 +55,7 @@ func NewGoogleProvider(
 		issuer = GoogleIssuer
 	}
 
-	discovered, err := oidc.NewProvider(ctx, issuer)
+	discovered, err := discoverIssuer(ctx, issuer)
 	if err != nil {
 		return nil, fmt.Errorf("discover identity provider: %w", err)
 	}
@@ -55,6 +70,39 @@ func NewGoogleProvider(
 		},
 		verifier: discovered.Verifier(&oidc.Config{ClientID: clientID}),
 	}, nil
+}
+
+// discoverIssuer fetches issuer's discovery document, retrying a failed attempt
+// with a short backoff. It returns the first success, the last failure after
+// discoverAttempts tries, or ctx's error as soon as ctx is cancelled.
+func discoverIssuer(ctx context.Context, issuer string) (*oidc.Provider, error) {
+	var lastErr error
+
+	for attempt := range discoverAttempts {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return nil, fmt.Errorf("wait to retry discovery: %w", ctx.Err())
+			case <-time.After(discoverBackoff[min(attempt-1, len(discoverBackoff)-1)]):
+			}
+		}
+
+		// A per-attempt deadline keeps one hung request from spending the
+		// whole startup budget the retries are meant to cover.
+		attemptCtx, cancel := context.WithTimeout(ctx, discoverAttemptTimeout)
+		discovered, err := oidc.NewProvider(attemptCtx, issuer)
+		cancel()
+		if err == nil {
+			return discovered, nil
+		}
+		lastErr = err
+
+		if ctx.Err() != nil {
+			return nil, fmt.Errorf("discover while stopping: %w", ctx.Err())
+		}
+	}
+
+	return nil, lastErr
 }
 
 // AuthURL builds the authorization request. It asks for online access, carries
