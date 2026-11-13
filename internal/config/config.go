@@ -4,6 +4,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -95,6 +96,11 @@ func Load(env Env) (Config, error) {
 		problems = append(problems, requiredInProd(env, "GOOGLE_CLIENT_SECRET")...)
 		problems = append(problems, requiredInProd(env, "BASE_URL")...)
 	}
+	if cfg.BaseURL != "" {
+		if err := validateBaseURL(cfg.BaseURL); err != nil {
+			problems = append(problems, err)
+		}
+	}
 
 	return cfg, errors.Join(problems...)
 }
@@ -117,6 +123,18 @@ func baseURLOr(env Env, port int, prod bool) string {
 		return ""
 	}
 	return fmt.Sprintf("http://localhost:%d", port)
+}
+
+// validateBaseURL requires an absolute http or https URL with a host. BASE_URL
+// builds OAuth redirects and invite links, so a bare hostname or a wrong scheme
+// breaks sign-in for every user. http stays allowed so local dev and loopback
+// smoke tests work without TLS.
+func validateBaseURL(raw string) error {
+	parsed, err := url.Parse(raw)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		return fmt.Errorf("BASE_URL must be an http or https URL with a host, got %q", raw)
+	}
+	return nil
 }
 
 // valueOr returns the variable's value, or fallback when it is unset or empty.

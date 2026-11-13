@@ -199,6 +199,82 @@ func TestLoadErrors(t *testing.T) {
 	}
 }
 
+func TestLoadValidatesBaseURL(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		baseURL string
+		want    string
+		wantErr string
+	}{
+		"https with host": {
+			baseURL: "https://parlay.example.com",
+			want:    "https://parlay.example.com",
+		},
+		"http with host": {
+			baseURL: "http://localhost:9090",
+			want:    "http://localhost:9090",
+		},
+		"trailing slashes are trimmed": {
+			baseURL: "https://parlay.example.com//",
+			want:    "https://parlay.example.com",
+		},
+		"path is allowed": {
+			baseURL: "https://parlay.example.com/parlay",
+			want:    "https://parlay.example.com/parlay",
+		},
+		"ftp scheme": {
+			baseURL: "ftp://parlay.example.com",
+			wantErr: `BASE_URL must be an http or https URL with a host, got "ftp://parlay.example.com"`,
+		},
+		"bare hostname": {
+			baseURL: "parlay.example.com",
+			wantErr: `BASE_URL must be an http or https URL with a host, got "parlay.example.com"`,
+		},
+		"scheme without host": {
+			baseURL: "https:/parlay.example.com",
+			wantErr: `BASE_URL must be an http or https URL with a host, got "https:/parlay.example.com"`,
+		},
+		"url parse error": {
+			baseURL: "http://exa mple.com",
+			wantErr: `BASE_URL must be an http or https URL with a host, got "http://exa mple.com"`,
+		},
+	}
+
+	// Each case runs in both envs. Prod carries the other required values so
+	// BASE_URL is the only variable under test.
+	envs := map[string]map[string]string{
+		config.EnvDev: {},
+		config.EnvProd: {
+			"SESSION_KEY":          strings.Repeat("k", 32),
+			"GOOGLE_CLIENT_ID":     "client-id",
+			"GOOGLE_CLIENT_SECRET": "client-secret",
+		},
+	}
+
+	for name, test := range tests {
+		for appEnv, base := range envs {
+			t.Run(appEnv+"/"+name, func(t *testing.T) {
+				t.Parallel()
+
+				values := make(map[string]string, len(base)+2)
+				maps.Copy(values, base)
+				values["APP_ENV"] = appEnv
+				values["BASE_URL"] = test.baseURL
+
+				cfg, err := config.Load(envFrom(values))
+				if test.wantErr != "" {
+					require.Error(t, err)
+					assert.Contains(t, err.Error(), test.wantErr)
+					return
+				}
+				require.NoError(t, err)
+				assert.Equal(t, test.want, cfg.BaseURL)
+			})
+		}
+	}
+}
+
 func TestLoadDevStartsWithNoSecrets(t *testing.T) {
 	t.Parallel()
 
