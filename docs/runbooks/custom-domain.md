@@ -4,8 +4,8 @@ title: Custom domain with Cloudflare
 type: runbook
 summary: Route a custom subdomain to Cloud Run through Cloudflare with origin header rewriting and OAuth callback configuration.
 tags: [custom-domain, cloudflare, cloud-run, dns, oauth, runbook]
-sources: [internal/config/config.go, internal/auth/provider.go, .github/workflows/deploy.yml, deploy/setup.sh]
-last_verified: 2026-11-12
+sources: [internal/config/config.go, internal/auth/provider.go, internal/groups/handlers.go, cmd/server/main.go, .github/workflows/deploy.yml, deploy/setup.sh]
+last_verified: 2026-11-13
 ---
 
 # Custom domain with Cloudflare
@@ -73,6 +73,10 @@ Trigger a deploy so Cloud Run restarts with the new `BASE_URL`:
 gh workflow run deploy.yml
 ```
 
+`BASE_URL` also builds group invite links. With it set, every `/groups` card shows
+`https://parlay.example.com/join/{token}`. Without it, the link follows the request's `Host`, which the Cloudflare origin
+rule from step 2 has rewritten to the `.run.app` hostname.
+
 ### 4. Register the Google OAuth callback
 
 Google rejects sign-in attempts if the redirect URI is not pre-registered.
@@ -120,3 +124,5 @@ If traffic fails or the custom domain has issues:
 4. Click **Sign in with Google**.
    - Verify the Google consent screen appears.
    - Complete sign-in and confirm you land back on `/groups` or `/join` with an active session cookie (`pc_session`).
+5. Open `/groups` and check that an invite link starts with `https://parlay.example.com/join/`. A `.run.app` link means
+   `BASE_URL` did not reach the revision.
