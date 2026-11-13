@@ -261,7 +261,8 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
           # Prove the revision boots, not just that Cloud Run accepted it.
-          curl -fsS --retry 8 --retry-delay 3 --retry-all-errors "$URL/healthz" >/dev/null
+          # Google Frontend reserves /healthz on *.run.app, so probe /readyz.
+          curl -fsS --retry 8 --retry-delay 3 --retry-all-errors "$URL/readyz" >/dev/null
 
           if [ -z "${BASE_URL_VAR:-}" ]; then
             echo "::notice::set the BASE_URL repo variable to $URL so future deploys pass it without a retry"
