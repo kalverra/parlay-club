@@ -198,7 +198,7 @@ func TestPlaceholderPages(t *testing.T) {
 	}{
 		{"slip", "slip", webui.TabWeek, "Slip", "Slip contents show up here once the season starts."},
 		{"research", "research", "", "Research", "Player and game research shows up here."},
-		{"record", "record", webui.TabRecord, "Record Book", "Season results show up here."},
+		{"record", "record", webui.TabRecord, "Record Book", "Join or create a group to see its Record Book."},
 	}
 
 	for _, test := range tests {
@@ -282,6 +282,8 @@ func renderPage(t *testing.T, page string, data webui.Page) string {
 		value = webui.SlipPage{Page: data}
 	case "research":
 		value = webui.ResearchPage{Page: data}
+	case "record":
+		value = webui.RecordPage{Page: data}
 	}
 
 	html, err := renderer.Render(page, value)

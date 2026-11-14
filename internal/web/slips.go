@@ -63,6 +63,7 @@ type slipHandlers struct {
 // scope, so the signed-in person and active group are already on the context.
 func (h *slipHandlers) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /{$}", h.home)
+	mux.HandleFunc("GET /record", h.recordBook)
 	mux.HandleFunc("GET /groups/{id}/week", h.groupWeek)
 	mux.HandleFunc("GET /me", h.profile)
 	mux.HandleFunc("POST /me", h.updateProfile)
