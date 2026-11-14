@@ -160,7 +160,7 @@ Effort: medium (clear seams across existing packages, one pure grader + boxscore
 
 ### Phase 3: Per-member wager logging
 
-- [ ] Add `internal/db/wagers.go`, `slips.Service.SetWager` / `DeleteWager`, `PUT` / `DELETE /slips/{id}/wagers/me` in `internal/web`, and the **"My wager"** form in `partials.html`, covered by DB, service, and HTTP tests
+- [x] Add `internal/db/wagers.go`, `slips.Service.SetWager` / `DeleteWager`, `PUT` / `DELETE /slips/{id}/wagers/me` in `internal/web`, and the **"My wager"** form in `partials.html`, covered by DB, service, and HTTP tests
 - [ ] Docs: update `docs/reference/routes.md` and `docs/concepts/slips.md` for wager endpoints and behavior
 
 ### Phase 4: Record Book calculation and `/record` screen

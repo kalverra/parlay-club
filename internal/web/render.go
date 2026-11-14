@@ -36,6 +36,7 @@ var partialFiles = map[string]string{
 	"slip-export":        partialsFile,
 	"slip-activity":      partialsFile,
 	"slip-payout":        partialsFile,
+	"slip-wager":         partialsFile,
 	"leg-form":           partialsFile,
 	"leg-added":          partialsFile,
 	"game-props":         partialsFile,
