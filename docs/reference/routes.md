@@ -3,8 +3,8 @@ id: routes
 title: Routes
 type: reference
 summary: Every HTTP route the server serves, the middleware in front of them, and the status codes, HTMX headers, and SSE frames handlers return.
-tags: [routes, http, handlers, middleware, htmx, sse, props, research, schedules, wagers]
-sources: [cmd/server/main.go, cmd/server/sandbox.go, internal/auth/handlers.go, internal/groups/handlers.go, internal/board/board.go, internal/web/routes.go, internal/web/home.go, internal/web/games.go, internal/web/pick.go, internal/web/slips.go, internal/web/schedules.go, internal/web/research.go, internal/web/export.go, internal/web/bugs.go, internal/web/screenshots.go, internal/sandbox/seed.go, internal/sandbox/plan.go, internal/live/stream.go, web/templates/home.html, web/templates/pick.html, web/templates/week.html, web/templates/slip.html, web/templates/partials.html, web/templates/sandbox.html]
+tags: [routes, http, handlers, middleware, htmx, sse, props, research, schedules, wagers, record]
+sources: [cmd/server/main.go, cmd/server/sandbox.go, internal/auth/handlers.go, internal/groups/handlers.go, internal/board/board.go, internal/web/routes.go, internal/web/home.go, internal/web/games.go, internal/web/pick.go, internal/web/slips.go, internal/web/schedules.go, internal/web/research.go, internal/web/record.go, internal/web/export.go, internal/web/bugs.go, internal/web/screenshots.go, internal/record/record.go, internal/sandbox/seed.go, internal/sandbox/plan.go, internal/live/stream.go, web/templates/home.html, web/templates/pick.html, web/templates/week.html, web/templates/slip.html, web/templates/record.html, web/templates/partials.html, web/templates/sandbox.html]
 last_verified: 2026-11-14
 ---
 
@@ -85,7 +85,7 @@ accept the shared invite. A forged group cookie still falls back to a real membe
 | `GET /groups/{id}/week`   | Make the group active, ensure scheduled slips exist, then redirect to the slip (1 slip), render the week hub (>1 slips), or show create form (0 slips) |
 | `GET /games`              | 303 to the active group's week; the pick board owns the week                                     |
 | `GET /research`           | Research page: week games, player search, injury reports, and last-5 hit bars                     |
-| `GET /record`             | Record Book placeholder                                                                          |
+| `GET /record`             | Season Record Book for the active group (optional `?season=`)                                    |
 
 The bottom bar has three destinations: Groups (`/`), This week (`/groups/{active}/week`), and Record Book. Research
 keeps a full page but leaves the bar; the hub links to the pick board, and pick rows link to Research.
@@ -99,8 +99,7 @@ the create form. With exactly one slip, it 303s directly to `/slips/{id}`. With 
 (`week.html`) with cards for each slip (name, scope badge, next step, deadline, progress) and a button to add a one-off
 slip. It uses the same group-switch seam as a slip link from another group.
 
-The slip handler file also serves `/me` and the slip and leg routes below. `/record` renders its empty state until a
-later change fills it in. The pick board and Research are described below.
+The slip handler file also serves `/me`, `/record`, and the slip and leg routes below. The pick board, Research, and Record Book are described below.
 
 ### Groups
 
@@ -327,6 +326,22 @@ omitted, it resolves them from `?leg_id=` or the player's stored odds.
 `POST /research/matches` accepts `odds_name`, `team`, and `athlete_id`. It saves a manual player match (`manual=1`) in
 `player_matches`, removes conflicting non-manual matches for that game, backfills `player_id` and `team` on matching
 odds and legs, and returns the refreshed game research partial.
+
+### Record Book
+
+| Method + path            | Purpose                                           | Response |
+| ------------------------ | ------------------------------------------------- | -------- |
+| `GET /record?season=`    | Season Record Book for the active group           | Full page; invalid or non-positive `season` is 400. |
+
+`GET /record` reads the active group from `Scope` and resolves the season in order: explicit `?season=` query
+parameter, latest season with `GRADED` slips, latest season with any slip, latest loaded week's season, or the current
+calendar year. An unreadable or non-positive `?season=` answers `400 Bad Request`.
+
+The handler loads the group's `GRADED` slips, their legs, participating users (including former members who authored a
+leg on a graded slip), and logged wagers for that season, computes `record.Build`, and renders `web/templates/record.html`.
+When no group is active or the selected season has no graded slips, it renders an empty state. Otherwise it shows the
+season selector, four summary cards (Group record, Units P/L, Win streak, Loss streak), and the member leaderboard
+(stacked cards below `sm:` and a table at `sm:+`). See [Record Book](../concepts/record-book.md).
 
 ### Profile
 
