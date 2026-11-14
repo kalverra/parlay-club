@@ -2,10 +2,10 @@
 id: data-refresh
 title: Data refresh
 type: concept
-summary: How page loads and on-demand views drive lazy syncs of the slate, weather, game lines, props, rosters, injuries, game logs, and nfelo projections, with per-source staleness windows, single-flight, failure backoff, tiered Parlay API and The Odds API credit floors, an archive of every successful response, a synchronous sandbox bootstrap, and a shutdown drain that cancels in-flight syncs.
-tags: [refresh, sync, lazy, staleness, singleflight, backoff, credits, odds, parlay-api, the-odds-api, enrichment, fallback, props, weather, slate, live-window, nfelo, projections, archive, raw-responses, roster, gamelog, injuries, player-matching, sandbox, clock, pick-board, shutdown, drain]
-sources: [internal/refresh/refresh.go, internal/refresh/rules.go, internal/refresh/sources.go, internal/refresh/research.go, internal/refresh/nfelo.go, internal/refresh/publish.go, internal/refresh/live.go, internal/sandbox/*.go, internal/board/board.go, internal/db/sync.go, internal/db/players.go, internal/db/odds.go, internal/db/nfelo.go, internal/web/pick.go, internal/web/games.go, internal/ingest/nfelo/client.go, internal/ingest/archive/transport.go, cmd/server/main.go, cmd/server/sandbox.go]
-last_verified: 2026-11-13
+summary: How page loads and on-demand views drive lazy syncs of the slate, weather, game lines, props, rosters, injuries, game logs, nfelo projections, and auto-grading, with per-source staleness windows, single-flight, failure backoff, tiered Parlay API and The Odds API credit floors, an archive of every successful response, a synchronous sandbox bootstrap, and a shutdown drain that cancels in-flight syncs.
+tags: [refresh, sync, lazy, staleness, singleflight, backoff, credits, odds, parlay-api, the-odds-api, enrichment, fallback, props, weather, slate, live-window, nfelo, projections, archive, raw-responses, roster, gamelog, injuries, player-matching, grade, auto-grading, sandbox, clock, pick-board, shutdown, drain]
+sources: [internal/refresh/refresh.go, internal/refresh/rules.go, internal/refresh/sources.go, internal/refresh/research.go, internal/refresh/nfelo.go, internal/refresh/grade.go, internal/refresh/publish.go, internal/refresh/live.go, internal/sandbox/*.go, internal/board/board.go, internal/grader/*.go, internal/slips/rules.go, internal/db/sync.go, internal/db/legs.go, internal/db/players.go, internal/db/odds.go, internal/db/nfelo.go, internal/web/pick.go, internal/web/games.go, internal/ingest/nfelo/client.go, internal/ingest/archive/transport.go, cmd/server/main.go, cmd/server/sandbox.go]
+last_verified: 2026-11-14
 ---
 
 # Data refresh
@@ -47,9 +47,9 @@ opening it, typing a search, filtering, and sorting read stored odds only, so th
 
 1. Read the latest week and its games. Before the first slate sync there is no week, which is not an error.
 2. Sync `espn:scoreboard` first, because it may add or change the week's games.
-3. Read the week's games again, then start one weather source per game, one odds source for the week, and the nfelo
-   projections source. Those run at the same time, each in its own goroutine. If ESPN is configured, `Kick()` also scans
-   slip legs in the current week and syncs stale game logs for any matched athletes.
+3. Read the week's games again, then start one weather source per game, one odds source for the week, the nfelo
+   projections source, and the `grade` source. Those run at the same time, each in its own goroutine. If ESPN is
+   configured, `Kick()` also scans slip legs in the current week and syncs stale game logs for any matched athletes.
 
 Within a source, `singleflight` keyed by its `sync_state` source key lets concurrent page loads share one fetch. The
 work inside the flight re-reads the staleness state before fetching, so a load that joined after the first run finished
@@ -91,6 +91,7 @@ Each source records its last successful sync in `sync_state.fetched_at`. A sourc
 | `espn:summary:{gameID}`| Game summary and key injuries        | 2 h                                                                                                                     | Game status is FINAL                                               |
 | `espn:gamelog:{athleteID}`| Athlete season game log and stats | 12 h                                                                                                                    | Never                                                              |
 | `nfelo:projections`| The week's model spreads, win probabilities, and QB adjustments | 12 h                                                                                                     | Not a regular-season week, no games, or every game has kicked off  |
+| `grade`            | Auto-grade `PENDING` legs on `FINAL` games | Every pass when `PENDING` legs exist on `FINAL` games                                                                   | No `PENDING` legs on `FINAL` games                                 |
 
 "Thursday", "Sunday", and "Monday" mean `America/New_York`. The zone database is embedded in the binary, so it resolves
 in the container without a separate `tzdata` package. The scoreboard's live flag comes from the stored games: any game
@@ -108,6 +109,24 @@ rows that match the current week's games. A game with no matching row keeps its 
 non-regular-season week is skipped because the CSV's playoff week numbers are unverified, and a week whose games have
 all kicked off is skipped because the projections are pre-game numbers that no longer change. The source spends no Odds
 API credits, so it has no floor and does not wait on the odds sync.
+
+## Auto-grading
+
+The `grade` source (`GradeSource = "grade"`) runs during each pass when a week exists:
+
+1. **Zero wasted fetches:** `due` calls `PendingLegsOnFinalGames()`. Once every leg on `FINAL` games has left `PENDING`
+   (including `NEEDS_GRADING` or `VOID`), the query returns zero rows and the source is skipped.
+2. **Game-only optimization:** `syncGrade` groups pending legs by `FINAL` game. If a game has only game/team/other legs
+   (no `grader.IsPlayerMarket` legs), it grades directly from the stored `games` scores without calling ESPN.
+3. **Player props and backoff:** If a `FINAL` game has at least one pending player-prop leg, `syncGrade` fetches
+   `BoxScore(ctx, gameID)` through `singleflight` keyed by `SummarySource(gameID)` (`espn:summary:{gameID}`), tagging
+   the request with `archive.WithKey`. A failed `BoxScore` fetch records a 5-minute in-memory backoff under
+   `SummarySource(gameID)` and skips that game without blocking other `FINAL` games.
+4. **Safe writes:** Non-`PENDING` outcomes from `grader.GradeLeg` pass to `slips.Service.AutoGradeLegs`, which updates
+   only rows matching `WHERE id = ? AND result = 'PENDING'` with `graded_by = "auto"`. Manual grades and prior
+   `NEEDS_GRADING` marks are never overwritten on re-runs. Each slip with at least one updated leg recomputes its
+   result/status, receives a system activity entry (`user_id = NULL`), and publishes `slip:{id}`. See
+   [Slips](slips.md#grading).
 
 ## Odds credits
 
