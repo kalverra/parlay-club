@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/kalverra/parlay-club/internal/db"
@@ -330,6 +331,96 @@ func (s *Service) SetLegResult(
 		s.notify(slipID)
 	}
 	return updated, nil
+}
+
+// AutoGraderName is the graded_by value recorded when the automatic grader
+// settles a leg.
+const AutoGraderName = "auto"
+
+// AutoGrade is one leg outcome produced by the automatic grader.
+type AutoGrade struct {
+	LegID  int64
+	Result parlay.Result
+}
+
+// AutoGradeLegs applies automatic grades inside one transaction, updating only
+// legs that are still PENDING (so manual grades and prior NEEDS_GRADING marks
+// are never overwritten). Each slip with at least one updated leg has its
+// result and status recomputed, receives one system activity entry, and is
+// published on slip:{id}.
+func (s *Service) AutoGradeLegs(ctx context.Context, grades []AutoGrade) error {
+	if len(grades) == 0 {
+		return nil
+	}
+	for _, g := range grades {
+		if !g.Result.IsLegResult() {
+			return fmt.Errorf("auto-grade leg %d: %w", g.LegID, db.ErrLegResultInvalid)
+		}
+	}
+
+	var slipOrder []int64
+	err := s.store.Tx(ctx, func(tx *db.Store) error {
+		slipChanges := make(map[int64][]string)
+		for _, g := range grades {
+			if g.Result == parlay.Pending {
+				continue
+			}
+			leg, err := tx.LegByID(ctx, g.LegID)
+			if errors.Is(err, db.ErrLegNotFound) {
+				continue
+			}
+			if err != nil {
+				return err
+			}
+			updated, err := tx.SetLegResultIfPending(ctx, g.LegID, g.Result, AutoGraderName)
+			if err != nil {
+				return err
+			}
+			if !updated {
+				continue
+			}
+			if _, seen := slipChanges[leg.SlipID]; !seen {
+				slipOrder = append(slipOrder, leg.SlipID)
+			}
+			slipChanges[leg.SlipID] = append(
+				slipChanges[leg.SlipID],
+				fmt.Sprintf("%s to %s", leg.Selection, g.Result),
+			)
+		}
+
+		for _, slipID := range slipOrder {
+			legs, err := tx.LegsForSlip(ctx, slipID)
+			if err != nil {
+				return err
+			}
+			members, err := tx.SlipMembers(ctx, slipID)
+			if err != nil {
+				return err
+			}
+			slipResult, status := gradeSlip(legs, members)
+			if err := tx.SetSlipGrade(ctx, slipID, slipResult, status); err != nil {
+				return err
+			}
+
+			changes := slipChanges[slipID]
+			message := fmt.Sprintf("Auto-graded %s", changes[0])
+			if len(changes) > 1 {
+				message = fmt.Sprintf("Auto-graded %d legs: %s", len(changes), strings.Join(changes, ", "))
+			}
+			if _, err := tx.AddActivity(ctx, slipID, nil, message); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("auto-grade legs: %w", err)
+	}
+
+	for _, slipID := range slipOrder {
+		s.notify(slipID)
+	}
+	return nil
 }
 
 // gradeSlip recomputes a slip's result and status from its legs and members.

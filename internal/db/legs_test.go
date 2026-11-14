@@ -232,3 +232,88 @@ func TestDeleteLeg(t *testing.T) {
 
 	require.ErrorIs(t, store.DeleteLeg(t.Context(), leg.ID), db.ErrLegNotFound)
 }
+
+func TestPendingLegsOnFinalGames(t *testing.T) {
+	t.Parallel()
+
+	store, database := openTestStore(t)
+	ada := createUser(t, store, "Ada")
+	group := createTestGroup(t, store, ada)
+	week := createTestWeek(t, store, 9)
+	slip := createTestSlip(t, store, group, week, "Week 9", 4, ada)
+
+	finalGameID := createTestGame(t, database, week, "401772001")
+	_, err := database.ExecContext(t.Context(), `
+		UPDATE games SET status = 'FINAL', home_score = 27, away_score = 20 WHERE id = ?`,
+		finalGameID)
+	require.NoError(t, err)
+
+	schedGameID := createTestGame(t, database, week, "401772002")
+
+	pendingFinal, err := store.CreateLeg(t.Context(), db.Leg{
+		SlipID: slip.ID, UserID: ada.ID, GameID: &finalGameID,
+		MarketType: "ML", Selection: "BUF ML", Team: new("BUF"),
+	})
+	require.NoError(t, err)
+
+	alreadyGraded, err := store.CreateLeg(t.Context(), db.Leg{
+		SlipID: slip.ID, UserID: ada.ID, GameID: &finalGameID,
+		MarketType: "SPREAD", Selection: "BUF -3.5", Team: new("BUF"), Line: new(-3.5),
+	})
+	require.NoError(t, err)
+	require.NoError(t, store.SetLegResult(t.Context(), alreadyGraded.ID, parlay.Won, "Ada"))
+
+	_, err = store.CreateLeg(t.Context(), db.Leg{
+		SlipID: slip.ID, UserID: ada.ID, GameID: &schedGameID,
+		MarketType: "ML", Selection: "BUF ML (sched)", Team: new("BUF"),
+	})
+	require.NoError(t, err)
+
+	_, err = store.CreateLeg(t.Context(), db.Leg{
+		SlipID: slip.ID, UserID: ada.ID,
+		MarketType: "OTHER", Selection: "Coin toss",
+	})
+	require.NoError(t, err)
+
+	got, err := store.PendingLegsOnFinalGames(t.Context())
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, pendingFinal.ID, got[0].Leg.ID)
+	assert.Equal(t, finalGameID, got[0].GameID)
+	assert.Equal(t, "BUF", got[0].HomeTeam)
+	assert.Equal(t, "MIA", got[0].AwayTeam)
+	require.NotNil(t, got[0].HomeScore)
+	require.NotNil(t, got[0].AwayScore)
+	assert.Equal(t, 27, *got[0].HomeScore)
+	assert.Equal(t, 20, *got[0].AwayScore)
+}
+
+func TestSetLegResultIfPendingDoesNotOverwrite(t *testing.T) {
+	t.Parallel()
+
+	store, _ := openTestStore(t)
+	ada := createUser(t, store, "Ada")
+	group := createTestGroup(t, store, ada)
+	week := createTestWeek(t, store, 9)
+	slip := createTestSlip(t, store, group, week, "Week 9", 2, ada)
+
+	leg, err := store.CreateLeg(t.Context(), db.Leg{
+		SlipID: slip.ID, UserID: ada.ID, MarketType: "ML", Selection: "BUF ML",
+	})
+	require.NoError(t, err)
+
+	updated, err := store.SetLegResultIfPending(t.Context(), leg.ID, parlay.Won, "auto")
+	require.NoError(t, err)
+	assert.True(t, updated)
+
+	// A second attempt must not overwrite the already-graded leg.
+	updated, err = store.SetLegResultIfPending(t.Context(), leg.ID, parlay.Lost, "other")
+	require.NoError(t, err)
+	assert.False(t, updated)
+
+	stored, err := store.LegByID(t.Context(), leg.ID)
+	require.NoError(t, err)
+	assert.Equal(t, parlay.Won, stored.Result)
+	require.NotNil(t, stored.GradedBy)
+	assert.Equal(t, "auto", *stored.GradedBy)
+}

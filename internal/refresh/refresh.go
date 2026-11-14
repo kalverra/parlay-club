@@ -25,6 +25,7 @@ import (
 	"github.com/kalverra/parlay-club/internal/ingest/nfelo"
 	"github.com/kalverra/parlay-club/internal/ingest/odds"
 	"github.com/kalverra/parlay-club/internal/ingest/weather"
+	"github.com/kalverra/parlay-club/internal/slips"
 )
 
 // Source keys written to sync_state.
@@ -38,6 +39,8 @@ const (
 	TheOddsAPISource = "odds:theoddsapi"
 	// NfeloProjectionsSource is nfelo's model spreads and QB adjustments.
 	NfeloProjectionsSource = "nfelo:projections"
+	// GradeSource is the sync_state key for auto-grading pending legs on final games.
+	GradeSource = "grade"
 	// weatherSourcePrefix keys per-game forecasts.
 	weatherSourcePrefix = "weather:"
 	// oddsPropsSourcePrefix keys per-game prop lines.
@@ -128,6 +131,17 @@ type ESPNResearchClient interface {
 	GameLog(ctx context.Context, athleteID string) (espn.GameLog, error)
 }
 
+// BoxScoreClient is the slice of *espn.Client refresh needs to auto-grade
+// player prop legs on final games.
+type BoxScoreClient interface {
+	BoxScore(ctx context.Context, eventID string) (espn.BoxScore, error)
+}
+
+// SlipGrader applies automatic leg grades through the slip service.
+type SlipGrader interface {
+	AutoGradeLegs(ctx context.Context, grades []slips.AutoGrade) error
+}
+
 // ForecastClient is the slice of *weather.Client refresh needs.
 type ForecastClient interface {
 	Forecast(ctx context.Context, venue weather.Venue, kickoff time.Time) (weather.Forecast, error)
@@ -166,12 +180,14 @@ type Deps struct {
 	Store         *db.Store
 	Scoreboard    ScoreboardClient
 	ESPN          ESPNResearchClient
+	BoxScore      BoxScoreClient
 	Forecast      ForecastClient
 	Lines         LinesClient
 	FallbackLines LinesClient
 	Props         PropsClient
 	FallbackProps FallbackPropsClient
 	Projections   ProjectionsClient
+	Slips         SlipGrader
 	Publisher     Publisher
 	Now           Clock
 	Logger        zerolog.Logger
@@ -183,12 +199,14 @@ type Service struct {
 	store         *db.Store
 	scoreboard    ScoreboardClient
 	espn          ESPNResearchClient
+	boxScore      BoxScoreClient
 	forecast      ForecastClient
 	lines         LinesClient
 	fallbackLines LinesClient
 	props         PropsClient
 	fallbackProps FallbackPropsClient
 	projections   ProjectionsClient
+	slips         SlipGrader
 	publisher     Publisher
 	now           Clock
 	logger        zerolog.Logger
@@ -230,6 +248,18 @@ func New(deps Deps) *Service {
 			espn = ec
 		}
 	}
+	boxScore := deps.BoxScore
+	if boxScore == nil {
+		if bc, ok := deps.Scoreboard.(BoxScoreClient); ok {
+			boxScore = bc
+		} else if bc, ok := espn.(BoxScoreClient); ok {
+			boxScore = bc
+		}
+	}
+	slipsSvc := deps.Slips
+	if slipsSvc == nil && deps.Store != nil {
+		slipsSvc = slips.New(deps.Store, deps.Publisher, now)
+	}
 	props := deps.Props
 	if props == nil {
 		if pc, ok := deps.Lines.(PropsClient); ok {
@@ -247,12 +277,14 @@ func New(deps Deps) *Service {
 		store:         deps.Store,
 		scoreboard:    deps.Scoreboard,
 		espn:          espn,
+		boxScore:      boxScore,
 		forecast:      deps.Forecast,
 		lines:         deps.Lines,
 		fallbackLines: deps.FallbackLines,
 		props:         props,
 		fallbackProps: fallbackProps,
 		projections:   deps.Projections,
+		slips:         slipsSvc,
 		publisher:     deps.Publisher,
 		now:           now,
 		logger:        deps.Logger,
@@ -404,6 +436,9 @@ func (s *Service) sourcesFor(
 	sources = append(sources, s.oddsSource(games, now))
 	if s.projections != nil && week.ID != 0 {
 		sources = append(sources, s.nfeloSource(week, games, now))
+	}
+	if week.ID != 0 {
+		sources = append(sources, s.gradeSource(now))
 	}
 	if s.espn == nil || week.ID == 0 {
 		return sources, nil

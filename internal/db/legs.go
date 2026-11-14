@@ -149,6 +149,127 @@ func (s *Store) UpdateLeg(ctx context.Context, leg Leg) (Leg, error) {
 	return s.LegByID(ctx, leg.ID)
 }
 
+// PendingFinalLeg pairs a PENDING leg with the FINAL game it belongs to.
+type PendingFinalLeg struct {
+	Leg       Leg
+	GameID    string
+	HomeTeam  string
+	AwayTeam  string
+	HomeScore *int
+	AwayScore *int
+}
+
+// PendingLegsOnFinalGames returns every PENDING leg whose game is FINAL,
+// ordered by game ID then leg ID.
+func (s *Store) PendingLegsOnFinalGames(ctx context.Context) ([]PendingFinalLeg, error) {
+	rows, err := s.conn().QueryContext(ctx, `
+		SELECT
+			l.id, l.slip_id, l.user_id, l.game_id, l.market_type, l.selection, l.team,
+			l.player_name, l.player_id, l.side, l.line, l.odds, l.result, l.graded_by, l.created_at,
+			g.id, g.home_team, g.away_team, g.home_score, g.away_score
+		FROM legs l
+		JOIN games g ON g.id = l.game_id
+		WHERE g.status = ? AND l.result = ?
+		ORDER BY g.id, l.id`,
+		string(GameFinal), string(parlay.Pending),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list pending legs on final games: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	out := make([]PendingFinalLeg, 0)
+	for rows.Next() {
+		var (
+			item      PendingFinalLeg
+			gameID    sql.NullString
+			team      sql.NullString
+			player    sql.NullString
+			playerID  sql.NullString
+			side      sql.NullString
+			line      sql.NullFloat64
+			result    string
+			gradedBy  sql.NullString
+			createdAt string
+			homeScore sql.NullInt64
+			awayScore sql.NullInt64
+		)
+		if err := rows.Scan(
+			&item.Leg.ID,
+			&item.Leg.SlipID,
+			&item.Leg.UserID,
+			&gameID,
+			&item.Leg.MarketType,
+			&item.Leg.Selection,
+			&team,
+			&player,
+			&playerID,
+			&side,
+			&line,
+			&item.Leg.Odds,
+			&result,
+			&gradedBy,
+			&createdAt,
+			&item.GameID,
+			&item.HomeTeam,
+			&item.AwayTeam,
+			&homeScore,
+			&awayScore,
+		); err != nil {
+			return nil, fmt.Errorf("scan pending leg on final game: %w", err)
+		}
+
+		parsed, err := scanTimestamp(createdAt)
+		if err != nil {
+			return nil, fmt.Errorf("scan pending leg on final game: %w", err)
+		}
+		item.Leg.GameID = nullableStringPtr(gameID)
+		item.Leg.Team = nullableStringPtr(team)
+		item.Leg.PlayerName = nullableStringPtr(player)
+		item.Leg.PlayerID = nullableStringPtr(playerID)
+		item.Leg.Side = nullableStringPtr(side)
+		if line.Valid {
+			item.Leg.Line = &line.Float64
+		}
+		item.Leg.Result = parlay.Result(result)
+		item.Leg.GradedBy = nullableStringPtr(gradedBy)
+		item.Leg.CreatedAt = parsed
+		item.HomeScore = nullableIntPtr(homeScore)
+		item.AwayScore = nullableIntPtr(awayScore)
+		out = append(out, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list pending legs on final games: %w", err)
+	}
+	return out, nil
+}
+
+// SetLegResultIfPending updates a leg's result and grader only when the leg is
+// still PENDING, returning true if the row was updated.
+func (s *Store) SetLegResultIfPending(
+	ctx context.Context,
+	legID int64,
+	result parlay.Result,
+	gradedBy string,
+) (bool, error) {
+	if !result.IsLegResult() {
+		return false, fmt.Errorf("set result on leg %d: %w", legID, ErrLegResultInvalid)
+	}
+
+	exec, err := s.conn().ExecContext(ctx,
+		"UPDATE legs SET result = ?, graded_by = ? WHERE id = ? AND result = ?",
+		string(result), gradedBy, legID, string(parlay.Pending),
+	)
+	if err != nil {
+		return false, fmt.Errorf("set result on leg %d: %w", legID, err)
+	}
+	affected, err := exec.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("set result on leg %d: %w", legID, err)
+	}
+	return affected > 0, nil
+}
+
 // SetLegResult writes one leg's result and the name of who graded it. A
 // result the schema does not allow returns ErrLegResultInvalid, and a missing
 // leg wraps ErrLegNotFound.
