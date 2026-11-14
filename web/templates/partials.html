@@ -216,7 +216,7 @@
                       class="cursor-pointer list-none rounded-full border px-1.5 py-0.5 {{resultClass .Result}}"
                       title="Grade this leg"
                     >
-                      {{.Result}}
+                      {{resultLabel .Result .GradedBy}}
                     </summary>
                     <ul
                       class="absolute right-0 z-20 mt-1 w-32 overflow-hidden rounded-lg border border-slate-700 bg-slate-900 py-1 shadow-xl"
@@ -242,7 +242,7 @@
                   </details>
                 {{else}}
                   <span class="rounded-full border px-1.5 py-0.5 {{resultClass .Result}}">
-                    {{.Result}}
+                    {{resultLabel .Result .GradedBy}}
                   </span>
                 {{end}}
               </div>

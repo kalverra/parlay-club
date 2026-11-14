@@ -144,6 +144,7 @@ func templateFuncs() template.FuncMap {
 		"list":        func(values ...string) []string { return values },
 		"inc":         func(value int) int { return value + 1 },
 		"resultClass": resultClass,
+		"resultLabel": resultLabel,
 	}
 }
 

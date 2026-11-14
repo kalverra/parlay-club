@@ -190,6 +190,7 @@ type LegView struct {
 	Odds            string
 	Model           string // nfelo chip; "" when there is no fresh model
 	Result          string
+	GradedBy        string
 	OwnerName       string
 	CanEdit         bool
 	CanGrade        bool
@@ -1646,6 +1647,7 @@ func legViews(
 			Odds:        formatOdds(leg.Odds),
 			Model:       legModel(leg, games),
 			Result:      string(leg.Result),
+			GradedBy:    legGradedBy(leg.GradedBy),
 			OwnerName:   names[leg.UserID],
 			CanEdit:     open && hasUser && leg.UserID == viewerID,
 			CanGrade:    viewerIsMember,
@@ -2474,14 +2476,39 @@ func money(value float64) string {
 	return fmt.Sprintf("$%.2f", value)
 }
 
+// legGradedBy formats a leg's grader attribution for display, turning the
+// internal "auto" marker into "Auto".
+func legGradedBy(gradedBy *string) string {
+	name := db.StringValue(gradedBy)
+	if name == slips.AutoGraderName {
+		return "Auto"
+	}
+	return name
+}
+
+// resultLabel formats a leg's result chip text, showing "Needs grading" for
+// NEEDS_GRADING and appending the grader attribution when present.
+func resultLabel(result, gradedBy string) string {
+	if result == string(parlay.NeedsGrading) {
+		return "Needs grading"
+	}
+	if gradedBy != "" {
+		return result + " · " + gradedBy
+	}
+	return result
+}
+
 // resultClass colors a leg's result chip: green for a win, rose for a loss,
-// muted for a push or void, and slate while it waits.
+// amber when manual grading is needed, muted for a push or void, and slate
+// while it waits.
 func resultClass(result string) string {
 	switch result {
 	case "WON":
 		return "border-emerald-800 bg-emerald-950 text-emerald-300"
 	case "LOST":
 		return "border-rose-800 bg-rose-950 text-rose-300"
+	case "NEEDS_GRADING":
+		return "border-amber-700 bg-amber-950 text-amber-300"
 	case "PUSH", "VOID":
 		return "border-slate-700 bg-slate-800 text-slate-300"
 	default:
