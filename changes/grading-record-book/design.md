@@ -150,7 +150,7 @@ Effort: medium (clear seams across existing packages, one pure grader + boxscore
 ### Phase 1: ESPN BoxScore parser and pure auto-grader
 
 - [x] Add `Client.BoxScore` (`internal/ingest/espn`) parsing `boxscore.players[]` by key name and handling DNP vs empty box scores, alongside fixture tests using `summary_week9_featured.json` and `summary_empty.json`
-- [ ] Create `internal/grader` implementing all 13 markets in `plan/product.md` (`SPREAD`, `ML`, `TOTAL`, `TEAM_TOTAL`, props, `ANYTIME_TD`, `KICKER_PTS`, `OTHER`) with table-driven tests for wins, losses, pushes, DNPs, and missing stats
+- [x] Create `internal/grader` implementing all 13 markets in `plan/product.md` (`SPREAD`, `ML`, `TOTAL`, `TEAM_TOTAL`, props, `ANYTIME_TD`, `KICKER_PTS`, `OTHER`) with table-driven tests for wins, losses, pushes, DNPs, and missing stats
 
 ### Phase 2: Lazy `grade` refresh and manual override UI
 
