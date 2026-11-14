@@ -3,9 +3,9 @@ id: routes
 title: Routes
 type: reference
 summary: Every HTTP route the server serves, the middleware in front of them, and the status codes, HTMX headers, and SSE frames handlers return.
-tags: [routes, http, handlers, middleware, htmx, sse, props, research, schedules]
-sources: [cmd/server/main.go, cmd/server/sandbox.go, internal/auth/handlers.go, internal/groups/handlers.go, internal/board/board.go, internal/web/routes.go, internal/web/home.go, internal/web/games.go, internal/web/pick.go, internal/web/slips.go, internal/web/schedules.go, internal/web/research.go, internal/web/export.go, internal/web/bugs.go, internal/web/screenshots.go, internal/sandbox/seed.go, internal/sandbox/plan.go, internal/live/stream.go, web/templates/home.html, web/templates/pick.html, web/templates/week.html, web/templates/sandbox.html]
-last_verified: 2026-11-13
+tags: [routes, http, handlers, middleware, htmx, sse, props, research, schedules, wagers]
+sources: [cmd/server/main.go, cmd/server/sandbox.go, internal/auth/handlers.go, internal/groups/handlers.go, internal/board/board.go, internal/web/routes.go, internal/web/home.go, internal/web/games.go, internal/web/pick.go, internal/web/slips.go, internal/web/schedules.go, internal/web/research.go, internal/web/export.go, internal/web/bugs.go, internal/web/screenshots.go, internal/sandbox/seed.go, internal/sandbox/plan.go, internal/live/stream.go, web/templates/home.html, web/templates/pick.html, web/templates/week.html, web/templates/slip.html, web/templates/partials.html, web/templates/sandbox.html]
+last_verified: 2026-11-14
 ---
 
 # Routes
@@ -163,6 +163,8 @@ slip outside every group is 404.
 | `DELETE /legs/{id}`                        | Delete the leg                                                  | Panel partial; `?from=board` answers the refreshed pair row, `?from=tray` the tray. |
 | `POST /slips/{id}/lock`                    | Record the signed-in member's lock in                           | Panel partial with `Hx-Trigger: slip-updated`. |
 | `POST /slips/{id}/unlock`                  | Clear every member's lock                                       | Panel partial with `Hx-Trigger: slip-updated`. |
+| `PUT /slips/{id}/wagers/me`                | Save or update the signed-in group member's personal wager      | `slip-wager` partial; invalid inputs answer 422. |
+| `DELETE /slips/{id}/wagers/me`             | Clear the signed-in group member's personal wager               | Reset `slip-wager` partial. |
 | `GET /slips/{id}/events`                   | Live updates for the slip and its week                          | `text/event-stream`; see below. |
 
 The leg form takes `market_type`, `selection`, `team`, `player_name`, `player_id`, `side`, `line`, `odds`, and
@@ -179,6 +181,12 @@ successful `POST` answers with the `leg-added` partial instead of the slip panel
 `POST /legs/{id}/vote` records an up vote (`1`), a down vote (`-1`), or a clear (`0`) on another member's leg. Voting
 again with the same value changes nothing, and a change publishes `slip:{id}` without writing an activity entry, so the
 actor's panel response and the other browsers' refresh both show the new tally. See [Slips](../concepts/slips.md#votes).
+
+`PUT /slips/{id}/wagers/me` saves or updates the signed-in group member's personal wager on the slip (`stake`, `odds`,
+optional `boost`, and optional `book`) and renders the `slip-wager` partial. `DELETE /slips/{id}/wagers/me` removes the
+saved wager idempotently and renders the reset form. Any member of the slip's group can log or clear their own wager
+regardless of slip status. Unreadable numbers, non-positive stakes, American odds between `-99` and `99` (including
+`0`), negative boosts, or book names over 40 characters answer 422. See [Slips](../concepts/slips.md#wagers).
 
 `GET /slips/{id}/events` serves one connection for one slip. It subscribes to `slip:{id}` and `week:{weekID}`, sends
 `slip-updated` and `board-updated` signals, pings every 25 seconds, and ends with `bye` at its deadline. The slip page

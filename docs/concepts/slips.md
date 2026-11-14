@@ -2,9 +2,9 @@
 id: slips
 title: Slips
 type: concept
-summary: How a group builds shared parlays from the slate, with slate scopes and deadline isolation, multi-slip week views, sibling slip switching, one-off slip creation, the hub's next-step banner and deadline, the game-first pick board and its pick dock, members, legs, votes, quick-add, create-slip defaults, grading, the editing and locking rules, and research.
-tags: [slips, weeks, legs, members, locking, grading, results, activity, groups, games, quick-add, nfelo, props, autocomplete, research, next-step, hub, pick-board, slate, drilldown, tabs, search, dock, tray, votes, voting, slate-scopes, deadlines, multi-slip]
-sources: [internal/slips/slips.go, internal/slips/rules.go, internal/slips/next.go, internal/grader/*.go, internal/refresh/grade.go, internal/board/board.go, internal/db/slips.go, internal/db/legs.go, internal/db/votes.go, internal/db/odds.go, internal/db/players.go, internal/db/weeks.go, internal/db/games.go, internal/web/games.go, internal/web/pick.go, internal/web/slips.go, internal/web/home.go, internal/web/research.go, web/templates/media.html, web/templates/week.html, web/templates/partials.html, web/static/app.js]
+summary: How a group builds shared parlays from the slate, with slate scopes and deadline isolation, multi-slip week views, sibling slip switching, one-off slip creation, the hub's next-step banner and deadline, the game-first pick board and its pick dock, members, legs, votes, wagers, quick-add, create-slip defaults, grading, the editing and locking rules, and research.
+tags: [slips, weeks, legs, members, locking, grading, results, activity, groups, games, quick-add, nfelo, props, autocomplete, research, next-step, hub, pick-board, slate, drilldown, tabs, search, dock, tray, votes, voting, wagers, slate-scopes, deadlines, multi-slip]
+sources: [internal/slips/slips.go, internal/slips/rules.go, internal/slips/next.go, internal/slips/wagers.go, internal/grader/*.go, internal/refresh/grade.go, internal/board/board.go, internal/db/slips.go, internal/db/legs.go, internal/db/votes.go, internal/db/wagers.go, internal/db/odds.go, internal/db/players.go, internal/db/weeks.go, internal/db/games.go, internal/web/games.go, internal/web/pick.go, internal/web/slips.go, internal/web/home.go, internal/web/research.go, web/templates/media.html, web/templates/week.html, web/templates/slip.html, web/templates/partials.html, web/static/app.js]
 last_verified: 2026-11-14
 ---
 
@@ -24,11 +24,12 @@ with their own stake, and no money passes through the app.
 ## The hub
 
 `GET /slips/{id}` is the hub. A step banner leads, then the members and their legs, then the export card, the payout
-calculator, and the activity feed. In the `export` step the card moves above the banner, because placing the picks is
-the one thing left. When a group has multiple slips in the active week, the header renders a horizontal sibling slip
-switcher bar below the title with links to each sibling slip and their status summary (`(Locked)`, `(1/2 Picks)`,
-`(Won)`). The bottom bar keeps Groups, This week, and Record Book; the hub's one primary action is the way into picking.
-The hub stays one column at every width.
+calculator, the **My wager** form (`slip-wager`), and the activity feed. In the `export` step the card moves above the
+banner, because placing the picks is the one thing left. `slip-wager` sits outside `slip-panel`, so live `slip-updated`
+refreshes do not wipe out in-progress wager inputs. When a group has multiple slips in the active week, the header
+renders a horizontal sibling slip switcher bar below the title with links to each sibling slip and their status summary
+(`(Locked)`, `(1/2 Picks)`, `(Won)`). The bottom bar keeps Groups, This week, and Record Book; the hub's one primary
+action is the way into picking. The hub stays one column at every width.
 
 `slips.NextStep` is one pure function over the slip, its members, its legs, the week's games, the viewer, and `now`. It
 returns the step, the legs still needed, the names the slip waits on, the first kickoff still ahead, and the slip's
@@ -404,6 +405,28 @@ The service returns typed errors so handlers can answer with a 422 and a short m
 | `ErrOwnVote`             | The actor votes on their own leg.               | you can't vote on your own pick          |
 | `ErrVotesClosed`         | A vote after the slip left `OPEN`.              | votes closed once everyone locked in     |
 | `ErrVoteInvalid`         | A value other than up, down, or clear.          | vote must be up, down, or clear          |
+| `ErrWagerStakeInvalid`   | Wager stake is not positive or finite.          | stake must be greater than $0            |
+| `ErrWagerOddsInvalid`    | Wager odds are 0 or between -99 and 99.         | odds must be -100 or lower, or +100 or higher |
+| `ErrWagerBoostInvalid`   | Wager boost is negative or non-finite.          | boost can't be negative                  |
+| `ErrWagerBookTooLong`    | Wager sportsbook name exceeds 40 characters.    | book name must be 40 characters or fewer |
+
+## Wagers
+
+While the stateless payout calculator (`GET /slips/{id}/payout`) lets anyone preview hypothetical payouts, each group
+member can also log the actual bet they placed on the slip via the **My wager** form (`slip-wager`). Saved wagers live
+in `wagers` keyed by `(slip_id, user_id)` (`internal/db/wagers.go`, `internal/slips/wagers.go`) and drive personal
+Dollar P/L in the Record Book.
+
+- **Who can log:** Any member of the slip's group can save, update (upsert), or clear their own wager at any time via
+  `PUT /slips/{id}/wagers/me` and `DELETE /slips/{id}/wagers/me`, whether or not they have legs on the slip and
+  regardless of whether the slip is `OPEN`, `LOCKED`, or `GRADED`. Non-group members get a 404.
+- **Validation and defaults:** `stake` must be finite and greater than `0`, `odds` must be a valid American price
+  (`<= -100` or `>= 100`), `boost` must be finite and `>= 0` (defaulting to `0` when omitted), and `book` is optional
+  and trimmed to at most 40 characters. When no wager is saved yet, the form prefills `odds` with the slip's current
+  `CombinedOdds` and `boost` with `0`.
+- **Display and live updates:** Once saved, the form shows the calculated return and profit (`parlay.Payout`) and
+  reveals a Clear button (`DELETE /slips/{id}/wagers/me`). Both `SetWager` and `DeleteWager` publish `slip:{id}` on the
+  live hub without writing an activity entry.
 
 ## Several slips
 
