@@ -1283,3 +1283,71 @@ func TestSlipPanelRendersLegLogosAndPortraits(t *testing.T) {
 	require.Positive(t, liStart)
 	assert.NotContains(t, body[liStart:customIdx], "data-media")
 }
+
+// TestSlipPanelRendersGradedByAndNeedsGradingAmberChip checks that the slip
+// panel surfaces Auto vs manual grader names on graded legs, styles
+// NEEDS_GRADING legs in amber with "Needs grading", and keeps the five
+// override options in the menu.
+func TestSlipPanelRendersGradedByAndNeedsGradingAmberChip(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 3)
+
+	autoLeg, err := fixture.store.CreateLeg(t.Context(), db.Leg{
+		SlipID:     fixture.slip.ID,
+		UserID:     fixture.user.ID,
+		MarketType: "ML",
+		Selection:  "BUF ML",
+		Odds:       -110,
+	})
+	require.NoError(t, err)
+	require.NoError(t, fixture.store.SetLegResult(t.Context(), autoLeg.ID, parlay.Won, slips.AutoGraderName))
+
+	manualLeg, err := fixture.store.CreateLeg(t.Context(), db.Leg{
+		SlipID:     fixture.slip.ID,
+		UserID:     fixture.user.ID,
+		MarketType: "SPREAD",
+		Selection:  "KC -3.5",
+		Odds:       -110,
+	})
+	require.NoError(t, err)
+	require.NoError(t, fixture.store.SetLegResult(t.Context(), manualLeg.ID, parlay.Lost, fixture.user.Name))
+
+	needsLeg, err := fixture.store.CreateLeg(t.Context(), db.Leg{
+		SlipID:     fixture.slip.ID,
+		UserID:     fixture.user.ID,
+		MarketType: "OTHER",
+		Selection:  "Gatorade Color Orange",
+		Odds:       250,
+	})
+	require.NoError(t, err)
+	require.NoError(t, fixture.store.SetLegResult(t.Context(), needsLeg.ID, parlay.NeedsGrading, slips.AutoGraderName))
+
+	rec := httptest.NewRecorder()
+	fixture.handler.ServeHTTP(rec, httptest.NewRequestWithContext(
+		t.Context(), http.MethodGet, fmt.Sprintf("/slips/%d/panel", fixture.slip.ID), nil,
+	))
+	require.Equal(t, http.StatusOK, rec.Code)
+	body := rec.Body.String()
+
+	assert.Contains(t, body, "WON · Auto")
+	assert.Contains(t, body, "LOST · "+fixture.user.Name)
+	assert.Contains(t, body, "border-amber-700 bg-amber-950 text-amber-300")
+	assert.Contains(t, body, "Needs grading")
+	for _, result := range []string{"PENDING", "WON", "LOST", "PUSH", "VOID"} {
+		assert.Contains(t, body, fmt.Sprintf(`name="result" value="%s"`, result))
+	}
+	assert.NotContains(t, body, `name="result" value="NEEDS_GRADING"`)
+
+	// Overriding a NEEDS_GRADING leg manually updates both chip and attribution.
+	override := putForm(t,
+		fixture.handler,
+		fmt.Sprintf("/legs/%d/result", needsLeg.ID),
+		url.Values{"result": {"WON"}},
+	)
+	require.Equal(t, http.StatusOK, override.Code, override.Body.String())
+	overrideBody := override.Body.String()
+	assert.Contains(t, overrideBody, "WON · "+fixture.user.Name)
+	assert.NotContains(t, overrideBody, "Needs grading")
+	assert.NotContains(t, overrideBody, "border-amber-700 bg-amber-950 text-amber-300")
+}
