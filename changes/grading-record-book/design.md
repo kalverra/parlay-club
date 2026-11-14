@@ -165,6 +165,6 @@ Effort: medium (clear seams across existing packages, one pure grader + boxscore
 
 ### Phase 4: Record Book calculation and `/record` screen
 
-- [ ] Create `internal/record` and season query methods in `internal/db` for `GRADED` slips, streaks, leaderboard (`<6` leg threshold, avg leg odds, Parlay Terrorist badge), and wager dollar P/L, with unit tests covering ties, pushes, and group isolation
+- [x] Create `internal/record` and season query methods in `internal/db` for `GRADED` slips, streaks, leaderboard (`<6` leg threshold, avg leg odds, Parlay Terrorist badge), and wager dollar P/L, with unit tests covering ties, pushes, and group isolation
 - [ ] Wire `GET /record?season=` in `internal/web` and replace `web/templates/record.html` with the phone-first Record Book view, verify `sandbox` week 9 stages (`AllClear` / `SundayComplete`), and cover routes/templates with tests
 - [ ] Docs: update `docs/reference/routes.md` and `docs/` (`good-vibes docs lint`, `good-vibes docs index`) for the Record Book screen and grading/wager specs
