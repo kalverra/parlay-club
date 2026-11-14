@@ -1243,6 +1243,30 @@ func TestSandboxShutdownReportsTheDrainDeadline(t *testing.T) {
 	require.ErrorIs(t, runtime.Shutdown(ctx), context.DeadlineExceeded)
 }
 
+func TestSandboxRecordBookReflectsGradedStages(t *testing.T) {
+	t.Parallel()
+
+	app := openSandboxApp(t)
+	client := app.client(t)
+	app.signInAsAda(t, client)
+
+	morning := app.request(t, client, http.MethodGet, "/record", nil, true)
+	require.Equal(t, http.StatusOK, morning.status)
+	assert.Contains(t, morning.body, "No graded slips yet for the 2026 season.")
+
+	for _, stage := range []sandbox.Stage{sandbox.AllClear, sandbox.SundayComplete} {
+		_, err := app.runtime.Stage(t.Context(), stage)
+		require.NoError(t, err, stage)
+
+		rec := app.request(t, client, http.MethodGet, "/record", nil, true)
+		require.Equal(t, http.StatusOK, rec.status, stage)
+		assert.Contains(t, rec.body, "1-0-0", stage)
+		assert.Contains(t, rec.body, "1 graded slip", stage)
+		assert.Contains(t, rec.body, "Ada", stage)
+		assert.Contains(t, rec.body, "2-0", stage)
+	}
+}
+
 // assertStageApplied checks the clock, replay stage, stage row, slip lock
 // state, and every scripted result for one stage.
 func assertStageApplied(

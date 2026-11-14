@@ -13,13 +13,6 @@ import (
 	"github.com/kalverra/parlay-club/internal/slips"
 )
 
-// pageRoute is one full page the shell serves without slip data.
-type pageRoute struct {
-	pattern string
-	page    string
-	tab     Tab
-}
-
 // UserFrom returns the signed-in user for a request. The server passes
 // auth.UserFrom; tests pass a stub.
 type UserFrom func(context.Context) (db.User, bool)
@@ -72,12 +65,6 @@ func (d Dependencies) now() time.Time {
 	return time.Now()
 }
 
-// pageRoutes are the shell's pages without per-slip data. The slip screen owns
-// "/" and the slip routes because it needs the store.
-var pageRoutes = []pageRoute{
-	{"GET /record", "record", TabRecord},
-}
-
 // New returns the shell's routes with no slip data. It is the small constructor
 // the shell tests use; the server calls NewWithDeps.
 func New(
@@ -109,43 +96,7 @@ func NewWithDeps(deps Dependencies) http.Handler {
 	bugRoutes := &bugHandlers{deps: deps}
 	bugRoutes.Routes(mux)
 
-	for _, route := range pageRoutes {
-		mux.Handle(route.pattern, pageHandler(deps.Logger, deps.Renderer, route, deps.UserFrom, deps.GroupsFrom))
-	}
-
 	return mux
-}
-
-// pageHandler renders one page of the shell.
-func pageHandler(
-	logger zerolog.Logger,
-	renderer *Renderer,
-	route pageRoute,
-	userFrom UserFrom,
-	groupsFrom GroupsFrom,
-) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		page := Page{Title: route.tab.Label(), Tab: route.tab}
-		if userFrom != nil {
-			if user, ok := userFrom(r.Context()); ok {
-				view := NewUser(user)
-				page.User = &view
-			}
-		}
-		if groupsFrom != nil {
-			page.Groups = groupsFrom(r.Context())
-		}
-
-		html, err := renderer.Render(route.page, page)
-		if err != nil {
-			logger.Error().Err(err).Str("page", route.page).Msg("render page")
-			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-			return
-		}
-
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = w.Write(html)
-	})
 }
 
 // NewUser maps a stored user to the identity the top bar draws.
