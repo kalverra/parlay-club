@@ -341,9 +341,8 @@ func parseMadeAttempts(s string) float64 {
 	if s == "" || s == "-" {
 		return 0
 	}
-	parts := strings.Split(s, "-")
-	if len(parts) > 0 {
-		return parseStat(parts[0])
+	if idx := strings.IndexAny(s, "/-"); idx >= 0 {
+		return parseStat(s[:idx])
 	}
 	return parseStat(s)
 }

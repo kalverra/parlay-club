@@ -1,8 +1,12 @@
 ---
 slug: grading-record-book
-status: proposed
+status: implementing
 created: "2026-11-01"
-depends_on: [props-research]
+accepted_by:
+    - Adam Hamrick
+accepted_at: "2026-11-14T14:35:57Z"
+depends_on:
+    - props-research
 ---
 
 # Auto-grading and Record Book
