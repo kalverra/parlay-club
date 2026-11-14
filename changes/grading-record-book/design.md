@@ -156,7 +156,7 @@ Effort: medium (clear seams across existing packages, one pure grader + boxscore
 
 - [x] Add `PendingLegsOnFinalGames` in `internal/db`, `slips.Service.AutoGradeLegs` (`WHERE result = 'PENDING'`, `graded_by = "auto"`, system activity, `slip:{id}` notify), and the `grade` source in `internal/refresh` (with game-only score optimization, error backoff, and integration tests proving manual overrides survive re-runs)
 - [x] Surface `GradedBy` and `NEEDS_GRADING` amber styling on `LegView` in `internal/web/slips.go` and `web/templates/partials.html`, with handler/render tests
-- [ ] Docs: update `docs/concepts/data-refresh.md` and `docs/concepts/slips.md` for `grade` and auto-grading behavior
+- [x] Docs: update `docs/concepts/data-refresh.md` and `docs/concepts/slips.md` for `grade` and auto-grading behavior
 
 ### Phase 3: Per-member wager logging
 

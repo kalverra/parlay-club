@@ -4,8 +4,8 @@ title: Slips
 type: concept
 summary: How a group builds shared parlays from the slate, with slate scopes and deadline isolation, multi-slip week views, sibling slip switching, one-off slip creation, the hub's next-step banner and deadline, the game-first pick board and its pick dock, members, legs, votes, quick-add, create-slip defaults, grading, the editing and locking rules, and research.
 tags: [slips, weeks, legs, members, locking, grading, results, activity, groups, games, quick-add, nfelo, props, autocomplete, research, next-step, hub, pick-board, slate, drilldown, tabs, search, dock, tray, votes, voting, slate-scopes, deadlines, multi-slip]
-sources: [internal/slips/slips.go, internal/slips/rules.go, internal/slips/next.go, internal/board/board.go, internal/db/slips.go, internal/db/legs.go, internal/db/votes.go, internal/db/odds.go, internal/db/players.go, internal/db/weeks.go, internal/db/games.go, internal/web/games.go, internal/web/pick.go, internal/web/slips.go, internal/web/home.go, internal/web/research.go, web/templates/media.html, web/templates/week.html, web/static/app.js]
-last_verified: 2026-11-12
+sources: [internal/slips/slips.go, internal/slips/rules.go, internal/slips/next.go, internal/grader/*.go, internal/refresh/grade.go, internal/board/board.go, internal/db/slips.go, internal/db/legs.go, internal/db/votes.go, internal/db/odds.go, internal/db/players.go, internal/db/weeks.go, internal/db/games.go, internal/web/games.go, internal/web/pick.go, internal/web/slips.go, internal/web/home.go, internal/web/research.go, web/templates/media.html, web/templates/week.html, web/templates/partials.html, web/static/app.js]
+last_verified: 2026-11-14
 ---
 
 # Slips
@@ -335,9 +335,21 @@ The slip result recomputes from every leg after each change:
 `PUSH` and `VOID` legs drop out of the slip's odds (see [Odds math](../reference/odds-math.md)) and count as neither a
 hit nor a miss.
 
-`OTHER` legs and any leg on a past-week slip normally grade by hand. The auto-grader (`grading-record-book`) will fill
-in the other markets from the ESPN final box score and leave `NEEDS_GRADING` where it cannot decide; any member can then
-override its result the same way. The per-market rules are in [Product](../../plan/product.md).
+`OTHER` legs and any leg on a past-week slip normally grade by hand. For `FINAL` games, the lazy `grade` refresh source
+evaluates `PENDING` legs with `internal/grader.GradeLeg` (using stored game scores for game/team markets and ESPN final
+box scores for player props) and calls `slips.Service.AutoGradeLegs`.
+
+- **Override-safe writes:** `AutoGradeLegs` updates only legs where `result = 'PENDING'`, records `graded_by = "auto"`,
+  writes a system activity entry (`user_id = NULL`, `"Auto-graded ..."`), recomputes the slip result and status, and
+  publishes `slip:{id}`. Manual overrides and prior `NEEDS_GRADING` marks are never overwritten on subsequent passes.
+- **Unresolved legs (`NEEDS_GRADING`):** `OTHER` legs, missing scores or lines, and final games with an empty box
+  score grade as `NEEDS_GRADING` (`graded_by = "auto"`), which keeps the slip `PENDING` until a member overrides them.
+- **UI attribution and styling:** `LegView.GradedBy` formats `"auto"` as `"Auto"` and preserves member names. The chip
+  label (`resultLabel`) renders `"Needs grading"` in amber (`border-amber-700 bg-amber-950 text-amber-300`) for
+  `NEEDS_GRADING` and `"{RESULT} · {GradedBy}"` once graded. Every leg keeps the five-option override menu (`PENDING`,
+  `WON`, `LOST`, `PUSH`, `VOID`).
+
+The per-market rules are in [Product](../../plan/product.md), and the refresh pass is in [Data refresh](data-refresh.md#auto-grading).
 
 ## Status and result
 
