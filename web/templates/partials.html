@@ -503,6 +503,108 @@
 </form>
 {{end}}
 
+{{define "slip-wager"}}
+<form
+  id="slip-wager"
+  class="space-y-3 rounded-xl border border-slate-800 bg-slate-900 p-4"
+  hx-put="/slips/{{.SlipID}}/wagers/me"
+  hx-target="#slip-wager"
+  hx-swap="outerHTML"
+>
+  <div class="flex items-center justify-between gap-2">
+    <h2 class="text-sm font-semibold text-slate-300">My wager</h2>
+    {{if .HasWager}}
+      <span class="rounded-full border border-emerald-800 bg-emerald-950 px-2 py-0.5 text-[11px] font-medium text-emerald-300">Saved</span>
+    {{else}}
+      <span class="text-xs text-slate-500">Tracked in Record Book</span>
+    {{end}}
+  </div>
+  <p data-form-error class="hidden rounded-lg border border-rose-700 bg-rose-950 px-3 py-2 text-xs text-rose-200"></p>
+  <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
+    <label class="block text-xs text-slate-400">
+      Stake ($)
+      <input
+        type="number"
+        name="stake"
+        min="0.01"
+        step="0.01"
+        inputmode="decimal"
+        placeholder="10.00"
+        value="{{.Stake}}"
+        required
+        class="mt-1 w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1 text-sm text-slate-100"
+      >
+    </label>
+    <label class="block text-xs text-slate-400">
+      Odds
+      <input
+        type="number"
+        name="odds"
+        inputmode="numeric"
+        placeholder="+350"
+        value="{{.Odds}}"
+        required
+        class="mt-1 w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1 text-sm text-slate-100"
+      >
+    </label>
+    <label class="block text-xs text-slate-400">
+      Boost %
+      <input
+        type="number"
+        name="boost"
+        min="0"
+        step="1"
+        inputmode="decimal"
+        value="{{.Boost}}"
+        class="mt-1 w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1 text-sm text-slate-100"
+      >
+    </label>
+    <label class="block text-xs text-slate-400">
+      Book
+      <input
+        type="text"
+        name="book"
+        maxlength="40"
+        placeholder="DraftKings"
+        value="{{.Book}}"
+        class="mt-1 w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1 text-sm text-slate-100"
+      >
+    </label>
+  </div>
+  {{if .HasWager}}
+    <dl class="grid grid-cols-2 gap-2 text-sm">
+      <div>
+        <dt class="text-xs text-slate-400">To return</dt>
+        <dd class="font-medium">{{.Return}}</dd>
+      </div>
+      <div>
+        <dt class="text-xs text-slate-400">Profit</dt>
+        <dd class="font-medium">{{.Profit}}</dd>
+      </div>
+    </dl>
+  {{end}}
+  <div class="flex items-center gap-2">
+    <button
+      type="submit"
+      class="rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-sky-500"
+    >
+      Save wager
+    </button>
+    {{if .HasWager}}
+      <button
+        type="button"
+        hx-delete="/slips/{{.SlipID}}/wagers/me"
+        hx-target="#slip-wager"
+        hx-swap="outerHTML"
+        class="rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800"
+      >
+        Clear
+      </button>
+    {{end}}
+  </div>
+</form>
+{{end}}
+
 {{define "leg-sheet"}}
 <dialog id="leg-sheet" class="leg-sheet" aria-label="Add or edit a leg">
   <div

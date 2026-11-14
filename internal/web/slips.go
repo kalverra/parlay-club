@@ -39,6 +39,10 @@ var ruleErrors = []error{
 	slips.ErrOwnVote,
 	slips.ErrVotesClosed,
 	slips.ErrVoteInvalid,
+	slips.ErrWagerStakeInvalid,
+	slips.ErrWagerOddsInvalid,
+	slips.ErrWagerBoostInvalid,
+	slips.ErrWagerBookTooLong,
 	db.ErrSlipNameRequired,
 	db.ErrSlipNameTaken,
 	db.ErrScheduleNameRequired,
@@ -83,6 +87,8 @@ func (h *slipHandlers) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /slips/{id}/panel", h.panel)
 	mux.HandleFunc("GET /slips/{id}/export", h.export)
 	mux.HandleFunc("GET /slips/{id}/payout", h.payout)
+	mux.HandleFunc("PUT /slips/{id}/wagers/me", h.setWager)
+	mux.HandleFunc("DELETE /slips/{id}/wagers/me", h.deleteWager)
 	mux.HandleFunc("GET /slips/{id}/activity", h.activity)
 	mux.HandleFunc("POST /slips/{id}/members", h.addMember)
 	mux.HandleFunc("DELETE /slips/{id}/members/{userID}", h.removeMember)
@@ -166,6 +172,7 @@ type SlipView struct {
 	MemberCount   int
 	Members       []SlipMemberView
 	Payout        PayoutView
+	Wager         WagerView
 	Activity      []ActivityView
 	Analyzer      AnalyzerView
 	LegForm       LegFormView
@@ -272,6 +279,18 @@ type PayoutView struct {
 	ReferenceAmerican string
 	Return            string
 	Profit            string
+}
+
+// WagerView is the signed-in user's logged bet form on a slip.
+type WagerView struct {
+	SlipID   int64
+	HasWager bool
+	Book     string
+	Stake    string
+	Odds     string
+	Boost    string
+	Return   string
+	Profit   string
 }
 
 // LegFormView is the add or edit leg form.
@@ -543,6 +562,74 @@ func (h *slipHandlers) payout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.renderPartial(w, "slip-payout", payout)
+}
+
+// setWager saves the signed-in user's personal wager on the slip and renders
+// the updated "My wager" partial.
+func (h *slipHandlers) setWager(w http.ResponseWriter, r *http.Request) {
+	slip, user, _, ok := h.loadSlip(w, r, r.PathValue("id"))
+	if !ok {
+		return
+	}
+	if err := readForm(w, r); err != nil {
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+
+	stake, err := strconv.ParseFloat(strings.TrimSpace(r.PostForm.Get("stake")), 64)
+	if err != nil {
+		h.writeFormError(w, "Stake needs to be a number.")
+		return
+	}
+	odds, err := strconv.Atoi(strings.TrimSpace(r.PostForm.Get("odds")))
+	if err != nil {
+		h.writeFormError(w, "Odds need to be a whole number.")
+		return
+	}
+	boost := 0.0
+	if rawBoost := strings.TrimSpace(r.PostForm.Get("boost")); rawBoost != "" {
+		boost, err = strconv.ParseFloat(rawBoost, 64)
+		if err != nil {
+			h.writeFormError(w, "Boost needs to be a number.")
+			return
+		}
+	}
+
+	_, err = h.deps.Slips.SetWager(r.Context(), user.ID, slip.ID, slips.WagerInput{
+		Book:     r.PostForm.Get("book"),
+		Stake:    stake,
+		Odds:     odds,
+		BoostPct: boost,
+	})
+	if err != nil {
+		h.respondError(w, err)
+		return
+	}
+	view, err := h.wagerView(r.Context(), slip, user.ID)
+	if err != nil {
+		h.serverError(w, err)
+		return
+	}
+	h.renderPartial(w, "slip-wager", view)
+}
+
+// deleteWager clears the signed-in user's personal wager on the slip and
+// renders the reset "My wager" partial.
+func (h *slipHandlers) deleteWager(w http.ResponseWriter, r *http.Request) {
+	slip, user, _, ok := h.loadSlip(w, r, r.PathValue("id"))
+	if !ok {
+		return
+	}
+	if err := h.deps.Slips.DeleteWager(r.Context(), user.ID, slip.ID); err != nil {
+		h.respondError(w, err)
+		return
+	}
+	view, err := h.wagerView(r.Context(), slip, user.ID)
+	if err != nil {
+		h.serverError(w, err)
+		return
+	}
+	h.renderPartial(w, "slip-wager", view)
 }
 
 // activity returns the activity feed partial.
@@ -1422,6 +1509,13 @@ func (h *slipHandlers) slipView(
 		return SlipPage{}, err
 	}
 	page.Slip.Payout = payout
+	if user, ok := h.user(ctx); ok {
+		wager, err := h.wagerView(ctx, slip, user.ID)
+		if err != nil {
+			return SlipPage{}, err
+		}
+		page.Slip.Wager = wager
+	}
 	return page, nil
 }
 
@@ -1844,6 +1938,53 @@ func (h *slipHandlers) payoutView(
 		ReferenceAmerican: formatOdds(parlay.DecimalToAmerican(reference)),
 		Return:            money(total),
 		Profit:            money(total - stake),
+	}, nil
+}
+
+// wagerView builds the "My wager" form for userID on slip, pre-filling any
+// saved wager or defaulting odds to the slip's current combined odds.
+func (h *slipHandlers) wagerView(ctx context.Context, slip db.Slip, userID int64) (WagerView, error) {
+	wager, found, err := h.deps.Store.WagerForUser(ctx, slip.ID, userID)
+	if err != nil {
+		return WagerView{}, err
+	}
+	if found {
+		book := ""
+		if wager.Book != nil {
+			book = *wager.Book
+		}
+		total := parlay.Payout(wager.Stake, parlay.AmericanToDecimal(wager.Odds), wager.BoostPct)
+		return WagerView{
+			SlipID:   slip.ID,
+			HasWager: true,
+			Book:     book,
+			Stake:    formatFloat(wager.Stake),
+			Odds:     strconv.Itoa(wager.Odds),
+			Boost:    formatFloat(wager.BoostPct),
+			Return:   money(total),
+			Profit:   money(total - wager.Stake),
+		}, nil
+	}
+
+	legs, err := h.deps.Store.LegsForSlip(ctx, slip.ID)
+	if err != nil {
+		return WagerView{}, err
+	}
+	combinedLegs := make([]parlay.Leg, 0, len(legs))
+	for _, leg := range legs {
+		combinedLegs = append(combinedLegs, parlay.Leg{
+			Decimal: parlay.AmericanToDecimal(leg.Odds),
+			Result:  leg.Result,
+		})
+	}
+	oddsStr := ""
+	if american := parlay.DecimalToAmerican(parlay.CombinedOdds(combinedLegs)); american != 0 {
+		oddsStr = strconv.Itoa(american)
+	}
+	return WagerView{
+		SlipID: slip.ID,
+		Odds:   oddsStr,
+		Boost:  "0",
 	}, nil
 }
 
