@@ -41,6 +41,8 @@ const (
 	NfeloProjectionsSource = "nfelo:projections"
 	// GradeSource is the sync_state key for auto-grading pending legs on final games.
 	GradeSource = "grade"
+	// SundayPrefillSource is the sync_state key for the one-shot Sunday pre-fill.
+	SundayPrefillSource = "prefill:sunday"
 	// weatherSourcePrefix keys per-game forecasts.
 	weatherSourcePrefix = "weather:"
 	// oddsPropsSourcePrefix keys per-game prop lines.
@@ -110,6 +112,7 @@ const (
 	nfeloIdleAge            = 4 * time.Hour
 	prefillIdempotencyAge   = 15 * time.Minute
 	prefillConcurrency      = 4
+	sundayPrefillStartHour  = 6
 	failureBackoff          = 5 * time.Minute
 	syncTimeout             = 30 * time.Second
 	requestTimeout          = 10 * time.Second
