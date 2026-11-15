@@ -1508,6 +1508,7 @@ func syncKeys(t *testing.T, store *db.Store, week db.Week) []string {
 	add(refresh.ScoreboardSource)
 	add(refresh.OddsLinesSource)
 	add(refresh.NfeloProjectionsSource)
+	add(refresh.NFLverseSource(week.Season))
 	add(refresh.OddsPropsSource(sandbox.FeaturedGameID))
 	add(refresh.RosterSource(sandbox.FeaturedHomeESPNID))
 	add(refresh.RosterSource(sandbox.FeaturedAwayESPNID))

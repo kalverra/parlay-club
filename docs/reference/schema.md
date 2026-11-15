@@ -2,10 +2,8 @@
 id: schema
 title: Database schema
 type: reference
-summary: SQLite tables, including groups and their members, legs and their votes, odds rows with sportsbook deep links, rosters and player game logs for props research, player name matching, nfelo model projections, the raw external response archive, how migrations are tracked and applied, and connection settings.
-tags: [database, sqlite, migrations, groups, archive, api, raw-responses, odds, links, nfelo, projections, roster, gamelog, player-matching, injuries, votes]
-sources: [internal/db/migrations/*.sql, internal/db/migrate.go, internal/db/db.go, internal/db/odds.go, internal/db/groups.go, internal/db/nfelo.go, internal/db/players.go, internal/db/votes.go, internal/db/archive.go, internal/db/archive_read.go, internal/ingest/archive/transport.go]
-last_verified: 2026-11-12
+summary: SQLite tables, including groups and their members, legs and their votes, odds rows with sportsbook deep links, rosters and player game logs for props research, player name matching, nfelo model projections, nflverse player crosswalks and weekly team/player signals, the raw external response archive, how migrations are tracked and applied, and connection settings.
+tags: [database, sqlite, migrations, groups, archive, api, raw-responses, odds, links, nfelo, nflverse, projections, roster, gamelog, player-matching, injuries, votes]
 ---
 
 # Database schema
@@ -20,6 +18,8 @@ ID to `odds`, and `0005_odds_event_sid.sql` adds the book's own event ID. `0006_
 one model projection per game. `0007_props_research.sql` adds `roster_players` and `player_gamelogs` for props research.
 `0008_leg_votes.sql` adds `leg_votes`, the up and down votes members cast on each other's legs.
 `0011_logos_portraits.sql` adds `home_logo` and `away_logo` to `games` and `headshot_url` to `roster_players`.
+`0012_nflverse_signals.sql` adds `nflverse_player_ids`, `nflverse_team_weeks`, and `nflverse_player_weeks` for nflverse
+team efficiency, player usage, and snap-count signals.
 
 ## Connection settings
 
@@ -43,7 +43,7 @@ connection rules out `SQLITE_BUSY`.
 - `db.Migrate` applies every file whose number is greater than `PRAGMA user_version`, in number order.
 - Each file runs in its own transaction. The migration's statements and its `user_version` bump commit together, so a
   failed migration leaves neither behind.
-- A fresh database ends at version 8 with every table below.
+- A fresh database ends at version 12 with every table below.
 - `0001_init.sql` creates `groups`, `group_members`, and `slips.group_id`. A database created before groups existed has
   the old `slips` shape, so delete it and let the migrations rebuild.
 - `0002_google_identity.sql` rebuilds `users` in its transaction with the SQLite 12-step method and
@@ -63,7 +63,8 @@ connection rules out `SQLITE_BUSY`.
   no existing table.
 - `0011_logos_portraits.sql` adds nullable `home_logo` and `away_logo` columns to `games` and a
   `headshot_url TEXT NOT NULL DEFAULT ''` column to `roster_players`.
-- Never edit an applied file. Add `0012_name.sql` and up.
+- `0012_nflverse_signals.sql` creates `nflverse_player_ids`, `nflverse_team_weeks`, and `nflverse_player_weeks`.
+- Never edit an applied file. Add `0013_name.sql` and up.
 - `PRAGMA user_version` on the database file is the only record of what ran.
 
 ## Tables
@@ -77,6 +78,9 @@ connection rules out `SQLITE_BUSY`.
 | `games`           | One row per ESPN event: teams, kickoff, venue, weather, scores. |
 | `odds`            | Odds API prices and sportsbook deep links per game, book, market, and selection. |
 | `nfelo_games`     | nfelo's pre-game model spread, win probability, and QB adjustments per game. |
+| `nflverse_player_ids`   | Crosswalk mapping ESPN athlete IDs to nflverse GSIS and PFR IDs. |
+| `nflverse_team_weeks`   | Weekly team offensive and defensive-allowed EPA, play volume, and pass rate. |
+| `nflverse_player_weeks` | Weekly player snaps, target/air-yards share, WOPR, volume, and total EPA. |
 | `slips`           | One shared parlay per group per week, with status and result.  |
 | `slip_members`    | Who is on a slip and when they locked in.                     |
 | `legs`            | Picks on a slip, with market, selection, line, odds, and result. |
@@ -198,6 +202,48 @@ CREATE TABLE nfelo_games (
   home_qb_adj   REAL NOT NULL,                 -- Elo points
   away_qb_adj   REAL NOT NULL,
   updated_at    TEXT NOT NULL                  -- RFC 3339 UTC
+);
+
+CREATE TABLE nflverse_player_ids (
+  espn_id    TEXT PRIMARY KEY,
+  gsis_id    TEXT NOT NULL,
+  pfr_id     TEXT NOT NULL DEFAULT '',
+  updated_at TEXT NOT NULL                     -- RFC 3339 UTC
+);
+CREATE INDEX idx_nflverse_player_ids_gsis ON nflverse_player_ids(gsis_id);
+
+CREATE TABLE nflverse_team_weeks (
+  season               INTEGER NOT NULL,
+  season_type          INTEGER NOT NULL,       -- 2 = regular, 3 = postseason
+  week_num             INTEGER NOT NULL,
+  team                 TEXT    NOT NULL,       -- ESPN abbreviation
+  off_pass_epa         REAL    NOT NULL,
+  off_rush_epa         REAL    NOT NULL,
+  def_pass_epa_allowed REAL    NOT NULL,
+  def_rush_epa_allowed REAL    NOT NULL,
+  plays_per_game       REAL    NOT NULL,
+  pass_rate            REAL    NOT NULL,
+  updated_at           TEXT    NOT NULL,       -- RFC 3339 UTC
+  PRIMARY KEY (season, season_type, week_num, team)
+);
+
+CREATE TABLE nflverse_player_weeks (
+  espn_id         TEXT    NOT NULL,
+  season          INTEGER NOT NULL,
+  season_type     INTEGER NOT NULL,            -- 2 = regular, 3 = postseason
+  week_num        INTEGER NOT NULL,
+  team            TEXT    NOT NULL,            -- ESPN abbreviation
+  offense_snaps   INTEGER NOT NULL,
+  offense_pct     REAL    NOT NULL,
+  target_share    REAL    NOT NULL,
+  air_yards_share REAL    NOT NULL,
+  wopr            REAL    NOT NULL,
+  carries         INTEGER NOT NULL,
+  targets         INTEGER NOT NULL,
+  total_epa       REAL    NOT NULL,
+  rz_opps         INTEGER NOT NULL DEFAULT 0,
+  updated_at      TEXT    NOT NULL,            -- RFC 3339 UTC
+  PRIMARY KEY (espn_id, season, season_type, week_num)
 );
 
 CREATE TABLE odds (
@@ -361,12 +407,14 @@ how to read it.
   bookmaker block's own ID for the event, used by DraftKings' combined event-page link.
 - `nfelo_games` holds one global row per game. A sync upserts it, and `updated_at` moves only when a stored value
   changes, so rerunning with the same CSV is a no-op.
+- `nflverse_player_ids`, `nflverse_team_weeks`, and `nflverse_player_weeks` hold global season rows keyed by ESPN IDs
+  and team abbreviations. Syncs upsert them idempotently and move `updated_at` only when a stored value changes.
 - A slip's reference odds are not stored; any view that shows them computes them.
 - `leg_votes` holds only cast votes. Clearing one deletes its row, and deleting a leg cascades. A vote changes no slip or
   leg field and writes no activity entry.
 - `slips.status` and `slips.result` stay in step with lock and leg-result changes.
 - `groups`, `group_members`, `slips`, and the rows that hang off a slip are scoped to one group. Weeks, games, odds,
-  nfelo projections, player matches, rosters, player game logs, and `sync_state` are global.
+  nfelo projections, nflverse signals, player matches, rosters, player game logs, and `sync_state` are global.
 - `roster_players` stores team roster athletes with `norm_name` for fast matching and `headshot_url` (`''` when
   missing).
 - `games.home_logo` and `games.away_logo` store validated `https://` ESPN team logo URLs (`NULL` when missing).

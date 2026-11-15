@@ -22,6 +22,7 @@ import (
 	"github.com/kalverra/parlay-club/internal/groups"
 	"github.com/kalverra/parlay-club/internal/ingest/espn"
 	"github.com/kalverra/parlay-club/internal/ingest/nfelo"
+	"github.com/kalverra/parlay-club/internal/ingest/nflverse"
 	"github.com/kalverra/parlay-club/internal/ingest/odds"
 	"github.com/kalverra/parlay-club/internal/ingest/weather"
 	"github.com/kalverra/parlay-club/internal/live"
@@ -96,6 +97,7 @@ func newSandboxRuntime(
 		Forecast:    weather.NewClient("", client),
 		Lines:       odds.NewClient("", sandboxOddsKey, client),
 		Projections: nfelo.NewClient("", client),
+		NFLverse:    nflverse.NewClient("", client),
 		Publisher:   hub,
 		Now:         scenario.Now,
 		Logger:      logger,

@@ -2,8 +2,8 @@
 id: data-sources
 title: Data sources
 type: reference
-summary: The free sources behind the slate, the ESPN scoreboard endpoint and its Sunday and Monday filter, the Open-Meteo forecast behind a game's weather, Parlay API game lines and props with The Odds API enrichment and fallback, ESPN rosters, game logs, and summary injuries, player matching, nfelo model projections, bookmakers, deep links, tiered credit floors, and the raw response archive every successful call leaves.
-tags: [data, espn, scoreboard, games, sync, fixtures, weather, open-meteo, venues, odds, parlay-api, the-odds-api, props, lines, bookmakers, links, credits, budget, enrichment, fallback, nfelo, projections, spreads, quarterbacks, archive, raw-responses, sqlite, rosters, gamelogs, injuries, player-matching]
+summary: The free sources behind the slate, the ESPN scoreboard endpoint and its Sunday and Monday filter, the Open-Meteo forecast behind a game's weather, Parlay API game lines and props with The Odds API enrichment and fallback, ESPN rosters, game logs, and summary injuries, player matching, nfelo model projections, nflverse team/player/snap-count CSVs, bookmakers, deep links, tiered credit floors, and the raw response archive every successful call leaves.
+tags: [data, espn, scoreboard, games, sync, fixtures, weather, open-meteo, venues, odds, parlay-api, the-odds-api, props, lines, bookmakers, links, credits, budget, enrichment, fallback, nfelo, nflverse, projections, spreads, quarterbacks, archive, raw-responses, sqlite, rosters, gamelogs, injuries, player-matching]
 ---
 
 # Data sources
@@ -332,6 +332,28 @@ Refresh writes the current regular-season week's matching rows into `nfelo_games
 [Data refresh](../concepts/data-refresh.md). The CSV is archived under the `nfelo:projections` key with
 `source = "nfelo"`, so a format change leaves the raw bytes in the archive. The real file saved on 2026-11-09 is
 `internal/ingest/nfelo/testdata/historic_projected_spreads.csv`.
+
+## nflverse (free, no auth)
+
+Base: `https://github.com/nflverse/nflverse-data/releases/download`. The data comes from public `nflverse-data` GitHub
+releases and needs no key or account. `nflverse.NewClient(baseURL, httpClient)` defaults an empty base URL to the root
+above and a nil client to a 30 second timeout, sends `User-Agent: parlay-club`, and parses every CSV by header name. A
+missing required column or non-numeric cell is an error.
+
+| Method | Path | Key columns / behavior |
+| --- | --- | --- |
+| `Players(ctx)` | `GET /players/players.csv` | Maps `gsis_id`, `pfr_id`, and `espn_id` (plus `display_name`, `latest_team`, `position`); skips rows missing `gsis_id` or `espn_id`. |
+| `TeamStats(ctx, season)` | `GET /stats_team/stats_team_week_{season}.csv` | Reads `season`, `week`, `season_type`, `team`, `opponent_team`, `passing_epa`, `rushing_epa`, `attempts`, `carries`, `passing_yards`, `rushing_yards`, and joins each game's opponent row onto `OppPassingEPA`, `OppRushingEPA`, `OppAttempts`, `OppCarries`, `OppPassingYards`, and `OppRushingYards`. |
+| `PlayerStats(ctx, season)` | `GET /stats_player/stats_player_week_{season}.csv` | Reads `player_id` (GSIS ID), `team`, `season`, `week`, `season_type`, `target_share`, `air_yards_share`, `wopr`, `passing_epa`, `rushing_epa`, `receiving_epa`, `targets`, `carries`, `receptions`, and yard/TD counts; skips rows missing identity cells and defaults blank/`NA` optional stat cells to `0`. |
+| `SnapCounts(ctx, season)` | `GET /snap_counts/snap_counts_{season}.csv` | Reads `pfr_player_id`, `player`, `team`, `season`, `game_type` (`REG`, `POST`, `WC`, `DIV`, `CON`, `SB`, `PRE`), `week`, `offense_snaps`, and `offense_pct`. |
+
+- Season types normalize to ESPN integers: `PRE` → `1`, `REG` → `2`, and `POST`/`WC`/`DIV`/`CON`/`SB` → `3`.
+- Team abbreviations that differ from ESPN normalize via `mapTeam`: `JAC` → `JAX`, `LA` → `LAR`, `OAK` → `LV`, `SD` → `LAC`,
+  `STL` → `LAR`, and `WAS` → `WSH`.
+- Refresh writes regular and postseason rows for the active season into `nflverse_player_ids`, `nflverse_team_weeks`,
+  and `nflverse_player_weeks` under `nflverse:season:{year}`; see [Data refresh](../concepts/data-refresh.md). Responses
+  up to 8 MiB are archived under `nflverse:season:{year}` (larger responses pass through unrecorded). Real 2026 fixtures
+  saved on 2026-11-15 live in `internal/ingest/nflverse/testdata/`.
 
 ## Player matching
 

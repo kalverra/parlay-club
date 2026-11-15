@@ -2,8 +2,8 @@
 id: data-refresh
 title: Data refresh
 type: concept
-summary: How page loads, Sunday morning pre-fill, and on-demand views drive syncs of the slate, weather, game lines, props, rosters, injuries, game logs, nfelo projections, and auto-grading, with per-source staleness windows, single-flight, failure backoff, tiered Parlay API and The Odds API credit floors, an archive of every successful response, a synchronous sandbox bootstrap, and a shutdown drain that cancels in-flight syncs.
-tags: [refresh, sync, lazy, prefill, staleness, singleflight, backoff, credits, odds, parlay-api, the-odds-api, enrichment, fallback, props, weather, slate, live-window, nfelo, projections, archive, raw-responses, roster, gamelog, injuries, player-matching, grade, auto-grading, sandbox, clock, pick-board, shutdown, drain]
+summary: How page loads, Sunday morning pre-fill, and on-demand views drive syncs of the slate, weather, game lines, props, rosters, injuries, game logs, nfelo projections, nflverse team/player signals, and auto-grading, with per-source staleness windows, single-flight, failure backoff, tiered Parlay API and The Odds API credit floors, an archive of every successful response, a synchronous sandbox bootstrap, and a shutdown drain that cancels in-flight syncs.
+tags: [refresh, sync, lazy, prefill, staleness, singleflight, backoff, credits, odds, parlay-api, the-odds-api, enrichment, fallback, props, weather, slate, live-window, nfelo, nflverse, projections, archive, raw-responses, roster, gamelog, injuries, player-matching, grade, auto-grading, sandbox, clock, pick-board, shutdown, drain]
 ---
 
 # Data refresh
@@ -11,8 +11,9 @@ tags: [refresh, sync, lazy, prefill, staleness, singleflight, backoff, credits, 
 ## Summary
 
 `internal/refresh` owns when outside data comes in. Free/unmetered sources (slate, weather, game summaries/injuries,
-unique week-team rosters, nfelo projections, auto-grading, and slip-leg game logs) refresh lazily on authenticated
-full-page `GET`s via `Kick()`, which returns at once and does the work in the background. Metered odds calls are
+unique week-team rosters, nfelo projections, nflverse team/player signals, auto-grading, and slip-leg game logs) refresh
+lazily on authenticated full-page `GET`s via `Kick()`, which returns at once and does the work in the background. Metered
+odds calls are
 reserved for the one-shot Sunday morning pre-fill (`RunPrefill`, triggered automatically on the first authenticated
 Sunday full-page visit at or after 6:00 AM `America/New_York` while Sunday games remain, or via the optional
 `POST /internal/prefill` fallback), synchronous `RunOnce` in sandbox bootstrap, pick-time syncs on `OPEN` slips with
@@ -100,9 +101,9 @@ deduplication, staleness windows, and failure backoff as background syncs:
    morning window (`06:00+ America/New_York` before the last Sunday kickoff) when `prefill:sunday` is stale, `Kick()`
    runs `RunPrefill()` (which runs `odds:lines`, free sources, and Parlay-only bulk props for upcoming games). Otherwise
    `Kick()` runs `freeSourcesFor` only: one weather source per game, one `espn:summary:{gameID}` and deduped week-team
-   `espn:roster:{teamID}` per non-`FINAL` game, the `nfelo:projections` source, the `grade` source, and
-   `espn:gamelog:{athleteID}` for any matched athletes on current-week slip legs. `RunOnce()` runs `freeSourcesFor` plus
-   `odds:lines`.
+   `espn:roster:{teamID}` per non-`FINAL` game, the `nfelo:projections` source, the `nflverse:season:{year}` source, the
+   `grade` source, and `espn:gamelog:{athleteID}` for any matched athletes on current-week slip legs. `RunOnce()` runs
+   `freeSourcesFor` plus `odds:lines`.
 
 Within a source, `singleflight` keyed by its `sync_state` source key lets concurrent page loads share one fetch. The
 work inside the flight re-reads the staleness state before fetching, so a load that joined after the first run finished
@@ -144,6 +145,7 @@ Each source records its last successful sync in `sync_state.fetched_at`. A sourc
 | `espn:summary:{gameID}`| Game summary and key injuries        | 15 min on Thursday, Sunday, or Monday or within 4 h of kickoff; 1 h otherwise                                           | Game status is FINAL                                               |
 | `espn:gamelog:{athleteID}`| Athlete season game log and stats | 1 h on Thursday, Sunday, or Monday; 4 h otherwise                                                                       | Never                                                              |
 | `nfelo:projections`| The week's model spreads, win probabilities, and QB adjustments | 1 h on Thursday, Sunday, or Monday; 4 h otherwise                                                       | Not a regular-season week, no games, or every game has kicked off  |
+| `nflverse:season:{year}` | Season player crosswalk, team EPA, player usage, and snap counts | 6 h on Tuesday, Wednesday, and game days (Thursday, Sunday, Monday); 24 h otherwise             | Not a regular or postseason week, or all games are final and last sync ran > 12 h after latest kickoff |
 | `grade`            | Auto-grade `PENDING` legs on `FINAL` games | Every pass when `PENDING` legs exist on `FINAL` games                                                                   | No `PENDING` legs on `FINAL` games                                 |
 | `prefill:sunday`   | One-shot Sunday morning pre-fill marker (`RunPrefill`) | Once per `America/New_York` calendar day (`sundayPrefillStale`)                                           | Outside Sunday 06:00 ET – last Sunday kickoff (`sundayPrefillWindow`), or already recorded for today's Eastern date |
 
@@ -163,6 +165,12 @@ rows that match the current week's games. A game with no matching row keeps its 
 non-regular-season week is skipped because the CSV's playoff week numbers are unverified, and a week whose games have
 all kicked off is skipped because the projections are pre-game numbers that no longer change. The source spends no Odds
 API credits, so it has no floor and does not wait on the odds sync.
+
+`nflverse:season:{year}` is per season, covering both regular-season and postseason weeks. One pass fetches
+`Players`, `TeamStats`, `PlayerStats`, and `SnapCounts` for `week.Season`, joins player usage (by GSIS ID) and snap
+counts (by PFR ID) onto ESPN `athlete_id`, and upserts `nflverse_player_ids`, `nflverse_team_weeks`, and
+`nflverse_player_weeks` in one transaction. Unmatched players are omitted, and any fetch failure leaves stored rows and
+`sync_state` untouched so the source enters the 5-minute backoff.
 
 ## Auto-grading
 
@@ -271,9 +279,9 @@ After a transaction commits and only when it changed rows, refresh publishes liv
 - `week:{weekID}` for the game board;
 - `slip:{id}` for every slip in that week.
 
-The scoreboard, weather, odds, and nfelo syncs all use the same helper. Publishing after commit means a listener never
-refetches a write that might roll back. A no-op rerun publishes nothing. See [Live updates](live-updates.md) for the hub
-and the client.
+The scoreboard, weather, odds, nfelo, and nflverse syncs all use the same helper. Publishing after commit means a
+listener never refetches a write that might roll back. A no-op rerun publishes nothing. See
+[Live updates](live-updates.md) for the hub and the client.
 
 ## Live window
 

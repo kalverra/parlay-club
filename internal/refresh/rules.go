@@ -134,8 +134,11 @@ func pickCooldownStale(last, now time.Time) bool {
 	return !now.Before(last.Add(pickRefreshCooldown))
 }
 
-// regularSeasonType is ESPN's season_type for the regular season.
-const regularSeasonType = 2
+// regularSeasonType and postseasonSeasonType match ESPN's season_type codes.
+const (
+	regularSeasonType    = 2
+	postseasonSeasonType = 3
+)
 
 // nfeloStale reports whether the week's model projections are due. It skips a
 // week that is not regular season, a week with no games, and a week whose games
@@ -149,6 +152,60 @@ func nfeloStale(last, now time.Time, week db.Week, games []db.Game) bool {
 		return true
 	}
 	return !now.Before(last.Add(gameDayAge(now, nfeloGameDayAge, nfeloIdleAge)))
+}
+
+// nflverseStale reports whether the season's nflverse team/player/snap sync is
+// due. It runs during regular and postseason weeks, syncs every 6 hours on
+// Tuesday/Wednesday/game days and every 24 hours otherwise, and stops once all
+// games in the week are final and the last sync ran more than 12 hours after
+// the latest kickoff.
+func nflverseStale(last, now time.Time, week db.Week, games []db.Game) bool {
+	if week.Season <= 0 || (week.SeasonType != regularSeasonType && week.SeasonType != postseasonSeasonType) {
+		return false
+	}
+	if last.IsZero() {
+		return true
+	}
+	if len(games) > 0 && allFinal(games) {
+		latest := latestKickoff(games)
+		if !latest.IsZero() && last.After(latest.Add(nflversePostFinalWindow)) {
+			return false
+		}
+	}
+	return !now.Before(last.Add(nflverseAge(now)))
+}
+
+// nflverseAge is the nflverse freshness window: 6 hours on Tuesday, Wednesday,
+// and game days (when weekly updates land or lineups shift) and 24 hours
+// otherwise.
+func nflverseAge(now time.Time) time.Duration {
+	switch now.In(eastern).Weekday() {
+	case time.Tuesday, time.Wednesday, time.Thursday, time.Sunday, time.Monday:
+		return nflverseActiveAge
+	default:
+		return nflverseIdleAge
+	}
+}
+
+// allFinal reports whether every game in the slice is final.
+func allFinal(games []db.Game) bool {
+	for _, game := range games {
+		if game.Status != db.GameFinal {
+			return false
+		}
+	}
+	return true
+}
+
+// latestKickoff returns the latest kickoff time among games.
+func latestKickoff(games []db.Game) time.Time {
+	var latest time.Time
+	for _, game := range games {
+		if game.Kickoff.After(latest) {
+			latest = game.Kickoff
+		}
+	}
+	return latest
 }
 
 // allKickedOff reports whether every game has reached its kickoff time.

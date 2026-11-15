@@ -17,6 +17,7 @@ import (
 
 	"github.com/kalverra/parlay-club/internal/ingest/espn"
 	"github.com/kalverra/parlay-club/internal/ingest/nfelo"
+	"github.com/kalverra/parlay-club/internal/ingest/nflverse"
 	"github.com/kalverra/parlay-club/internal/ingest/odds"
 	"github.com/kalverra/parlay-club/internal/ingest/weather"
 )
@@ -543,6 +544,42 @@ func morningFixtures() ([]Fixture, error) {
 			File:       "internal/ingest/nfelo/testdata/historic_projected_spreads.csv",
 			Provenance: Captured,
 			Note:       "The real nfelo file saved on 2026-11-09, unedited; it includes 2026 week 9.",
+		},
+		{
+			Name:       "nflverse-players",
+			Stage:      Morning,
+			Method:     http.MethodGet,
+			URL:        nflverse.DefaultBaseURL + "/players/players.csv",
+			File:       "internal/ingest/nflverse/testdata/players.csv",
+			Provenance: Captured,
+			Note:       "Real nflverse players.csv crosswalk saved 2026-11-15.",
+		},
+		{
+			Name:       "nflverse-week-9-team-stats",
+			Stage:      Morning,
+			Method:     http.MethodGet,
+			URL:        nflverse.DefaultBaseURL + "/stats_team/stats_team_week_2026.csv",
+			File:       "internal/ingest/nflverse/testdata/stats_team_week_2026.csv",
+			Provenance: Captured,
+			Note:       "Real nflverse 2026 stats_team_week CSV saved 2026-11-15.",
+		},
+		{
+			Name:       "nflverse-week-9-player-stats",
+			Stage:      Morning,
+			Method:     http.MethodGet,
+			URL:        nflverse.DefaultBaseURL + "/stats_player/stats_player_week_2026.csv",
+			File:       "internal/ingest/nflverse/testdata/stats_player_week_2026.csv",
+			Provenance: Captured,
+			Note:       "Real nflverse 2026 stats_player_week CSV saved 2026-11-15.",
+		},
+		{
+			Name:       "nflverse-week-9-snap-counts",
+			Stage:      Morning,
+			Method:     http.MethodGet,
+			URL:        nflverse.DefaultBaseURL + "/snap_counts/snap_counts_2026.csv",
+			File:       "internal/ingest/nflverse/testdata/snap_counts_2026.csv",
+			Provenance: Captured,
+			Note:       "Real nflverse 2026 snap_counts CSV saved 2026-11-15.",
 		},
 	}
 
