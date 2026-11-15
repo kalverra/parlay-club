@@ -11,6 +11,7 @@ import (
 
 	"github.com/kalverra/parlay-club/internal/analyzer"
 	"github.com/kalverra/parlay-club/internal/db"
+	"github.com/kalverra/parlay-club/internal/ingest/espn"
 	"github.com/kalverra/parlay-club/internal/parlay"
 	"github.com/kalverra/parlay-club/internal/tz"
 )
@@ -110,14 +111,15 @@ type Sort string
 
 // The ways the pick board can order its rows.
 const (
-	SortPlayer Sort = "player"
-	SortOdds   Sort = "odds"
-	SortLine   Sort = "line"
+	SortPlayer  Sort = "player"
+	SortOdds    Sort = "odds"
+	SortLine    Sort = "line"
+	SortMatchup Sort = "matchup"
 )
 
 // DetailSorts lists the open game's sort chips in display order. One game has
 // one kickoff, so kickoff drops out and player is the default.
-var DetailSorts = []Sort{SortPlayer, SortOdds, SortLine}
+var DetailSorts = []Sort{SortPlayer, SortOdds, SortLine, SortMatchup}
 
 // Label is the chip text.
 func (s Sort) Label() string {
@@ -128,6 +130,8 @@ func (s Sort) Label() string {
 		return "Odds"
 	case SortLine:
 		return "Line"
+	case SortMatchup:
+		return "Matchup"
 	default:
 		return string(s)
 	}
@@ -151,6 +155,7 @@ type Row struct {
 	Kickoff     time.Time
 	Text        string
 	Picked      int64
+	Badge       string
 }
 
 // GameCard is one game on the slate: the matchup, its kickoff, the game lines
@@ -220,6 +225,7 @@ type PlayerGroup struct {
 	Position    string
 	HeadshotURL string
 	Team        string
+	Tags        []string
 	Lines       []LineGroup
 }
 
@@ -235,6 +241,15 @@ type GameDetail struct {
 	Players  []PlayerGroup
 }
 
+// BoardSignals holds optional nflverse, injury, and open-slip context used to
+// attach suggestion badges to board rows and rank rows by matchup strength.
+type BoardSignals struct { //nolint:revive // Name specified in design.
+	TeamEPA     map[string]*analyzer.TeamDefenseProfile
+	PlayerUsage map[string]*analyzer.PlayerUsage
+	Injuries    map[string][]espn.Injury
+	SlipLegs    []analyzer.Leg
+}
+
 // Query is one search, filter, and sort request.
 type Query struct {
 	Q        string
@@ -243,7 +258,8 @@ type Query struct {
 	Sort     Sort
 	GameID   string
 	// Now is the app clock. A zero time uses time.Now.
-	Now time.Time
+	Now     time.Time
+	Signals BoardSignals
 }
 
 // eastern is the zone the kickoff windows use.
@@ -665,10 +681,11 @@ func Detail(game db.Game, rows []Row, q Query) GameDetail {
 			tabRows = append(tabRows, row)
 		}
 	}
+	tabRows = ApplySignals(game, tabRows, q.Signals)
 	if category == CategoryLines {
-		detail.Lines = lineGroups(game, tabRows, mode)
+		detail.Lines = lineGroups(game, tabRows, mode, q.Signals)
 	} else {
-		detail.Players = playerGroups(game, tabRows, mode)
+		detail.Players = playerGroups(game, tabRows, mode, q.Signals)
 	}
 	return detail
 }
@@ -728,7 +745,7 @@ func tabCategory(requested Category, counts map[Category]int) Category {
 // anything unknown reads as player.
 func detailSort(mode Sort) Sort {
 	switch mode {
-	case SortPlayer, SortOdds, SortLine:
+	case SortPlayer, SortOdds, SortLine, SortMatchup:
 		return mode
 	default:
 		return SortPlayer
@@ -772,9 +789,9 @@ func Pair(game db.Game, rows []Row) []LineGroup {
 
 // lineGroups pairs rows into one group per line and then orders the groups for
 // the detail's sort.
-func lineGroups(game db.Game, rows []Row, mode Sort) []LineGroup {
+func lineGroups(game db.Game, rows []Row, mode Sort, signals BoardSignals) []LineGroup {
 	groups := Pair(game, rows)
-	sortLineGroups(groups, mode)
+	sortLineGroups(game, groups, mode, signals)
 	return groups
 }
 
@@ -892,7 +909,7 @@ func lineText(line *float64) string {
 
 // sortLineGroups orders line groups by the detail's sort, falling back to the
 // market order for ties.
-func sortLineGroups(groups []LineGroup, mode Sort) {
+func sortLineGroups(game db.Game, groups []LineGroup, mode Sort, signals BoardSignals) {
 	sort.SliceStable(groups, func(i, j int) bool {
 		left, right := groups[i], groups[j]
 		switch mode {
@@ -902,6 +919,10 @@ func sortLineGroups(groups []LineGroup, mode Sort) {
 			}
 		case SortLine:
 			if a, b := highestLine(left), highestLine(right); a != b {
+				return a > b
+			}
+		case SortMatchup:
+			if a, b := groupSignalScore(game, left, signals), groupSignalScore(game, right, signals); a != b {
 				return a > b
 			}
 		}
@@ -986,7 +1007,7 @@ func lineValue(line *float64) float64 {
 
 // playerGroups folds prop rows into one card per player, clustering a player's
 // markets under their name.
-func playerGroups(game db.Game, rows []Row, mode Sort) []PlayerGroup {
+func playerGroups(game db.Game, rows []Row, mode Sort, signals BoardSignals) []PlayerGroup {
 	order := make([]string, 0, len(rows))
 	byPlayer := make(map[string][]Row, len(rows))
 	for _, row := range rows {
@@ -1007,10 +1028,11 @@ func playerGroups(game db.Game, rows []Row, mode Sort) []PlayerGroup {
 			Position:    first.Position,
 			HeadshotURL: first.HeadshotURL,
 			Team:        first.Team,
-			Lines:       lineGroups(game, playerRows, mode),
+			Tags:        playerTags(game, playerRows, signals),
+			Lines:       lineGroups(game, playerRows, mode, signals),
 		})
 	}
-	sortPlayers(players, mode)
+	sortPlayers(game, players, mode, signals)
 	return players
 }
 
@@ -1025,7 +1047,7 @@ func playerKey(row Row) string {
 
 // sortPlayers orders player cards for the sort, falling back to the player's
 // name.
-func sortPlayers(players []PlayerGroup, mode Sort) {
+func sortPlayers(game db.Game, players []PlayerGroup, mode Sort, signals BoardSignals) {
 	sort.SliceStable(players, func(i, j int) bool {
 		left, right := players[i], players[j]
 		switch mode {
@@ -1035,6 +1057,10 @@ func sortPlayers(players []PlayerGroup, mode Sort) {
 			}
 		case SortLine:
 			if a, b := playerLine(left), playerLine(right); a != b {
+				return a > b
+			}
+		case SortMatchup:
+			if a, b := playerSignalScore(game, left, signals), playerSignalScore(game, right, signals); a != b {
 				return a > b
 			}
 		}
