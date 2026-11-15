@@ -218,7 +218,7 @@ invariants)
 - [x] Extend `web.Refresher`, trigger pick-time syncs on `OPEN` slips with upcoming games in
       `pickBoard`/`pickResults`/`pickDetail` (`internal/web/pick.go`), and add `POST /slips/{id}/pick/refresh` with the
       phone-first refresh button in `web/templates/partials.html` and handler/cooldown/locked-slip tests
-- [ ] Docs: update `docs/concepts/data-refresh.md`, `docs/concepts/slips.md`, `docs/reference/data-sources.md`, and
+- [x] Docs: update `docs/concepts/data-refresh.md`, `docs/concepts/slips.md`, `docs/reference/data-sources.md`, and
       `docs/reference/routes.md` for pick-time refreshes and the refresh route
 
 ### Phase 3: Cloud Scheduler deploy wiring and setup docs
