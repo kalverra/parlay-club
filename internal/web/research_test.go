@@ -42,6 +42,18 @@ func (r *researchTestRefresher) SyncPlayerResearch(_ context.Context, athleteID 
 	return nil
 }
 
+func (r *researchTestRefresher) SyncPickLines(_ context.Context, _ int64) error {
+	return nil
+}
+
+func (r *researchTestRefresher) SyncPickGame(_ context.Context, _ int64, _ string) error {
+	return nil
+}
+
+func (r *researchTestRefresher) ForcePickRefresh(_ context.Context, _ int64, _ string) error {
+	return nil
+}
+
 func researchHandlerWithRefresher(
 	t *testing.T,
 	fixture *slipFixture,

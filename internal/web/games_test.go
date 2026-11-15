@@ -260,6 +260,18 @@ func (s *stubRefresher) SyncPlayerResearch(_ context.Context, _ string) error {
 	return nil
 }
 
+func (s *stubRefresher) SyncPickLines(_ context.Context, _ int64) error {
+	return nil
+}
+
+func (s *stubRefresher) SyncPickGame(_ context.Context, _ int64, _ string) error {
+	return nil
+}
+
+func (s *stubRefresher) ForcePickRefresh(_ context.Context, _ int64, _ string) error {
+	return nil
+}
+
 func TestGamePropsHandler(t *testing.T) {
 	t.Parallel()
 

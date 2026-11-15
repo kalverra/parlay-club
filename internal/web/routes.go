@@ -30,11 +30,14 @@ type GroupFrom func(context.Context) (db.Group, bool)
 // cookies.SetGroup; tests record the choice.
 type SetGroup func(http.ResponseWriter, int64)
 
-// Refresher describes on-demand sync for game props and research.
+// Refresher describes on-demand sync for game props, research, and pick-time odds.
 type Refresher interface {
 	SyncGameProps(ctx context.Context, gameID string) error
 	SyncGameResearch(ctx context.Context, gameID string) error
 	SyncPlayerResearch(ctx context.Context, athleteID string) error
+	SyncPickLines(ctx context.Context, weekID int64) error
+	SyncPickGame(ctx context.Context, weekID int64, gameID string) error
+	ForcePickRefresh(ctx context.Context, weekID int64, gameID string) error
 }
 
 // Dependencies are the services the app's routes need. A nil store or slip
