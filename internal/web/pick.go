@@ -578,7 +578,7 @@ func (h *slipHandlers) pickPageData(
 	}
 	if card, ok := openByID[q.GameID]; ok {
 		game := gamesByID[card.ID]
-		signals := h.boardSignalsForGame(ctx, slip.WeekID, game, rows, mine)
+		signals := h.boardSignalsForGame(ctx, slip.WeekID, game, legs, boardRowPlayerIDs(game.ID, rows))
 		model := board.Detail(game, rows, board.Query{
 			Q:        q.Q,
 			Category: q.Category,
@@ -1264,7 +1264,11 @@ func (h *slipHandlers) pickPairRow(
 	mine := legsForUser(legs, user.ID)
 	rows := board.Build(
 		[]db.Game{game}, currentOdds(odds), roster, homeBook, mine, h.deps.now())
-	signals := h.boardSignalsForGame(ctx, slip.WeekID, game, rows, mine)
+	var playerIDs []string
+	if leg.PlayerID != nil && *leg.PlayerID != "" {
+		playerIDs = []string{*leg.PlayerID}
+	}
+	signals := h.boardSignalsForGame(ctx, slip.WeekID, game, legs, playerIDs)
 	rows = board.ApplySignals(game, rows, signals)
 	for _, group := range board.Pair(game, rows) {
 		if !groupHoldsLeg(group, leg) {
@@ -1403,6 +1407,22 @@ func floatPointer(raw string) *float64 {
 	return &value
 }
 
+func boardRowPlayerIDs(gameID string, rows []board.Row) []string {
+	seen := make(map[string]struct{})
+	var ids []string
+	for _, row := range rows {
+		if row.GameID != gameID || row.PlayerID == "" {
+			continue
+		}
+		if _, ok := seen[row.PlayerID]; ok {
+			continue
+		}
+		seen[row.PlayerID] = struct{}{}
+		ids = append(ids, row.PlayerID)
+	}
+	return ids
+}
+
 // boardSignalsForGame loads optional nflverse team EPA, player usage, game
 // injuries, and open-slip legs for one game's pick board. Missing or stale
 // nflverse data fails soft with nil maps.
@@ -1410,11 +1430,11 @@ func (h *slipHandlers) boardSignalsForGame(
 	ctx context.Context,
 	weekID int64,
 	game db.Game,
-	rows []board.Row,
-	mine []db.Leg,
+	legs []db.Leg,
+	playerIDs []string,
 ) board.BoardSignals {
-	slipLegs := make([]analyzer.Leg, 0, len(mine))
-	for _, leg := range mine {
+	slipLegs := make([]analyzer.Leg, 0, len(legs))
+	for _, leg := range legs {
 		slipLegs = append(slipLegs, analyzerLeg(leg, nil))
 	}
 	signals := board.BoardSignals{
@@ -1432,22 +1452,9 @@ func (h *slipHandlers) boardSignalsForGame(
 	}
 	signals.TeamEPA = teamEPA
 
-	seen := make(map[string]struct{})
-	playerUsage := make(map[string]*analyzer.PlayerUsage)
-	for _, row := range rows {
-		if row.GameID != game.ID || row.PlayerID == "" {
-			continue
-		}
-		if _, ok := seen[row.PlayerID]; ok {
-			continue
-		}
-		seen[row.PlayerID] = struct{}{}
-		pWeeks := loadNFLversePlayerWeeks(ctx, h.deps.Store, row.PlayerID, week.Season, week.SeasonType)
-		if usage := buildPlayerUsage(pWeeks); usage != nil {
-			playerUsage[row.PlayerID] = usage
-		}
-	}
-	if len(playerUsage) > 0 {
+	if playerUsage := nflverseUsageForPlayers(
+		ctx, h.deps.Store, playerIDs, week.Season, week.SeasonType,
+	); len(playerUsage) > 0 {
 		signals.PlayerUsage = playerUsage
 	}
 	return signals

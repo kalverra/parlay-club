@@ -29,7 +29,7 @@ func (s *Service) nflverseSource(week db.Week, games []db.Game, now time.Time) s
 // untouched so the caller backs off and retries.
 func (s *Service) syncNFLverse(ctx context.Context, week db.Week, now time.Time) (bool, error) {
 	if s.nflverse == nil || week.Season <= 0 ||
-		(week.SeasonType != regularSeasonType && week.SeasonType != postseasonSeasonType) {
+		(week.SeasonType != nflverse.SeasonTypeRegular && week.SeasonType != nflverse.SeasonTypePostseason) {
 		return false, nil
 	}
 
@@ -112,7 +112,8 @@ func buildNFLverseTeamWeeks(
 ) []db.NFLverseTeamWeek {
 	rows := make([]db.NFLverseTeamWeek, 0, len(stats))
 	for _, tw := range stats {
-		if tw.Season != season || (tw.SeasonType != regularSeasonType && tw.SeasonType != postseasonSeasonType) {
+		if tw.Season != season ||
+			(tw.SeasonType != nflverse.SeasonTypeRegular && tw.SeasonType != nflverse.SeasonTypePostseason) {
 			continue
 		}
 		plays := float64(tw.Attempts + tw.Carries)
@@ -156,7 +157,8 @@ func buildNFLversePlayerWeeks(
 	order := make([]nflversePlayerWeekKey, 0, len(playerStats))
 
 	for _, ps := range playerStats {
-		if ps.Season != season || (ps.SeasonType != regularSeasonType && ps.SeasonType != postseasonSeasonType) {
+		if ps.Season != season ||
+			(ps.SeasonType != nflverse.SeasonTypeRegular && ps.SeasonType != nflverse.SeasonTypePostseason) {
 			continue
 		}
 		espnID, ok := espnByGSIS[ps.PlayerID]
@@ -189,7 +191,8 @@ func buildNFLversePlayerWeeks(
 	}
 
 	for _, sc := range snapCounts {
-		if sc.Season != season || (sc.SeasonType != regularSeasonType && sc.SeasonType != postseasonSeasonType) {
+		if sc.Season != season ||
+			(sc.SeasonType != nflverse.SeasonTypeRegular && sc.SeasonType != nflverse.SeasonTypePostseason) {
 			continue
 		}
 		espnID, ok := espnByPFR[sc.PFRPlayerID]

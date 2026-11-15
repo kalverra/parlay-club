@@ -475,7 +475,7 @@ func TestAnalyzerGuideRejectsUnsafeBackURL(t *testing.T) {
 
 	fixture := newSlipFixture(t, 2)
 
-	for _, raw := range []string{"//evil.com/phish", "https://evil.com/phish"} {
+	for _, raw := range []string{"//evil.com/phish", "https://evil.com/phish", `/\evil.com`} {
 		recorder := httptest.NewRecorder()
 		request := httptest.NewRequestWithContext(
 			t.Context(),

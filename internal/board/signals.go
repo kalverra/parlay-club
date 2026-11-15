@@ -340,18 +340,11 @@ func opposingDefenseRank(game db.Game, row Row, teamEPA map[string]*analyzer.Tea
 	default:
 		return 0
 	}
-	profile := teamEPA[opponent]
-	if profile == nil {
+	_, rank, ok := analyzer.MatchupDefenseRank(row.Market, teamEPA[opponent])
+	if !ok {
 		return 0
 	}
-	switch row.Market {
-	case "PASS_YDS", "PASS_TDS", "REC_YDS", "RECEPTIONS":
-		return profile.DefPassEPAAllowedRank
-	case "RUSH_YDS", "RUSH_ATT":
-		return profile.DefRushEPAAllowedRank
-	default:
-		return 0
-	}
+	return rank
 }
 
 func effectiveTargetShare(usage *analyzer.PlayerUsage) float64 {

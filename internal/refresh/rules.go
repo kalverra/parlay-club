@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/kalverra/parlay-club/internal/db"
+	"github.com/kalverra/parlay-club/internal/ingest/nflverse"
 	"github.com/kalverra/parlay-club/internal/ingest/weather"
 	"github.com/kalverra/parlay-club/internal/tz"
 )
@@ -134,18 +135,12 @@ func pickCooldownStale(last, now time.Time) bool {
 	return !now.Before(last.Add(pickRefreshCooldown))
 }
 
-// regularSeasonType and postseasonSeasonType match ESPN's season_type codes.
-const (
-	regularSeasonType    = 2
-	postseasonSeasonType = 3
-)
-
 // nfeloStale reports whether the week's model projections are due. It skips a
 // week that is not regular season, a week with no games, and a week whose games
 // have all kicked off. Inside the window projections are good for 1 hour on
 // game days and 4 hours otherwise.
 func nfeloStale(last, now time.Time, week db.Week, games []db.Game) bool {
-	if week.SeasonType != regularSeasonType || len(games) == 0 || allKickedOff(games, now) {
+	if week.SeasonType != nflverse.SeasonTypeRegular || len(games) == 0 || allKickedOff(games, now) {
 		return false
 	}
 	if last.IsZero() {
@@ -160,7 +155,8 @@ func nfeloStale(last, now time.Time, week db.Week, games []db.Game) bool {
 // games in the week are final and the last sync ran more than 12 hours after
 // the latest kickoff.
 func nflverseStale(last, now time.Time, week db.Week, games []db.Game) bool {
-	if week.Season <= 0 || (week.SeasonType != regularSeasonType && week.SeasonType != postseasonSeasonType) {
+	if week.Season <= 0 ||
+		(week.SeasonType != nflverse.SeasonTypeRegular && week.SeasonType != nflverse.SeasonTypePostseason) {
 		return false
 	}
 	if last.IsZero() {

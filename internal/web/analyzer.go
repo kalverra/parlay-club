@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/kalverra/parlay-club/internal/analyzer"
 	"github.com/kalverra/parlay-club/internal/db"
+	"github.com/kalverra/parlay-club/internal/ingest/nflverse"
 )
 
 // nfeloSource is the sync_state row that records the last nfelo fetch.
@@ -26,11 +28,6 @@ const nfeloFreshFor = 72 * time.Hour
 // nflverseFreshFor is how long a successful nflverse sync may shape analyzer
 // rules and grades.
 const nflverseFreshFor = 7 * 24 * time.Hour
-
-const (
-	seasonTypeRegular    = 2
-	seasonTypePostseason = 3
-)
 
 func nflverseSource(season int) string {
 	return fmt.Sprintf("nflverse:season:%d", season)
@@ -164,6 +161,23 @@ func (h *slipHandlers) analyzerGuide(w http.ResponseWriter, r *http.Request) {
 
 func safeReturnPath(raw string) string {
 	if raw == "" || !strings.HasPrefix(raw, "/") || strings.HasPrefix(raw, "//") {
+		return ""
+	}
+	if strings.ContainsRune(raw, '\\') {
+		return ""
+	}
+	for _, r := range raw {
+		if r < 0x20 || r == 0x7f {
+			return ""
+		}
+	}
+	if colon := strings.IndexByte(raw, ':'); colon != -1 {
+		if slash := strings.IndexByte(raw[1:], '/'); slash == -1 || colon < slash+1 {
+			return ""
+		}
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.IsAbs() || parsed.Host != "" {
 		return ""
 	}
 	return raw
@@ -432,6 +446,13 @@ func (h *slipHandlers) nflverseForSlip(
 	return teamProfiles, usageByPlayer
 }
 
+func nflverseSeasonTypes(seasonType int) []int {
+	if seasonType == nflverse.SeasonTypePostseason {
+		return []int{nflverse.SeasonTypeRegular, nflverse.SeasonTypePostseason}
+	}
+	return []int{seasonType}
+}
+
 // loadFreshNFLverseTeamProfiles returns season-to-date/L4 team EPA and pace
 // profiles when nflverse:season:{year} is present and under nflverseFreshFor.
 func loadFreshNFLverseTeamProfiles(
@@ -445,12 +466,9 @@ func loadFreshNFLverseTeamProfiles(
 		return nil, false
 	}
 
-	seasonType := week.SeasonType
-	teamWeeks, err := store.NFLverseTeamWeeksForSeason(ctx, week.Season, seasonType)
-	if err == nil && len(teamWeeks) == 0 && seasonType == seasonTypePostseason {
-		seasonType = seasonTypeRegular
-		teamWeeks, err = store.NFLverseTeamWeeksForSeason(ctx, week.Season, seasonType)
-	}
+	teamWeeks, err := store.NFLverseTeamWeeksForSeasonTypes(
+		ctx, week.Season, nflverseSeasonTypes(week.SeasonType)...,
+	)
 	if err != nil || len(teamWeeks) == 0 {
 		return nil, true
 	}
@@ -458,21 +476,46 @@ func loadFreshNFLverseTeamProfiles(
 }
 
 // loadNFLversePlayerWeeks returns weekly nflverse usage rows for an athlete,
-// falling back to regular season rows during postseason when < 3 weeks exist.
+// merging regular-season and postseason rows during postseason so L3 and
+// season averages stay populated.
 func loadNFLversePlayerWeeks(
 	ctx context.Context,
 	store *db.Store,
 	athleteID string,
 	season, seasonType int,
 ) []db.NFLversePlayerWeek {
-	rows, err := store.NFLversePlayerWeeksForPlayer(ctx, athleteID, season, seasonType)
-	if err == nil && len(rows) < 3 && seasonType == seasonTypePostseason {
-		rows, err = store.NFLversePlayerWeeksForPlayer(ctx, athleteID, season, seasonTypeRegular)
-	}
+	rows, err := store.NFLversePlayerWeeksForPlayerTypes(
+		ctx, athleteID, season, nflverseSeasonTypes(seasonType)...,
+	)
 	if err != nil {
 		return nil
 	}
 	return rows
+}
+
+func nflverseUsageForPlayers(
+	ctx context.Context,
+	store *db.Store,
+	athleteIDs []string,
+	season, seasonType int,
+) map[string]*analyzer.PlayerUsage {
+	if len(athleteIDs) == 0 {
+		return nil
+	}
+	byPlayer, err := store.NFLversePlayerWeeksForPlayersTypes(
+		ctx, athleteIDs, season, nflverseSeasonTypes(seasonType)...,
+	)
+	if err != nil {
+		return nil
+	}
+
+	usageByPlayer := make(map[string]*analyzer.PlayerUsage)
+	for _, id := range athleteIDs {
+		if usage := buildPlayerUsage(byPlayer[id]); usage != nil {
+			usageByPlayer[id] = usage
+		}
+	}
+	return usageByPlayer
 }
 
 func (h *slipHandlers) nflverseUsageForLegs(
@@ -481,7 +524,7 @@ func (h *slipHandlers) nflverseUsageForLegs(
 	season, seasonType int,
 ) map[string]*analyzer.PlayerUsage {
 	seen := make(map[string]struct{}, len(legs))
-	usageByPlayer := make(map[string]*analyzer.PlayerUsage)
+	athleteIDs := make([]string, 0, len(legs))
 	for _, leg := range legs {
 		if leg.PlayerID == nil || *leg.PlayerID == "" {
 			continue
@@ -491,13 +534,9 @@ func (h *slipHandlers) nflverseUsageForLegs(
 			continue
 		}
 		seen[id] = struct{}{}
-
-		rows := loadNFLversePlayerWeeks(ctx, h.deps.Store, id, season, seasonType)
-		if usage := buildPlayerUsage(rows); usage != nil {
-			usageByPlayer[id] = usage
-		}
+		athleteIDs = append(athleteIDs, id)
 	}
-	return usageByPlayer
+	return nflverseUsageForPlayers(ctx, h.deps.Store, athleteIDs, season, seasonType)
 }
 
 func buildTeamDefenseProfiles(rows []db.NFLverseTeamWeek) map[string]*analyzer.TeamDefenseProfile {

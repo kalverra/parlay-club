@@ -206,4 +206,36 @@ func TestUpsertNFLversePlayerWeeksIdempotentAndQuery(t *testing.T) {
 	assert.InDelta(t, 0.98, byPlayer[0].OffensePct, 1e-9)
 	assert.Equal(t, second, byPlayer[0].UpdatedAt)
 	assert.Equal(t, first, byPlayer[1].UpdatedAt)
+
+	batch, err := store.NFLversePlayerWeeksForPlayers(t.Context(), []string{"4362628", "missing"}, 2026, 2)
+	require.NoError(t, err)
+	assert.Equal(t, byPlayer, batch["4362628"])
+	assert.Empty(t, batch["missing"])
+
+	emptyBatch, err := store.NFLversePlayerWeeksForPlayers(t.Context(), nil, 2026, 2)
+	require.NoError(t, err)
+	assert.Empty(t, emptyBatch)
+
+	// Multi-season-type queries merge regular and postseason rows in expected order.
+	_, err = store.UpsertNFLverseTeamWeeks(t.Context(), []db.NFLverseTeamWeek{
+		{Season: 2026, SeasonType: 2, WeekNum: 18, Team: "CIN", OffPassEPA: 0.10, UpdatedAt: first},
+		{Season: 2026, SeasonType: 3, WeekNum: 1, Team: "CIN", OffPassEPA: 0.25, UpdatedAt: second},
+	})
+	require.NoError(t, err)
+	teamMerged, err := store.NFLverseTeamWeeksForSeasonTypes(t.Context(), 2026, 2, 3)
+	require.NoError(t, err)
+	require.Len(t, teamMerged, 2)
+	assert.Equal(t, 2, teamMerged[0].SeasonType)
+	assert.Equal(t, 3, teamMerged[1].SeasonType)
+
+	_, err = store.UpsertNFLversePlayerWeeks(t.Context(), []db.NFLversePlayerWeek{
+		{ESPNID: "4362628", Season: 2026, SeasonType: 3, WeekNum: 1, Team: "CIN", OffensePct: 0.99, UpdatedAt: second},
+	})
+	require.NoError(t, err)
+	playerMerged, err := store.NFLversePlayerWeeksForPlayersTypes(t.Context(), []string{"4362628"}, 2026, 2, 3)
+	require.NoError(t, err)
+	require.Len(t, playerMerged["4362628"], 3)
+	assert.Equal(t, 3, playerMerged["4362628"][0].SeasonType, "postseason week comes first")
+	assert.Equal(t, 8, playerMerged["4362628"][1].WeekNum)
+	assert.Equal(t, 7, playerMerged["4362628"][2].WeekNum)
 }
