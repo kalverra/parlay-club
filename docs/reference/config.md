@@ -4,8 +4,6 @@ title: Configuration
 type: reference
 summary: Environment variables the server reads, their dev defaults, the odds provider keys, pre-fill bearer token, and GitHub issue reporting settings they configure, the offline sandbox switch, and the values it rejects in prod.
 tags: [config, environment, startup, google, oauth, odds, parlay-api, the-odds-api, prefill, sandbox, offline, github, bug-reports]
-sources: [internal/config/config.go, cmd/server/main.go, cmd/server/sandbox.go, internal/sandbox/*.go, internal/ingest/odds/client.go]
-last_verified: 2026-11-15
 ---
 
 # Configuration
