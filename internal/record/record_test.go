@@ -50,7 +50,15 @@ func TestBuildStreaksAndPushReset(t *testing.T) {
 		{ID: 1, Season: 2026, SeasonType: 2, WeekNum: 1, CreatedAt: t0, Status: "GRADED", Result: parlay.Won},
 		{ID: 6, Season: 2026, SeasonType: 2, WeekNum: 6, CreatedAt: t0, Status: "GRADED", Result: parlay.Lost},
 		{ID: 4, Season: 2026, SeasonType: 2, WeekNum: 4, CreatedAt: t0, Status: "GRADED", Result: parlay.Won},
-		{ID: 2, Season: 2026, SeasonType: 2, WeekNum: 1, CreatedAt: t0.Add(time.Hour), Status: "GRADED", Result: parlay.Won},
+		{
+			ID:         2,
+			Season:     2026,
+			SeasonType: 2,
+			WeekNum:    1,
+			CreatedAt:  t0.Add(time.Hour),
+			Status:     "GRADED",
+			Result:     parlay.Won,
+		},
 		{ID: 5, Season: 2026, SeasonType: 2, WeekNum: 5, CreatedAt: t0, Status: "GRADED", Result: parlay.Lost},
 	}
 

@@ -81,23 +81,32 @@ func SummarySource(gameID string) string {
 // Staleness windows and the failure backoff. The odds windows match the credit
 // budget in docs/reference/data-sources.md.
 const (
-	scoreboardLiveAge    = 10 * time.Minute
-	scoreboardGameDayAge = 30 * time.Minute
-	scoreboardIdleAge    = 6 * time.Hour
-	weatherAge           = time.Hour
-	weatherLookahead     = 48 * time.Hour
-	oddsWeekdayAge       = 24 * time.Hour
-	oddsSaturdayAge      = 12 * time.Hour
-	oddsSundayAge        = 45 * time.Minute
-	oddsLateAge          = 3 * time.Hour
-	oddsPropsAge         = 2 * time.Hour
-	rosterAge            = 24 * time.Hour
-	gameLogAge           = 12 * time.Hour
-	summaryAge           = 2 * time.Hour
-	nfeloAge             = 12 * time.Hour
-	failureBackoff       = 5 * time.Minute
-	syncTimeout          = 30 * time.Second
-	requestTimeout       = 10 * time.Second
+	scoreboardLiveAge     = 5 * time.Minute
+	scoreboardGameDayAge  = 15 * time.Minute
+	scoreboardIdleAge     = 2 * time.Hour
+	weatherNearAge        = 15 * time.Minute
+	weatherNearLookahead  = 6 * time.Hour
+	weatherAge            = 30 * time.Minute
+	weatherLookahead      = 48 * time.Hour
+	oddsWeekdayAge        = 24 * time.Hour
+	oddsSaturdayAge       = 12 * time.Hour
+	oddsSundayAge         = 45 * time.Minute
+	oddsLateAge           = 3 * time.Hour
+	oddsPropsAge          = 2 * time.Hour
+	rosterGameDayAge      = 2 * time.Hour
+	rosterIdleAge         = 6 * time.Hour
+	gameLogGameDayAge     = time.Hour
+	gameLogIdleAge        = 4 * time.Hour
+	summaryGameDayAge     = 15 * time.Minute
+	summaryIdleAge        = time.Hour
+	summaryNearKickoff    = 4 * time.Hour
+	nfeloGameDayAge       = time.Hour
+	nfeloIdleAge          = 4 * time.Hour
+	prefillIdempotencyAge = 15 * time.Minute
+	prefillConcurrency    = 4
+	failureBackoff        = 5 * time.Minute
+	syncTimeout           = 30 * time.Second
+	requestTimeout        = 10 * time.Second
 )
 
 // Credit floors. The odds client uses the free event list first, so refresh
@@ -351,9 +360,10 @@ func waitFor(ctx context.Context, wg *sync.WaitGroup) error {
 	}
 }
 
-// kick runs the slate first, then the sources that depend on it. The slate
-// sync may add or change the week's games, so the weather and odds pass reads
-// them again.
+// kick runs the slate first, then the free sources that depend on it. The
+// slate sync may add or change the week's games, so the free-source pass reads
+// them again. Page-load kicks omit odds:lines to avoid spending credits outside
+// RunPrefill, RunOnce, and pick-time refreshes.
 func (s *Service) kick(ctx context.Context) {
 	now := s.now()
 
@@ -370,17 +380,17 @@ func (s *Service) kick(ctx context.Context) {
 		return
 	}
 
-	sources, err := s.sourcesFor(ctx, week, games, now)
+	sources, err := s.freeSourcesFor(ctx, week, games, now)
 	if err != nil {
 		s.logger.Error().Err(err).Msg("build refresh sources")
 	}
 	s.runSources(ctx, now, sources)
 }
 
-// RunOnce is the synchronous counterpart to Kick. It runs the same
-// scoreboard-first pass, waits for every source it starts, and returns the
-// failures joined. The sandbox bootstrap uses it so startup finishes with a
-// complete slate; normal page loads keep using Kick.
+// RunOnce is the synchronous counterpart used by sandbox bootstrap and tests.
+// It runs the scoreboard-first pass followed by all free sources plus
+// odds:lines, waits for every source it starts, and returns the failures
+// joined.
 func (s *Service) RunOnce(ctx context.Context) error {
 	now := s.now()
 
@@ -398,10 +408,11 @@ func (s *Service) RunOnce(ctx context.Context) error {
 	if err != nil {
 		return errors.Join(append(errs, fmt.Errorf("read current games: %w", err))...)
 	}
-	sources, err := s.sourcesFor(ctx, week, games, now)
+	sources, err := s.freeSourcesFor(ctx, week, games, now)
 	if err != nil {
 		errs = append(errs, err)
 	}
+	sources = append(sources, s.oddsSource(games, now))
 
 	var (
 		wg     sync.WaitGroup
@@ -421,19 +432,184 @@ func (s *Service) RunOnce(ctx context.Context) error {
 	return errors.Join(append(errs, runErr...)...)
 }
 
-// sourcesFor builds the sources that depend on the slate. A store read failure
-// is joined but does not hide the sources that were built.
-func (s *Service) sourcesFor(
+// PrefillReport summarizes one RunPrefill sweep.
+type PrefillReport struct {
+	WeekID          int64 `json:"week_id"`
+	UpcomingGames   int   `json:"upcoming_games"`
+	LinesSynced     bool  `json:"lines_synced"`
+	PropsSynced     int   `json:"props_synced"`
+	PropsSkipped    int   `json:"props_skipped"`
+	PropsFailed     int   `json:"props_failed"`
+	FreeSourcesRun  int   `json:"free_sources_run"`
+	ParlayRemaining *int  `json:"parlay_remaining,omitempty"`
+}
+
+// RunPrefill runs the Sunday morning pre-fill sweep synchronously: scoreboard
+// first, then odds:lines (with 15m idempotency so retries do not double-spend),
+// then free sources (weather, summaries, unique week-team rosters, nfelo,
+// grade, gamelogs), and finally bounded-parallel Parlay-only bulk props for
+// upcoming games (with 15m idempotency and no fallback EventProps calls).
+func (s *Service) RunPrefill(ctx context.Context) (PrefillReport, error) {
+	s.stopMu.Lock()
+	if s.stopping() {
+		s.stopMu.Unlock()
+		return PrefillReport{}, context.Canceled
+	}
+	s.wg.Add(1)
+	s.stopMu.Unlock()
+	defer s.wg.Done()
+
+	ctx, stopWork := context.WithCancel(ctx)
+	defer stopWork()
+	unregister := context.AfterFunc(s.stopCtx, stopWork)
+	defer unregister()
+
+	now := s.now()
+	var report PrefillReport
+	var errs []error
+
+	_, games, err := s.currentWeek(ctx)
+	if err != nil {
+		return report, fmt.Errorf("read current games: %w", err)
+	}
+	if err := s.refreshWithTimeout(ctx, s.scoreboardSource(games, now), now); err != nil {
+		errs = append(errs, err)
+	}
+
+	week, games, err := s.currentWeek(ctx)
+	if err != nil {
+		return report, errors.Join(append(errs, fmt.Errorf("read current games: %w", err))...)
+	}
+	report.WeekID = week.ID
+
+	if len(games) > 0 && !allKickedOff(games, now) {
+		linesRan := false
+		linesSrc := source{
+			key: OddsLinesSource,
+			due: func(_ context.Context, state db.SyncState) (bool, error) {
+				return prefillStale(state.FetchedAt, now), nil
+			},
+			run: func(ctx context.Context) (bool, error) {
+				linesRan = true
+				return s.syncOdds(ctx, games, now)
+			},
+		}
+		if err := s.refreshWithTimeout(ctx, linesSrc, now); err != nil {
+			errs = append(errs, err)
+		} else if linesRan {
+			report.LinesSynced = true
+		}
+
+		if refreshedWeek, refreshedGames, err := s.currentWeek(ctx); err != nil {
+			errs = append(errs, fmt.Errorf("reload games after lines: %w", err))
+		} else {
+			week, games = refreshedWeek, refreshedGames
+		}
+	}
+
+	freeSources, err := s.freeSourcesFor(ctx, week, games, now)
+	if err != nil {
+		errs = append(errs, err)
+	}
+	report.FreeSourcesRun = len(freeSources)
+	errs = append(errs, s.runBoundedSources(ctx, now, freeSources, prefillConcurrency)...)
+
+	upcoming := make([]db.Game, 0, len(games))
+	for _, game := range games {
+		if now.Before(game.Kickoff) {
+			upcoming = append(upcoming, game)
+		}
+	}
+	report.UpcomingGames = len(upcoming)
+
+	if s.props != nil && len(upcoming) > 0 {
+		synced, skipped, failed, propErrs := s.prefillProps(ctx, upcoming, now)
+		report.PropsSynced = synced
+		report.PropsSkipped = skipped
+		report.PropsFailed = failed
+		errs = append(errs, propErrs...)
+	} else {
+		report.PropsSkipped = len(upcoming)
+	}
+
+	if state, err := s.store.SyncState(ctx, OddsLinesSource); err == nil && state.OddsCreditsRemaining != nil {
+		report.ParlayRemaining = state.OddsCreditsRemaining
+	}
+
+	return report, errors.Join(errs...)
+}
+
+// runBoundedSources runs sources across at most limit concurrent workers.
+func (s *Service) runBoundedSources(ctx context.Context, now time.Time, sources []source, limit int) []error {
+	if len(sources) == 0 {
+		return nil
+	}
+	if limit <= 0 || limit > len(sources) {
+		limit = len(sources)
+	}
+
+	jobs := make(chan source, len(sources))
+	for _, src := range sources {
+		jobs <- src
+	}
+	close(jobs)
+
+	var (
+		wg   sync.WaitGroup
+		mu   sync.Mutex
+		errs []error
+	)
+	for range limit {
+		wg.Go(func() {
+			for src := range jobs {
+				if ctx.Err() != nil {
+					return
+				}
+				if err := s.refreshWithTimeout(ctx, src, now); err != nil {
+					mu.Lock()
+					errs = append(errs, err)
+					mu.Unlock()
+				}
+			}
+		})
+	}
+	wg.Wait()
+	return errs
+}
+
+// freeSourcesFor builds the free/unmetered sources that depend on the slate.
+// A store read failure is joined but does not hide the sources that were built.
+func (s *Service) freeSourcesFor(
 	ctx context.Context,
 	week db.Week,
 	games []db.Game,
 	now time.Time,
 ) ([]source, error) {
-	sources := make([]source, 0, len(games)+2)
+	sources := make([]source, 0, len(games)*2+2)
 	for _, game := range games {
 		sources = append(sources, s.weatherSource(game, now))
 	}
-	sources = append(sources, s.oddsSource(games, now))
+	if s.espn != nil {
+		seenTeams := make(map[string]struct{}, len(games)*2)
+		for _, game := range games {
+			if game.Status == db.GameFinal {
+				continue
+			}
+			sources = append(sources, s.summarySource(game, now))
+			if game.HomeESPNID != "" && game.HomeTeam != "" {
+				if _, seen := seenTeams[game.HomeESPNID]; !seen {
+					seenTeams[game.HomeESPNID] = struct{}{}
+					sources = append(sources, s.rosterSource(game.HomeTeam, game.HomeESPNID, now))
+				}
+			}
+			if game.AwayESPNID != "" && game.AwayTeam != "" {
+				if _, seen := seenTeams[game.AwayESPNID]; !seen {
+					seenTeams[game.AwayESPNID] = struct{}{}
+					sources = append(sources, s.rosterSource(game.AwayTeam, game.AwayESPNID, now))
+				}
+			}
+		}
+	}
 	if s.projections != nil && week.ID != 0 {
 		sources = append(sources, s.nfeloSource(week, games, now))
 	}

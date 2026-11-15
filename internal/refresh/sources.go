@@ -132,7 +132,7 @@ func slateGame(game espn.Game, weekID int64, now time.Time) db.Game {
 
 // syncWeather fetches one game's forecast and writes it.
 func (s *Service) syncWeather(ctx context.Context, game db.Game, now time.Time) (bool, error) {
-	if game.Indoor || game.VenueID == nil {
+	if s.forecast == nil || game.Indoor || game.VenueID == nil {
 		return false, nil
 	}
 	if now.Before(game.Kickoff.Add(-weatherLookahead)) || !now.Before(game.Kickoff) {

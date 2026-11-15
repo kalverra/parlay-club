@@ -121,5 +121,5 @@ func TestWagersForGroupSeasonIsolatesGroupAndSeason(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, got, 1)
 	assert.Equal(t, slipA2026.ID, got[0].SlipID)
-	assert.Equal(t, float64(15), got[0].Stake)
+	assert.InDelta(t, float64(15), got[0].Stake, 1e-9)
 }

@@ -190,26 +190,7 @@ func Build(season int, slips []Slip, legs []Leg, members []Member, wagers []Wage
 		}
 	}
 
-	for _, w := range wagers {
-		s, ok := gradedByID[w.SlipID]
-		if !ok {
-			continue
-		}
-		st, hasLeg := stats[w.UserID]
-		if !hasLeg {
-			continue
-		}
-		st.wagerCount++
-		switch s.Result {
-		case parlay.Won:
-			dec := parlay.AmericanToDecimal(w.Odds)
-			st.dollarPL += parlay.Payout(w.Stake, dec, w.BoostPct) - w.Stake
-		case parlay.Lost:
-			st.dollarPL -= w.Stake
-		case parlay.Push:
-			// Push returns stake; net dollar P/L is 0.
-		}
-	}
+	applyWagers(wagers, gradedByID, stats)
 
 	maxTerrorist := 0
 	for _, st := range stats {
@@ -340,4 +321,27 @@ func sortLeaderboard(rows []MemberRow) {
 		}
 		return cmp.Compare(a.UserID, b.UserID)
 	})
+}
+
+func applyWagers(wagers []Wager, gradedByID map[int64]Slip, stats map[int64]*memberStats) {
+	for _, w := range wagers {
+		s, ok := gradedByID[w.SlipID]
+		if !ok {
+			continue
+		}
+		st, hasLeg := stats[w.UserID]
+		if !hasLeg {
+			continue
+		}
+		st.wagerCount++
+		switch s.Result {
+		case parlay.Won:
+			dec := parlay.AmericanToDecimal(w.Odds)
+			st.dollarPL += parlay.Payout(w.Stake, dec, w.BoostPct) - w.Stake
+		case parlay.Lost:
+			st.dollarPL -= w.Stake
+		case parlay.Push:
+			// Push returns stake; net dollar P/L is 0.
+		}
+	}
 }
