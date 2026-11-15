@@ -236,7 +236,7 @@ The board's query contract:
 | `cat`     | detail        | The open tab: `lines`, `passing`, `rushing`, `receiving`, `tds`, or `kicking`. `team_totals` folds into `lines`. An unknown value opens `lines` when it has rows, otherwise the first tab that does. |
 | `q`       | slate, detail | Search text. Matches a matchup, team, venue, or roster player on the slate, and a row in the open game. |
 | `win`     | slate         | Kickoff window: `thursday`, `sun_morning`, `sun_early`, `sun_late`, `sun_night`, or `monday`, in Eastern time. Unknown values fall back to any time. |
-| `sort`    | detail        | `player` (default), `odds` (shortest price first), or `line` (highest line first). Kickoff, category, and unknown values resolve to `player`. |
+| `sort`    | detail        | `player` (default), `odds` (shortest price first), `line` (highest line first), or `matchup` (strongest suggestion signal and softest opposing defense first). Kickoff, category, and unknown values resolve to `player`. |
 
 The slate shows one card per upcoming game, ordered by kickoff, with the matchup, venue, kickoff, spread, total,
 moneyline, and either "Explore N props" or "No props yet". A game with no stored odds still gets a card, with no lines
@@ -257,7 +257,7 @@ badge includes both sides of each line. Tab and sort chips swap `#pick-detail` a
 slate and its scroll alone. `#pick-detail` re-fetches itself from its resolved tab and sort on `board-updated`, and a
 tab or sort response out-of-band syncs the search form's hidden `cat` and `sort`, so a later search or live refresh
 keeps the open tab. An unknown category opens Lines when it has rows, otherwise the first tab that does; `sort` resolves
-to `player`, `odds`, or `line`, and anything else reads as `player`. The "All games" back link drops `game` and `cat`,
+to `player`, `odds`, `line`, or `matchup`, and anything else reads as `player`. The "All games" back link drops `game` and `cat`,
 keeps `q` and `win`, and swaps `#pick-body`. A search filters the open game's rows. An unknown game, a kicked-off game,
 or a game the window hides falls back to the slate instead of a 404.
 
@@ -331,8 +331,9 @@ positions (`QB`, `RB`, `WR`, `TE`, `LT`, `OT`, `C`, `CB`, `S`). It also lists sp
 ESPN athlete, and provides a form to manually link unmatched players.
 
 `GET /research/players/{espnID}` syncs game logs on demand (`espn:gamelog:{id}`). It renders last-5 hit bars (green when
-over the line, red when under), the last-5 median, the season mean, and total games played. If `market` or `line` is
-omitted, it resolves them from `?leg_id=` or the player's stored odds.
+over the line, red when under), the last-5 median, the season mean, and total games played. When fresh nflverse data is
+cached, it also renders `Snap % (L3)`, `Target share`, `WOPR`, and `Opp Pass Def` / `Opp Rush Def` rank for the active
+market. If `market` or `line` is omitted, it resolves them from `?leg_id=` or the player's stored odds.
 
 `POST /research/matches` accepts `odds_name`, `team`, and `athlete_id`. It saves a manual player match (`manual=1`) in
 `player_matches`, removes conflicting non-manual matches for that game, backfills `player_id` and `team` on matching
