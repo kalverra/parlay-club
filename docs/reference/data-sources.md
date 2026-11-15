@@ -4,8 +4,6 @@ title: Data sources
 type: reference
 summary: The free sources behind the slate, the ESPN scoreboard endpoint and its Sunday and Monday filter, the Open-Meteo forecast behind a game's weather, Parlay API game lines and props with The Odds API enrichment and fallback, ESPN rosters, game logs, and summary injuries, player matching, nfelo model projections, bookmakers, deep links, tiered credit floors, and the raw response archive every successful call leaves.
 tags: [data, espn, scoreboard, games, sync, fixtures, weather, open-meteo, venues, odds, parlay-api, the-odds-api, props, lines, bookmakers, links, credits, budget, enrichment, fallback, nfelo, projections, spreads, quarterbacks, archive, raw-responses, sqlite, rosters, gamelogs, injuries, player-matching]
-sources: [internal/ingest/espn/client.go, internal/ingest/espn/scoreboard.go, internal/ingest/espn/roster.go, internal/ingest/espn/summary.go, internal/ingest/espn/gamelog.go, internal/db/weeks.go, internal/db/games.go, internal/db/players.go, internal/ingest/weather/client.go, internal/ingest/weather/forecast.go, internal/ingest/weather/venues.go, internal/ingest/odds/client.go, internal/ingest/odds/events.go, internal/ingest/odds/lines.go, internal/ingest/odds/props.go, internal/ingest/odds/match.go, internal/ingest/nfelo/client.go, internal/ingest/nfelo/projections.go, internal/ingest/nfelo/teams.go, internal/db/nfelo.go, internal/refresh/nfelo.go, internal/refresh/research.go, internal/ingest/archive/transport.go, internal/ingest/archive/labels.go, internal/db/archive.go, internal/refresh/refresh.go, internal/refresh/sources.go, cmd/server/main.go]
-last_verified: 2026-11-12
 ---
 
 # Data sources
@@ -226,11 +224,13 @@ no subject or book is skipped, so unpriced DFS rows never reach `refresh`.
 | `player_anytime_td`              | `player_anytime_touchdown_scorer`, `anytime_td`, `anytime_touchdown_scorer` | `ANYTIME_TD` |
 | `player_kicking_points`          |                                                                  | `KICKER_PTS` |
 
-Parlay API rows carry validated prop links and sids on FanDuel only today. `odds:props:{game}` runs on demand
-when someone opens a game card or research view, stale after 2 hours and skipped after kickoff. Before matching
-players, it syncs rosters for both teams (`espn:roster:{team}`). It checks the Parlay API 150-credit floor
-(`OddsPropsFloor`), calls `Client.Props`, maps `TEAM_TOTAL` to the game's team abbreviation, and resolves player
-names through `ResolvePlayerMatch`.
+Parlay API rows carry validated prop links and sids on FanDuel only today. `odds:props:{game}` warms Parlay-only during
+`RunPrefill` (15-minute idempotency) and runs on demand when someone opens an upcoming game on an `OPEN` slip's pick
+board, taps "Load them" or "Refresh odds", or opens a research view. It is stale after 30 minutes on game days or
+within 6 hours of kickoff, and 2 hours otherwise (subject to a 2-minute cooldown on manual refresh), and is skipped once
+kickoff has passed. Before matching players, it syncs rosters for both teams (`espn:roster:{team}`). It checks the
+Parlay API 150-credit floor (`OddsPropsFloor`), calls `Client.Props`, maps `TEAM_TOTAL` to the game's team
+abbreviation, and resolves player names through `ResolvePlayerMatch`.
 
 ## The Odds API (free tier: 500 credits/month)
 
@@ -357,12 +357,15 @@ call. Both balances live in `sync_state`: `odds:lines` for Parlay API and `odds:
 
 The free tier is 1,000 credits a month. Target at most 800, leaving room for testing and playoff weeks.
 
-- `odds:lines` is stale after 24 h Monday through Friday, 12 h on Saturday, and 45 min on Sunday until the last Sunday
-  kickoff. After that it runs only before the Monday game, every 3 h. Skip the fetch once every game of the week has
-  kicked off.
-- `odds:props:{game}` runs on demand when someone opens that game's card or research view, and only while at least 150
-  credits remain (`refresh.OddsPropsFloor`). Each game is one flat 3-credit `/props` call for all nine markets, not one
-  credit per market.
+- `odds:lines` runs on the Sunday morning pre-fill (`POST /internal/prefill`, 15 min idempotency), on-demand pick-time
+  views (`SyncPickLines`/`SyncPickGame`: 15 min on game days before the day's last kickoff or within 2 h of an upcoming
+  kickoff, 2 h otherwise; 2 min cooldown in `ForcePickRefresh`), and in sandbox `RunOnce` (24 h Monday–Friday, 12 h
+  Saturday, 45 min Sunday before the last Sunday kickoff, 3 h after). Page-load `Kick()` omits `odds:lines`, and all
+  runs skip the fetch once every game of the week has kicked off.
+- `odds:props:{game}` warms Parlay-only during `RunPrefill` (15 min idempotency) and runs on demand on `OPEN`-slip
+  pick-time views, "Load them", "Refresh odds" (2 min cooldown), or research views (stale after 30 min on game days or
+  within 6 h of kickoff, 2 h otherwise), and only while at least 150 credits remain (`refresh.OddsPropsFloor`). Each game
+  is one flat 3-credit `/props` call for all nine markets, not one credit per market.
 - `odds:lines` runs only while at least 50 credits remain (`refresh.OddsLinesFloor`).
 - Below a floor, serve cached rows and show "lines paused until the monthly reset".
 - The rough split: lines are about 20 calls × 3 = 60 credits a week, and props about 6 games × 3 = 18 a week, or about

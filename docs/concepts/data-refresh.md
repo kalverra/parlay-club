@@ -4,8 +4,6 @@ title: Data refresh
 type: concept
 summary: How page loads, Sunday morning pre-fill, and on-demand views drive syncs of the slate, weather, game lines, props, rosters, injuries, game logs, nfelo projections, and auto-grading, with per-source staleness windows, single-flight, failure backoff, tiered Parlay API and The Odds API credit floors, an archive of every successful response, a synchronous sandbox bootstrap, and a shutdown drain that cancels in-flight syncs.
 tags: [refresh, sync, lazy, prefill, staleness, singleflight, backoff, credits, odds, parlay-api, the-odds-api, enrichment, fallback, props, weather, slate, live-window, nfelo, projections, archive, raw-responses, roster, gamelog, injuries, player-matching, grade, auto-grading, sandbox, clock, pick-board, shutdown, drain]
-sources: [internal/refresh/refresh.go, internal/refresh/rules.go, internal/refresh/sources.go, internal/refresh/research.go, internal/refresh/nfelo.go, internal/refresh/grade.go, internal/refresh/publish.go, internal/refresh/live.go, internal/sandbox/*.go, internal/board/board.go, internal/grader/*.go, internal/slips/rules.go, internal/db/sync.go, internal/db/legs.go, internal/db/players.go, internal/db/odds.go, internal/db/nfelo.go, internal/web/pick.go, internal/web/games.go, internal/ingest/nfelo/client.go, internal/ingest/archive/transport.go, cmd/server/main.go, cmd/server/sandbox.go]
-last_verified: 2026-11-15
 ---
 
 # Data refresh
@@ -15,9 +13,10 @@ last_verified: 2026-11-15
 `internal/refresh` owns when outside data comes in. Free/unmetered sources (slate, weather, game summaries/injuries,
 unique week-team rosters, nfelo projections, auto-grading, and slip-leg game logs) refresh lazily on full-page `GET`s via
 `Kick()`, which returns at once and does the work in the background. Metered odds calls are reserved for the Sunday
-morning pre-fill (`RunPrefill` via `POST /internal/prefill`), synchronous `RunOnce` in sandbox bootstrap, and on-demand
-game prop views. Each source has its own staleness window, its own single-flight, and its own failure backoff. Parlay API
-and The Odds API are the metered sources, so each free event list runs before its balances gate the paid calls.
+morning pre-fill (`RunPrefill` via `POST /internal/prefill`), synchronous `RunOnce` in sandbox bootstrap, pick-time
+syncs on `OPEN` slips with upcoming games, and on-demand game prop views. Each source has its own staleness window,
+its own single-flight, and its own failure backoff. Parlay API and The Odds API are the metered sources, so each free
+event list runs before its balances gate the paid calls.
 
 ## What kicks a sync
 
@@ -45,11 +44,21 @@ retries do not double-spend), all free sources (`weather`, `espn:summary`, uniqu
 for upcoming games (bounded to 4 concurrent workers, 15-minute idempotency, skipping kicked-off games and The Odds API
 `EventProps` enrichment/fallback). It returns a `PrefillReport` JSON summary.
 
-On-demand user actions also trigger syncs directly. Tapping "Load them" on the pick board calls
-`SyncGameProps(ctx, gameID)`. Loading game research calls `SyncGameResearch(ctx, gameID)`. Loading player research calls
-`SyncPlayerResearch(ctx, athleteID)`. These run synchronously with a 10-second timeout, but share the same single-flight
-deduplication, staleness windows, and failure backoff as background syncs. The pick board itself never syncs props:
-opening it, typing a search, filtering, and sorting read stored odds only, so they spend no credits.
+On-demand user actions also trigger syncs directly with a 10-second timeout, sharing the same single-flight
+deduplication, staleness windows, and failure backoff as background syncs:
+
+- **Pick-time lines and props (`OPEN` slips only):** Opening `GET /slips/{id}/pick` on an `OPEN` slip with upcoming
+  games in its slate scope calls `SyncPickLines(ctx, weekID)` (or `SyncPickGame(ctx, weekID, gameID)` when an upcoming
+  game is selected). `GET /slips/{id}/pick/results` and `GET /slips/{id}/pick/detail` call
+  `SyncPickGame(ctx, weekID, gameID)` only when the slip is `OPEN` and an upcoming game is selected. Once synced,
+  `sync_state.fetched_at` is fresh, so repeated search keystrokes, tab/sort clicks, and `board-updated` SSE reloads
+  short-circuit in SQLite with zero API calls. `GET /slips/{id}/pick/slate` and locked or graded slips stay strictly
+  read-only.
+- **Manual pick refresh:** Tapping "Refresh odds" (`POST /slips/{id}/pick/refresh`) on an `OPEN` slip with upcoming
+  games calls `ForcePickRefresh(ctx, weekID, gameID)`, bypassing the normal staleness windows subject to a 2-minute
+  cooldown (`pickRefreshCooldown`).
+- **Prop load and research:** Tapping "Load them" on the pick board calls `SyncGameProps(ctx, gameID)`. Loading game
+  research calls `SyncGameResearch(ctx, gameID)`. Loading player research calls `SyncPlayerResearch(ctx, athleteID)`.
 
 ## One pass
 
@@ -95,8 +104,8 @@ Each source records its last successful sync in `sync_state.fetched_at`. A sourc
 | ------------------ | --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
 | `espn:scoreboard`  | Latest week's slate, scores, and status | 5 min while any game is live; 15 min on Thursday, Sunday, or Monday; 2 h otherwise                                      | Never                                                              |
 | `weather:{gameID}` | Kickoff-window forecast for one game    | 15 min within 6 h of kickoff; 30 min otherwise                                                                          | Indoor, unknown venue, more than 48 h before kickoff, or kicked off |
-| `odds:lines`       | The week's game lines                   | 24 h Monday–Friday; 12 h Saturday; 45 min Sunday before the last Sunday kickoff; 3 h after that and all day Monday (15 min idempotency in `RunPrefill`) | No games, or every game has kicked off                             |
-| `odds:props:{gameID}` | Game prop odds                       | 2 h (15 min idempotency in `RunPrefill`)                                                                                | Once game has kicked off                                           |
+| `odds:lines`       | The week's game lines                   | `RunOnce`: 24 h Monday–Friday; 12 h Saturday; 45 min Sunday before the last Sunday kickoff; 3 h after that and all day Monday. Pick-time (`SyncPickLines`/`SyncPickGame`): 15 min on game days before the day's last kickoff or within 2 h of an upcoming kickoff; 2 h otherwise. (15 min idempotency in `RunPrefill`; 2 min cooldown in `ForcePickRefresh`) | No games, or every game has kicked off |
+| `odds:props:{gameID}` | Game prop odds                       | 30 min on game days (Thursday, Sunday, Monday) or within 6 h of kickoff; 2 h otherwise (15 min idempotency in `RunPrefill`; 2 min cooldown in `ForcePickRefresh`) | Once game has kicked off               |
 | `espn:roster:{teamID}`| NFL team roster                      | 2 h on Thursday, Sunday, or Monday; 6 h otherwise                                                                       | Never (skipped for `FINAL` games in `Kick()`/`RunPrefill()`/`RunOnce()`) |
 | `espn:summary:{gameID}`| Game summary and key injuries        | 15 min on Thursday, Sunday, or Monday or within 4 h of kickoff; 1 h otherwise                                           | Game status is FINAL                                               |
 | `espn:gamelog:{athleteID}`| Athlete season game log and stats | 1 h on Thursday, Sunday, or Monday; 4 h otherwise                                                                       | Never                                                              |
@@ -166,19 +175,21 @@ disabled, not failed. If one provider fails while the other succeeds, refresh lo
 rows, so `odds:lines` does not enter backoff. If every configured provider fails, the sync returns the joined error and
 the source backs off with cached rows still served.
 
-Props and research data run on demand through `SyncGameProps`, `SyncGameResearch`, and `SyncPlayerResearch`, and bulk
-upcoming-game props also warm during `RunPrefill`. The pick board's "Load them" prompt, or a research partial,
-triggers an on-demand sync with a short 10-second timeout. The board never loops over games on page load: each tap is a
-person asking for that one game.
+Props and research data run on demand through `SyncGameProps`, `SyncPickLines`, `SyncPickGame`, `ForcePickRefresh`,
+`SyncGameResearch`, and `SyncPlayerResearch`, and bulk upcoming-game props also warm during `RunPrefill`. The pick
+board's "Load them" prompt, "Refresh odds" button, pick-time views on `OPEN` slips, or a research partial trigger an
+on-demand sync with a short 10-second timeout. The board never loops over games on page load: each tap or game selection
+targets at most that one game.
 
-- `odds:props:{gameID}`: Stale after 2 hours (15-minute idempotency window in `RunPrefill`), skipped once kickoff has
-  passed. Before matching players, it syncs rosters (`espn:roster:{teamID}`) for both teams. It enforces the Parlay API
-  150-credit floor (`OddsPropsFloor`). In `SyncGameProps`, when The Odds API is configured and Parlay API bought props,
-  it calls `EventProps` at or above 100 credits (`TheOddsAPIEnrichFloor`) and merges via `odds.MergeProps` to populate
-  DraftKings prop deep links; if Parlay API is unconfigured, errors, returns no props, or sits below 150 credits, it
-  falls back to The Odds API when at least 25 credits remain (`TheOddsAPIFallbackFloor`). During `RunPrefill`, bulk
-  props are Parlay-only (skipping The Odds API `EventProps` enrichment/fallback). Prop players are matched against team
-  rosters via `ResolvePlayerMatch`.
+- `odds:props:{gameID}`: Stale after 30 minutes on game days or within 6 hours of kickoff, and 2 hours otherwise
+  (15-minute idempotency window in `RunPrefill`; 2-minute manual cooldown in `ForcePickRefresh`), skipped once kickoff
+  has passed. Before matching players, it syncs rosters (`espn:roster:{teamID}`) for both teams. It enforces the Parlay
+  API 150-credit floor (`OddsPropsFloor`). In `SyncGameProps`, `SyncPickGame`, and `ForcePickRefresh`, when The Odds API
+  is configured and Parlay API bought props, it calls `EventProps` at or above 100 credits (`TheOddsAPIEnrichFloor`)
+  and merges via `odds.MergeProps` to populate DraftKings prop deep links; if Parlay API is unconfigured, errors,
+  returns no props, or sits below 150 credits, it falls back to The Odds API when at least 25 credits remain
+  (`TheOddsAPIFallbackFloor`). During `RunPrefill`, bulk props are Parlay-only (skipping The Odds API `EventProps`
+  enrichment/fallback). Prop players are matched against team rosters via `ResolvePlayerMatch`.
 - `espn:roster:{teamID}`: Stale after 2 hours on game days (Thursday, Sunday, Monday) and 6 hours otherwise. Upserts
   team roster players into `roster_players` with normalized names. Promoted into `Kick()`, `RunPrefill()`, and
   `RunOnce()` (deduped per week team for non-`FINAL` games).
