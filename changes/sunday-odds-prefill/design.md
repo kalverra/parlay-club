@@ -205,7 +205,7 @@ invariants)
       `weather`, `nfelo`, `gamelog`), promote `summary` and unique week-team `roster` syncs into `Kick()`, and split
       `Kick` from `RunOnce` so `Kick` omits `odds:lines` in `internal/refresh` (updating
       `TestRefreshArchivesEveryIngestCall` and adding unit/integration tests)
-- [ ] Add optional `PrefillToken` (`PREFILL_TOKEN`) to `internal/config` and mount `POST /internal/prefill` outside
+- [x] Add optional `PrefillToken` (`PREFILL_TOKEN`) to `internal/config` and mount `POST /internal/prefill` outside
       cookie/CSRF middleware in `cmd/server` with constant-time bearer auth, synchronous execution, and handler/config
       tests
 - [ ] Docs: amend the lazy-only sync guardrail in `AGENTS.md` and update `docs/concepts/data-refresh.md`,

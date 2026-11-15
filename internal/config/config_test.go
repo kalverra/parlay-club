@@ -35,6 +35,7 @@ func TestLoadDevDefaults(t *testing.T) {
 	assert.Empty(t, cfg.TheOddsAPIKey)
 	assert.Empty(t, cfg.GitHubToken)
 	assert.Equal(t, "kalverra/parlay-club", cfg.GitHubRepo)
+	assert.Empty(t, cfg.PrefillToken)
 	assert.Equal(t, zerolog.DebugLevel, cfg.LogLevel)
 }
 
@@ -62,6 +63,7 @@ func TestLoadOverridesEveryValue(t *testing.T) {
 		"THE_ODDS_API_KEY":     "the-odds-key",
 		"GITHUB_TOKEN":         "  ghp_secret  ",
 		"GITHUB_REPO":          "  other/repo  ",
+		"PREFILL_TOKEN":        "  prefill-secret  ",
 		"LOG_LEVEL":            "warn",
 	}))
 	require.NoError(t, err)
@@ -77,6 +79,7 @@ func TestLoadOverridesEveryValue(t *testing.T) {
 	assert.Equal(t, "the-odds-key", cfg.TheOddsAPIKey)
 	assert.Equal(t, "ghp_secret", cfg.GitHubToken)
 	assert.Equal(t, "other/repo", cfg.GitHubRepo)
+	assert.Equal(t, "prefill-secret", cfg.PrefillToken)
 	assert.Equal(t, zerolog.WarnLevel, cfg.LogLevel)
 }
 
@@ -104,6 +107,7 @@ func TestLoadProdDefaults(t *testing.T) {
 	assert.Empty(t, cfg.TheOddsAPIKey)
 	assert.Empty(t, cfg.GitHubToken)
 	assert.Equal(t, "kalverra/parlay-club", cfg.GitHubRepo)
+	assert.Empty(t, cfg.PrefillToken)
 	assert.Equal(t, zerolog.InfoLevel, cfg.LogLevel)
 }
 
