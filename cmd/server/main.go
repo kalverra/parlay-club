@@ -3,7 +3,9 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -48,6 +50,10 @@ const ingestTimeout = 10 * time.Second
 // healthzPingTimeout bounds a probe's database check, so a busy SQLite cannot
 // hold Cloud Run's probe open.
 const healthzPingTimeout = 2 * time.Second
+
+// prefillTimeout caps one synchronous POST /internal/prefill sweep under Cloud
+// Scheduler's 3-minute default deadline.
+const prefillTimeout = 2 * time.Minute
 
 func main() {
 	if err := run(); err != nil {
@@ -179,6 +185,7 @@ func run() error {
 			web.StaticHandler(),
 			web.ScreenshotHandler(store, logger),
 			newHealthzHandler(database, logger),
+			newPrefillHandler(ctx, cfg.PrefillToken, cfg.Sandbox, refresher, logger),
 			handlers,
 			groupHandlers,
 			scope,
@@ -297,12 +304,13 @@ func newLogger(cfg config.Config, out io.Writer) zerolog.Logger {
 }
 
 // newMux builds the routes. Health, static files, and the sign-in screens sit
-// outside the shell's checks. Everything else needs a signed-in user and an
-// active group, and every non-GET form must come from HTMX or be one of the
-// plain forms. mountExtra adds dev-only routes behind those same checks; it may
-// be nil outside sandbox mode.
+// outside the shell's checks. POST /internal/prefill sits outside cookie/CSRF
+// middleware and uses bearer auth instead. Everything else needs a signed-in
+// user and an active group, and every non-GET form must come from HTMX or be
+// one of the plain forms. mountExtra adds dev-only routes behind those same
+// checks; it may be nil outside sandbox mode.
 func newMux(
-	shell, static, screenshots, healthz http.Handler,
+	shell, static, screenshots, healthz, prefill http.Handler,
 	handlers *auth.Handlers,
 	groupHandlers *groups.Handlers,
 	scope func(http.Handler) http.Handler,
@@ -326,7 +334,80 @@ func newMux(
 	}
 	mux.Handle("/", handlers.RequireUser(scope(kickOnPage(kick)(app))))
 
-	return handlers.CSRF(mux)
+	csrfProtected := handlers.CSRF(mux)
+	if prefill == nil {
+		return csrfProtected
+	}
+	outer := http.NewServeMux()
+	outer.Handle("POST /internal/prefill", prefill)
+	outer.Handle("/", csrfProtected)
+	return outer
+}
+
+type prefillRunner interface {
+	RunPrefill(ctx context.Context) (refresh.PrefillReport, error)
+}
+
+// newPrefillHandler serves POST /internal/prefill synchronously with fail-closed
+// constant-time bearer auth.
+func newPrefillHandler(
+	stopCtx context.Context,
+	token string,
+	sandbox bool,
+	runner prefillRunner,
+	logger zerolog.Logger,
+) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if token == "" {
+			http.NotFound(w, r)
+			return
+		}
+		if !validBearerToken(r.Header.Get("Authorization"), token) {
+			w.Header().Set("WWW-Authenticate", "Bearer")
+			http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+			return
+		}
+		if sandbox || runner == nil {
+			http.Error(w, "prefill is disabled in sandbox mode", http.StatusServiceUnavailable)
+			return
+		}
+
+		prefillCtx, cancel := context.WithTimeout(r.Context(), prefillTimeout)
+		defer cancel()
+		if stopCtx != nil {
+			unregister := context.AfterFunc(stopCtx, cancel)
+			defer unregister()
+		}
+
+		report, err := runner.RunPrefill(prefillCtx)
+		if err != nil {
+			logger.Error().Err(err).Msg("prefill: run")
+			writeJSON(w, http.StatusInternalServerError, map[string]any{
+				"error":  err.Error(),
+				"report": report,
+			})
+			return
+		}
+		writeJSON(w, http.StatusOK, report)
+	})
+}
+
+func validBearerToken(header, want string) bool {
+	if want == "" {
+		return false
+	}
+	const prefix = "Bearer "
+	if len(header) <= len(prefix) || !strings.EqualFold(header[:len(prefix)], prefix) {
+		return false
+	}
+	got := header[len(prefix):]
+	return subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1
+}
+
+func writeJSON(w http.ResponseWriter, status int, payload any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(payload)
 }
 
 // kickOnPage starts a refresh pass for full-page GETs. HTMX partials and SSE
