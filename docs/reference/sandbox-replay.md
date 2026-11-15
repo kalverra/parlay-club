@@ -3,16 +3,14 @@ id: sandbox-replay
 title: Sandbox replay
 type: reference
 summary: The fail-closed HTTP transport and named week 9 response registry behind the local Sunday sandbox, the requests they answer or leave as labeled empty fallbacks, which fixtures are real captures versus derived snapshots, and how startup, reset, stages, seeded people, and scripted grades replay them.
-tags: [sandbox, replay, fixtures, fallbacks, testing, espn, weather, parlay-api, nfelo, provenance, offline, startup, clock, reset, seeding, personas, stages, grading]
-sources: [internal/sandbox/registry.go, internal/sandbox/transport.go, internal/sandbox/scenario.go, internal/sandbox/state.go, internal/sandbox/reset.go, internal/sandbox/seed.go, internal/sandbox/plan.go, internal/sandbox/sandbox_test.go, internal/sandbox/state_test.go, cmd/server/sandbox.go, cmd/server/main.go, internal/config/config.go, internal/ingest/espn/testdata/README.md, internal/ingest/odds/testdata/README.md, internal/ingest/weather/testdata/README.md, internal/ingest/nfelo/testdata/README.md]
-last_verified: 2026-11-11
+tags: [sandbox, replay, fixtures, fallbacks, testing, espn, weather, parlay-api, nfelo, nflverse, provenance, offline, startup, clock, reset, seeding, personas, stages, grading]
 ---
 
 # Sandbox replay
 
-`internal/sandbox` replays saved provider responses through the ordinary ESPN, Open-Meteo, Parlay API, and nfelo
-clients. It has two parts: an `http.RoundTripper` that answers only registered requests, and a registry that preloads
-the week 9 response files.
+`internal/sandbox` replays saved provider responses through the ordinary ESPN, Open-Meteo, Parlay API, nfelo, and
+nflverse clients. It has two parts: an `http.RoundTripper` that answers only registered requests, and a registry that
+preloads the week 9 response files.
 
 ## Fail-closed transport
 
@@ -38,15 +36,15 @@ the supporting lines, projections, props, and forecasts that are due at its cloc
 ## Server startup
 
 `SUNDAY_SANDBOX=1` makes `cmd/server` build `sandbox.Week9` from the checkout root before it mounts any route. One
-`http.Client` with the replay transport becomes the transport for the ordinary ESPN, weather, Parlay API, and nfelo
-clients. The Parlay API client gets a synthetic key and no fallback provider, so a real key from `.env` is never passed.
-Sandbox mode also skips Google provider construction and forces the dev sign-in form.
+`http.Client` with the replay transport becomes the transport for the ordinary ESPN, weather, Parlay API, nfelo, and
+nflverse clients. The Parlay API client gets a synthetic key and no fallback provider, so a real key from `.env` is never
+passed. Sandbox mode also skips Google provider construction and forces the dev sign-in form.
 
 A fresh `./data/sunday-sandbox.db` runs `refresh.Service.RunOnce` before the server listens: the scoreboard first, then
-the weather, lines, and projections sources, all synchronously. Startup then writes a `morning` row with the scenario
-clock to the sandbox-only `sandbox_state` table. A later boot reads that row, restores the stage and clock, and does not
-rebuild. The schema migrations stay untouched and ordinary dev keeps `./data/parlay.db`; sandbox mode ignores `DB_PATH`.
-See [Persistence](../concepts/persistence.md).
+the weather, lines, projections, and nflverse sources, all synchronously. Startup then writes a `morning` row with the
+scenario clock to the sandbox-only `sandbox_state` table. A later boot reads that row, restores the stage and clock, and
+does not rebuild. The schema migrations stay untouched and ordinary dev keeps `./data/parlay.db`; sandbox mode ignores
+`DB_PATH`. See [Persistence](../concepts/persistence.md).
 
 The sandbox scenario clock is `2026-11-08T13:00:00Z` on a first boot: the week 9 Sunday morning. Refresh, slips, and the
 web handlers share it; auth cookies and SSE timers stay on real time. See [Data refresh](../concepts/data-refresh.md). A
@@ -85,8 +83,8 @@ One reset:
 
 1. sets the scenario to the `morning` stage and saves that stage and clock;
 2. clears every disposable table (`api_responses`, `api_bodies`, activity, wagers, legs, slip members, slips, player
-   research, player matches, nfelo games, odds, games, weeks, group members, groups, users, and `sync_state`) in one
-   transaction;
+   research, player matches, `nflverse_player_weeks`, `nflverse_team_weeks`, `nflverse_player_ids`, nfelo games, odds,
+   games, weeks, group members, groups, users, and `sync_state`) in one transaction;
 3. clears the refresh service's in-memory failure backoff and runs the real morning ingest synchronously;
 4. signs in three fixed `.test` personas through `auth.SignIn`, creates one shared group, and adds the other two through
    the normal invite join;
@@ -125,6 +123,10 @@ replay at that stage's clock.
 | `parlay-week-9-lines` | `GET parlay-api.com/.../odds?regions=us&markets=h2h,spreads,totals...` | `internal/ingest/odds/testdata/odds_nfl.json` | Captured from The Odds API 2026-11-07; same shape. |
 | `parlay-week-9-featured-props` | `GET parlay-api.com/.../props?eventId=dc56d980...&markets=...` | `internal/ingest/odds/testdata/props_sample.json` | **Derived.** Hand-built Parlay API props shape, not a live capture. |
 | `nfelo-week-9-projections` | `GET raw.githubusercontent.com/.../historic_projected_spreads.csv` | `internal/ingest/nfelo/testdata/historic_projected_spreads.csv` | Captured 2026-11-09, unedited. |
+| `nflverse-players` | `GET github.com/.../players/players.csv` | `internal/ingest/nflverse/testdata/players.csv` | Captured 2026-11-15, trimmed to week 9 players plus edge-case rows. |
+| `nflverse-week-9-team-stats` | `GET github.com/.../stats_team/stats_team_week_2026.csv` | `internal/ingest/nflverse/testdata/stats_team_week_2026.csv` | Captured 2026-11-15, unedited. |
+| `nflverse-week-9-player-stats` | `GET github.com/.../stats_player/stats_player_week_2026.csv` | `internal/ingest/nflverse/testdata/stats_player_week_2026.csv` | Captured 2026-11-15, trimmed to week 9 rows. |
+| `nflverse-week-9-snap-counts` | `GET github.com/.../snap_counts/snap_counts_2026.csv` | `internal/ingest/nflverse/testdata/snap_counts_2026.csv` | Captured 2026-11-15, trimmed to week 9 rows. |
 | `espn-featured-home-roster` | `GET site.api.espn.com/.../teams/1/roster` | `internal/ingest/espn/testdata/roster_falcons.json` | Captured 2026-11-11. Read before the props sync matches player names. |
 | `espn-featured-away-roster` | `GET site.api.espn.com/.../teams/4/roster` | `internal/ingest/espn/testdata/roster_bengals.json` | Captured 2026-11-11. Resolves the featured prop board's players. |
 | `espn-week-9-featured-summary` | `GET site.api.espn.com/.../summary?event=401873038` | `internal/ingest/espn/testdata/summary_week9_featured.json` | Captured 2026-11-11. The research page's injury report. |
@@ -144,8 +146,9 @@ replay at that stage's clock.
 | `weather-soldier` | Open-Meteo Soldier Field, `2026-11-09T01:00`–`03:00` | `internal/ingest/weather/testdata/forecast_soldier.json` | **Derived.** |
 
 The four indoor week 9 venues need no forecast. `forecast_highmark.json` remains a weather-client fixture, but the week
-9 sandbox does not register it because Buffalo plays at U.S. Bank Stadium, an indoor venue. The registry holds 88
-fixtures: the 22 morning responses plus a 22-response set for each of the three later stages.
+9 sandbox does not register it because Buffalo plays at U.S. Bank Stadium, an indoor venue. The registry holds 104
+fixtures: the 26 morning responses plus a 26-response set for each of the three later stages (61 captured and 43
+derived).
 
 The featured game is the one game whose whole card and research surface is captured. Opening its props syncs both
 rosters, so its prop board resolves real players instead of showing an empty state, and the research page and player
@@ -208,6 +211,7 @@ normal event, line, and lazy prop paths enforce their floors instead of silently
 - Parlay API's event list matches all 14 games and the 3-credit line board parses every market with its saved credits;
 - every outdoor kickoff resolves a three-hour forecast, including the captured Lumen window and a derived one;
 - nfelo returns a week 9 projection for every slate game;
+- nflverse replays the 2026 player crosswalk, team stats, player stats, and snap counts;
 - the featured prop board parses through Parlay API's flat `/props` shape;
 - the featured game's rosters parse, its summary yields key-position injuries, and its four prop-board players have game
   logs with games played;

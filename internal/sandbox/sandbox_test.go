@@ -29,7 +29,7 @@ func TestWeek9RegistryPreloadsEveryResponse(t *testing.T) {
 	t.Parallel()
 
 	fixtures := week9Registry(t).Fixtures()
-	require.Len(t, fixtures, 88, "the morning set plus a full response set for each later stage")
+	require.Len(t, fixtures, 104, "the morning set plus a full response set for each later stage")
 
 	names := make(map[string]bool, len(fixtures))
 	byStage := make(map[sandbox.Stage][]sandbox.Fixture, len(sandbox.Stages()))
@@ -52,11 +52,15 @@ func TestWeek9RegistryPreloadsEveryResponse(t *testing.T) {
 		}
 	}
 
-	assert.Equal(t, 45, captured,
-		"morning captures plus the reused events, lines, projections, Lumen forecast, and research in each stage")
+	assert.Equal(
+		t,
+		61,
+		captured,
+		"morning captures plus the reused events, lines, projections, nflverse CSVs, Lumen forecast, and research in each stage",
+	)
 	assert.Equal(t, 43, derived, "scripted scoreboards, the hand-built props board, and derived forecasts")
 	for _, stage := range sandbox.Stages() {
-		assert.Len(t, byStage[stage], 22, "stage %s has a complete response set", stage)
+		assert.Len(t, byStage[stage], 26, "stage %s has a complete response set", stage)
 		scoreboards := 0
 		for _, fixture := range byStage[stage] {
 			assert.Equal(t, stage, fixture.Stage, fixture.Name)

@@ -23,6 +23,7 @@ import (
 	"github.com/kalverra/parlay-club/internal/ingest/archive"
 	"github.com/kalverra/parlay-club/internal/ingest/espn"
 	"github.com/kalverra/parlay-club/internal/ingest/nfelo"
+	"github.com/kalverra/parlay-club/internal/ingest/nflverse"
 	"github.com/kalverra/parlay-club/internal/ingest/odds"
 	"github.com/kalverra/parlay-club/internal/ingest/weather"
 	"github.com/kalverra/parlay-club/internal/slips"
@@ -53,6 +54,8 @@ const (
 	gameLogSourcePrefix = "espn:gamelog:"
 	// summarySourcePrefix keys per-game ESPN summaries and injury lists.
 	summarySourcePrefix = "espn:summary:"
+	// nflverseSourcePrefix keys per-season nflverse efficiency and usage syncs.
+	nflverseSourcePrefix = "nflverse:season:"
 )
 
 // WeatherSource returns the sync_state key for one game's forecast.
@@ -78,6 +81,11 @@ func GameLogSource(athleteID string) string {
 // SummarySource returns the sync_state key for one game's summary.
 func SummarySource(gameID string) string {
 	return summarySourcePrefix + gameID
+}
+
+// NFLverseSource returns the sync_state key for one season's nflverse sync.
+func NFLverseSource(season int) string {
+	return fmt.Sprintf("%s%d", nflverseSourcePrefix, season)
 }
 
 // Staleness windows and the failure backoff. The odds windows match the credit
@@ -110,6 +118,9 @@ const (
 	summaryNearKickoff      = 4 * time.Hour
 	nfeloGameDayAge         = time.Hour
 	nfeloIdleAge            = 4 * time.Hour
+	nflverseActiveAge       = 6 * time.Hour
+	nflverseIdleAge         = 24 * time.Hour
+	nflversePostFinalWindow = 12 * time.Hour
 	prefillIdempotencyAge   = 15 * time.Minute
 	prefillConcurrency      = 4
 	prefillKickTimeout      = 2 * time.Minute
@@ -189,6 +200,14 @@ type ProjectionsClient interface {
 	Projections(ctx context.Context) ([]nfelo.Projection, error)
 }
 
+// NFLverseClient is the slice of *nflverse.Client refresh needs.
+type NFLverseClient interface {
+	Players(ctx context.Context) ([]nflverse.Player, error)
+	TeamStats(ctx context.Context, season int) ([]nflverse.TeamWeek, error)
+	PlayerStats(ctx context.Context, season int) ([]nflverse.PlayerWeek, error)
+	SnapCounts(ctx context.Context, season int) ([]nflverse.SnapCount, error)
+}
+
 // Publisher receives live change signals. *live.Hub satisfies it.
 type Publisher interface {
 	Publish(topic string)
@@ -206,6 +225,7 @@ type Deps struct {
 	Props         PropsClient
 	FallbackProps FallbackPropsClient
 	Projections   ProjectionsClient
+	NFLverse      NFLverseClient
 	Slips         SlipGrader
 	Publisher     Publisher
 	Now           Clock
@@ -225,6 +245,7 @@ type Service struct {
 	props         PropsClient
 	fallbackProps FallbackPropsClient
 	projections   ProjectionsClient
+	nflverse      NFLverseClient
 	slips         SlipGrader
 	publisher     Publisher
 	now           Clock
@@ -303,6 +324,7 @@ func New(deps Deps) *Service {
 		props:         props,
 		fallbackProps: fallbackProps,
 		projections:   deps.Projections,
+		nflverse:      deps.NFLverse,
 		slips:         slipsSvc,
 		publisher:     deps.Publisher,
 		now:           now,
@@ -693,6 +715,9 @@ func (s *Service) freeSourcesFor(
 	}
 	if s.projections != nil && week.ID != 0 {
 		sources = append(sources, s.nfeloSource(week, games, now))
+	}
+	if s.nflverse != nil && week.ID != 0 {
+		sources = append(sources, s.nflverseSource(week, games, now))
 	}
 	if week.ID != 0 {
 		sources = append(sources, s.gradeSource(now))

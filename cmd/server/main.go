@@ -29,6 +29,7 @@ import (
 	"github.com/kalverra/parlay-club/internal/ingest/archive"
 	"github.com/kalverra/parlay-club/internal/ingest/espn"
 	"github.com/kalverra/parlay-club/internal/ingest/nfelo"
+	"github.com/kalverra/parlay-club/internal/ingest/nflverse"
 	"github.com/kalverra/parlay-club/internal/ingest/odds"
 	"github.com/kalverra/parlay-club/internal/ingest/weather"
 	"github.com/kalverra/parlay-club/internal/live"
@@ -143,6 +144,7 @@ func run() error {
 			Lines:         odds.NewClient("", cfg.OddsAPIKey, ingestClient),
 			FallbackLines: odds.NewClient(odds.TheOddsAPIBaseURL, cfg.TheOddsAPIKey, ingestClient),
 			Projections:   nfelo.NewClient("", ingestClient),
+			NFLverse:      nflverse.NewClient("", ingestClient),
 			Publisher:     hub,
 			Logger:        logger,
 		})

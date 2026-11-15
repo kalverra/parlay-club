@@ -157,8 +157,8 @@ Effort: medium (coordinates across ingest, SQLite migrations, pure analyzer scor
 ### Phase 1: Ingest, SQLite storage, refresh wiring, and sandbox fixtures
 
 - [x] Build `internal/ingest/nflverse` CSV clients (`Players`, `TeamStats`, `PlayerStats`, `SnapCounts`) with ESPN team-code mapping and header-based parsing, plus tests against real saved CSV fixtures.
-- [ ] Add `0012_nflverse_signals.sql`, `internal/db/nflverse.go` store queries/upserts, `internal/refresh` weekly sync source (`nflverse:season:{year}`), `internal/sandbox/registry.go` + `reset.go` + `migrate_test.go` wiring, and end-to-end refresh tests.
-- [ ] Docs: update `docs/reference/data-sources.md`, `docs/reference/schema.md`, `docs/concepts/data-refresh.md`, and `docs/reference/sandbox-replay.md` for `nflverse` sources and tables.
+- [x] Add `0012_nflverse_signals.sql`, `internal/db/nflverse.go` store queries/upserts, `internal/refresh` weekly sync source (`nflverse:season:{year}`), `internal/sandbox/registry.go` + `reset.go` + `migrate_test.go` wiring, and end-to-end refresh tests.
+- [x] Docs: update `docs/reference/data-sources.md`, `docs/reference/schema.md`, `docs/concepts/data-refresh.md`, and `docs/reference/sandbox-replay.md` for `nflverse` sources and tables.
 
 ### Phase 2: Analyzer `nflverse` rules, leg/parlay grades, and in-app docs page
 
