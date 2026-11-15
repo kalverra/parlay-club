@@ -7,6 +7,7 @@ import (
 
 	"github.com/kalverra/parlay-club/internal/db"
 	"github.com/kalverra/parlay-club/internal/ingest/nfelo"
+	"github.com/kalverra/parlay-club/internal/ingest/nflverse"
 )
 
 // nfeloSource syncs the latest regular-season week's model projections.
@@ -31,7 +32,7 @@ func (s *Service) syncNfelo(
 	games []db.Game,
 	now time.Time,
 ) (bool, error) {
-	if week.SeasonType != regularSeasonType || len(games) == 0 || allKickedOff(games, now) {
+	if week.SeasonType != nflverse.SeasonTypeRegular || len(games) == 0 || allKickedOff(games, now) {
 		return false, nil
 	}
 

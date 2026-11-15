@@ -694,17 +694,13 @@ func inTopRank(rank, maxRank int) bool {
 	return rank >= 1 && rank <= maxRank
 }
 
-// matchupRank returns the opposing defense's EPA-allowed rank and split name
-// ("pass" or "rush") for a yardage/TD over leg.
-func matchupRank(leg Leg, game Game) (split string, rank int, ok bool) {
-	if leg.Side != sideOver {
-		return "", 0, false
-	}
-	oppEPA := game.OpponentEPA(leg.Team)
+// MatchupDefenseRank returns the opposing defense's EPA-allowed split ("pass"
+// or "rush") and league rank (1..32) for a yardage, TD, or reception market.
+func MatchupDefenseRank(market string, oppEPA *TeamDefenseProfile) (split string, rank int, ok bool) {
 	if oppEPA == nil {
 		return "", 0, false
 	}
-	switch leg.Market {
+	switch market {
 	case marketPassYds, marketPassTDs, marketRecYds, marketReceptions:
 		if oppEPA.DefPassEPAAllowedRank <= 0 {
 			return "", 0, false
@@ -718,6 +714,15 @@ func matchupRank(leg Leg, game Game) (split string, rank int, ok bool) {
 	default:
 		return "", 0, false
 	}
+}
+
+// matchupRank returns the opposing defense's EPA-allowed rank and split name
+// ("pass" or "rush") for a yardage/TD over leg.
+func matchupRank(leg Leg, game Game) (split string, rank int, ok bool) {
+	if leg.Side != sideOver {
+		return "", 0, false
+	}
+	return MatchupDefenseRank(leg.Market, game.OpponentEPA(leg.Team))
 }
 
 func toughMatchupHit(leg Leg, game Game) (split string, rank int, hit bool) {

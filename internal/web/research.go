@@ -594,19 +594,24 @@ func (h *researchHandlers) populateNFLverseResearch(
 	if oppProf == nil {
 		return
 	}
-	isRush := activeMarket == "RUSH_YDS" || activeMarket == "RUSH_ATT" ||
-		(activeMarket == "" && strings.EqualFold(view.Position, "RB"))
-	if isRush {
-		if oppProf.DefRushEPAAllowedRank > 0 {
-			view.OppDefLabel = "Opp Rush Def"
-			view.OppDefRank = fmt.Sprintf("#%d vs %s", oppProf.DefRushEPAAllowedRank, opp)
+	market := activeMarket
+	if market == "" {
+		if strings.EqualFold(view.Position, "RB") {
+			market = "RUSH_YDS"
+		} else {
+			market = "PASS_YDS"
 		}
+	}
+	split, rank, ok := analyzer.MatchupDefenseRank(market, oppProf)
+	if !ok {
 		return
 	}
-	if oppProf.DefPassEPAAllowedRank > 0 {
+	if split == "rush" {
+		view.OppDefLabel = "Opp Rush Def"
+	} else {
 		view.OppDefLabel = "Opp Pass Def"
-		view.OppDefRank = fmt.Sprintf("#%d vs %s", oppProf.DefPassEPAAllowedRank, opp)
 	}
+	view.OppDefRank = fmt.Sprintf("#%d vs %s", rank, opp)
 }
 
 func (h *researchHandlers) resolveMarketAndLine(

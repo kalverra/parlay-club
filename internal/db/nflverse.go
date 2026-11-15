@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -206,12 +207,34 @@ func (s *Store) UpsertNFLverseTeamWeeks(ctx context.Context, rows []NFLverseTeam
 // NFLverseTeamWeeksForSeason returns all stored team-week rows for one season
 // and season type, ordered by week ascending then team.
 func (s *Store) NFLverseTeamWeeksForSeason(ctx context.Context, season, seasonType int) ([]NFLverseTeamWeek, error) {
+	return s.NFLverseTeamWeeksForSeasonTypes(ctx, season, seasonType)
+}
+
+// NFLverseTeamWeeksForSeasonTypes returns all stored team-week rows for one
+// season across the given season types, ordered by season type ascending, week
+// ascending, then team.
+func (s *Store) NFLverseTeamWeeksForSeasonTypes(
+	ctx context.Context,
+	season int,
+	seasonTypes ...int,
+) ([]NFLverseTeamWeek, error) {
+	if len(seasonTypes) == 0 {
+		return nil, nil
+	}
+	placeholders := strings.Repeat("?,", len(seasonTypes))
+	placeholders = placeholders[:len(placeholders)-1]
+	args := make([]any, 0, 1+len(seasonTypes))
+	args = append(args, season)
+	for _, st := range seasonTypes {
+		args = append(args, st)
+	}
+
 	rows, err := s.conn().QueryContext(ctx, "SELECT"+nflverseTeamWeekColumns+`
 		FROM nflverse_team_weeks
-		WHERE season = ? AND season_type = ?
-		ORDER BY week_num ASC, team ASC`, season, seasonType)
+		WHERE season = ? AND season_type IN (`+placeholders+`)
+		ORDER BY season_type ASC, week_num ASC, team ASC`, args...)
 	if err != nil {
-		return nil, fmt.Errorf("nflverse team weeks %d/%d: %w", season, seasonType, err)
+		return nil, fmt.Errorf("nflverse team weeks %d/%v: %w", season, seasonTypes, err)
 	}
 	defer func() { _ = rows.Close() }()
 
@@ -244,7 +267,7 @@ func (s *Store) NFLverseTeamWeeksForSeason(ctx context.Context, season, seasonTy
 		out = append(out, item)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("nflverse team weeks %d/%d: %w", season, seasonType, err)
+		return nil, fmt.Errorf("nflverse team weeks %d/%v: %w", season, seasonTypes, err)
 	}
 	return out, nil
 }
@@ -339,15 +362,94 @@ func (s *Store) NFLversePlayerWeeksForPlayer(
 	espnID string,
 	season, seasonType int,
 ) ([]NFLversePlayerWeek, error) {
+	return s.NFLversePlayerWeeksForPlayerTypes(ctx, espnID, season, seasonType)
+}
+
+// NFLversePlayerWeeksForPlayerTypes returns one player's weekly nflverse rows
+// for a season across the given season types, ordered most recent season type
+// and week first.
+func (s *Store) NFLversePlayerWeeksForPlayerTypes(
+	ctx context.Context,
+	espnID string,
+	season int,
+	seasonTypes ...int,
+) ([]NFLversePlayerWeek, error) {
+	if len(seasonTypes) == 0 {
+		return nil, nil
+	}
+	placeholders := strings.Repeat("?,", len(seasonTypes))
+	placeholders = placeholders[:len(placeholders)-1]
+	args := make([]any, 0, 2+len(seasonTypes))
+	args = append(args, espnID, season)
+	for _, st := range seasonTypes {
+		args = append(args, st)
+	}
+
 	rows, err := s.conn().QueryContext(ctx, "SELECT"+nflversePlayerWeekColumns+`
 		FROM nflverse_player_weeks
-		WHERE espn_id = ? AND season = ? AND season_type = ?
-		ORDER BY week_num DESC`, espnID, season, seasonType)
+		WHERE espn_id = ? AND season = ? AND season_type IN (`+placeholders+`)
+		ORDER BY season_type DESC, week_num DESC`, args...)
 	if err != nil {
-		return nil, fmt.Errorf("nflverse player weeks %s/%d/%d: %w", espnID, season, seasonType, err)
+		return nil, fmt.Errorf("nflverse player weeks %s/%d/%v: %w", espnID, season, seasonTypes, err)
 	}
 	defer func() { _ = rows.Close() }()
 	return scanNFLversePlayerWeeks(rows)
+}
+
+// NFLversePlayerWeeksForPlayers returns weekly nflverse rows for multiple
+// ESPN athlete IDs in a season and season type, ordered most recent week first
+// per player.
+func (s *Store) NFLversePlayerWeeksForPlayers(
+	ctx context.Context,
+	espnIDs []string,
+	season, seasonType int,
+) (map[string][]NFLversePlayerWeek, error) {
+	return s.NFLversePlayerWeeksForPlayersTypes(ctx, espnIDs, season, seasonType)
+}
+
+// NFLversePlayerWeeksForPlayersTypes returns weekly nflverse rows for multiple
+// ESPN athlete IDs in a season across the given season types, ordered most
+// recent season type and week first per player.
+func (s *Store) NFLversePlayerWeeksForPlayersTypes(
+	ctx context.Context,
+	espnIDs []string,
+	season int,
+	seasonTypes ...int,
+) (map[string][]NFLversePlayerWeek, error) {
+	if len(espnIDs) == 0 || len(seasonTypes) == 0 {
+		return map[string][]NFLversePlayerWeek{}, nil
+	}
+	idPlaceholders := strings.Repeat("?,", len(espnIDs))
+	idPlaceholders = idPlaceholders[:len(idPlaceholders)-1]
+	typePlaceholders := strings.Repeat("?,", len(seasonTypes))
+	typePlaceholders = typePlaceholders[:len(typePlaceholders)-1]
+	args := make([]any, 0, len(espnIDs)+1+len(seasonTypes))
+	for _, id := range espnIDs {
+		args = append(args, id)
+	}
+	args = append(args, season)
+	for _, st := range seasonTypes {
+		args = append(args, st)
+	}
+
+	rows, err := s.conn().QueryContext(ctx, "SELECT"+nflversePlayerWeekColumns+`
+		FROM nflverse_player_weeks
+		WHERE espn_id IN (`+idPlaceholders+`) AND season = ? AND season_type IN (`+typePlaceholders+`)
+		ORDER BY season_type DESC, week_num DESC`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("nflverse player weeks batch %d/%v: %w", season, seasonTypes, err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	items, err := scanNFLversePlayerWeeks(rows)
+	if err != nil {
+		return nil, err
+	}
+	grouped := make(map[string][]NFLversePlayerWeek, len(espnIDs))
+	for _, item := range items {
+		grouped[item.ESPNID] = append(grouped[item.ESPNID], item)
+	}
+	return grouped, nil
 }
 
 // NFLversePlayerWeeksForSeason returns all stored player-week rows for a

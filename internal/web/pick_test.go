@@ -2278,4 +2278,47 @@ func TestPickBoardWiresSignalsBadgesSortAndHTMXSwaps(t *testing.T) {
 		assert.NotContains(t, body, "Smash matchup")
 		assert.NotContains(t, body, "Role bump")
 	})
+
+	t.Run("friend leg on open slip triggers Fits slip", func(t *testing.T) {
+		t.Parallel()
+		fixture := newSlipFixture(t, 4)
+		now := gameKickoff().Add(-2 * time.Hour)
+		game := seedBoardSignals(t, fixture, now)
+		handler := pickHandlerWithRefresher(
+			t, fixture, fixture.user, &pickTestRefresher{}, func() time.Time { return now },
+		)
+
+		friend, err := fixture.store.CreateUserWithIdentity(
+			t.Context(), "Friend", "friend@example.com", "google-friend", "",
+		)
+		require.NoError(t, err)
+		_, err = fixture.store.CreateLeg(t.Context(), db.Leg{
+			SlipID:     fixture.slip.ID,
+			UserID:     friend.ID,
+			GameID:     new(game.ID),
+			MarketType: "PASS_YDS",
+			Team:       new("BUF"),
+			PlayerName: new("Josh Allen"),
+			PlayerID:   new("qb-allen"),
+			Side:       new("OVER"),
+			Line:       new(255.5),
+			Odds:       -110,
+			Selection:  "Josh Allen Over 255.5 pass yds",
+		})
+		require.NoError(t, err)
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequestWithContext(
+			t.Context(),
+			http.MethodGet,
+			fmt.Sprintf("/slips/%d/pick/detail?game=%s&cat=receiving&sort=matchup", fixture.slip.ID, game.ID),
+			nil,
+		)
+		req.Header.Set("Hx-Request", "true")
+		handler.ServeHTTP(rec, req)
+		require.Equal(t, http.StatusOK, rec.Code)
+
+		body := html.UnescapeString(rec.Body.String())
+		assert.Contains(t, body, `Fits slip`)
+	})
 }

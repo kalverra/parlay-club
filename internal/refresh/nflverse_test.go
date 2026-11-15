@@ -250,8 +250,8 @@ func TestNFLverseStale(t *testing.T) {
 	// Sunday 2026-11-08 13:00 UTC -> active day (6h window).
 	sunday := time.Date(2026, time.November, 8, 18, 0, 0, 0, time.UTC)
 
-	regWeek := db.Week{ID: 1, Season: 2026, SeasonType: regularSeasonType, WeekNum: 9}
-	postWeek := db.Week{ID: 2, Season: 2026, SeasonType: postseasonSeasonType, WeekNum: 1}
+	regWeek := db.Week{ID: 1, Season: 2026, SeasonType: nflverse.SeasonTypeRegular, WeekNum: 9}
+	postWeek := db.Week{ID: 2, Season: 2026, SeasonType: nflverse.SeasonTypePostseason, WeekNum: 1}
 	preWeek := db.Week{ID: 3, Season: 2026, SeasonType: 1, WeekNum: 1}
 
 	scheduled := []db.Game{{ID: "g1", Kickoff: sunday, Status: db.GameScheduled}}
