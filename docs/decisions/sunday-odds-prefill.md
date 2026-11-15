@@ -1,8 +1,8 @@
 ---
-slug: sunday-odds-prefill
-status: implementing
-created: "2026-11-15"
-effort: medium
+id: adr-sunday-odds-prefill
+title: Sunday morning odds pre-fill and smart refresh
+type: decision
+summary: Add an authenticated Sunday 9:30 AM Eastern pre-fill trigger that warms the slate, game lines, and Parlay API bulk props for all upcoming games, sync free news and roster sources much more often, and move post-prefill odds and prop refreshes strictly to when players are selecting a line on an open slip.
 ---
 
 # Sunday morning odds pre-fill and smart refresh
@@ -93,3 +93,43 @@ time, and Cloud Run stays scaled to zero.
 The medium effort rating fits because the change spans scheduled deploy wiring and request authentication, refresh
 orchestration across two differently priced odds providers, pick-time freshness rules, and pick-board refresh triggers
 while preserving SQLite's single-writer and credit-floor invariants.
+
+## Consequences
+
+- **What got easier:** Sunday slate, lines, and Parlay bulk props can be warmed in one sweep, free sources (injuries,
+  rosters, weather, nfelo, and game logs) refresh on tighter game-day cadences, and post-prefill odds/prop spending
+  happens only during active picking on `OPEN` slips.
+- **What got harder:** Two separate odds refresh paths (`RunPrefill` vs. pick-time `SyncPickLines`/`SyncPickGame`/
+  `ForcePickRefresh`) with distinct staleness and cooldown windows must stay aligned with credit floors and
+  single-flight keys.
+- **What we would revisit:** Relying solely on an external Cloud Scheduler trigger for Sunday pre-fill (subsequently
+  addressed by `first-sunday-visit-prefill`, which triggers `RunPrefill` automatically on the first authenticated Sunday
+  visit).
+
+## Alternatives considered
+
+- **Keeping the 45-minute Sunday page-load `odds:lines` poll in `Kick()`:** Rejected because it spent credits on
+  non-picking screens and locked slips while leaving player props cold.
+- **Bulk-enriching props via The Odds API during Sunday pre-fill:** Rejected because per-market billing (~9
+  credits/game, >100 credits for a full slate) would exhaust the 500/month budget; reserved The Odds API `EventProps`
+  for targeted per-game pick-time enrichment.
+- **In-process Go cron ticker for 9:30 AM ET:** Rejected because Cloud Run scales to zero (`--min-instances 0`)
+  overnight, so an in-process timer would not fire.
+- **GCP OIDC token verification for Cloud Scheduler:** Rejected to avoid extra service-account and cold-start JWKS
+  overhead; chose an optional `PREFILL_TOKEN` bearer secret (`subtle.ConstantTimeCompare`) matching `github-token`.
+- **Returning `202 Accepted` and running `RunPrefill` asynchronously from `POST /internal/prefill`:** Rejected because
+  Cloud Run throttles CPU after the HTTP response finishes; synchronous execution (capped at 2m) keeps CPU allocated and
+  lets Litestream flush.
+
+## Implementation notes
+
+- `RunOnce()` (used by sandbox mode) still runs `freeSourcesFor` and `odds:lines`, keeping sandbox morning bootstrap and
+  stage transitions deterministic while `Kick()` omits `odds:lines`.
+- `syncWeather` gained a nil guard for `s.forecast` to match the other optional source clients.
+- `docs/reference/config.md` still carries retired `last_verified` and `sources` front-matter fields flagged by
+  `good-vibes docs lint`.
+
+## Follow-ups
+
+- Remove retired `last_verified` and `sources` front-matter fields from `docs/reference/config.md` (and any remaining
+  docs flagged by `good-vibes docs lint`).
