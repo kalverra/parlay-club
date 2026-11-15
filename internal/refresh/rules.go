@@ -85,6 +85,55 @@ func oddsAge(now time.Time, games []db.Game) time.Duration {
 	}
 }
 
+// oddsPickLinesStale reports whether the week's lines are stale for a player
+// actively picking on an open slip. It skips a week with no games and a week
+// whose games have all kicked off. Inside the window lines are good for 15
+// minutes on game days (before the last kickoff on that day) or within 2 hours
+// of an upcoming kickoff, and 2 hours otherwise.
+func oddsPickLinesStale(last, now time.Time, games []db.Game) bool {
+	if len(games) == 0 || allKickedOff(games, now) {
+		return false
+	}
+	if last.IsZero() {
+		return true
+	}
+	return !now.Before(last.Add(oddsPickLinesAge(now, games)))
+}
+
+// oddsPickLinesAge returns 15 minutes on game days (before the last kickoff on
+// that day) or within 2 hours of an upcoming kickoff, and 2 hours otherwise.
+func oddsPickLinesAge(now time.Time, games []db.Game) time.Duration {
+	if gameDay(now) {
+		lastOnDay := lastKickoffOn(games, now.In(eastern).Weekday())
+		if !lastOnDay.IsZero() && now.Before(lastOnDay) {
+			return oddsPickLinesGameDayAge
+		}
+	}
+	if withinNextKickoff(games, now, oddsPickLinesLookahead) {
+		return oddsPickLinesGameDayAge
+	}
+	return oddsPickLinesIdleAge
+}
+
+// withinNextKickoff reports whether any upcoming game starts within lookahead.
+func withinNextKickoff(games []db.Game, now time.Time, lookahead time.Duration) bool {
+	for _, game := range games {
+		if now.Before(game.Kickoff) && !now.Before(game.Kickoff.Add(-lookahead)) {
+			return true
+		}
+	}
+	return false
+}
+
+// pickCooldownStale reports whether a manual pick-time refresh is outside its
+// 2-minute cooldown.
+func pickCooldownStale(last, now time.Time) bool {
+	if last.IsZero() {
+		return true
+	}
+	return !now.Before(last.Add(pickRefreshCooldown))
+}
+
 // regularSeasonType is ESPN's season_type for the regular season.
 const regularSeasonType = 2
 
@@ -161,7 +210,8 @@ func knownVenue(game db.Game) bool {
 }
 
 // oddsPropsStale reports whether a game's props are due. It skips a game once
-// it has kicked off. Inside the window props are good for two hours.
+// it has kicked off. Inside the window props are good for 30 minutes on game
+// days or within 6 hours of kickoff, and 2 hours otherwise.
 func oddsPropsStale(last, now time.Time, game db.Game) bool {
 	if !now.Before(game.Kickoff) {
 		return false
@@ -169,7 +219,18 @@ func oddsPropsStale(last, now time.Time, game db.Game) bool {
 	if last.IsZero() {
 		return true
 	}
-	return !now.Before(last.Add(oddsPropsAge))
+	return !now.Before(last.Add(oddsPropsAgeFor(now, game)))
+}
+
+// oddsPropsAgeFor returns the props freshness window for game at now.
+func oddsPropsAgeFor(now time.Time, game db.Game) time.Duration {
+	if gameDay(now) {
+		return oddsPropsGameDayAge
+	}
+	if !game.Kickoff.IsZero() && !now.Before(game.Kickoff.Add(-oddsPropsNearKickoff)) {
+		return oddsPropsGameDayAge
+	}
+	return oddsPropsAge
 }
 
 // rosterStale reports whether a team's roster is due. Rosters are good for 2

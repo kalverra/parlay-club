@@ -81,32 +81,38 @@ func SummarySource(gameID string) string {
 // Staleness windows and the failure backoff. The odds windows match the credit
 // budget in docs/reference/data-sources.md.
 const (
-	scoreboardLiveAge     = 5 * time.Minute
-	scoreboardGameDayAge  = 15 * time.Minute
-	scoreboardIdleAge     = 2 * time.Hour
-	weatherNearAge        = 15 * time.Minute
-	weatherNearLookahead  = 6 * time.Hour
-	weatherAge            = 30 * time.Minute
-	weatherLookahead      = 48 * time.Hour
-	oddsWeekdayAge        = 24 * time.Hour
-	oddsSaturdayAge       = 12 * time.Hour
-	oddsSundayAge         = 45 * time.Minute
-	oddsLateAge           = 3 * time.Hour
-	oddsPropsAge          = 2 * time.Hour
-	rosterGameDayAge      = 2 * time.Hour
-	rosterIdleAge         = 6 * time.Hour
-	gameLogGameDayAge     = time.Hour
-	gameLogIdleAge        = 4 * time.Hour
-	summaryGameDayAge     = 15 * time.Minute
-	summaryIdleAge        = time.Hour
-	summaryNearKickoff    = 4 * time.Hour
-	nfeloGameDayAge       = time.Hour
-	nfeloIdleAge          = 4 * time.Hour
-	prefillIdempotencyAge = 15 * time.Minute
-	prefillConcurrency    = 4
-	failureBackoff        = 5 * time.Minute
-	syncTimeout           = 30 * time.Second
-	requestTimeout        = 10 * time.Second
+	scoreboardLiveAge       = 5 * time.Minute
+	scoreboardGameDayAge    = 15 * time.Minute
+	scoreboardIdleAge       = 2 * time.Hour
+	weatherNearAge          = 15 * time.Minute
+	weatherNearLookahead    = 6 * time.Hour
+	weatherAge              = 30 * time.Minute
+	weatherLookahead        = 48 * time.Hour
+	oddsWeekdayAge          = 24 * time.Hour
+	oddsSaturdayAge         = 12 * time.Hour
+	oddsSundayAge           = 45 * time.Minute
+	oddsLateAge             = 3 * time.Hour
+	oddsPickLinesGameDayAge = 15 * time.Minute
+	oddsPickLinesIdleAge    = 2 * time.Hour
+	oddsPickLinesLookahead  = 2 * time.Hour
+	oddsPropsAge            = 2 * time.Hour
+	oddsPropsGameDayAge     = 30 * time.Minute
+	oddsPropsNearKickoff    = 6 * time.Hour
+	pickRefreshCooldown     = 2 * time.Minute
+	rosterGameDayAge        = 2 * time.Hour
+	rosterIdleAge           = 6 * time.Hour
+	gameLogGameDayAge       = time.Hour
+	gameLogIdleAge          = 4 * time.Hour
+	summaryGameDayAge       = 15 * time.Minute
+	summaryIdleAge          = time.Hour
+	summaryNearKickoff      = 4 * time.Hour
+	nfeloGameDayAge         = time.Hour
+	nfeloIdleAge            = 4 * time.Hour
+	prefillIdempotencyAge   = 15 * time.Minute
+	prefillConcurrency      = 4
+	failureBackoff          = 5 * time.Minute
+	syncTimeout             = 30 * time.Second
+	requestTimeout          = 10 * time.Second
 )
 
 // Credit floors. The odds client uses the free event list first, so refresh
@@ -810,6 +816,119 @@ func (s *Service) SyncPlayerResearch(ctx context.Context, athleteID string) erro
 
 	now := s.now()
 	return s.refreshSync(ctx, s.gameLogSource(athleteID, now), now)
+}
+
+// SyncPickLines refreshes the week's game lines for an open pick screen if
+// stale under pick-time rules (15m on game days or within 2h of kickoff, 2h
+// midweek).
+func (s *Service) SyncPickLines(ctx context.Context, weekID int64) error {
+	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
+	defer cancel()
+
+	return s.syncPickLines(ctx, weekID, s.now(), false)
+}
+
+// SyncPickGame refreshes pick-time lines for the week (if stale) and props for
+// one upcoming game (if stale under 30m/2h rules).
+func (s *Service) SyncPickGame(ctx context.Context, weekID int64, gameID string) error {
+	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
+	defer cancel()
+
+	now := s.now()
+	var errs []error
+	if weekID != 0 {
+		if err := s.syncPickLines(ctx, weekID, now, false); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if gameID != "" {
+		if err := s.syncPickProps(ctx, weekID, gameID, now, false); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// ForcePickRefresh refreshes the week's lines and, when gameID is non-empty,
+// that game's props, subject to a 2-minute cooldown per source so rapid
+// clicks cannot drain credits.
+func (s *Service) ForcePickRefresh(ctx context.Context, weekID int64, gameID string) error {
+	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
+	defer cancel()
+
+	now := s.now()
+	var errs []error
+	if weekID != 0 {
+		if err := s.syncPickLines(ctx, weekID, now, true); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if gameID != "" {
+		if err := s.syncPickProps(ctx, weekID, gameID, now, true); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func (s *Service) syncPickLines(ctx context.Context, weekID int64, now time.Time, force bool) error {
+	if weekID == 0 || (s.lines == nil && s.fallbackLines == nil) {
+		return nil
+	}
+	games, err := s.store.GamesForWeek(ctx, weekID)
+	if err != nil {
+		return fmt.Errorf("week %d games: %w", weekID, err)
+	}
+	if len(games) == 0 || allKickedOff(games, now) {
+		return nil
+	}
+	src := source{
+		key: OddsLinesSource,
+		due: func(_ context.Context, state db.SyncState) (bool, error) {
+			if force {
+				return pickCooldownStale(state.FetchedAt, now), nil
+			}
+			return oddsPickLinesStale(state.FetchedAt, now, games), nil
+		},
+		run: func(ctx context.Context) (bool, error) {
+			return s.syncOdds(ctx, games, now)
+		},
+	}
+	err = s.refreshSync(ctx, src, now)
+	if errors.Is(err, odds.ErrNoAPIKey) {
+		return nil
+	}
+	return err
+}
+
+func (s *Service) syncPickProps(ctx context.Context, weekID int64, gameID string, now time.Time, force bool) error {
+	game, err := s.store.GameByID(ctx, gameID)
+	if err != nil {
+		return fmt.Errorf("game %s: %w", gameID, err)
+	}
+	if weekID != 0 && game.WeekID != weekID {
+		return nil
+	}
+	if !now.Before(game.Kickoff) {
+		return nil
+	}
+	src := source{
+		key: OddsPropsSource(game.ID),
+		due: func(_ context.Context, state db.SyncState) (bool, error) {
+			if force {
+				return pickCooldownStale(state.FetchedAt, now), nil
+			}
+			return oddsPropsStale(state.FetchedAt, now, game), nil
+		},
+		run: func(ctx context.Context) (bool, error) {
+			return s.syncOddsProps(ctx, game, now)
+		},
+	}
+	err = s.refreshSync(ctx, src, now)
+	if errors.Is(err, odds.ErrNoAPIKey) {
+		return nil
+	}
+	return err
 }
 
 // shouldRun reads a source's state and applies its due rule. Credit floors are
