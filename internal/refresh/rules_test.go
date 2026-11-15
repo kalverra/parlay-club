@@ -732,3 +732,158 @@ func TestGameDay(t *testing.T) {
 		})
 	}
 }
+
+func TestSundayPrefillWindow(t *testing.T) {
+	t.Parallel()
+
+	games := slateGames()
+	mondayOnly := []db.Game{
+		{ID: "mon", Kickoff: novemberTime(9, 20, 15)},
+	}
+
+	tests := []struct {
+		name  string
+		games []db.Game
+		now   time.Time
+		want  bool
+	}{
+		{
+			name:  "no games",
+			games: nil,
+			now:   novemberTime(8, 8, 0),
+			want:  false,
+		},
+		{
+			name:  "no sunday games even with monday game",
+			games: mondayOnly,
+			now:   novemberTime(8, 8, 0),
+			want:  false,
+		},
+		{
+			name:  "monday",
+			games: games,
+			now:   novemberTime(9, 8, 0),
+			want:  false,
+		},
+		{
+			name:  "thursday",
+			games: games,
+			now:   novemberTime(5, 8, 0),
+			want:  false,
+		},
+		{
+			name:  "saturday",
+			games: games,
+			now:   novemberTime(7, 23, 59),
+			want:  false,
+		},
+		{
+			name:  "sunday midnight ET before start hour",
+			games: games,
+			now:   novemberTime(8, 0, 0),
+			want:  false,
+		},
+		{
+			name:  "sunday 05:59 ET before start hour",
+			games: games,
+			now:   novemberTime(8, 5, 59),
+			want:  false,
+		},
+		{
+			name:  "sunday 06:00 ET with upcoming sunday games",
+			games: games,
+			now:   novemberTime(8, 6, 0),
+			want:  true,
+		},
+		{
+			name:  "sunday between early and late kickoff",
+			games: games,
+			now:   novemberTime(8, 16, 24),
+			want:  true,
+		},
+		{
+			name:  "sunday at last sunday kickoff with monday game remaining",
+			games: games,
+			now:   novemberTime(8, 16, 25),
+			want:  false,
+		},
+		{
+			name:  "sunday night after last sunday kickoff with monday game remaining",
+			games: games,
+			now:   novemberTime(8, 20, 0),
+			want:  false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, sundayPrefillWindow(tt.games, tt.now))
+		})
+	}
+}
+
+func TestSundayPrefillStale(t *testing.T) {
+	t.Parallel()
+
+	fallBackMidnight := time.Date(2026, time.November, 1, 0, 30, 0, 0, eastern).UTC()
+	fallBackMorning := time.Date(2026, time.November, 1, 6, 0, 0, 0, eastern).UTC()
+	fallBackEveSat := time.Date(2026, time.October, 31, 23, 30, 0, 0, eastern).UTC()
+	springForwardMorning := time.Date(2026, time.March, 8, 6, 0, 0, 0, eastern).UTC()
+	springForwardNight := time.Date(2026, time.March, 8, 23, 0, 0, 0, eastern).UTC()
+
+	tests := []struct {
+		name string
+		last time.Time
+		now  time.Time
+		want bool
+	}{
+		{
+			name: "zero last time",
+			last: time.Time{},
+			now:  novemberTime(8, 6, 0),
+			want: true,
+		},
+		{
+			name: "same eastern sunday",
+			last: novemberTime(8, 6, 0),
+			now:  novemberTime(8, 15, 0),
+			want: false,
+		},
+		{
+			name: "saturday before sunday",
+			last: novemberTime(7, 23, 59),
+			now:  novemberTime(8, 6, 0),
+			want: true,
+		},
+		{
+			name: "prior sunday",
+			last: novemberTime(1, 6, 0),
+			now:  novemberTime(8, 6, 0),
+			want: true,
+		},
+		{
+			name: "same eastern sunday across fall-back DST",
+			last: fallBackMidnight,
+			now:  fallBackMorning,
+			want: false,
+		},
+		{
+			name: "saturday late EDT vs sunday morning EST sharing UTC date",
+			last: fallBackEveSat,
+			now:  fallBackMorning,
+			want: true,
+		},
+		{
+			name: "same eastern sunday across spring-forward DST",
+			last: springForwardMorning,
+			now:  springForwardNight,
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, sundayPrefillStale(tt.last, tt.now))
+		})
+	}
+}

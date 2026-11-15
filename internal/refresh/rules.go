@@ -284,6 +284,29 @@ func prefillStale(last, now time.Time) bool {
 	return !now.Before(last.Add(prefillIdempotencyAge))
 }
 
+// sundayPrefillWindow reports whether now falls in the Sunday morning-to-kickoff
+// pre-fill window in America/New_York while at least one Sunday game has not
+// yet kicked off.
+func sundayPrefillWindow(games []db.Game, now time.Time) bool {
+	nowET := now.In(eastern)
+	if nowET.Weekday() != time.Sunday || nowET.Hour() < sundayPrefillStartHour {
+		return false
+	}
+	lastSunday := lastKickoffOn(games, time.Sunday)
+	return !lastSunday.IsZero() && now.Before(lastSunday)
+}
+
+// sundayPrefillStale reports whether the one-shot Sunday pre-fill has not yet
+// run on now's calendar date in America/New_York.
+func sundayPrefillStale(last, now time.Time) bool {
+	if last.IsZero() {
+		return true
+	}
+	ly, lm, ld := last.In(eastern).Date()
+	ny, nm, nd := now.In(eastern).Date()
+	return ly != ny || lm != nm || ld != nd
+}
+
 // gameDayAge returns gd on Thursday, Sunday, or Monday in America/New_York and
 // idle otherwise.
 func gameDayAge(now time.Time, gd, idle time.Duration) time.Duration {
