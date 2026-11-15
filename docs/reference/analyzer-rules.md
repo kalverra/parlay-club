@@ -2,41 +2,30 @@
 id: analyzer-rules
 title: Analyzer rules
 type: reference
-summary: The stable IDs, severities, triggers, and example messages for the correlation, weather, key-number, chalk, player stats, and nfelo model rules in internal/analyzer.
-tags: [analyzer, rules, warnings, correlation, severity, slips, nfelo, model, quarterback, props, player-stats]
-sources: [internal/analyzer/analyzer.go, internal/analyzer/rules.go, internal/analyzer/analyzer_test.go, internal/web/analyzer.go, internal/db/players.go]
-last_verified: 2026-11-09
+summary: The stable IDs, severities, triggers, and example messages for the correlation, weather, key-number, chalk, player stats, nfelo model, and nflverse rules, plus the A–F leg and slip grading rubric in internal/analyzer.
+tags: [analyzer, rules, grades, rubric, warnings, correlation, severity, slips, nfelo, nflverse, model, quarterback, props, player-stats]
 ---
 
 # Analyzer rules
 
 ## Summary
 
-`internal/analyzer` holds the sharp-friend checks that run under a slip. `AnalyzeSlip(legs, games, stats)` is pure and
-deterministic: no I/O, no clock, and no LLM calls. It returns warnings with a stable rule ID, a severity, a message, and
-the legs involved.
+`internal/analyzer` holds the sharp-friend checks and grading functions that run under a slip. `AnalyzeSlip(legs, games, stats)`, `ScoreLeg(leg, games, stats)`, and `ScoreSlip(legs, games, stats)` are pure and deterministic: no I/O, no clock, and no LLM calls. `AnalyzeSlip` returns warnings with a stable rule ID, a severity, a message, and the legs involved; `ScoreLeg` and `ScoreSlip` return `A`–`F` grades with `GradeFactor` breakdowns. `RuleDocs()` and `GradeRubric()` expose the live rules and scoring weights for `/analyzer/guide`.
 
-When nfelo's model is fresh, `hook` and `chalk` add a sentence about it, and `qb_drag` reads it for a downgraded
-quarterback. When player game logs exist, `median_trap` warns when a yardage over sits above recent game medians. A game
-without model data or a leg without player stats behaves exactly as it did before those sources existed.
+When nfelo's model is fresh, `hook` and `chalk` add a sentence about it, and `qb_drag` reads it for a downgraded quarterback. When player game logs exist, `median_trap` warns when a yardage over sits above recent game medians. When `nflverse` team EPA and player usage are fresh, `tough_matchup`, `shrinking_role`, `pace_clash`, and `td_spike_risk` fire alongside EPA and usage grading factors. A game or leg without those optional inputs behaves cleanly and fails soft.
 
 Rule IDs are stable across releases. A warning's severity is `Info`, `Warn`, or `Danger`.
 
 ## How rules see a slip
 
-- Legs with market `OTHER`, an empty `GameID`, or a `GameID` missing from the game map are skipped by every rule.
-- Output is sorted by severity, `Danger` first, then by the first involved leg's position in the slip. Stable sorting
-  keeps the same input in the same order.
+- Legs with market `OTHER`, an empty `GameID`, or a `GameID` missing from the game map are skipped by every rule and receive no grade (`Letter == ""`).
+- Output is sorted by severity, `Danger` first, then by the first involved leg's position in the slip. Stable sorting keeps the same input in the same order.
 - **Same team** means an equal `Team`. **Opponent** is the other team in the leg's game.
-- **Favorite**: a `SPREAD` with a line below 0, or an `ML` with negative odds. **Underdog**: a `SPREAD` with a line
-  above 0, or an `ML` with positive odds.
+- **Favorite**: a `SPREAD` with a line below 0, or an `ML` with negative odds. **Underdog**: a `SPREAD` with a line above 0, or an `ML` with positive odds.
 - **Passing/receiving over**: an `OVER` on `PASS_YDS`, `PASS_TDS`, `REC_YDS`, or `RECEPTIONS`.
-- **Model data**: nfelo's pre-game spread, win probability, and QB adjustments for the game. `internal/web` attaches it
-  only when the game is `SCHEDULED` and the last successful `nfelo:projections` fetch is under 72 hours old. Otherwise
-  the game has no model, and the model sentences and `qb_drag` stay quiet.
-- **Player stats**: `stats` maps ESPN athlete IDs to recent game logs per market, most recent first. `internal/web`
-  populates it from `player_gamelogs` for every matched `PlayerID` on the slip. An unmatched player, a missing game log,
-  or a market with fewer than 3 games leaves player-stat rules quiet.
+- **Model data**: nfelo's pre-game spread, win probability, and QB adjustments for the game. `internal/web` attaches it only when the game is `SCHEDULED` and the last successful `nfelo:projections` fetch is under 72 hours old. Otherwise the game has no model, and the model sentences and `qb_drag` stay quiet.
+- **Player stats**: `stats` maps ESPN athlete IDs to recent game logs per market, most recent first. `internal/web` populates it from `player_gamelogs` for every matched `PlayerID` on the slip. An unmatched player, a missing game log, or a market with fewer than 3 games leaves player-stat rules quiet.
+- **nflverse team EPA & player usage**: `Game.HomeEPA` and `Game.AwayEPA` hold league ranks (`1..32`, where `1` is the toughest defense, highest offense, fastest pace, or highest pass rate) for `DefPassEPAAllowedRank`, `DefRushEPAAllowedRank`, `OffPassEPARank`, `PlaysPerGameRank`, and `PassRateRank`. `PlayerStats.Usage` holds weekly `OffensePct`, `TargetShare`, `AirYardsShare`, `WOPR`, `Carries`, `Targets`, and `TotalEPA` (most recent first, requiring ≥ 3 weeks for usage rules). `internal/web` attaches both only when `nflverse:season:{year}` is under 7 days old.
 - When a rule's legs belong to more than one person, the message names each owner.
 
 ## Rule Set A: Correlation
@@ -216,3 +205,91 @@ game:
 
 An unmatched player (`PlayerID` is empty), an `UNDER` side, non-yardage markets (`RECEPTIONS`, `PASS_TDS`, `ANYTIME_TD`),
 and players with fewer than 3 games stay quiet.
+
+## nflverse Efficiency, Usage, and Pace
+
+| Rule             | Severity | Fires when |
+| ---------------- | -------- | ---------- |
+| `tough_matchup`  | `Warn`   | Yardage or TD `OVER` facing an opposing defense ranked `#1`–`#5` in matching `DefPassEPAAllowed` or `DefRushEPAAllowed`. |
+| `shrinking_role` | `Warn`   | Player prop `OVER` where last-2-game `OffensePct` dropped `>= 15` percentage points or `TargetShare` dropped `>= 8` percentage points vs. season average. |
+| `pace_clash`     | `Warn`   | `TOTAL` `OVER` when both teams rank `#25`–`#32` in `PlaysPerGame` and `#23`–`#32` in `PassRate`, or `TOTAL` `UNDER` when both rank `#1`–`#8` in `PlaysPerGame` and `OffPassEPA`. |
+| `td_spike_risk`  | `Info`   | `ANYTIME_TD` `YES` with `>= 3` TDs in last 3 games on `< 15%` target share and `< 8` carries/game, or `PASS_TDS` `OVER` with `>= 6` TDs in last 3 games on `<= 0` avg `TotalEPA`. |
+
+### `tough_matchup` — Warn
+
+A yardage or TD `OVER` (`PASS_YDS`, `PASS_TDS`, `REC_YDS`, `RECEPTIONS` against `DefPassEPAAllowedRank` `#1`–`#5`, or `RUSH_YDS`, `RUSH_ATT` against `DefRushEPAAllowedRank` `#1`–`#5`). One warning per qualifying leg. Missing or zero rank fails soft.
+
+> BAL ranks #2 against the rush by EPA allowed, so James Cook Over 68.5 Rush Yds is a tough matchup.
+
+### `shrinking_role` — Warn
+
+A player prop `OVER` (`PASS_YDS`, `PASS_TDS`, `RUSH_YDS`, `RUSH_ATT`, `REC_YDS`, `RECEPTIONS`) on a matched player with `>= 3` usage weeks where the average `OffensePct` over the last 2 games dropped by at least 15 percentage points below the season average, or the last-2-game `TargetShare` dropped by at least 8 percentage points below the season average.
+
+> Dalton Kincaid's snap share dropped from 78% on the season to 55% over the last 2 games — recent volume is fading for Dalton Kincaid Over 45.5 Rec Yds.
+
+### `pace_clash` — Warn
+
+A game `TOTAL` leg that fights both teams' pace and efficiency profile. Fires on `TOTAL` `OVER` when both teams sit bottom-8 (`#25`–`#32`) in `PlaysPerGameRank` and bottom-10 (`#23`–`#32`) in `PassRateRank`, and on `TOTAL` `UNDER` when both teams sit top-8 (`#1`–`#8`) in `PlaysPerGameRank` and `OffPassEPARank`.
+
+> Both PIT and CLE sit bottom-8 in pace and bottom-10 in pass rate, so Over 42.5 needs a lot of efficiency.
+
+### `td_spike_risk` — Info
+
+Touchdown scoring outpacing underlying opportunity over the last 3 games (requires `>= 3` game logs and `>= 3` usage weeks):
+
+- `ANYTIME_TD` `YES`: `>= 3` TDs in the last 3 games with `< 15%` last-3-game `TargetShare` and `< 8` carries/game.
+- `PASS_TDS` `OVER`: `>= 6` passing TDs in the last 3 games with `<= 0` average `TotalEPA` over the last 3 games.
+
+> Dawson Knox has 3 TDs in the last 3 games on a 11% target share and 0 carries/game — TD luck can cool off.
+
+## Leg and Slip Grading Rubric
+
+`ScoreLeg` and `ScoreSlip` compute deterministic `0..100` scores (clamped) and map them to `A`–`F` letter grades with `GradeFactor` breakdowns. `GradeRubric()` exposes this exact rubric for `/analyzer/guide`.
+
+### Score Bands
+
+| Letter | Range    | Description |
+| ------ | -------- | ----------- |
+| `A`    | `85–100` | Strong form, matchup, and price with clean script alignment. |
+| `B`    | `73–84`  | Solid leg or slip with minor or no red flags. |
+| `C`    | `60–72`  | Mixed signals: playable, but fighting a hook, chalk, or tough spot. |
+| `D`    | `48–59`  | Multiple headwinds or script friction dragging down the ticket. |
+| `F`    | `0–47`   | Severe script conflict, heavy chalk, or stacked environmental headwinds. |
+
+### Leg Scoring Factors (`ScoreLeg`)
+
+Every matched leg (not `OTHER`, with a valid `GameID` in the games map) starts at a baseline of `75` (`B`). Adjustments are summed within three capped categories:
+
+- **Form & Usage** (clamped to `-20` to `+15`)
+- **Matchup & Environment** (clamped to `-20` to `+15`)
+- **Line & Price** (clamped to `-20` to `+10`)
+
+| Factor                 | Category              | Delta              | Trigger |
+| ---------------------- | --------------------- | ------------------ | ------- |
+| `hit_rate`             | Form & Usage          | `+10`              | Cleared the line in at least 4 of the last 5 games. |
+| `rising_usage`         | Form & Usage          | `+5`               | Last-3-game snap share (`+8` pp) or target share (`+4` pp) trending above season average. |
+| `median_trap`          | Form & Usage          | `-15`              | Yardage `OVER` line sits above the player's last-5 game median. |
+| `shrinking_role`       | Form & Usage          | `-15`              | Last-2-game snap share (`-15` pp) or target share (`-8` pp) dropped below season average. |
+| `favorable_matchup`    | Matchup & Environment | `+10`              | Opposing defense ranks `#25`–`#32` in matching pass or rush EPA allowed. |
+| `tough_matchup`        | Matchup & Environment | `-12`              | Opposing defense ranks `#1`–`#5` in matching pass or rush EPA allowed. |
+| `wind`                 | Matchup & Environment | `-8` / `-18`       | `-8` for `Warn` wind/gusts; `-18` for `Danger` wind (`>= 20` mph) on passing/receiving/kicking/total `OVER`s. |
+| `qb_drag`              | Matchup & Environment | `-8`               | nfelo marks down the team's QB by `<= -30` Elo on a favorite or passing/receiving/team-total `OVER`. |
+| `fake_weather`         | Matchup & Environment | `-3`               | Light rain without wind gives a game total `UNDER` no real scoring brake. |
+| `nfelo_cushion`        | Line & Price          | `+8`               | nfelo projects at least 2 points of cushion on a spread leg. |
+| `hook`                 | Line & Price          | `-10` (`-4` w/ cushion) | Spread sits on `-3.5`, `+2.5`, `-7.5`, or `+6.5`; softened to `-4` with `>= +2` nfelo cushion. |
+| `total_key_number`     | Line & Price          | `-5`               | Game total sits within `0.5` points of `37`, `41`, `43`, `44`, `47`, or `51`. |
+| `chalk`                | Line & Price          | `-10` to `-18`     | Odds `<= -230` scale linearly from `-10` at `-230` down to `-18` at `-500` or worse. |
+
+### Slip Scoring Factors (`ScoreSlip`)
+
+`ScoreSlip` starts from the rounded average of its graded legs' numeric scores (returning an empty grade if no legs are gradable), then applies slip-level correlation and drag factors:
+
+| Factor                | Delta         | Trigger |
+| --------------------- | ------------- | ------- |
+| `stack_shootout`      | `+8`          | Pass `OVER` + same-team receiver `OVER` + game `TOTAL` `OVER` in the same game. |
+| `stack_clock_drain`   | `+8`          | Favorite spread/ML + same-team rush `OVER` + opponent `TEAM_TOTAL` `UNDER`. |
+| `blowout_passing`     | `-12`         | Big favorite spread (`<= -7.0`) paired with same-team passing/receiving `OVER`. |
+| `trailing_rb`         | `-20`         | Underdog spread (`>= +4.5`) or ML paired with same-team rushing `OVER`. |
+| `total_contradiction` | `-20`         | Game `TOTAL` `UNDER` paired with 2+ point-scoring `OVER`s or `ANYTIME_TD`s. |
+| `parlay_drag`         | `-3` / leg    | Applied for every leg beyond 3 legs. |
+| `chalk_drag`          | `-5` / leg    | Applied for every heavy favorite leg (`<= -230`) beyond the first. |
