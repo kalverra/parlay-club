@@ -130,30 +130,58 @@ func TestSyncNfeloWritesMatchingRowsAndPublishesOnce(t *testing.T) {
 func TestNfeloStale(t *testing.T) {
 	t.Parallel()
 
-	now := novemberTime(7, 11, 0)
+	saturday := novemberTime(7, 11, 0)
+	sunday := novemberTime(8, 11, 0)
 	regular := db.Week{ID: 2026209, Season: 2026, SeasonType: 2, WeekNum: 9}
 	playoff := regular
 	playoff.SeasonType = 3
-	upcoming := []db.Game{{ID: "401", Kickoff: now.Add(time.Hour)}}
-	kickedOff := []db.Game{{ID: "401", Kickoff: now.Add(-time.Minute)}}
+	upcoming := []db.Game{{ID: "401", Kickoff: sunday.Add(2 * time.Hour)}}
+	kickedOff := []db.Game{{ID: "401", Kickoff: saturday.Add(-time.Minute)}}
 
 	tests := map[string]struct {
 		last  time.Time
+		now   time.Time
 		week  db.Week
 		games []db.Game
 		want  bool
 	}{
-		"never fetched":     {last: time.Time{}, week: regular, games: upcoming, want: true},
-		"inside the window": {last: now.Add(-nfeloAge + time.Minute), week: regular, games: upcoming, want: false},
-		"at the window":     {last: now.Add(-nfeloAge), week: regular, games: upcoming, want: true},
-		"playoff week":      {last: time.Time{}, week: playoff, games: upcoming, want: false},
-		"all kicked off":    {last: time.Time{}, week: regular, games: kickedOff, want: false},
-		"no games":          {last: time.Time{}, week: regular, games: nil, want: false},
+		"never fetched": {last: time.Time{}, now: saturday, week: regular, games: upcoming, want: true},
+		"idle waits four hours": {
+			last:  saturday.Add(-nfeloIdleAge + time.Minute),
+			now:   saturday,
+			week:  regular,
+			games: upcoming,
+			want:  false,
+		},
+		"idle at four hours": {
+			last:  saturday.Add(-nfeloIdleAge),
+			now:   saturday,
+			week:  regular,
+			games: upcoming,
+			want:  true,
+		},
+		"game day waits one hour": {
+			last:  sunday.Add(-nfeloGameDayAge + time.Minute),
+			now:   sunday,
+			week:  regular,
+			games: upcoming,
+			want:  false,
+		},
+		"game day at one hour": {
+			last:  sunday.Add(-nfeloGameDayAge),
+			now:   sunday,
+			week:  regular,
+			games: upcoming,
+			want:  true,
+		},
+		"playoff week":   {last: time.Time{}, now: saturday, week: playoff, games: upcoming, want: false},
+		"all kicked off": {last: time.Time{}, now: saturday, week: regular, games: kickedOff, want: false},
+		"no games":       {last: time.Time{}, now: saturday, week: regular, games: nil, want: false},
 	}
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			assert.Equal(t, tt.want, nfeloStale(tt.last, now, tt.week, tt.games))
+			assert.Equal(t, tt.want, nfeloStale(tt.last, tt.now, tt.week, tt.games))
 		})
 	}
 }

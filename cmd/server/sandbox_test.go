@@ -1492,19 +1492,37 @@ func assertSandboxSync(t *testing.T, database *sql.DB, store *db.Store, week db.
 func syncKeys(t *testing.T, store *db.Store, week db.Week) []string {
 	t.Helper()
 
-	keys := []string{
-		refresh.ScoreboardSource,
-		refresh.OddsLinesSource,
-		refresh.NfeloProjectionsSource,
-		refresh.OddsPropsSource(sandbox.FeaturedGameID),
-		refresh.RosterSource(sandbox.FeaturedHomeESPNID),
-		refresh.RosterSource(sandbox.FeaturedAwayESPNID),
+	seen := make(map[string]struct{})
+	var keys []string
+	add := func(key string) {
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		keys = append(keys, key)
 	}
+
+	add(refresh.ScoreboardSource)
+	add(refresh.OddsLinesSource)
+	add(refresh.NfeloProjectionsSource)
+	add(refresh.OddsPropsSource(sandbox.FeaturedGameID))
+	add(refresh.RosterSource(sandbox.FeaturedHomeESPNID))
+	add(refresh.RosterSource(sandbox.FeaturedAwayESPNID))
+
 	games, err := store.GamesForWeek(t.Context(), week.ID)
 	require.NoError(t, err)
 	for _, game := range games {
 		if !game.Indoor && sandbox.MorningTime().Before(game.Kickoff) {
-			keys = append(keys, refresh.WeatherSource(game.ID))
+			add(refresh.WeatherSource(game.ID))
+		}
+		if game.Status != db.GameFinal {
+			add(refresh.SummarySource(game.ID))
+			if game.HomeESPNID != "" {
+				add(refresh.RosterSource(game.HomeESPNID))
+			}
+			if game.AwayESPNID != "" {
+				add(refresh.RosterSource(game.AwayESPNID))
+			}
 		}
 	}
 	sort.Strings(keys)

@@ -470,8 +470,8 @@ func TestSyncPlayerResearchGameLog(t *testing.T) {
 	assert.Equal(t, 6, log.GamesPlayed)
 	assert.JSONEq(t, `{"PASS_YDS":[280.0,310.0,240.0]}`, log.StatsJSON)
 
-	// Within 12h window, no second fetch.
-	clock.Advance(6 * time.Hour)
+	// Within 1h game-day window, no second fetch.
+	clock.Advance(30 * time.Minute)
 	err = service.SyncPlayerResearch(t.Context(), "3918298")
 	require.NoError(t, err)
 
@@ -479,8 +479,8 @@ func TestSyncPlayerResearchGameLog(t *testing.T) {
 	assert.Equal(t, 1, espnClient.gamelogCalls)
 	espnClient.mu.Unlock()
 
-	// After 12h, re-fetches.
-	clock.Advance(7 * time.Hour)
+	// After 1h, re-fetches.
+	clock.Advance(31 * time.Minute)
 	err = service.SyncPlayerResearch(t.Context(), "3918298")
 	require.NoError(t, err)
 

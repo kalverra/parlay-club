@@ -379,11 +379,12 @@ func TestKickUsesTheScoreboardStalenessClock(t *testing.T) {
 	service.wait()
 	assert.Equal(t, int32(1), scoreboard.calls.Load())
 
-	// Six hours later the midweek slate is stale.
-	clock.Advance(6 * time.Hour)
+	// Two hours later the midweek slate is stale.
+	clock.Advance(2 * time.Hour)
 	service.KickContext(t.Context())
 	service.wait()
 	assert.Equal(t, int32(2), scoreboard.calls.Load())
+	assert.Zero(t, lines.lineCalls, "Kick() omits odds:lines")
 }
 
 func TestOddsRowRejectsATeamOutsideTheGame(t *testing.T) {

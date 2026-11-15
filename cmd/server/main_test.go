@@ -584,16 +584,20 @@ func TestRefreshArchivesEveryIngestCall(t *testing.T) {
 		Now:        func() time.Time { return ingestNow },
 		Logger:     zerolog.Nop(),
 	})
-	service.KickContext(t.Context())
+	require.NoError(t, service.RunOnce(t.Context()))
 
 	weatherKey := refresh.WeatherSource("401")
-	waitForSyncStates(t, store, refresh.ScoreboardSource, weatherKey, refresh.OddsLinesSource)
+	summaryKey := refresh.SummarySource("401")
+	homeRosterKey := refresh.RosterSource("2")
+	awayRosterKey := refresh.RosterSource("15")
+	waitForSyncStates(t, store,
+		refresh.ScoreboardSource, weatherKey, summaryKey, homeRosterKey, awayRosterKey, refresh.OddsLinesSource)
 
 	rows, err := store.ListAPIResponses(t.Context(), db.APIResponseFilter{})
 	require.NoError(t, err)
-	require.Len(t, rows, 4, "one row per outside call")
+	require.Len(t, rows, 7, "one row per outside call")
 
-	keyCounts := make(map[string]int, 3)
+	keyCounts := make(map[string]int, 6)
 	var eventsRow, linesRow db.APIResponse
 	for _, row := range rows {
 		keyCounts[row.Key]++
@@ -607,7 +611,7 @@ func TestRefreshArchivesEveryIngestCall(t *testing.T) {
 		assert.NotEmpty(t, body)
 
 		switch row.Key {
-		case refresh.ScoreboardSource:
+		case refresh.ScoreboardSource, summaryKey, homeRosterKey, awayRosterKey:
 			assert.Equal(t, archive.SourceESPN, row.Source)
 			assert.Nil(t, row.CreditsRemaining)
 			assert.Nil(t, row.CreditsUsed)
@@ -628,8 +632,11 @@ func TestRefreshArchivesEveryIngestCall(t *testing.T) {
 	assert.Equal(t, map[string]int{
 		refresh.ScoreboardSource: 1,
 		weatherKey:               1,
+		summaryKey:               1,
+		homeRosterKey:            1,
+		awayRosterKey:            1,
 		refresh.OddsLinesSource:  2,
-	}, keyCounts, "ESPN and weather once each, and the Odds API's free event list plus paid lines")
+	}, keyCounts, "ESPN scoreboard/summary/rosters and weather once each, and the Odds API's free event list plus paid lines")
 
 	require.NotEmpty(t, eventsRow.BodySHA256, "the free event list is archived")
 	require.NotNil(t, eventsRow.CreditsRemaining)
@@ -782,41 +789,51 @@ func waitForSyncStates(t *testing.T, store *db.Store, keys ...string) {
 	}
 }
 
-// fakeESPN serves one scheduled Sunday game at Highmark Stadium.
+// fakeESPN serves one scheduled Sunday game at Highmark Stadium, along with
+// its summary and team rosters.
 func fakeESPN(t *testing.T) *httptest.Server {
 	t.Helper()
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, "/scoreboard", r.URL.Path)
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"season": map[string]any{"year": 2026, "type": 2},
-			"week":   map[string]any{"number": 9},
-			"events": []any{map[string]any{
-				"id":     "401",
-				"date":   ingestKickoff.Format(time.RFC3339),
-				"status": map[string]any{"type": map[string]any{"state": "pre"}},
-				"competitions": []any{map[string]any{
-					"competitors": []any{
-						map[string]any{
-							"homeAway": "home",
-							"team": map[string]any{
-								"id": "2", "abbreviation": "BUF", "displayName": "Buffalo Bills",
+		switch {
+		case r.URL.Path == "/scoreboard":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"season": map[string]any{"year": 2026, "type": 2},
+				"week":   map[string]any{"number": 9},
+				"events": []any{map[string]any{
+					"id":     "401",
+					"date":   ingestKickoff.Format(time.RFC3339),
+					"status": map[string]any{"type": map[string]any{"state": "pre"}},
+					"competitions": []any{map[string]any{
+						"competitors": []any{
+							map[string]any{
+								"homeAway": "home",
+								"team": map[string]any{
+									"id": "2", "abbreviation": "BUF", "displayName": "Buffalo Bills",
+								},
+							},
+							map[string]any{
+								"homeAway": "away",
+								"team": map[string]any{
+									"id": "15", "abbreviation": "MIA", "displayName": "Miami Dolphins",
+								},
 							},
 						},
-						map[string]any{
-							"homeAway": "away",
-							"team": map[string]any{
-								"id": "15", "abbreviation": "MIA", "displayName": "Miami Dolphins",
-							},
+						"venue": map[string]any{
+							"id": "11938", "fullName": "Highmark Stadium", "indoor": false,
 						},
-					},
-					"venue": map[string]any{
-						"id": "11938", "fullName": "Highmark Stadium", "indoor": false,
-					},
+					}},
 				}},
-			}},
-		})
+			})
+		case r.URL.Path == "/summary":
+			_ = json.NewEncoder(w).Encode(map[string]any{"injuries": []any{}})
+		case strings.HasPrefix(r.URL.Path, "/teams/") && strings.HasSuffix(r.URL.Path, "/roster"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"athletes": []any{}})
+		default:
+			t.Errorf("unexpected ESPN path %q", r.URL.Path)
+			http.NotFound(w, r)
+		}
 	}))
 	t.Cleanup(server.Close)
 	return server

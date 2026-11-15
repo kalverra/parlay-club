@@ -20,8 +20,8 @@ func scoreboardStale(last, now time.Time, live bool) bool {
 	return !now.Before(last.Add(scoreboardAge(now, live)))
 }
 
-// scoreboardAge is the slate's freshness window: 10 minutes while a game is
-// live, 30 minutes on a Thursday, Sunday, or Monday, and 6 hours otherwise.
+// scoreboardAge is the slate's freshness window: 5 minutes while a game is
+// live, 15 minutes on a Thursday, Sunday, or Monday, and 2 hours otherwise.
 func scoreboardAge(now time.Time, live bool) time.Duration {
 	switch {
 	case live:
@@ -90,7 +90,8 @@ const regularSeasonType = 2
 
 // nfeloStale reports whether the week's model projections are due. It skips a
 // week that is not regular season, a week with no games, and a week whose games
-// have all kicked off.
+// have all kicked off. Inside the window projections are good for 1 hour on
+// game days and 4 hours otherwise.
 func nfeloStale(last, now time.Time, week db.Week, games []db.Game) bool {
 	if week.SeasonType != regularSeasonType || len(games) == 0 || allKickedOff(games, now) {
 		return false
@@ -98,7 +99,7 @@ func nfeloStale(last, now time.Time, week db.Week, games []db.Game) bool {
 	if last.IsZero() {
 		return true
 	}
-	return !now.Before(last.Add(nfeloAge))
+	return !now.Before(last.Add(gameDayAge(now, nfeloGameDayAge, nfeloIdleAge)))
 }
 
 // allKickedOff reports whether every game has reached its kickoff time.
@@ -128,7 +129,8 @@ func lastKickoffOn(games []db.Game, weekday time.Weekday) time.Time {
 
 // weatherStale reports whether one game's forecast is due. It skips an indoor
 // game, an unknown venue, a kickoff more than 48 hours away, and a game that
-// has already started. Inside the window the forecast is good for an hour.
+// has already started. Inside the window the forecast is good for 15 minutes
+// within 6 hours of kickoff and 30 minutes otherwise.
 func weatherStale(last, now time.Time, game db.Game) bool {
 	if game.Indoor || !knownVenue(game) {
 		return false
@@ -142,7 +144,11 @@ func weatherStale(last, now time.Time, game db.Game) bool {
 	if last.IsZero() {
 		return true
 	}
-	return !now.Before(last.Add(weatherAge))
+	age := weatherAge
+	if !now.Before(game.Kickoff.Add(-weatherNearLookahead)) {
+		age = weatherNearAge
+	}
+	return !now.Before(last.Add(age))
 }
 
 // knownVenue reports whether the game's venue has coordinates.
@@ -166,16 +172,18 @@ func oddsPropsStale(last, now time.Time, game db.Game) bool {
 	return !now.Before(last.Add(oddsPropsAge))
 }
 
-// rosterStale reports whether a team's roster is due. Rosters are good for 24 hours.
+// rosterStale reports whether a team's roster is due. Rosters are good for 2
+// hours on game days and 6 hours otherwise.
 func rosterStale(last, now time.Time) bool {
 	if last.IsZero() {
 		return true
 	}
-	return !now.Before(last.Add(rosterAge))
+	return !now.Before(last.Add(gameDayAge(now, rosterGameDayAge, rosterIdleAge)))
 }
 
 // summaryStale reports whether a game's summary is due. It skips games that
-// are final. Inside the window summaries are good for two hours.
+// are final. Inside the window summaries are good for 15 minutes on game days
+// or within 4 hours of kickoff, and 1 hour otherwise.
 func summaryStale(last, now time.Time, game db.Game) bool {
 	if game.Status == db.GameFinal {
 		return false
@@ -183,14 +191,43 @@ func summaryStale(last, now time.Time, game db.Game) bool {
 	if last.IsZero() {
 		return true
 	}
-	return !now.Before(last.Add(summaryAge))
+	return !now.Before(last.Add(summaryAgeFor(now, game)))
+}
+
+// summaryAgeFor returns the summary freshness window for game at now.
+func summaryAgeFor(now time.Time, game db.Game) time.Duration {
+	if gameDay(now) {
+		return summaryGameDayAge
+	}
+	if !game.Kickoff.IsZero() && !now.Before(game.Kickoff.Add(-summaryNearKickoff)) && now.Before(game.Kickoff) {
+		return summaryGameDayAge
+	}
+	return summaryIdleAge
 }
 
 // gameLogStale reports whether an athlete's game log is due. Game logs are good
-// for 12 hours.
+// for 1 hour on game days and 4 hours otherwise.
 func gameLogStale(last, now time.Time) bool {
 	if last.IsZero() {
 		return true
 	}
-	return !now.Before(last.Add(gameLogAge))
+	return !now.Before(last.Add(gameDayAge(now, gameLogGameDayAge, gameLogIdleAge)))
+}
+
+// prefillStale reports whether a pre-fill managed source is older than the
+// 15-minute idempotency window.
+func prefillStale(last, now time.Time) bool {
+	if last.IsZero() {
+		return true
+	}
+	return !now.Before(last.Add(prefillIdempotencyAge))
+}
+
+// gameDayAge returns gd on Thursday, Sunday, or Monday in America/New_York and
+// idle otherwise.
+func gameDayAge(now time.Time, gd, idle time.Duration) time.Duration {
+	if gameDay(now) {
+		return gd
+	}
+	return idle
 }

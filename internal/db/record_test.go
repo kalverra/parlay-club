@@ -23,10 +23,10 @@ func TestRecordSeasonQueriesIsolateGroupAndStatus(t *testing.T) {
 	require.NoError(t, err)
 	groupB := createTestGroup(t, store, ben)
 
-	wk2024 := createSeasonWeek(t, store, 2024, 2, 10)
-	wk2025 := createSeasonWeek(t, store, 2025, 2, 1)
-	wk2025W2 := createSeasonWeek(t, store, 2025, 2, 2)
-	wk2026 := createSeasonWeek(t, store, 2026, 2, 1)
+	wk2024 := createSeasonWeek(t, store, 2024, 10)
+	wk2025 := createSeasonWeek(t, store, 2025, 1)
+	wk2025W2 := createSeasonWeek(t, store, 2025, 2)
+	wk2026 := createSeasonWeek(t, store, 2026, 1)
 
 	// Group A: 2024 graded, 2025 graded (two weeks), 2026 open only.
 	slip2024 := createTestSlip(t, store, groupA, wk2024, "2024 W10", 2, ada, sam)
@@ -99,9 +99,9 @@ func TestRecordSeasonQueriesIsolateGroupAndStatus(t *testing.T) {
 	assert.Equal(t, []int64{ada.ID, sam.ID}, []int64{recordUsers[0].ID, recordUsers[1].ID})
 }
 
-func createSeasonWeek(t *testing.T, store *db.Store, season, seasonType, weekNum int) db.Week {
+func createSeasonWeek(t *testing.T, store *db.Store, season, weekNum int) db.Week {
 	t.Helper()
-	week, err := store.UpsertWeek(t.Context(), season, seasonType, weekNum)
+	week, err := store.UpsertWeek(t.Context(), season, 2, weekNum)
 	require.NoError(t, err)
 	return week
 }

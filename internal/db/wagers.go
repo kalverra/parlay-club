@@ -126,7 +126,14 @@ func scanWager(scanner interface{ Scan(...any) error }) (Wager, error) {
 		wager Wager
 		book  sql.NullString
 	)
-	if err := scanner.Scan(&wager.SlipID, &wager.UserID, &book, &wager.Stake, &wager.Odds, &wager.BoostPct); err != nil {
+	if err := scanner.Scan(
+		&wager.SlipID,
+		&wager.UserID,
+		&book,
+		&wager.Stake,
+		&wager.Odds,
+		&wager.BoostPct,
+	); err != nil {
 		return Wager{}, err
 	}
 	wager.Book = nullableStringPtr(book)

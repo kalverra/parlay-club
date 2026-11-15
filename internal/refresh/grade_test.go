@@ -41,7 +41,7 @@ func (p *fakePublisher) Publish(topic string) {
 	p.topics = append(p.topics, topic)
 }
 
-func seedGradeFixture(t *testing.T, store *db.Store, now time.Time) (db.User, db.Week, db.Slip) {
+func seedGradeFixture(t *testing.T, store *db.Store, _ time.Time) (db.User, db.Week, db.Slip) {
 	t.Helper()
 	ctx := t.Context()
 
