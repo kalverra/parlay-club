@@ -269,7 +269,7 @@ func findPlayer(players []espn.PlayerBoxStats, playerID, normName, team string) 
 }
 
 // normalizePlayerName mirrors db.NormalizePlayerName: lowercases, strips '.',
-// ''', '-', and ',', collapses whitespace, and drops a trailing generational
+// ”', '-', and ',', collapses whitespace, and drops a trailing generational
 // suffix (jr, sr, ii, iii, iv, v) when preceded by a space.
 func normalizePlayerName(name string) string {
 	name = strings.ToLower(name)

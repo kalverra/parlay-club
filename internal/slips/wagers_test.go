@@ -32,9 +32,9 @@ func TestSetWagerAllowsGroupMemberAndPublishes(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, saved.Book)
 	assert.Equal(t, "FanDuel", *saved.Book)
-	assert.Equal(t, float64(25), saved.Stake)
+	assert.InDelta(t, float64(25), saved.Stake, 0.001)
 	assert.Equal(t, 350, saved.Odds)
-	assert.Equal(t, float64(25), saved.BoostPct)
+	assert.InDelta(t, float64(25), saved.BoostPct, 0.001)
 	assert.Contains(t, f.published.topics, fmt.Sprintf("slip:%d", f.slip.ID))
 
 	got, found, err := f.store.WagerForUser(t.Context(), f.slip.ID, pat.ID)
@@ -68,13 +68,26 @@ func TestSetWagerRejectsOutsiderAndInvalidInputs(t *testing.T) {
 		{name: "zero odds", input: slips.WagerInput{Stake: 10, Odds: 0}, want: slips.ErrWagerOddsInvalid},
 		{name: "odds 50", input: slips.WagerInput{Stake: 10, Odds: 50}, want: slips.ErrWagerOddsInvalid},
 		{name: "odds -99", input: slips.WagerInput{Stake: 10, Odds: -99}, want: slips.ErrWagerOddsInvalid},
-		{name: "negative boost", input: slips.WagerInput{Stake: 10, Odds: -110, BoostPct: -1}, want: slips.ErrWagerBoostInvalid},
-		{name: "nan boost", input: slips.WagerInput{Stake: 10, Odds: -110, BoostPct: math.NaN()}, want: slips.ErrWagerBoostInvalid},
-		{name: "book too long", input: slips.WagerInput{Stake: 10, Odds: 100, Book: strings.Repeat("x", 41)}, want: slips.ErrWagerBookTooLong},
+		{
+			name:  "negative boost",
+			input: slips.WagerInput{Stake: 10, Odds: -110, BoostPct: -1},
+			want:  slips.ErrWagerBoostInvalid,
+		},
+		{
+			name:  "nan boost",
+			input: slips.WagerInput{Stake: 10, Odds: -110, BoostPct: math.NaN()},
+			want:  slips.ErrWagerBoostInvalid,
+		},
+		{
+			name:  "book too long",
+			input: slips.WagerInput{Stake: 10, Odds: 100, Book: strings.Repeat("x", 41)},
+			want:  slips.ErrWagerBookTooLong,
+		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			_, err := f.service.SetWager(t.Context(), f.ada.ID, f.slip.ID, tc.input)
 			require.ErrorIs(t, err, tc.want)
 		})

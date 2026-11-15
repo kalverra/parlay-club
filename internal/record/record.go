@@ -132,6 +132,21 @@ func Build(season int, slips []Slip, legs []Leg, members []Member, wagers []Wage
 		return st
 	}
 
+	accumulateSlips(&book, graded, legsBySlip, ensureMember)
+	accumulateWagers(wagers, gradedByID, stats)
+
+	rows := buildLeaderboardRows(stats)
+	sortLeaderboard(rows)
+	book.Leaderboard = rows
+	return book
+}
+
+func accumulateSlips(
+	book *Book,
+	graded []Slip,
+	legsBySlip map[int64][]Leg,
+	ensureMember func(int64) *memberStats,
+) {
 	var curWin, curLoss int
 	for _, s := range graded {
 		book.TotalSlips++
@@ -189,7 +204,9 @@ func Build(season int, slips []Slip, legs []Leg, members []Member, wagers []Wage
 			ensureMember(lostLegUsers[0]).terroristCount++
 		}
 	}
+}
 
+func accumulateWagers(wagers []Wager, gradedByID map[int64]Slip, stats map[int64]*memberStats) {
 	for _, w := range wagers {
 		s, ok := gradedByID[w.SlipID]
 		if !ok {
@@ -210,7 +227,9 @@ func Build(season int, slips []Slip, legs []Leg, members []Member, wagers []Wage
 			// Push returns stake; net dollar P/L is 0.
 		}
 	}
+}
 
+func buildLeaderboardRows(stats map[int64]*memberStats) []MemberRow {
 	maxTerrorist := 0
 	for _, st := range stats {
 		if st.terroristCount > maxTerrorist {
@@ -256,10 +275,7 @@ func Build(season int, slips []Slip, legs []Leg, members []Member, wagers []Wage
 			DollarPL:        dollarPL,
 		})
 	}
-
-	sortLeaderboard(rows)
-	book.Leaderboard = rows
-	return book
+	return rows
 }
 
 type memberStats struct {

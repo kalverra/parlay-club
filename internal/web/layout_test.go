@@ -84,6 +84,8 @@ func TestLayoutTopBar(t *testing.T) {
 		User: &webui.User{Name: "Adam Hamrick", Initials: "AH", AvatarClass: "bg-sky-500"},
 	})
 
+	assert.Contains(t, out, `href="/"`)
+	assert.Contains(t, out, `aria-label="Home"`)
 	assert.Contains(t, out, ">Week 9</span>")
 	assert.Contains(t, out, `id="slip-switcher"`)
 	assert.Contains(t, out, `<option value="2" selected>Week 9 #2</option>`)

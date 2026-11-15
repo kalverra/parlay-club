@@ -10,9 +10,6 @@ import (
 	"github.com/kalverra/parlay-club/internal/parlay"
 )
 
-func intPtr(v int) *int       { return &v }
-func floatPtr(v float64) *float64 { return &v }
-
 func sampleBox() *espn.BoxScore {
 	return &espn.BoxScore{
 		Completed: true,
@@ -61,12 +58,12 @@ func sampleBox() *espn.BoxScore {
 	}
 }
 
-func finalGame(homeScore, awayScore int) grader.GameScore {
+func finalGame(homeScore int) grader.GameScore {
 	return grader.GameScore{
 		HomeTeam:  "BUF",
 		AwayTeam:  "MIA",
-		HomeScore: intPtr(homeScore),
-		AwayScore: intPtr(awayScore),
+		HomeScore: new(homeScore),
+		AwayScore: new(20),
 		Final:     true,
 	}
 }
@@ -84,55 +81,61 @@ func TestGradeLeg_GameAndTeamMarkets(t *testing.T) {
 		{
 			name: "non-final game returns pending",
 			leg:  grader.LegInput{Market: "ML", Team: "BUF", Side: "TEAM"},
-			game: grader.GameScore{HomeTeam: "BUF", AwayTeam: "MIA", HomeScore: intPtr(14), AwayScore: intPtr(7), Final: false},
+			game: grader.GameScore{
+				HomeTeam:  "BUF",
+				AwayTeam:  "MIA",
+				HomeScore: new(14),
+				AwayScore: new(7),
+				Final:     false,
+			},
 			want: parlay.Pending,
 		},
 		// SPREAD
 		{
 			name: "spread home favorite wins",
-			leg:  grader.LegInput{Market: "SPREAD", Team: "BUF", Side: "TEAM", Line: floatPtr(-3.5)},
-			game: finalGame(27, 20),
+			leg:  grader.LegInput{Market: "SPREAD", Team: "BUF", Side: "TEAM", Line: new(-3.5)},
+			game: finalGame(27),
 			want: parlay.Won,
 		},
 		{
 			name: "spread home favorite loses",
-			leg:  grader.LegInput{Market: "SPREAD", Team: "BUF", Side: "TEAM", Line: floatPtr(-7.5)},
-			game: finalGame(27, 20),
+			leg:  grader.LegInput{Market: "SPREAD", Team: "BUF", Side: "TEAM", Line: new(-7.5)},
+			game: finalGame(27),
 			want: parlay.Lost,
 		},
 		{
 			name: "spread integer push",
-			leg:  grader.LegInput{Market: "SPREAD", Team: "BUF", Side: "TEAM", Line: floatPtr(-7)},
-			game: finalGame(27, 20),
+			leg:  grader.LegInput{Market: "SPREAD", Team: "BUF", Side: "TEAM", Line: new(-7.0)},
+			game: finalGame(27),
 			want: parlay.Push,
 		},
 		{
 			name: "spread away underdog wins",
-			leg:  grader.LegInput{Market: "SPREAD", Team: "MIA", Side: "TEAM", Line: floatPtr(7.5)},
-			game: finalGame(27, 20),
+			leg:  grader.LegInput{Market: "SPREAD", Team: "MIA", Side: "TEAM", Line: new(7.5)},
+			game: finalGame(27),
 			want: parlay.Won,
 		},
 		{
 			name: "spread away underdog loses",
-			leg:  grader.LegInput{Market: "SPREAD", Team: "MIA", Side: "TEAM", Line: floatPtr(6.5)},
-			game: finalGame(27, 20),
+			leg:  grader.LegInput{Market: "SPREAD", Team: "MIA", Side: "TEAM", Line: new(6.5)},
+			game: finalGame(27),
 			want: parlay.Lost,
 		},
 		{
 			name: "spread missing line",
 			leg:  grader.LegInput{Market: "SPREAD", Team: "BUF", Side: "TEAM"},
-			game: finalGame(27, 20),
+			game: finalGame(27),
 			want: parlay.NeedsGrading,
 		},
 		{
 			name: "spread unmatched team",
-			leg:  grader.LegInput{Market: "SPREAD", Team: "KC", Side: "TEAM", Line: floatPtr(-3.5)},
-			game: finalGame(27, 20),
+			leg:  grader.LegInput{Market: "SPREAD", Team: "KC", Side: "TEAM", Line: new(-3.5)},
+			game: finalGame(27),
 			want: parlay.NeedsGrading,
 		},
 		{
 			name: "spread missing scores",
-			leg:  grader.LegInput{Market: "SPREAD", Team: "BUF", Side: "TEAM", Line: floatPtr(-3.5)},
+			leg:  grader.LegInput{Market: "SPREAD", Team: "BUF", Side: "TEAM", Line: new(-3.5)},
 			game: grader.GameScore{HomeTeam: "BUF", AwayTeam: "MIA", Final: true},
 			want: parlay.NeedsGrading,
 		},
@@ -140,25 +143,25 @@ func TestGradeLeg_GameAndTeamMarkets(t *testing.T) {
 		{
 			name: "ml home wins",
 			leg:  grader.LegInput{Market: "ML", Team: "BUF", Side: "TEAM"},
-			game: finalGame(27, 20),
+			game: finalGame(27),
 			want: parlay.Won,
 		},
 		{
 			name: "ml away loses",
 			leg:  grader.LegInput{Market: "ML", Team: "MIA", Side: "TEAM"},
-			game: finalGame(27, 20),
+			game: finalGame(27),
 			want: parlay.Lost,
 		},
 		{
 			name: "ml tie pushes",
 			leg:  grader.LegInput{Market: "ML", Team: "BUF", Side: "TEAM"},
-			game: finalGame(20, 20),
+			game: finalGame(20),
 			want: parlay.Push,
 		},
 		{
 			name: "ml unmatched team",
 			leg:  grader.LegInput{Market: "ML", Team: "NYJ", Side: "TEAM"},
-			game: finalGame(27, 20),
+			game: finalGame(27),
 			want: parlay.NeedsGrading,
 		},
 		{
@@ -170,88 +173,88 @@ func TestGradeLeg_GameAndTeamMarkets(t *testing.T) {
 		// TOTAL
 		{
 			name: "total over wins",
-			leg:  grader.LegInput{Market: "TOTAL", Side: "OVER", Line: floatPtr(46.5)},
-			game: finalGame(27, 20),
+			leg:  grader.LegInput{Market: "TOTAL", Side: "OVER", Line: new(46.5)},
+			game: finalGame(27),
 			want: parlay.Won,
 		},
 		{
 			name: "total over loses",
-			leg:  grader.LegInput{Market: "TOTAL", Side: "OVER", Line: floatPtr(47.5)},
-			game: finalGame(27, 20),
+			leg:  grader.LegInput{Market: "TOTAL", Side: "OVER", Line: new(47.5)},
+			game: finalGame(27),
 			want: parlay.Lost,
 		},
 		{
 			name: "total under wins",
-			leg:  grader.LegInput{Market: "TOTAL", Side: "UNDER", Line: floatPtr(47.5)},
-			game: finalGame(27, 20),
+			leg:  grader.LegInput{Market: "TOTAL", Side: "UNDER", Line: new(47.5)},
+			game: finalGame(27),
 			want: parlay.Won,
 		},
 		{
 			name: "total under loses",
-			leg:  grader.LegInput{Market: "TOTAL", Side: "UNDER", Line: floatPtr(46.5)},
-			game: finalGame(27, 20),
+			leg:  grader.LegInput{Market: "TOTAL", Side: "UNDER", Line: new(46.5)},
+			game: finalGame(27),
 			want: parlay.Lost,
 		},
 		{
 			name: "total integer push",
-			leg:  grader.LegInput{Market: "TOTAL", Side: "OVER", Line: floatPtr(47)},
-			game: finalGame(27, 20),
+			leg:  grader.LegInput{Market: "TOTAL", Side: "OVER", Line: new(47.0)},
+			game: finalGame(27),
 			want: parlay.Push,
 		},
 		{
 			name: "total missing line",
 			leg:  grader.LegInput{Market: "TOTAL", Side: "OVER"},
-			game: finalGame(27, 20),
+			game: finalGame(27),
 			want: parlay.NeedsGrading,
 		},
 		{
 			name: "total invalid side",
-			leg:  grader.LegInput{Market: "TOTAL", Side: "TEAM", Line: floatPtr(47.5)},
-			game: finalGame(27, 20),
+			leg:  grader.LegInput{Market: "TOTAL", Side: "TEAM", Line: new(47.5)},
+			game: finalGame(27),
 			want: parlay.NeedsGrading,
 		},
 		// TEAM_TOTAL
 		{
 			name: "team total home over wins",
-			leg:  grader.LegInput{Market: "TEAM_TOTAL", Team: "BUF", Side: "OVER", Line: floatPtr(26.5)},
-			game: finalGame(27, 20),
+			leg:  grader.LegInput{Market: "TEAM_TOTAL", Team: "BUF", Side: "OVER", Line: new(26.5)},
+			game: finalGame(27),
 			want: parlay.Won,
 		},
 		{
 			name: "team total away under wins",
-			leg:  grader.LegInput{Market: "TEAM_TOTAL", Team: "MIA", Side: "UNDER", Line: floatPtr(20.5)},
-			game: finalGame(27, 20),
+			leg:  grader.LegInput{Market: "TEAM_TOTAL", Team: "MIA", Side: "UNDER", Line: new(20.5)},
+			game: finalGame(27),
 			want: parlay.Won,
 		},
 		{
 			name: "team total away over loses",
-			leg:  grader.LegInput{Market: "TEAM_TOTAL", Team: "MIA", Side: "OVER", Line: floatPtr(20.5)},
-			game: finalGame(27, 20),
+			leg:  grader.LegInput{Market: "TEAM_TOTAL", Team: "MIA", Side: "OVER", Line: new(20.5)},
+			game: finalGame(27),
 			want: parlay.Lost,
 		},
 		{
 			name: "team total integer push",
-			leg:  grader.LegInput{Market: "TEAM_TOTAL", Team: "MIA", Side: "UNDER", Line: floatPtr(20)},
-			game: finalGame(27, 20),
+			leg:  grader.LegInput{Market: "TEAM_TOTAL", Team: "MIA", Side: "UNDER", Line: new(20.0)},
+			game: finalGame(27),
 			want: parlay.Push,
 		},
 		{
 			name: "team total unmatched team",
-			leg:  grader.LegInput{Market: "TEAM_TOTAL", Team: "NE", Side: "OVER", Line: floatPtr(20.5)},
-			game: finalGame(27, 20),
+			leg:  grader.LegInput{Market: "TEAM_TOTAL", Team: "NE", Side: "OVER", Line: new(20.5)},
+			game: finalGame(27),
 			want: parlay.NeedsGrading,
 		},
 		// OTHER & unknown
 		{
 			name: "other always needs grading",
 			leg:  grader.LegInput{Market: "OTHER"},
-			game: finalGame(27, 20),
+			game: finalGame(27),
 			want: parlay.NeedsGrading,
 		},
 		{
 			name: "unknown market needs grading",
 			leg:  grader.LegInput{Market: "FIRST_TD", Team: "BUF"},
-			game: finalGame(27, 20),
+			game: finalGame(27),
 			want: parlay.NeedsGrading,
 		},
 	}
@@ -267,7 +270,7 @@ func TestGradeLeg_GameAndTeamMarkets(t *testing.T) {
 func TestGradeLeg_PlayerProps(t *testing.T) {
 	t.Parallel()
 
-	game := finalGame(27, 20)
+	game := finalGame(27)
 	box := sampleBox()
 
 	tests := []struct {
@@ -279,121 +282,157 @@ func TestGradeLeg_PlayerProps(t *testing.T) {
 		// PASS_YDS (Josh Allen: 280)
 		{
 			name: "pass yds over wins",
-			leg:  grader.LegInput{Market: "PASS_YDS", PlayerID: "3918298", Team: "BUF", Side: "OVER", Line: floatPtr(279.5)},
+			leg:  grader.LegInput{Market: "PASS_YDS", PlayerID: "3918298", Team: "BUF", Side: "OVER", Line: new(279.5)},
 			box:  box,
 			want: parlay.Won,
 		},
 		{
 			name: "pass yds over loses",
-			leg:  grader.LegInput{Market: "PASS_YDS", PlayerID: "3918298", Team: "BUF", Side: "OVER", Line: floatPtr(280.5)},
+			leg:  grader.LegInput{Market: "PASS_YDS", PlayerID: "3918298", Team: "BUF", Side: "OVER", Line: new(280.5)},
 			box:  box,
 			want: parlay.Lost,
 		},
 		{
 			name: "pass yds integer push",
-			leg:  grader.LegInput{Market: "PASS_YDS", PlayerID: "3918298", Team: "BUF", Side: "UNDER", Line: floatPtr(280)},
+			leg: grader.LegInput{
+				Market:   "PASS_YDS",
+				PlayerID: "3918298",
+				Team:     "BUF",
+				Side:     "UNDER",
+				Line:     new(280.0),
+			},
 			box:  box,
 			want: parlay.Push,
 		},
 		// PASS_TDS (Josh Allen: 2)
 		{
 			name: "pass tds over wins",
-			leg:  grader.LegInput{Market: "PASS_TDS", PlayerID: "3918298", Team: "BUF", Side: "OVER", Line: floatPtr(1.5)},
+			leg:  grader.LegInput{Market: "PASS_TDS", PlayerID: "3918298", Team: "BUF", Side: "OVER", Line: new(1.5)},
 			box:  box,
 			want: parlay.Won,
 		},
 		{
 			name: "pass tds under loses",
-			leg:  grader.LegInput{Market: "PASS_TDS", PlayerID: "3918298", Team: "BUF", Side: "UNDER", Line: floatPtr(1.5)},
+			leg:  grader.LegInput{Market: "PASS_TDS", PlayerID: "3918298", Team: "BUF", Side: "UNDER", Line: new(1.5)},
 			box:  box,
 			want: parlay.Lost,
 		},
 		{
 			name: "pass tds push",
-			leg:  grader.LegInput{Market: "PASS_TDS", PlayerID: "3918298", Team: "BUF", Side: "OVER", Line: floatPtr(2)},
+			leg: grader.LegInput{
+				Market:   "PASS_TDS",
+				PlayerID: "3918298",
+				Team:     "BUF",
+				Side:     "OVER",
+				Line:     new(2.0),
+			},
 			box:  box,
 			want: parlay.Push,
 		},
 		// RUSH_YDS (James Cook III: 95)
 		{
 			name: "rush yds over wins",
-			leg:  grader.LegInput{Market: "RUSH_YDS", PlayerID: "4379399", Team: "BUF", Side: "OVER", Line: floatPtr(89.5)},
+			leg:  grader.LegInput{Market: "RUSH_YDS", PlayerID: "4379399", Team: "BUF", Side: "OVER", Line: new(89.5)},
 			box:  box,
 			want: parlay.Won,
 		},
 		{
 			name: "rush yds under wins",
-			leg:  grader.LegInput{Market: "RUSH_YDS", PlayerID: "4379399", Team: "BUF", Side: "UNDER", Line: floatPtr(99.5)},
+			leg:  grader.LegInput{Market: "RUSH_YDS", PlayerID: "4379399", Team: "BUF", Side: "UNDER", Line: new(99.5)},
 			box:  box,
 			want: parlay.Won,
 		},
 		{
 			name: "rush yds push",
-			leg:  grader.LegInput{Market: "RUSH_YDS", PlayerID: "4379399", Team: "BUF", Side: "OVER", Line: floatPtr(95)},
+			leg: grader.LegInput{
+				Market:   "RUSH_YDS",
+				PlayerID: "4379399",
+				Team:     "BUF",
+				Side:     "OVER",
+				Line:     new(95.0),
+			},
 			box:  box,
 			want: parlay.Push,
 		},
 		// RUSH_ATT (James Cook III: 18)
 		{
 			name: "rush att over wins",
-			leg:  grader.LegInput{Market: "RUSH_ATT", PlayerID: "4379399", Team: "BUF", Side: "OVER", Line: floatPtr(17.5)},
+			leg:  grader.LegInput{Market: "RUSH_ATT", PlayerID: "4379399", Team: "BUF", Side: "OVER", Line: new(17.5)},
 			box:  box,
 			want: parlay.Won,
 		},
 		{
 			name: "rush att under loses",
-			leg:  grader.LegInput{Market: "RUSH_ATT", PlayerID: "4379399", Team: "BUF", Side: "UNDER", Line: floatPtr(17.5)},
+			leg:  grader.LegInput{Market: "RUSH_ATT", PlayerID: "4379399", Team: "BUF", Side: "UNDER", Line: new(17.5)},
 			box:  box,
 			want: parlay.Lost,
 		},
 		{
 			name: "rush att push",
-			leg:  grader.LegInput{Market: "RUSH_ATT", PlayerID: "4379399", Team: "BUF", Side: "UNDER", Line: floatPtr(18)},
+			leg: grader.LegInput{
+				Market:   "RUSH_ATT",
+				PlayerID: "4379399",
+				Team:     "BUF",
+				Side:     "UNDER",
+				Line:     new(18.0),
+			},
 			box:  box,
 			want: parlay.Push,
 		},
 		// REC_YDS (Tyreek Hill: 112)
 		{
 			name: "rec yds over wins",
-			leg:  grader.LegInput{Market: "REC_YDS", PlayerID: "4241457", Team: "MIA", Side: "OVER", Line: floatPtr(99.5)},
+			leg:  grader.LegInput{Market: "REC_YDS", PlayerID: "4241457", Team: "MIA", Side: "OVER", Line: new(99.5)},
 			box:  box,
 			want: parlay.Won,
 		},
 		{
 			name: "rec yds over loses",
-			leg:  grader.LegInput{Market: "REC_YDS", PlayerID: "4241457", Team: "MIA", Side: "OVER", Line: floatPtr(115.5)},
+			leg:  grader.LegInput{Market: "REC_YDS", PlayerID: "4241457", Team: "MIA", Side: "OVER", Line: new(115.5)},
 			box:  box,
 			want: parlay.Lost,
 		},
 		// RECEPTIONS (Tyreek Hill: 7)
 		{
 			name: "receptions over wins",
-			leg:  grader.LegInput{Market: "RECEPTIONS", PlayerID: "4241457", Team: "MIA", Side: "OVER", Line: floatPtr(6.5)},
+			leg:  grader.LegInput{Market: "RECEPTIONS", PlayerID: "4241457", Team: "MIA", Side: "OVER", Line: new(6.5)},
 			box:  box,
 			want: parlay.Won,
 		},
 		{
 			name: "receptions push",
-			leg:  grader.LegInput{Market: "RECEPTIONS", PlayerID: "4241457", Team: "MIA", Side: "OVER", Line: floatPtr(7)},
+			leg: grader.LegInput{
+				Market:   "RECEPTIONS",
+				PlayerID: "4241457",
+				Team:     "MIA",
+				Side:     "OVER",
+				Line:     new(7.0),
+			},
 			box:  box,
 			want: parlay.Push,
 		},
 		// KICKER_PTS (Tyler Bass: 9 via TotalKickingPoints; Jason Sanders: 10 via fallback 2*3+4)
 		{
 			name: "kicker pts totalKickingPoints over wins",
-			leg:  grader.LegInput{Market: "KICKER_PTS", PlayerID: "3051909", Team: "BUF", Side: "OVER", Line: floatPtr(8.5)},
+			leg:  grader.LegInput{Market: "KICKER_PTS", PlayerID: "3051909", Team: "BUF", Side: "OVER", Line: new(8.5)},
 			box:  box,
 			want: parlay.Won,
 		},
 		{
 			name: "kicker pts fallback calculation over wins",
-			leg:  grader.LegInput{Market: "KICKER_PTS", PlayerID: "4360234", Team: "MIA", Side: "OVER", Line: floatPtr(9.5)},
+			leg:  grader.LegInput{Market: "KICKER_PTS", PlayerID: "4360234", Team: "MIA", Side: "OVER", Line: new(9.5)},
 			box:  box,
 			want: parlay.Won,
 		},
 		{
 			name: "kicker pts push",
-			leg:  grader.LegInput{Market: "KICKER_PTS", PlayerID: "4360234", Team: "MIA", Side: "UNDER", Line: floatPtr(10)},
+			leg: grader.LegInput{
+				Market:   "KICKER_PTS",
+				PlayerID: "4360234",
+				Team:     "MIA",
+				Side:     "UNDER",
+				Line:     new(10.0),
+			},
 			box:  box,
 			want: parlay.Push,
 		},
@@ -443,51 +482,76 @@ func TestGradeLeg_PlayerProps(t *testing.T) {
 		// Player active in another category (0, not VOID)
 		{
 			name: "player active in rushing has 0 receptions (not void)",
-			leg:  grader.LegInput{Market: "RECEPTIONS", PlayerID: "4379399", Team: "BUF", Side: "UNDER", Line: floatPtr(0.5)},
+			leg: grader.LegInput{
+				Market:   "RECEPTIONS",
+				PlayerID: "4379399",
+				Team:     "BUF",
+				Side:     "UNDER",
+				Line:     new(0.5),
+			},
 			box:  box,
 			want: parlay.Won,
 		},
 		{
 			name: "player active in rushing loses over 0.5 receptions",
-			leg:  grader.LegInput{Market: "RECEPTIONS", PlayerID: "4379399", Team: "BUF", Side: "OVER", Line: floatPtr(0.5)},
+			leg:  grader.LegInput{Market: "RECEPTIONS", PlayerID: "4379399", Team: "BUF", Side: "OVER", Line: new(0.5)},
 			box:  box,
 			want: parlay.Lost,
 		},
 		// Name fallback matching & team narrowing
 		{
 			name: "name fallback matches normalized name without suffix",
-			leg:  grader.LegInput{Market: "RUSH_YDS", PlayerName: "james cook", Team: "BUF", Side: "OVER", Line: floatPtr(89.5)},
+			leg: grader.LegInput{
+				Market:     "RUSH_YDS",
+				PlayerName: "james cook",
+				Team:       "BUF",
+				Side:       "OVER",
+				Line:       new(89.5),
+			},
 			box:  box,
 			want: parlay.Won,
 		},
 		{
 			name: "name fallback narrowed by team avoids wrong team",
-			leg:  grader.LegInput{Market: "RUSH_YDS", PlayerName: "James Cook", Team: "MIA", Side: "OVER", Line: floatPtr(89.5)},
+			leg: grader.LegInput{
+				Market:     "RUSH_YDS",
+				PlayerName: "James Cook",
+				Team:       "MIA",
+				Side:       "OVER",
+				Line:       new(89.5),
+			},
 			box:  box,
 			want: parlay.Void,
 		},
 		// DNP vs missing stats
 		{
 			name: "absent player in populated box score is void (DNP)",
-			leg:  grader.LegInput{Market: "REC_YDS", PlayerID: "9999999", PlayerName: "Keon Coleman", Team: "BUF", Side: "OVER", Line: floatPtr(39.5)},
+			leg: grader.LegInput{
+				Market:     "REC_YDS",
+				PlayerID:   "9999999",
+				PlayerName: "Keon Coleman",
+				Team:       "BUF",
+				Side:       "OVER",
+				Line:       new(39.5),
+			},
 			box:  box,
 			want: parlay.Void,
 		},
 		{
 			name: "empty box score (HasStats false) returns needs grading",
-			leg:  grader.LegInput{Market: "PASS_YDS", PlayerID: "3918298", Team: "BUF", Side: "OVER", Line: floatPtr(245.5)},
+			leg:  grader.LegInput{Market: "PASS_YDS", PlayerID: "3918298", Team: "BUF", Side: "OVER", Line: new(245.5)},
 			box:  &espn.BoxScore{Completed: true, HasStats: false},
 			want: parlay.NeedsGrading,
 		},
 		{
 			name: "nil box score returns needs grading",
-			leg:  grader.LegInput{Market: "PASS_YDS", PlayerID: "3918298", Team: "BUF", Side: "OVER", Line: floatPtr(245.5)},
+			leg:  grader.LegInput{Market: "PASS_YDS", PlayerID: "3918298", Team: "BUF", Side: "OVER", Line: new(245.5)},
 			box:  nil,
 			want: parlay.NeedsGrading,
 		},
 		{
 			name: "prop with no player id and no player name returns needs grading",
-			leg:  grader.LegInput{Market: "PASS_YDS", Team: "BUF", Side: "OVER", Line: floatPtr(245.5)},
+			leg:  grader.LegInput{Market: "PASS_YDS", Team: "BUF", Side: "OVER", Line: new(245.5)},
 			box:  box,
 			want: parlay.NeedsGrading,
 		},
@@ -499,7 +563,7 @@ func TestGradeLeg_PlayerProps(t *testing.T) {
 		},
 		{
 			name: "prop with invalid side returns needs grading",
-			leg:  grader.LegInput{Market: "PASS_YDS", PlayerID: "3918298", Team: "BUF", Side: "YES", Line: floatPtr(245.5)},
+			leg:  grader.LegInput{Market: "PASS_YDS", PlayerID: "3918298", Team: "BUF", Side: "YES", Line: new(245.5)},
 			box:  box,
 			want: parlay.NeedsGrading,
 		},

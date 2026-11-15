@@ -403,7 +403,7 @@ func (s *Service) AutoGradeLegs(ctx context.Context, grades []AutoGrade) error {
 			}
 
 			changes := slipChanges[slipID]
-			message := fmt.Sprintf("Auto-graded %s", changes[0])
+			message := "Auto-graded " + changes[0]
 			if len(changes) > 1 {
 				message = fmt.Sprintf("Auto-graded %d legs: %s", len(changes), strings.Join(changes, ", "))
 			}

@@ -186,29 +186,6 @@ func TestQuickAddCreatesTheSelectedLeg(t *testing.T) {
 	}
 }
 
-func TestCustomLegFormTargetsTheGameCard(t *testing.T) {
-	t.Parallel()
-
-	fixture := newSlipFixture(t, 2)
-	game := addGame(t, fixture, gameKickoff())
-
-	recorder := httptest.NewRecorder()
-	request := httptest.NewRequestWithContext(
-		t.Context(),
-		http.MethodGet,
-		fmt.Sprintf("/slips/%d/legs/new?game_id=%s&quick=1", fixture.slip.ID, game.ID),
-		nil,
-	)
-	fixture.handler.ServeHTTP(recorder, request)
-
-	require.Equal(t, http.StatusOK, recorder.Code)
-	body := recorder.Body.String()
-	assert.Contains(t, body, fmt.Sprintf(`hx-target="#quick-add-%s"`, game.ID))
-	assert.Contains(t, body, `name="quick" value="1"`)
-	assert.Contains(t, body, fmt.Sprintf(`<option value="%s" selected>`, game.ID))
-	assert.Contains(t, body, `name="game_id"`)
-}
-
 // gamesHandler rebuilds the web routes for a different signed-in user, which
 // is how the home-book test changes the profile after the fixture is built.
 

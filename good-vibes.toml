@@ -14,5 +14,18 @@ dir = "changes"
 # Require accepted_by and accepted_at before design or implement. accepted_in is optional; when set, it must be a URL.
 require_accept = false
 
+[[implement.verify.checks]]
+name = "lint"
+run = "golangci-lint run ./... --fix"
+quick = "golangci-lint run ./path/to/pkg/... --fix"
+paths = ["**/*.go", "go.mod", ".golangci.yaml"]
+fix = true
+
+[[implement.verify.checks]]
+name = "test"
+run = "go test ./..."
+quick = "go test ./path/to/pkg/"
+paths = ["**/*.go", "go.mod", "go.sum", "**/testdata/**"]
+
 [docs]
 root = "docs"
