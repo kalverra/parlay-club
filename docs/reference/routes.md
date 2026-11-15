@@ -3,7 +3,7 @@ id: routes
 title: Routes
 type: reference
 summary: Every HTTP route the server serves, the middleware in front of them, and the status codes, HTMX headers, and SSE frames handlers return.
-tags: [routes, http, handlers, middleware, htmx, sse, props, prefill, research, schedules, wagers, record]
+tags: [routes, http, handlers, middleware, htmx, sse, props, prefill, research, schedules, wagers, record, analyzer, guide]
 ---
 
 # Routes
@@ -87,6 +87,7 @@ accept the shared invite. A forged group cookie still falls back to a real membe
 | `GET /games`              | 303 to the active group's week; the pick board owns the week                                     |
 | `GET /research`           | Research page: week games, player search, injury reports, and last-5 hit bars                     |
 | `GET /record`             | Season Record Book for the active group (optional `?season=`)                                    |
+| `GET /analyzer/guide`     | Grading & Analyzer Guide: live `A`–`F` rubric, pick-board badges, and every warning rule         |
 
 The bottom bar has three destinations: Groups (`/`), This week (`/groups/{active}/week`), and Record Book. Research
 keeps a full page but leaves the bar; the hub links to the pick board, and pick rows link to Research.
@@ -353,6 +354,19 @@ leg on a graded slip), and logged wagers for that season, computes `record.Build
 state. Otherwise it shows the season selector, four summary cards (Group record, Units P/L, Win streak, Loss streak),
 and the member leaderboard (stacked cards below `sm:` and a table at `sm:+`). See
 [Record Book](../concepts/record-book.md).
+
+### Analyzer guide
+
+| Method + path            | Purpose                                                         | Response |
+| ------------------------ | --------------------------------------------------------------- | -------- |
+| `GET /analyzer/guide`    | Grading & Analyzer Guide backed by `RuleDocs()` and `GradeRubric()` | Full page; optional `?from=` back-link path. |
+
+`GET /analyzer/guide` renders `web/templates/analyzer_guide.html` behind `RequireUser` and `Scope`. It displays the
+live `A`–`F` leg and slip grading rubric (`analyzer.GradeRubric()`), pick-board badge descriptions, and every active
+warning rule (`analyzer.RuleDocs()`) grouped by category with stable anchors (`#leg-grades`, `#slip-grade`,
+`#suggestions`, `#rules`, and `#rule-<id>`). An optional `?from=` query parameter renders a `"← Back"` link when it
+passes `safeReturnPath` (starts with `/` and not `//`); external or protocol-relative targets are ignored. See
+[Analyzer](../concepts/analyzer.md) and [Analyzer rules](analyzer-rules.md).
 
 ### Profile
 
