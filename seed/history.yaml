@@ -4,18 +4,166 @@
 #
 # A leg's market defaults to OTHER, its odds to -110, and its result to PENDING.
 # The slip result is computed from the legs, not stored here.
-#
-# Example:
-#
-# slips:
-#   - season: 2026
-#     season_type: 2 # 2 regular, 3 postseason
-#     week: 7
-#     name: Week 7
-#     legs_per_member: 2
-#     legs:
-#       - user: Adam
-#         selection: BUF -3.5
-#         market: OTHER
-#         odds: -110
-#         result: WON
+
+slips:
+  - season: 2026
+    season_type: 2
+    week: 7
+    name: Week 7
+    legs_per_member: 2
+    legs:
+      - user: Bob
+        selection: Josh Jacobs 50+ Rush Yds
+        market: RUSH_YDS
+        team: GB
+        player: Josh Jacobs
+        side: OVER
+        line: 49.5
+        odds: 126
+        result: LOST
+      - user: Bob
+        selection: Tyler Allgeier Anytime TD
+        market: ANYTIME_TD
+        team: ARI
+        player: Tyler Allgeier
+        odds: 231
+        result: LOST
+      - user: Adam
+        selection: Christian McCaffrey 4+ Receptions
+        market: RECEPTIONS
+        team: SF
+        player: Christian McCaffrey
+        side: OVER
+        line: 3.5
+        odds: -309
+        result: WON
+      - user: Adam
+        selection: Joe Burrow Over 6.5 Rush Yds
+        market: RUSH_YDS
+        team: CIN
+        player: Joe Burrow
+        side: OVER
+        line: 6.5
+        result: WON
+      - user: Connor
+        selection: Ja'Marr Chase Anytime TD
+        market: ANYTIME_TD
+        team: CIN
+        player: Ja'Marr Chase
+        result: WON
+      - user: Connor
+        selection: Kyren Williams 80+ Rush Yds
+        market: RUSH_YDS
+        team: LAR
+        player: Kyren Williams
+        side: OVER
+        line: 79.5
+        odds: 175
+        result: WON
+
+  - season: 2026
+    season_type: 2
+    week: 8
+    name: Week 8
+    legs_per_member: 2
+    legs:
+      - user: Bob
+        selection: Minnesota Vikings +10.5
+        market: SPREAD
+        team: MIN
+        line: 10.5
+        odds: -308
+        result: WON
+      - user: Bob
+        selection: Javonte Williams Anytime TD
+        market: ANYTIME_TD
+        team: DAL
+        player: Javonte Williams
+        result: LOST
+      - user: Adam
+        selection: Dak Prescott Under 8.5 Rush Yds
+        market: RUSH_YDS
+        team: DAL
+        player: Dak Prescott
+        side: UNDER
+        line: 8.5
+        result: LOST
+      - user: Adam
+        selection: Antonio Williams Over 3.5 Receptions
+        market: RECEPTIONS
+        team: WAS
+        player: Antonio Williams
+        side: OVER
+        line: 3.5
+        odds: 129
+        result: WON
+      - user: Connor
+        selection: Zay Flowers Over 6.5 Receptions
+        market: RECEPTIONS
+        team: BAL
+        player: Zay Flowers
+        side: OVER
+        line: 6.5
+        odds: 129
+        result: LOST
+      - user: Connor
+        selection: Jaylen Warren Over 22.5 Rec Yds
+        market: REC_YDS
+        team: PIT
+        player: Jaylen Warren
+        side: OVER
+        line: 22.5
+        odds: -104
+        result: LOST
+
+  - season: 2026
+    season_type: 2
+    week: 9
+    name: Week 9
+    legs_per_member: 2
+    legs:
+      - user: Bob
+        selection: Detroit Lions -6.5
+        market: SPREAD
+        team: DET
+        line: -6.5
+        result: WON
+      - user: Bob
+        selection: Jahmyr Gibbs Anytime TD
+        market: ANYTIME_TD
+        team: DET
+        player: Jahmyr Gibbs
+        result: WON
+      - user: Adam
+        selection: Bucky Irving Over 15.5 Rush Att
+        market: RUSH_ATT
+        team: TB
+        player: Bucky Irving
+        side: OVER
+        line: 15.5
+        odds: -105
+        result: LOST
+      - user: Adam
+        selection: Jameson Williams Over 51.5 Rec Yds
+        market: REC_YDS
+        team: DET
+        player: Jameson Williams
+        side: OVER
+        line: 51.5
+        result: LOST
+      - user: Connor
+        selection: George Kittle Over 69.5 Rec Yds
+        market: REC_YDS
+        team: SF
+        player: George Kittle
+        side: OVER
+        line: 69.5
+        odds: -104
+        result: LOST
+      - user: Connor
+        selection: Rhamondre Stevenson Anytime TD
+        market: ANYTIME_TD
+        team: NE
+        player: Rhamondre Stevenson
+        odds: -101
+        result: WON

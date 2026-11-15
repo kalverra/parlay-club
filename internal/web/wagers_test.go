@@ -27,7 +27,7 @@ func TestSlipPageRendersMyWagerDefaults(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/slips/%d", f.slip.ID), nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf("/slips/%d", f.slip.ID), nil)
 	rec := httptest.NewRecorder()
 	f.handler.ServeHTTP(rec, req)
 
@@ -51,7 +51,8 @@ func TestPutAndDeleteMyWager(t *testing.T) {
 		"boost": {"25"},
 		"book":  {"DraftKings"},
 	}
-	putReq := httptest.NewRequest(
+	putReq := httptest.NewRequestWithContext(
+		t.Context(),
 		http.MethodPut,
 		fmt.Sprintf("/slips/%d/wagers/me", f.slip.ID),
 		strings.NewReader(form.Encode()),
@@ -69,16 +70,17 @@ func TestPutAndDeleteMyWager(t *testing.T) {
 	wager, found, err := f.store.WagerForUser(t.Context(), f.slip.ID, f.user.ID)
 	require.NoError(t, err)
 	require.True(t, found)
-	assert.Equal(t, float64(25), wager.Stake)
+	assert.InDelta(t, float64(25), wager.Stake, 0.001)
 	assert.Equal(t, 350, wager.Odds)
-	assert.Equal(t, float64(25), wager.BoostPct)
+	assert.InDelta(t, float64(25), wager.BoostPct, 0.001)
 	require.NotNil(t, wager.Book)
 	assert.Equal(t, "DraftKings", *wager.Book)
 
 	// Upsert idempotently updates the existing wager.
 	form.Set("stake", "40")
 	form.Set("book", "FanDuel")
-	putReq2 := httptest.NewRequest(
+	putReq2 := httptest.NewRequestWithContext(
+		t.Context(),
 		http.MethodPut,
 		fmt.Sprintf("/slips/%d/wagers/me", f.slip.ID),
 		strings.NewReader(form.Encode()),
@@ -91,12 +93,17 @@ func TestPutAndDeleteMyWager(t *testing.T) {
 	wager, found, err = f.store.WagerForUser(t.Context(), f.slip.ID, f.user.ID)
 	require.NoError(t, err)
 	require.True(t, found)
-	assert.Equal(t, float64(40), wager.Stake)
+	assert.InDelta(t, float64(40), wager.Stake, 0.001)
 	require.NotNil(t, wager.Book)
 	assert.Equal(t, "FanDuel", *wager.Book)
 
 	// Delete clears the saved wager.
-	delReq := httptest.NewRequest(http.MethodDelete, fmt.Sprintf("/slips/%d/wagers/me", f.slip.ID), nil)
+	delReq := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodDelete,
+		fmt.Sprintf("/slips/%d/wagers/me", f.slip.ID),
+		nil,
+	)
 	delRec := httptest.NewRecorder()
 	f.handler.ServeHTTP(delRec, delReq)
 
@@ -129,7 +136,9 @@ func TestMyWagerValidationAndGroupIsolation(t *testing.T) {
 
 	for _, tc := range invalidCases {
 		t.Run(tc.name, func(t *testing.T) {
-			req := httptest.NewRequest(
+			t.Parallel()
+			req := httptest.NewRequestWithContext(
+				t.Context(),
 				http.MethodPut,
 				fmt.Sprintf("/slips/%d/wagers/me", f.slip.ID),
 				strings.NewReader(tc.form.Encode()),
@@ -148,7 +157,8 @@ func TestMyWagerValidationAndGroupIsolation(t *testing.T) {
 	f.as(outsider)
 
 	validForm := url.Values{"stake": {"10"}, "odds": {"200"}}
-	putReq := httptest.NewRequest(
+	putReq := httptest.NewRequestWithContext(
+		t.Context(),
 		http.MethodPut,
 		fmt.Sprintf("/slips/%d/wagers/me", f.slip.ID),
 		strings.NewReader(validForm.Encode()),
@@ -158,7 +168,12 @@ func TestMyWagerValidationAndGroupIsolation(t *testing.T) {
 	f.handler.ServeHTTP(putRec, putReq)
 	assert.Equal(t, http.StatusUnprocessableEntity, putRec.Code)
 
-	delReq := httptest.NewRequest(http.MethodDelete, fmt.Sprintf("/slips/%d/wagers/me", f.slip.ID), nil)
+	delReq := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodDelete,
+		fmt.Sprintf("/slips/%d/wagers/me", f.slip.ID),
+		nil,
+	)
 	delRec := httptest.NewRecorder()
 	f.handler.ServeHTTP(delRec, delReq)
 	assert.Equal(t, http.StatusUnprocessableEntity, delRec.Code)

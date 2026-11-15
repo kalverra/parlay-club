@@ -41,7 +41,7 @@ func (p *fakePublisher) Publish(topic string) {
 	p.topics = append(p.topics, topic)
 }
 
-func seedGradeFixture(t *testing.T, store *db.Store, now time.Time) (db.User, db.Week, db.Slip) {
+func seedGradeFixture(t *testing.T, store *db.Store) (db.User, db.Week, db.Slip) {
 	t.Helper()
 	ctx := t.Context()
 
@@ -61,7 +61,7 @@ func TestGradeSourceGameOnlyOptimization(t *testing.T) {
 
 	now := time.Date(2026, 11, 8, 21, 0, 0, 0, time.UTC)
 	store := openTestStore(t)
-	ada, week, slip := seedGradeFixture(t, store, now)
+	ada, week, slip := seedGradeFixture(t, store)
 
 	game := storedGame(week.ID, now.Add(-4*time.Hour))
 	game.Status = db.GameFinal
@@ -127,7 +127,7 @@ func TestGradeSourcePlayerPropsAndZeroWasteReruns(t *testing.T) {
 
 	now := time.Date(2026, 11, 8, 21, 0, 0, 0, time.UTC)
 	store := openTestStore(t)
-	ada, week, slip := seedGradeFixture(t, store, now)
+	ada, week, slip := seedGradeFixture(t, store)
 
 	game := storedGame(week.ID, now.Add(-4*time.Hour))
 	game.Status = db.GameFinal
@@ -206,7 +206,7 @@ func TestGradeSourceManualOverrideSurvivesReruns(t *testing.T) {
 
 	now := time.Date(2026, 11, 8, 21, 0, 0, 0, time.UTC)
 	store := openTestStore(t)
-	ada, week, slip := seedGradeFixture(t, store, now)
+	ada, week, slip := seedGradeFixture(t, store)
 
 	game := storedGame(week.ID, now.Add(-4*time.Hour))
 	game.Status = db.GameFinal
@@ -287,7 +287,7 @@ func TestGradeSourceBoxScoreErrorBackoff(t *testing.T) {
 
 	now := time.Date(2026, 11, 8, 21, 0, 0, 0, time.UTC)
 	store := openTestStore(t)
-	ada, week, slip := seedGradeFixture(t, store, now)
+	ada, week, slip := seedGradeFixture(t, store)
 
 	game1 := storedGame(week.ID, now.Add(-4*time.Hour))
 	game1.ID = "401772001"

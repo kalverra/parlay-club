@@ -99,7 +99,8 @@ the create form. With exactly one slip, it 303s directly to `/slips/{id}`. With 
 (`week.html`) with cards for each slip (name, scope badge, next step, deadline, progress) and a button to add a one-off
 slip. It uses the same group-switch seam as a slip link from another group.
 
-The slip handler file also serves `/me`, `/record`, and the slip and leg routes below. The pick board, Research, and Record Book are described below.
+The slip handler file also serves `/me`, `/record`, and the slip and leg routes below. The pick board, Research, and
+Record Book are described below.
 
 ### Groups
 
@@ -153,7 +154,6 @@ slip outside every group is 404.
 | `POST /slips/{id}/members`                 | Add a group member from `user_id`                               | Panel partial. |
 | `DELETE /slips/{id}/members/{userID}`      | Remove a member                                                 | Panel partial. |
 | `PATCH /slips/{id}`                        | Change `name` or `legs_per_member`                              | Panel partial. |
-| `GET /slips/{id}/legs/new`                 | Empty leg form with the game picker and player autocomplete     | Optional `?game_id=` and `?quick=`; leg form partial. |
 | `POST /slips/{id}/legs`                    | Add the signed-in member's leg                                  | Panel partial, the `leg-added` partial for a quick add, or the refreshed pair row for `from=board`; `Hx-Trigger: leg-saved` or `tray-updated`. |
 | `GET /legs/{id}/edit`                      | Edit form filled from the leg with player autocomplete          | Leg form partial. |
 | `PUT /legs/{id}`                           | Save the leg's pick fields                                      | Panel partial with `Hx-Trigger: leg-saved`, or the refreshed pair row with `Hx-Trigger: tray-updated` for `from=board` (plus `board-updated` when the leg moves to another line). |
@@ -333,15 +333,16 @@ odds and legs, and returns the refreshed game research partial.
 | ------------------------ | ------------------------------------------------- | -------- |
 | `GET /record?season=`    | Season Record Book for the active group           | Full page; invalid or non-positive `season` is 400. |
 
-`GET /record` reads the active group from `Scope` and resolves the season in order: explicit `?season=` query
-parameter, latest season with `GRADED` slips, latest season with any slip, latest loaded week's season, or the current
-calendar year. An unreadable or non-positive `?season=` answers `400 Bad Request`.
+`GET /record` reads the active group from `Scope` and resolves the season in order: explicit `?season=` query parameter,
+latest season with `GRADED` slips, latest season with any slip, latest loaded week's season, or the current calendar
+year. An unreadable or non-positive `?season=` answers `400 Bad Request`.
 
 The handler loads the group's `GRADED` slips, their legs, participating users (including former members who authored a
-leg on a graded slip), and logged wagers for that season, computes `record.Build`, and renders `web/templates/record.html`.
-When no group is active or the selected season has no graded slips, it renders an empty state. Otherwise it shows the
-season selector, four summary cards (Group record, Units P/L, Win streak, Loss streak), and the member leaderboard
-(stacked cards below `sm:` and a table at `sm:+`). See [Record Book](../concepts/record-book.md).
+leg on a graded slip), and logged wagers for that season, computes `record.Build`, and renders
+`web/templates/record.html`. When no group is active or the selected season has no graded slips, it renders an empty
+state. Otherwise it shows the season selector, four summary cards (Group record, Units P/L, Win streak, Loss streak),
+and the member leaderboard (stacked cards below `sm:` and a table at `sm:+`). See
+[Record Book](../concepts/record-book.md).
 
 ### Profile
 

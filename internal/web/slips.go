@@ -94,7 +94,6 @@ func (h *slipHandlers) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /slips/{id}/members", h.addMember)
 	mux.HandleFunc("DELETE /slips/{id}/members/{userID}", h.removeMember)
 	mux.HandleFunc("PATCH /slips/{id}", h.updateSlip)
-	mux.HandleFunc("GET /slips/{id}/legs/new", h.newLegForm)
 	mux.HandleFunc("POST /slips/{id}/legs", h.addLeg)
 	mux.HandleFunc("GET /legs/{id}/edit", h.editLegForm)
 	mux.HandleFunc("PUT /legs/{id}", h.updateLeg)
@@ -176,7 +175,6 @@ type SlipView struct {
 	Wager         WagerView
 	Activity      []ActivityView
 	Analyzer      AnalyzerView
-	LegForm       LegFormView
 	Siblings      []SiblingSlipView
 }
 
@@ -185,7 +183,6 @@ type SlipMemberView struct {
 	User      User
 	Locked    bool
 	IsCurrent bool
-	CanAddLeg bool
 	CanLockIn bool
 	Legs      []LegView
 	LegCount  int
@@ -723,32 +720,6 @@ func (h *slipHandlers) updateSlip(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.renderPanel(w, r, updated)
-}
-
-// newLegForm shows the leg form for one slip.
-func (h *slipHandlers) newLegForm(w http.ResponseWriter, r *http.Request) {
-	slip, _, _, ok := h.loadSlip(w, r, r.PathValue("id"))
-	if !ok {
-		return
-	}
-	form := LegFormView{
-		SlipID: slip.ID,
-		Action: fmt.Sprintf("/slips/%d/legs", slip.ID),
-		Target: "#slip-panel",
-		Market: "OTHER",
-		Odds:   strconv.Itoa(db.DefaultLegOdds),
-		GameID: r.URL.Query().Get("game_id"),
-	}
-	if r.URL.Query().Get("quick") != "" && form.GameID != "" {
-		form.Quick = true
-		form.Target = "#quick-add-" + form.GameID
-	}
-	form, err := h.withGames(r.Context(), form, slip)
-	if err != nil {
-		h.serverError(w, err)
-		return
-	}
-	h.renderPartial(w, "leg-form", form)
 }
 
 // editLegForm shows the leg form filled from an existing leg.
@@ -1581,7 +1552,6 @@ func (h *slipHandlers) slipPageData(ctx context.Context, slip db.Slip) (SlipPage
 			User:      NewUser(member.User),
 			Locked:    member.LockedAt != nil,
 			IsCurrent: isCurrent,
-			CanAddLeg: open && isCurrent && member.LockedAt == nil && len(own) < slip.LegsPerMember,
 			CanLockIn: open && isCurrent && member.LockedAt == nil && len(own) == slip.LegsPerMember,
 			Legs:      own,
 			LegCount:  len(own),
@@ -1613,15 +1583,6 @@ func (h *slipHandlers) slipPageData(ctx context.Context, slip db.Slip) (SlipPage
 		Activity:      activity,
 		Analyzer:      analyzerView(legs, gamesByID, playerStats, names),
 		Siblings:      siblings,
-	}
-	if hasUser {
-		view.LegForm = LegFormView{
-			SlipID: slip.ID,
-			Action: fmt.Sprintf("/slips/%d/legs", slip.ID),
-			Target: "#slip-panel",
-			Market: "OTHER",
-			Odds:   strconv.Itoa(db.DefaultLegOdds),
-		}
 	}
 
 	next := slips.NextStep(slip, members, legs, games, viewerID, h.deps.now())

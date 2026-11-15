@@ -81,7 +81,7 @@ type rawBoxTeamPlayers struct {
 }
 
 type rawBoxStatGroup struct {
-	Name     string `json:"name"`
+	Name     string   `json:"name"`
 	Keys     []string `json:"keys"`
 	Athletes []struct {
 		Athlete struct {
@@ -170,8 +170,9 @@ func applyStatGroup(group rawBoxStatGroup, teamAbbrev string, getOrCreate func(i
 		if k == "totalKickingPoints" {
 			hasTotalKickingPts = true
 		}
-		if k == "fieldGoalsMade/fieldGoalAttempts" || k == "fieldGoalsMade-fieldGoalAttempts" || k == "fieldGoalsMade" ||
-			k == "extraPointsMade/extraPointAttempts" || k == "extraPointsMade-extraPointAttempts" || k == "extraPointsMade" {
+		if k == "fieldGoalsMade/fieldGoalAttempts" || k == "fieldGoalsMade-fieldGoalAttempts" ||
+			k == "fieldGoalsMade" || k == "extraPointsMade/extraPointAttempts" ||
+			k == "extraPointsMade-extraPointAttempts" || k == "extraPointsMade" {
 			isKickingGroup = true
 		}
 	}

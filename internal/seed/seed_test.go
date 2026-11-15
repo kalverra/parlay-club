@@ -219,7 +219,23 @@ slips:
 	assert.Equal(t, db.SlipGraded, week.Status)
 }
 
-func TestLoadShipsAnEmptyHistoryFile(t *testing.T) {
+func TestLoadEmptyHistoryFileIsANoOp(t *testing.T) {
+	t.Parallel()
+
+	store := newStore(t)
+	group := newGroup(t, store)
+
+	path := writeHistory(t, "# comments only\n")
+	report, err := seed.Load(t.Context(), store, group.ID, path)
+	require.NoError(t, err)
+	assert.Equal(t, seed.Report{}, report)
+
+	slips, err := store.SlipsForWeek(t.Context(), group.ID, db.WeekID(2026, 2, 7))
+	require.NoError(t, err)
+	assert.Empty(t, slips)
+}
+
+func TestLoadRepoHistoryFile(t *testing.T) {
 	t.Parallel()
 
 	store := newStore(t)
@@ -228,11 +244,15 @@ func TestLoadShipsAnEmptyHistoryFile(t *testing.T) {
 	path := filepath.Join("..", "..", seed.DefaultPath)
 	report, err := seed.Load(t.Context(), store, group.ID, path)
 	require.NoError(t, err)
-	assert.Equal(t, seed.Report{}, report)
+	assert.Equal(t, seed.Report{Slips: 3, Skipped: 0, Users: 3}, report)
 
-	slips, err := store.SlipsForWeek(t.Context(), group.ID, db.WeekID(2026, 2, 7))
-	require.NoError(t, err)
-	assert.Empty(t, slips)
+	for _, week := range []int{7, 8, 9} {
+		slips, err := store.SlipsForWeek(t.Context(), group.ID, db.WeekID(2026, 2, week))
+		require.NoError(t, err)
+		require.Len(t, slips, 1)
+		assert.Equal(t, db.SlipGraded, slips[0].Status)
+		assert.Equal(t, parlay.Lost, slips[0].Result)
+	}
 }
 
 func TestLoadReportsAMissingFile(t *testing.T) {

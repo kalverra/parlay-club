@@ -20,14 +20,14 @@ func TestRecordBookEmptyStateAndInvalidSeason(t *testing.T) {
 	f := newSlipFixture(t, 2)
 
 	rec := httptest.NewRecorder()
-	f.handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/record", nil))
+	f.handler.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/record", nil))
 	require.Equal(t, http.StatusOK, rec.Code)
 	body := html.UnescapeString(rec.Body.String())
 	assert.Contains(t, body, "Record Book")
 	assert.Contains(t, body, "No graded slips yet for the 2026 season.")
 
 	bad := httptest.NewRecorder()
-	f.handler.ServeHTTP(bad, httptest.NewRequest(http.MethodGet, "/record?season=abc", nil))
+	f.handler.ServeHTTP(bad, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/record?season=abc", nil))
 	assert.Equal(t, http.StatusBadRequest, bad.Code)
 }
 
@@ -97,7 +97,7 @@ func TestRecordBookSeasonSelectionLeaderboardAndGroupIsolation(t *testing.T) {
 
 	// Default /record should pick 2025 because 2026 only has an OPEN slip (f.slip).
 	rec := httptest.NewRecorder()
-	f.handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/record", nil))
+	f.handler.ServeHTTP(rec, httptest.NewRequestWithContext(ctx, http.MethodGet, "/record", nil))
 	require.Equal(t, http.StatusOK, rec.Code)
 	body := html.UnescapeString(rec.Body.String())
 
@@ -115,7 +115,7 @@ func TestRecordBookSeasonSelectionLeaderboardAndGroupIsolation(t *testing.T) {
 
 	// ?season=2026 switches to 2026 and shows the empty state for 2026.
 	rec2026 := httptest.NewRecorder()
-	f.handler.ServeHTTP(rec2026, httptest.NewRequest(http.MethodGet, "/record?season=2026", nil))
+	f.handler.ServeHTTP(rec2026, httptest.NewRequestWithContext(ctx, http.MethodGet, "/record?season=2026", nil))
 	require.Equal(t, http.StatusOK, rec2026.Code)
 	body2026 := html.UnescapeString(rec2026.Body.String())
 	assert.Contains(t, body2026, "2026 season")
