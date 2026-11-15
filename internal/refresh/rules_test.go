@@ -338,16 +338,51 @@ func TestOddsPropsStaleRules(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "props wait two hours",
+			name: "game day waits thirty minutes",
 			last: novemberTime(8, 9, 0),
-			now:  novemberTime(8, 10, 59),
+			now:  novemberTime(8, 9, 29),
 			game: game,
 			want: false,
 		},
 		{
-			name: "props at two hours",
+			name: "game day at thirty minutes",
 			last: novemberTime(8, 9, 0),
-			now:  novemberTime(8, 11, 0),
+			now:  novemberTime(8, 9, 30),
+			game: game,
+			want: true,
+		},
+		{
+			name: "within six hours of kickoff waits thirty minutes",
+			last: novemberTime(8, 7, 0),
+			now:  novemberTime(8, 7, 29),
+			game: db.Game{ID: "402", Kickoff: novemberTime(8, 13, 0)},
+			want: false,
+		},
+		{
+			name: "saturday within six hours of kickoff waits thirty minutes",
+			last: novemberTime(7, 20, 0),
+			now:  novemberTime(7, 20, 29),
+			game: db.Game{ID: "403", Kickoff: novemberTime(8, 1, 0)},
+			want: false,
+		},
+		{
+			name: "saturday within six hours of kickoff at thirty minutes",
+			last: novemberTime(7, 20, 0),
+			now:  novemberTime(7, 20, 30),
+			game: db.Game{ID: "403", Kickoff: novemberTime(8, 1, 0)},
+			want: true,
+		},
+		{
+			name: "midweek waits two hours",
+			last: novemberTime(4, 10, 0),
+			now:  novemberTime(4, 11, 59),
+			game: game,
+			want: false,
+		},
+		{
+			name: "midweek at two hours",
+			last: novemberTime(4, 10, 0),
+			now:  novemberTime(4, 12, 0),
 			game: game,
 			want: true,
 		},
@@ -371,6 +406,120 @@ func TestOddsPropsStaleRules(t *testing.T) {
 			assert.Equal(t, test.want, oddsPropsStale(test.last, test.now, test.game))
 		})
 	}
+}
+
+func TestOddsPickLinesStaleRules(t *testing.T) {
+	t.Parallel()
+
+	games := slateGames()
+	thursdayGames := []db.Game{
+		{ID: "thu", Kickoff: novemberTime(5, 20, 15)},
+		{ID: "sun", Kickoff: novemberTime(8, 13, 0)},
+	}
+	tests := []struct {
+		name  string
+		last  time.Time
+		now   time.Time
+		games []db.Game
+		want  bool
+	}{
+		{
+			name:  "never fetched with upcoming game",
+			now:   novemberTime(4, 12, 0),
+			games: games,
+			want:  true,
+		},
+		{
+			name:  "no games skips",
+			now:   novemberTime(8, 12, 0),
+			games: nil,
+			want:  false,
+		},
+		{
+			name:  "all games kicked off skips",
+			now:   novemberTime(9, 20, 15),
+			games: games,
+			want:  false,
+		},
+		{
+			name:  "sunday before last sunday kickoff waits fifteen minutes",
+			last:  novemberTime(8, 12, 0),
+			now:   novemberTime(8, 12, 14),
+			games: games,
+			want:  false,
+		},
+		{
+			name:  "sunday before last sunday kickoff at fifteen minutes",
+			last:  novemberTime(8, 12, 0),
+			now:   novemberTime(8, 12, 15),
+			games: games,
+			want:  true,
+		},
+		{
+			name:  "thursday before thursday kickoff at fifteen minutes",
+			last:  novemberTime(5, 19, 0),
+			now:   novemberTime(5, 19, 15),
+			games: thursdayGames,
+			want:  true,
+		},
+		{
+			name:  "monday before monday kickoff at fifteen minutes",
+			last:  novemberTime(9, 19, 0),
+			now:   novemberTime(9, 19, 15),
+			games: games,
+			want:  true,
+		},
+		{
+			name:  "sunday after last sunday kickoff waits two hours",
+			last:  novemberTime(8, 17, 0),
+			now:   novemberTime(8, 18, 59),
+			games: games,
+			want:  false,
+		},
+		{
+			name:  "sunday after last sunday kickoff at two hours",
+			last:  novemberTime(8, 17, 0),
+			now:   novemberTime(8, 19, 0),
+			games: games,
+			want:  true,
+		},
+		{
+			name:  "midweek waits two hours",
+			last:  novemberTime(4, 12, 0),
+			now:   novemberTime(4, 13, 59),
+			games: games,
+			want:  false,
+		},
+		{
+			name:  "midweek at two hours",
+			last:  novemberTime(4, 12, 0),
+			now:   novemberTime(4, 14, 0),
+			games: games,
+			want:  true,
+		},
+		{
+			name:  "within two hours of next kickoff waits fifteen minutes",
+			last:  novemberTime(7, 23, 0),
+			now:   novemberTime(7, 23, 15),
+			games: []db.Game{{ID: "early", Kickoff: novemberTime(8, 1, 0)}},
+			want:  true,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, test.want, oddsPickLinesStale(test.last, test.now, test.games))
+		})
+	}
+}
+
+func TestPickCooldownStaleRules(t *testing.T) {
+	t.Parallel()
+
+	now := novemberTime(8, 12, 0)
+	assert.True(t, pickCooldownStale(time.Time{}, now))
+	assert.False(t, pickCooldownStale(now.Add(-2*time.Minute+time.Second), now))
+	assert.True(t, pickCooldownStale(now.Add(-2*time.Minute), now))
 }
 
 func TestRosterStaleRules(t *testing.T) {
