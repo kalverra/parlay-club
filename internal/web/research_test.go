@@ -721,3 +721,113 @@ func TestResearchPlayerRendersPortraitAndTeamLogo(t *testing.T) {
 	assert.Contains(t, bodyNoImg, `>DA</span>`)
 	assert.NotContains(t, bodyNoImg, `src=""`)
 }
+
+func TestResearchPlayerSurfacesNFLverseMetricsAndHTMX(t *testing.T) {
+	t.Parallel()
+
+	seedResearchNFLverse := func(t *testing.T, fixture *slipFixture, syncedAt time.Time) {
+		t.Helper()
+		addGame(t, fixture, gameKickoff())
+		require.NoError(t, fixture.store.UpsertRosterPlayers(t.Context(), []db.RosterPlayer{
+			{AthleteID: "3918298", FullName: "James Cook", Team: "BUF", Position: "RB", UpdatedAt: syncedAt},
+		}))
+		statsJSON := `{"RUSH_YDS":[95,82,74,110,68],"REC_YDS":[25,18,32,12,20]}`
+		require.NoError(t, fixture.store.UpsertPlayerGameLog(t.Context(), db.PlayerGameLog{
+			AthleteID: "3918298", GamesPlayed: 5, StatsJSON: statsJSON, UpdatedAt: syncedAt,
+		}))
+
+		teams := []string{"BUF", "MIA", "BAL", "SF"}
+		teamWeeks := make([]db.NFLverseTeamWeek, 0, len(teams))
+		for i, abbr := range teams {
+			teamWeeks = append(teamWeeks, db.NFLverseTeamWeek{
+				Season:            2026,
+				SeasonType:        2,
+				WeekNum:           1,
+				Team:              abbr,
+				DefPassEPAAllowed: float64(i) * 0.05,            // MIA is #2 pass def
+				DefRushEPAAllowed: float64(len(teams)-i) * 0.05, // MIA is #3 rush def
+				UpdatedAt:         syncedAt,
+			})
+		}
+		_, err := fixture.store.UpsertNFLverseTeamWeeks(t.Context(), teamWeeks)
+		require.NoError(t, err)
+		require.NoError(t, fixture.store.RecordSync(t.Context(), "nflverse:season:2026", syncedAt, nil))
+
+		var playerWeeks []db.NFLversePlayerWeek
+		for wk := 1; wk <= 3; wk++ {
+			playerWeeks = append(playerWeeks, db.NFLversePlayerWeek{
+				Season:      2026,
+				SeasonType:  2,
+				WeekNum:     wk,
+				ESPNID:      "3918298",
+				Team:        "BUF",
+				OffensePct:  0.72,
+				TargetShare: 0.14,
+				WOPR:        0.38,
+				UpdatedAt:   syncedAt,
+			})
+		}
+		_, err = fixture.store.UpsertNFLversePlayerWeeks(t.Context(), playerWeeks)
+		require.NoError(t, err)
+	}
+
+	t.Run("fresh nflverse surfaces Snap %, Target share, WOPR, Opp Def Rank, and HTMX market swap", func(t *testing.T) {
+		t.Parallel()
+		fixture := newSlipFixture(t, 2)
+		seedResearchNFLverse(t, fixture, time.Now().UTC())
+		handler := researchHandlerWithRefresher(t, fixture, fixture.user, &researchTestRefresher{})
+
+		// 1. HTMX partial swap via GET /research?player_id=3918298 (defaults to RUSH_YDS).
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/research?player_id=3918298", nil)
+		req.Header.Set("Hx-Request", "true")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		require.Equal(t, http.StatusOK, rec.Code)
+
+		body := rec.Body.String()
+		assert.Contains(t, body, "Snap % (L3)")
+		assert.Contains(t, body, "72%")
+		assert.Contains(t, body, "Target share")
+		assert.Contains(t, body, "14.0%")
+		assert.Contains(t, body, "WOPR")
+		assert.Contains(t, body, "0.38")
+		assert.Contains(t, body, "Opp Rush Def")
+		assert.Contains(t, body, "#3 vs MIA")
+		// Mobile-width 2-column grid layout on phone screens.
+		assert.Contains(t, body, "grid-cols-2 gap-2 sm:grid-cols-4")
+		// Partial response should not include full page wrapper.
+		assert.NotContains(t, body, `id="research-panel"`)
+
+		// 2. HTMX market tab swap to REC_YDS switches opponent rank to Opp Pass Def.
+		reqRec := httptest.NewRequestWithContext(
+			t.Context(), http.MethodGet, "/research/players/3918298?market=REC_YDS", nil,
+		)
+		reqRec.Header.Set("Hx-Request", "true")
+		recSwap := httptest.NewRecorder()
+		handler.ServeHTTP(recSwap, reqRec)
+		require.Equal(t, http.StatusOK, recSwap.Code)
+
+		swapBody := recSwap.Body.String()
+		assert.Contains(t, swapBody, "Opp Pass Def")
+		assert.Contains(t, swapBody, "#2 vs MIA")
+	})
+
+	t.Run("stale nflverse fails soft without usage tiles", func(t *testing.T) {
+		t.Parallel()
+		fixture := newSlipFixture(t, 2)
+		seedResearchNFLverse(t, fixture, time.Now().UTC().Add(-8*24*time.Hour))
+		handler := researchHandlerWithRefresher(t, fixture, fixture.user, &researchTestRefresher{})
+
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/research/players/3918298", nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		require.Equal(t, http.StatusOK, rec.Code)
+
+		body := rec.Body.String()
+		assert.Contains(t, body, "James Cook")
+		assert.NotContains(t, body, "Snap % (L3)")
+		assert.NotContains(t, body, "Target share")
+		assert.NotContains(t, body, "WOPR")
+		assert.NotContains(t, body, "Opp Rush Def")
+	})
+}

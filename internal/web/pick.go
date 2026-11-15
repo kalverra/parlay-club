@@ -10,8 +10,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kalverra/parlay-club/internal/analyzer"
 	"github.com/kalverra/parlay-club/internal/board"
 	"github.com/kalverra/parlay-club/internal/db"
+	"github.com/kalverra/parlay-club/internal/ingest/espn"
 	"github.com/kalverra/parlay-club/internal/parlay"
 	"github.com/kalverra/parlay-club/internal/slips"
 )
@@ -130,6 +132,7 @@ type PickPlayerView struct {
 	Position    string
 	Team        string
 	TeamLogo    string
+	Tags        []string
 	Lines       []PickLineGroupView
 }
 
@@ -160,6 +163,7 @@ type PickRowView struct {
 	UpdateID   int64
 	AtLimit    bool
 	SwapURL    string
+	Badge      string
 }
 
 // PickDockView is the viewer's own picks: the fixed dock's count and combined
@@ -574,11 +578,13 @@ func (h *slipHandlers) pickPageData(
 	}
 	if card, ok := openByID[q.GameID]; ok {
 		game := gamesByID[card.ID]
+		signals := h.boardSignalsForGame(ctx, slip.WeekID, game, rows, mine)
 		model := board.Detail(game, rows, board.Query{
 			Q:        q.Q,
 			Category: q.Category,
 			Sort:     q.Sort,
 			Now:      now,
+			Signals:  signals,
 		})
 		detail := pickDetailView(slip.ID, model, q, atLimit, !card.HasProps && rowGames[card.ID])
 		detail.CanRefresh = slip.Status == db.SlipOpen
@@ -648,6 +654,7 @@ func pickDetailView(
 			Position:    player.Position,
 			Team:        player.Team,
 			TeamLogo:    teamLogoForGame(player.Team, model.Game),
+			Tags:        player.Tags,
 		}
 		for _, group := range player.Lines {
 			card.Lines = append(card.Lines, pickLineGroupView(slipID, group, atLimit, linkQuery, true))
@@ -1137,6 +1144,7 @@ func pickRowView(slipID int64, row board.Row, atLimit bool, q board.Query) PickR
 		Text:       row.Text,
 		PickID:     row.Picked,
 		AtLimit:    atLimit,
+		Badge:      row.Badge,
 	}
 	if row.Line != nil {
 		view.Line = formatFloat(*row.Line)
@@ -1256,6 +1264,8 @@ func (h *slipHandlers) pickPairRow(
 	mine := legsForUser(legs, user.ID)
 	rows := board.Build(
 		[]db.Game{game}, currentOdds(odds), roster, homeBook, mine, h.deps.now())
+	signals := h.boardSignalsForGame(ctx, slip.WeekID, game, rows, mine)
+	rows = board.ApplySignals(game, rows, signals)
 	for _, group := range board.Pair(game, rows) {
 		if !groupHoldsLeg(group, leg) {
 			continue
@@ -1391,4 +1401,71 @@ func floatPointer(raw string) *float64 {
 		return nil
 	}
 	return &value
+}
+
+// boardSignalsForGame loads optional nflverse team EPA, player usage, game
+// injuries, and open-slip legs for one game's pick board. Missing or stale
+// nflverse data fails soft with nil maps.
+func (h *slipHandlers) boardSignalsForGame(
+	ctx context.Context,
+	weekID int64,
+	game db.Game,
+	rows []board.Row,
+	mine []db.Leg,
+) board.BoardSignals {
+	slipLegs := make([]analyzer.Leg, 0, len(mine))
+	for _, leg := range mine {
+		slipLegs = append(slipLegs, analyzerLeg(leg, nil))
+	}
+	signals := board.BoardSignals{
+		Injuries: parseGameInjuries(game),
+		SlipLegs: slipLegs,
+	}
+
+	week, err := h.deps.Store.WeekByID(ctx, weekID)
+	if err != nil {
+		return signals
+	}
+	teamEPA, fresh := loadFreshNFLverseTeamProfiles(ctx, h.deps.Store, h.deps.now(), week)
+	if !fresh {
+		return signals
+	}
+	signals.TeamEPA = teamEPA
+
+	seen := make(map[string]struct{})
+	playerUsage := make(map[string]*analyzer.PlayerUsage)
+	for _, row := range rows {
+		if row.GameID != game.ID || row.PlayerID == "" {
+			continue
+		}
+		if _, ok := seen[row.PlayerID]; ok {
+			continue
+		}
+		seen[row.PlayerID] = struct{}{}
+		pWeeks := loadNFLversePlayerWeeks(ctx, h.deps.Store, row.PlayerID, week.Season, week.SeasonType)
+		if usage := buildPlayerUsage(pWeeks); usage != nil {
+			playerUsage[row.PlayerID] = usage
+		}
+	}
+	if len(playerUsage) > 0 {
+		signals.PlayerUsage = playerUsage
+	}
+	return signals
+}
+
+func parseGameInjuries(game db.Game) map[string][]espn.Injury {
+	if game.InjuriesJSON == nil || *game.InjuriesJSON == "" {
+		return nil
+	}
+	teamInjuries, err := espn.ParseInjuries(*game.InjuriesJSON)
+	if err != nil || len(teamInjuries) == 0 {
+		return nil
+	}
+	byTeam := make(map[string][]espn.Injury, len(teamInjuries))
+	for _, ti := range teamInjuries {
+		if ti.Abbreviation != "" && len(ti.Injuries) > 0 {
+			byTeam[ti.Abbreviation] = ti.Injuries
+		}
+	}
+	return byTeam
 }

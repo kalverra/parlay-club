@@ -169,5 +169,5 @@ Effort: medium (coordinates across ingest, SQLite migrations, pure analyzer scor
 ### Phase 3: Pick-board leg suggestions and research usage view
 
 - [x] Extend `internal/board` with `BoardSignals` (`Smash matchup`, `High volume`, `Role bump`, `Fits slip` badges) and `SortMatchup` sorting, with table-driven board tests.
-- [ ] Wire `BoardSignals` into `internal/web/pick.go`, surface `Snap %`, `Target share`, `WOPR`, and opponent defense rank in `internal/web/research.go` and templates, and verify mobile-width rendering and HTMX partial swaps in web tests.
+- [x] Wire `BoardSignals` into `internal/web/pick.go`, surface `Snap %`, `Target share`, `WOPR`, and opponent defense rank in `internal/web/research.go` and templates, and verify mobile-width rendering and HTMX partial swaps in web tests.
 - [ ] Docs: update `docs/concepts/slips.md` for pick-board suggestion badges, `Matchup` sort, and research usage context.

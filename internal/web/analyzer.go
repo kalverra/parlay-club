@@ -423,24 +423,56 @@ func (h *slipHandlers) nflverseForSlip(
 	if err != nil {
 		return nil, nil
 	}
-	state, err := h.deps.Store.SyncState(ctx, nflverseSource(week.Season))
-	if err != nil || h.deps.now().Sub(state.FetchedAt) > nflverseFreshFor {
+	teamProfiles, fresh := loadFreshNFLverseTeamProfiles(ctx, h.deps.Store, h.deps.now(), week)
+	if !fresh {
 		return nil, nil
-	}
-
-	seasonType := week.SeasonType
-	teamWeeks, err := h.deps.Store.NFLverseTeamWeeksForSeason(ctx, week.Season, seasonType)
-	if err == nil && len(teamWeeks) == 0 && seasonType == seasonTypePostseason {
-		seasonType = seasonTypeRegular
-		teamWeeks, err = h.deps.Store.NFLverseTeamWeeksForSeason(ctx, week.Season, seasonType)
-	}
-	var teamProfiles map[string]*analyzer.TeamDefenseProfile
-	if err == nil && len(teamWeeks) > 0 {
-		teamProfiles = buildTeamDefenseProfiles(teamWeeks)
 	}
 
 	usageByPlayer := h.nflverseUsageForLegs(ctx, legs, week.Season, week.SeasonType)
 	return teamProfiles, usageByPlayer
+}
+
+// loadFreshNFLverseTeamProfiles returns season-to-date/L4 team EPA and pace
+// profiles when nflverse:season:{year} is present and under nflverseFreshFor.
+func loadFreshNFLverseTeamProfiles(
+	ctx context.Context,
+	store *db.Store,
+	now time.Time,
+	week db.Week,
+) (map[string]*analyzer.TeamDefenseProfile, bool) {
+	state, err := store.SyncState(ctx, nflverseSource(week.Season))
+	if err != nil || now.Sub(state.FetchedAt) > nflverseFreshFor {
+		return nil, false
+	}
+
+	seasonType := week.SeasonType
+	teamWeeks, err := store.NFLverseTeamWeeksForSeason(ctx, week.Season, seasonType)
+	if err == nil && len(teamWeeks) == 0 && seasonType == seasonTypePostseason {
+		seasonType = seasonTypeRegular
+		teamWeeks, err = store.NFLverseTeamWeeksForSeason(ctx, week.Season, seasonType)
+	}
+	if err != nil || len(teamWeeks) == 0 {
+		return nil, true
+	}
+	return buildTeamDefenseProfiles(teamWeeks), true
+}
+
+// loadNFLversePlayerWeeks returns weekly nflverse usage rows for an athlete,
+// falling back to regular season rows during postseason when < 3 weeks exist.
+func loadNFLversePlayerWeeks(
+	ctx context.Context,
+	store *db.Store,
+	athleteID string,
+	season, seasonType int,
+) []db.NFLversePlayerWeek {
+	rows, err := store.NFLversePlayerWeeksForPlayer(ctx, athleteID, season, seasonType)
+	if err == nil && len(rows) < 3 && seasonType == seasonTypePostseason {
+		rows, err = store.NFLversePlayerWeeksForPlayer(ctx, athleteID, season, seasonTypeRegular)
+	}
+	if err != nil {
+		return nil
+	}
+	return rows
 }
 
 func (h *slipHandlers) nflverseUsageForLegs(
@@ -460,13 +492,7 @@ func (h *slipHandlers) nflverseUsageForLegs(
 		}
 		seen[id] = struct{}{}
 
-		rows, err := h.deps.Store.NFLversePlayerWeeksForPlayer(ctx, id, season, seasonType)
-		if err == nil && len(rows) < 3 && seasonType == seasonTypePostseason {
-			rows, err = h.deps.Store.NFLversePlayerWeeksForPlayer(ctx, id, season, seasonTypeRegular)
-		}
-		if err != nil {
-			continue
-		}
+		rows := loadNFLversePlayerWeeks(ctx, h.deps.Store, id, season, seasonType)
 		if usage := buildPlayerUsage(rows); usage != nil {
 			usageByPlayer[id] = usage
 		}

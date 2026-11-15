@@ -1104,6 +1104,27 @@
       </div>
     </div>
 
+    {{if or .SnapPct .TargetShare .WOPR .OppDefRank}}
+      <div class="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <div class="rounded-lg border border-slate-800 bg-slate-950/40 p-2.5 text-center">
+          <p class="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Snap % (L3)</p>
+          <p class="mt-1 text-base font-bold text-slate-100">{{if .SnapPct}}{{.SnapPct}}{{else}}--{{end}}</p>
+        </div>
+        <div class="rounded-lg border border-slate-800 bg-slate-950/40 p-2.5 text-center">
+          <p class="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Target share</p>
+          <p class="mt-1 text-base font-bold text-slate-100">{{if .TargetShare}}{{.TargetShare}}{{else}}--{{end}}</p>
+        </div>
+        <div class="rounded-lg border border-slate-800 bg-slate-950/40 p-2.5 text-center">
+          <p class="text-[10px] font-semibold uppercase tracking-wide text-slate-400">WOPR</p>
+          <p class="mt-1 text-base font-bold text-slate-100">{{if .WOPR}}{{.WOPR}}{{else}}--{{end}}</p>
+        </div>
+        <div class="rounded-lg border border-slate-800 bg-slate-950/40 p-2.5 text-center">
+          <p class="text-[10px] font-semibold uppercase tracking-wide text-slate-400">{{if .OppDefLabel}}{{.OppDefLabel}}{{else}}Opp Def Rank{{end}}</p>
+          <p class="mt-1 text-base font-bold text-slate-100">{{if .OppDefRank}}{{.OppDefRank}}{{else}}--{{end}}</p>
+        </div>
+      </div>
+    {{end}}
+
     <!-- Market selector tabs -->
     {{if .AvailableMarkets}}
       <div class="mt-4 flex flex-wrap gap-1.5">
@@ -1177,7 +1198,8 @@
         class="w-full rounded-lg border border-emerald-700 bg-emerald-950/50 px-3 py-2 text-left text-sm font-medium text-emerald-300 hover:bg-emerald-900/60"
       >
         <span class="block truncate">{{.Text}}</span>
-        <span class="text-xs font-normal text-emerald-400/80">{{.Price}} &middot; tap to remove</span>
+        <span class="block text-xs font-normal text-emerald-400/80">{{.Price}} &middot; tap to remove</span>
+        {{if .Badge}}<span class="mt-1 inline-block rounded-full border border-sky-700/70 bg-sky-950/70 px-1.5 py-0.5 text-[10px] font-medium text-sky-300">{{.Badge}}</span>{{end}}
       </button>
     </form>
   {{else if .UpdateID}}
@@ -1200,7 +1222,8 @@
         class="w-full rounded-lg border border-slate-700 bg-slate-800/60 px-3 py-2 text-left text-sm font-medium text-slate-200 hover:bg-slate-800"
       >
         <span class="block truncate">{{.Text}}</span>
-        <span class="text-xs font-normal text-slate-400">{{.Price}} &middot; tap to switch</span>
+        <span class="block text-xs font-normal text-slate-400">{{.Price}} &middot; tap to switch</span>
+        {{if .Badge}}<span class="mt-1 inline-block rounded-full border border-sky-700/70 bg-sky-950/70 px-1.5 py-0.5 text-[10px] font-medium text-sky-300">{{.Badge}}</span>{{end}}
       </button>
     </form>
   {{else if .AtLimit}}
@@ -1212,7 +1235,8 @@
       hx-swap="innerHTML"
     >
       <span class="block truncate">{{.Text}}</span>
-      <span class="text-xs font-normal text-slate-400">{{.Price}} &middot; swap in</span>
+      <span class="block text-xs font-normal text-slate-400">{{.Price}} &middot; swap in</span>
+      {{if .Badge}}<span class="mt-1 inline-block rounded-full border border-sky-700/70 bg-sky-950/70 px-1.5 py-0.5 text-[10px] font-medium text-sky-300">{{.Badge}}</span>{{end}}
     </button>
   {{else}}
     <form
@@ -1235,7 +1259,8 @@
         class="w-full rounded-lg border border-slate-700 bg-slate-800/60 px-3 py-2 text-left text-sm font-medium text-slate-200 hover:bg-slate-800"
       >
         <span class="block truncate">{{.Text}}</span>
-        <span class="text-xs font-normal text-slate-400">{{.Price}} &middot; tap to add</span>
+        <span class="block text-xs font-normal text-slate-400">{{.Price}} &middot; tap to add</span>
+        {{if .Badge}}<span class="mt-1 inline-block rounded-full border border-sky-700/70 bg-sky-950/70 px-1.5 py-0.5 text-[10px] font-medium text-sky-300">{{.Badge}}</span>{{end}}
       </button>
     </form>
   {{end}}
@@ -1525,6 +1550,13 @@
           </p>
         {{end}}
       </header>
+      {{if .Tags}}
+        <div class="mt-2 flex flex-wrap gap-1.5">
+          {{range .Tags}}
+            <span class="rounded-full border border-emerald-800/70 bg-emerald-950/60 px-2 py-0.5 text-[10px] font-medium text-emerald-300">{{.}}</span>
+          {{end}}
+        </div>
+      {{end}}
       <div class="mt-2 space-y-2">
         {{range .Lines}}
           {{template "pick-line-group" .}}
