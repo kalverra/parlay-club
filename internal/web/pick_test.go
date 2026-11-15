@@ -1,19 +1,28 @@
 package web_test
 
 import (
+	"context"
 	"fmt"
 	"html"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/kalverra/parlay-club/internal/db"
+	"github.com/kalverra/parlay-club/internal/ingest/odds"
+	"github.com/kalverra/parlay-club/internal/live"
+	"github.com/kalverra/parlay-club/internal/refresh"
+	"github.com/kalverra/parlay-club/internal/slips"
+	webui "github.com/kalverra/parlay-club/internal/web"
+	assets "github.com/kalverra/parlay-club/web"
 )
 
 // addSecondGame writes another week game with its own teams.
@@ -1693,4 +1702,401 @@ func TestPickBoardRendersLogosAndPortraits(t *testing.T) {
 	assert.Contains(t, detailBody, `data-fallback-badge`)
 	assert.Contains(t, detailBody, `>JA</span>`)
 	assert.Contains(t, detailBody, `>TT</span>`)
+}
+
+type pickSyncCall struct {
+	weekID int64
+	gameID string
+}
+
+type pickTestRefresher struct {
+	linesCalls []int64
+	gameCalls  []pickSyncCall
+	forceCalls []pickSyncCall
+}
+
+func (r *pickTestRefresher) SyncGameProps(_ context.Context, _ string) error {
+	return nil
+}
+
+func (r *pickTestRefresher) SyncGameResearch(_ context.Context, _ string) error {
+	return nil
+}
+
+func (r *pickTestRefresher) SyncPlayerResearch(_ context.Context, _ string) error {
+	return nil
+}
+
+func (r *pickTestRefresher) SyncPickLines(_ context.Context, weekID int64) error {
+	r.linesCalls = append(r.linesCalls, weekID)
+	return nil
+}
+
+func (r *pickTestRefresher) SyncPickGame(_ context.Context, weekID int64, gameID string) error {
+	r.gameCalls = append(r.gameCalls, pickSyncCall{weekID: weekID, gameID: gameID})
+	return nil
+}
+
+func (r *pickTestRefresher) ForcePickRefresh(_ context.Context, weekID int64, gameID string) error {
+	r.forceCalls = append(r.forceCalls, pickSyncCall{weekID: weekID, gameID: gameID})
+	return nil
+}
+
+func (r *pickTestRefresher) totalCalls() int {
+	return len(r.linesCalls) + len(r.gameCalls) + len(r.forceCalls)
+}
+
+func pickHandlerWithGroupRefresher(
+	t *testing.T,
+	fixture *slipFixture,
+	user db.User,
+	group db.Group,
+	refresher webui.Refresher,
+	now func() time.Time,
+) http.Handler {
+	t.Helper()
+
+	renderer, err := webui.NewRenderer(assets.Templates, false)
+	require.NoError(t, err)
+
+	hub := &live.Hub{}
+	return webui.NewWithDeps(webui.Dependencies{
+		Logger:   zerolog.Nop(),
+		Renderer: renderer,
+		UserFrom: func(context.Context) (db.User, bool) {
+			return user, true
+		},
+		GroupsFrom: func(context.Context) []webui.GroupOption {
+			return []webui.GroupOption{{ID: group.ID, Name: group.Name, Current: true}}
+		},
+		GroupFrom: func(context.Context) (db.Group, bool) {
+			return group, true
+		},
+		Store:   fixture.store,
+		Slips:   slips.New(fixture.store, hub, nil),
+		Stream:  live.NewStream(hub, func(int64) bool { return false }),
+		Refresh: refresher,
+		Now:     now,
+	})
+}
+
+func pickHandlerWithRefresher(
+	t *testing.T,
+	fixture *slipFixture,
+	user db.User,
+	refresher webui.Refresher,
+	now func() time.Time,
+) http.Handler {
+	t.Helper()
+	return pickHandlerWithGroupRefresher(t, fixture, user, fixture.group, refresher, now)
+}
+
+func TestPickBoardAndPartialsSyncRules(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	upcoming := addGame(t, fixture, gameKickoff())
+	started := addSecondGameAt(
+		t, fixture, "401772099", "CIN", "CLE", "Cincinnati Bengals", "Cleveland Browns",
+		gameKickoff().Add(-2*time.Hour),
+	)
+	now := gameKickoff().Add(-1 * time.Hour)
+	refresher := &pickTestRefresher{}
+	handler := pickHandlerWithRefresher(t, fixture, fixture.user, refresher, func() time.Time { return now })
+
+	refreshAction := fmt.Sprintf(`hx-post="/slips/%d/pick/refresh"`, fixture.slip.ID)
+
+	// 1. Open slip, pickBoard with no game selected: calls SyncPickLines and renders Refresh button.
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequestWithContext(
+		t.Context(), http.MethodGet, fmt.Sprintf("/slips/%d/pick", fixture.slip.ID), nil,
+	))
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, []int64{fixture.slip.WeekID}, refresher.linesCalls)
+	assert.Empty(t, refresher.gameCalls)
+	assert.Contains(t, rec.Body.String(), refreshAction)
+
+	// 2. pickBoard with upcoming game selected: calls SyncPickGame and renders Refresh button in detail too.
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequestWithContext(
+		t.Context(), http.MethodGet, fmt.Sprintf("/slips/%d/pick?game=%s", fixture.slip.ID, upcoming.ID), nil,
+	))
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, []pickSyncCall{{weekID: fixture.slip.WeekID, gameID: upcoming.ID}}, refresher.gameCalls)
+	assert.Equal(t, 2, strings.Count(rec.Body.String(), refreshAction))
+
+	// 3. pickResults without game selected: 0 extra sync calls.
+	before := refresher.totalCalls()
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequestWithContext(
+		t.Context(), http.MethodGet, fmt.Sprintf("/slips/%d/pick/results?q=allen", fixture.slip.ID), nil,
+	))
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, before, refresher.totalCalls())
+
+	// 4. pickResults with upcoming game selected: calls SyncPickGame.
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodGet,
+		fmt.Sprintf("/slips/%d/pick/results?game=%s&q=allen", fixture.slip.ID, upcoming.ID),
+		nil,
+	))
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Len(t, refresher.gameCalls, 2)
+
+	// 5. pickResults with kicked-off game selected: 0 extra sync calls.
+	before = refresher.totalCalls()
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequestWithContext(
+		t.Context(), http.MethodGet, fmt.Sprintf("/slips/%d/pick/results?game=%s", fixture.slip.ID, started.ID), nil,
+	))
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, before, refresher.totalCalls())
+
+	// 6. pickDetail with upcoming game selected: calls SyncPickGame.
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequestWithContext(
+		t.Context(), http.MethodGet, fmt.Sprintf("/slips/%d/pick/detail?game=%s", fixture.slip.ID, upcoming.ID), nil,
+	))
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Len(t, refresher.gameCalls, 3)
+	assert.Contains(t, rec.Body.String(), refreshAction)
+
+	// 7. pickSlate is strictly read-only.
+	before = refresher.totalCalls()
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequestWithContext(
+		t.Context(), http.MethodGet, fmt.Sprintf("/slips/%d/pick/slate", fixture.slip.ID), nil,
+	))
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, before, refresher.totalCalls())
+
+	// 8. Locked slip: 0 sync calls across pickBoard, pickResults, pickDetail, and no Refresh button.
+	require.NoError(t, fixture.store.SetSlipStatus(t.Context(), fixture.slip.ID, db.SlipLocked))
+	before = refresher.totalCalls()
+	for _, target := range []string{
+		fmt.Sprintf("/slips/%d/pick", fixture.slip.ID),
+		fmt.Sprintf("/slips/%d/pick/results?game=%s", fixture.slip.ID, upcoming.ID),
+		fmt.Sprintf("/slips/%d/pick/detail?game=%s", fixture.slip.ID, upcoming.ID),
+	} {
+		rec = httptest.NewRecorder()
+		handler.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, target, nil))
+		require.Equal(t, http.StatusOK, rec.Code)
+		assert.NotContains(t, rec.Body.String(), refreshAction)
+	}
+	assert.Equal(t, before, refresher.totalCalls())
+
+	// 9. Open slip with all games kicked off: 0 sync calls and no Refresh button.
+	require.NoError(t, fixture.store.SetSlipStatus(t.Context(), fixture.slip.ID, db.SlipOpen))
+	now = gameKickoff().Add(time.Minute)
+	before = refresher.totalCalls()
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequestWithContext(
+		t.Context(), http.MethodGet, fmt.Sprintf("/slips/%d/pick", fixture.slip.ID), nil,
+	))
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, before, refresher.totalCalls())
+	assert.NotContains(t, rec.Body.String(), refreshAction)
+}
+
+func TestPickRefreshHandlerAndGuards(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	upcoming := addGame(t, fixture, gameKickoff())
+	now := gameKickoff().Add(-1 * time.Hour)
+	refresher := &pickTestRefresher{}
+	handler := pickHandlerWithRefresher(t, fixture, fixture.user, refresher, func() time.Time { return now })
+
+	// 1. Open slip with no game selected: ForcePickRefresh(weekID, "") and returns #pick-body.
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequestWithContext(
+		t.Context(), http.MethodPost, fmt.Sprintf("/slips/%d/pick/refresh", fixture.slip.ID), nil,
+	)
+	handler.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, []pickSyncCall{{weekID: fixture.slip.WeekID, gameID: ""}}, refresher.forceCalls)
+	assert.Contains(t, rec.Body.String(), `id="pick-body"`)
+
+	// 2. Open slip with game form param: ForcePickRefresh(weekID, gameID).
+	form := url.Values{"game": {upcoming.ID}}
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequestWithContext(
+		t.Context(), http.MethodPost, fmt.Sprintf("/slips/%d/pick/refresh", fixture.slip.ID),
+		strings.NewReader(form.Encode()),
+	)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	handler.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, []pickSyncCall{
+		{weekID: fixture.slip.WeekID, gameID: ""},
+		{weekID: fixture.slip.WeekID, gameID: upcoming.ID},
+	}, refresher.forceCalls)
+	assert.Contains(t, rec.Body.String(), `id="pick-detail"`)
+
+	// 3. Non-member of the slip's group gets 404 and triggers 0 refreshes.
+	outsider, err := fixture.store.CreateUserWithIdentity(
+		t.Context(), "Outsider", "outsider@example.com", "sub-outsider", "",
+	)
+	require.NoError(t, err)
+	otherGroup := db.Group{ID: fixture.group.ID + 1, Name: "Other Group"}
+	outsiderHandler := pickHandlerWithGroupRefresher(
+		t, fixture, outsider, otherGroup, refresher, func() time.Time { return now },
+	)
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequestWithContext(
+		t.Context(), http.MethodPost, fmt.Sprintf("/slips/%d/pick/refresh", fixture.slip.ID), nil,
+	)
+	outsiderHandler.ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+	assert.Len(t, refresher.forceCalls, 2)
+
+	// 4. Locked slip returns 422 and triggers 0 refreshes.
+	require.NoError(t, fixture.store.SetSlipStatus(t.Context(), fixture.slip.ID, db.SlipLocked))
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequestWithContext(
+		t.Context(), http.MethodPost, fmt.Sprintf("/slips/%d/pick/refresh", fixture.slip.ID), nil,
+	)
+	handler.ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusUnprocessableEntity, rec.Code)
+	assert.Len(t, refresher.forceCalls, 2)
+
+	// 5. Open slip with all games kicked off: 0 ForcePickRefresh calls.
+	require.NoError(t, fixture.store.SetSlipStatus(t.Context(), fixture.slip.ID, db.SlipOpen))
+	now = gameKickoff().Add(time.Minute)
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequestWithContext(
+		t.Context(), http.MethodPost, fmt.Sprintf("/slips/%d/pick/refresh", fixture.slip.ID), nil,
+	)
+	handler.ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Len(t, refresher.forceCalls, 2)
+}
+
+type fakePickLinesClient struct {
+	calls atomic.Int32
+	event odds.Event
+	lines []odds.Line
+}
+
+func (c *fakePickLinesClient) Events(context.Context) ([]odds.Event, odds.Credits, error) {
+	return []odds.Event{c.event}, odds.Credits{Remaining: 400}, nil
+}
+
+func (c *fakePickLinesClient) Lines(context.Context) ([]odds.Line, odds.Credits, error) {
+	c.calls.Add(1)
+	return c.lines, odds.Credits{Remaining: 397}, nil
+}
+
+type fakePickPropsClient struct {
+	calls atomic.Int32
+	event odds.Event
+	props []odds.Prop
+}
+
+func (c *fakePickPropsClient) Events(context.Context) ([]odds.Event, odds.Credits, error) {
+	return []odds.Event{c.event}, odds.Credits{Remaining: 800}, nil
+}
+
+func (c *fakePickPropsClient) Props(context.Context, string) ([]odds.Prop, odds.Credits, error) {
+	c.calls.Add(1)
+	return c.props, odds.Credits{Remaining: 797}, nil
+}
+
+func TestPickRefreshCooldownAndRepeatedSearchWithService(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	game := addGame(t, fixture, gameKickoff())
+	clockNow := gameKickoff().Add(-1 * time.Hour)
+	now := func() time.Time { return clockNow }
+
+	event := odds.Event{
+		ID:           "evt-pick-1",
+		HomeTeam:     game.HomeName,
+		AwayTeam:     game.AwayName,
+		CommenceTime: game.Kickoff,
+	}
+	linesClient := &fakePickLinesClient{
+		event: event,
+		lines: []odds.Line{{
+			EventID:    event.ID,
+			Book:       "draftkings",
+			MarketType: odds.MarketSpread,
+			Side:       odds.SideTeam,
+			Team:       game.AwayName,
+			Line:       new(-2.5),
+			Price:      -110,
+		}},
+	}
+	propsClient := &fakePickPropsClient{
+		event: event,
+		props: []odds.Prop{{
+			EventID:    event.ID,
+			Book:       "draftkings",
+			MarketType: odds.MarketPassYds,
+			PlayerName: "Josh Allen",
+			Side:       odds.SideOver,
+			Line:       new(265.5),
+			Price:      -115,
+		}},
+	}
+	svc := refresh.New(refresh.Deps{
+		Store:  fixture.store,
+		Lines:  linesClient,
+		Props:  propsClient,
+		Now:    now,
+		Logger: zerolog.Nop(),
+	})
+	handler := pickHandlerWithRefresher(t, fixture, fixture.user, svc, now)
+
+	// 1. Opening pickDetail/pickResults for a game fetches lines and props once.
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequestWithContext(
+		t.Context(), http.MethodGet, fmt.Sprintf("/slips/%d/pick/detail?game=%s", fixture.slip.ID, game.ID), nil,
+	))
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, int32(1), linesClient.calls.Load())
+	assert.Equal(t, int32(1), propsClient.calls.Load())
+
+	// 2. Repeated search queries on that game spend 0 extra API calls.
+	for _, q := range []string{"j", "jo", "jos", "josh"} {
+		rec = httptest.NewRecorder()
+		handler.ServeHTTP(rec, httptest.NewRequestWithContext(
+			t.Context(),
+			http.MethodGet,
+			fmt.Sprintf("/slips/%d/pick/results?game=%s&q=%s", fixture.slip.ID, game.ID, q),
+			nil,
+		))
+		require.Equal(t, http.StatusOK, rec.Code)
+	}
+	assert.Equal(t, int32(1), linesClient.calls.Load())
+	assert.Equal(t, int32(1), propsClient.calls.Load())
+
+	// 3. Immediate POST /pick/refresh within 2m cooldown is blocked (0 extra calls).
+	form := url.Values{"game": {game.ID}}
+	rec = httptest.NewRecorder()
+	req := httptest.NewRequestWithContext(
+		t.Context(), http.MethodPost, fmt.Sprintf("/slips/%d/pick/refresh", fixture.slip.ID),
+		strings.NewReader(form.Encode()),
+	)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	handler.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, int32(1), linesClient.calls.Load())
+	assert.Equal(t, int32(1), propsClient.calls.Load())
+
+	// 4. After 2m cooldown expires, POST /pick/refresh refreshes both lines and props.
+	clockNow = clockNow.Add(2 * time.Minute)
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequestWithContext(
+		t.Context(), http.MethodPost, fmt.Sprintf("/slips/%d/pick/refresh", fixture.slip.ID),
+		strings.NewReader(form.Encode()),
+	)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	handler.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, int32(2), linesClient.calls.Load())
+	assert.Equal(t, int32(2), propsClient.calls.Load())
 }

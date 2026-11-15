@@ -215,7 +215,7 @@ invariants)
 
 - [x] Implement `SyncPickLines`, `SyncPickGame`, `ForcePickRefresh`, pick-time staleness rules (`15m`/`2h` lines,
       `30m`/`2h` props), and the `2m` manual refresh cooldown in `internal/refresh` with unit and single-flight tests
-- [ ] Extend `web.Refresher`, trigger pick-time syncs on `OPEN` slips with upcoming games in
+- [x] Extend `web.Refresher`, trigger pick-time syncs on `OPEN` slips with upcoming games in
       `pickBoard`/`pickResults`/`pickDetail` (`internal/web/pick.go`), and add `POST /slips/{id}/pick/refresh` with the
       phone-first refresh button in `web/templates/partials.html` and handler/cooldown/locked-slip tests
 - [ ] Docs: update `docs/concepts/data-refresh.md`, `docs/concepts/slips.md`, `docs/reference/data-sources.md`, and

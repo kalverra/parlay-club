@@ -49,6 +49,7 @@ type PickSlateView struct {
 	Sort       string
 	Game       string
 	RefreshURL string
+	CanRefresh bool
 	Detail     bool
 	Cards      []PickGameCardView
 	Windows    []PickChip
@@ -101,6 +102,7 @@ type PickDetailView struct {
 	Category        string
 	Sort            string
 	RefreshURL      string
+	CanRefresh      bool
 	OOB             bool
 	BackHref        string
 	BackPushURL     string
@@ -202,7 +204,12 @@ func (h *slipHandlers) pickBoard(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	data, err := h.pickPageData(r.Context(), slip, pickQuery(r, h.deps.now()))
+	q := pickQuery(r, h.deps.now())
+	if err := h.syncPickIfOpen(r.Context(), slip, q, true); err != nil {
+		h.serverError(w, err)
+		return
+	}
+	data, err := h.pickPageData(r.Context(), slip, q)
 	if err != nil {
 		h.serverError(w, err)
 		return
@@ -221,7 +228,12 @@ func (h *slipHandlers) pickResults(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	data, err := h.pickPageData(r.Context(), slip, pickQuery(r, h.deps.now()))
+	q := pickQuery(r, h.deps.now())
+	if err := h.syncPickIfOpen(r.Context(), slip, q, false); err != nil {
+		h.serverError(w, err)
+		return
+	}
+	data, err := h.pickPageData(r.Context(), slip, q)
 	if err != nil {
 		h.serverError(w, err)
 		return
@@ -261,7 +273,12 @@ func (h *slipHandlers) pickDetail(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	data, err := h.pickPageData(r.Context(), slip, pickQuery(r, h.deps.now()))
+	q := pickQuery(r, h.deps.now())
+	if err := h.syncPickIfOpen(r.Context(), slip, q, false); err != nil {
+		h.serverError(w, err)
+		return
+	}
+	data, err := h.pickPageData(r.Context(), slip, q)
 	if err != nil {
 		h.serverError(w, err)
 		return
@@ -275,6 +292,105 @@ func (h *slipHandlers) pickDetail(w http.ResponseWriter, r *http.Request) {
 	// hidden copies. Swap them out of band so the next search keeps the tab.
 	detail.OOB = true
 	h.renderPartial(w, "pick-detail", detail)
+}
+
+// pickRefresh triggers a manual pick-time odds refresh on an open slip and
+// returns the updated #pick-body partial.
+func (h *slipHandlers) pickRefresh(w http.ResponseWriter, r *http.Request) {
+	slip, _, _, ok := h.loadSlip(w, r, r.PathValue("id"))
+	if !ok {
+		return
+	}
+	if slip.Status != db.SlipOpen {
+		h.respondError(w, slips.ErrSlipNotOpen)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		h.writeFormError(w, "Bad form")
+		return
+	}
+	q := pickQuery(r, h.deps.now())
+	if h.deps.Refresh != nil {
+		hasUpcoming, gameUpcoming, err := h.syncPickScope(r.Context(), slip, q.GameID, q.Now)
+		if err != nil {
+			h.serverError(w, err)
+			return
+		}
+		if hasUpcoming {
+			refreshGameID := ""
+			if gameUpcoming {
+				refreshGameID = q.GameID
+			}
+			if err := h.deps.Refresh.ForcePickRefresh(r.Context(), slip.WeekID, refreshGameID); err != nil {
+				h.deps.Logger.Warn().
+					Err(err).
+					Int64("slip_id", slip.ID).
+					Str("game_id", refreshGameID).
+					Msg("force pick refresh")
+			}
+		}
+	}
+	data, err := h.pickPageData(r.Context(), slip, q)
+	if err != nil {
+		h.serverError(w, err)
+		return
+	}
+	h.renderPartial(w, "pick-body", data.Body)
+}
+
+// syncPickIfOpen triggers pick-time odds syncs only when slip is OPEN and
+// upcoming games remain in its scope. When syncLines is false, it syncs only
+// when an upcoming game is selected.
+func (h *slipHandlers) syncPickIfOpen(ctx context.Context, slip db.Slip, q board.Query, syncLines bool) error {
+	if h.deps.Refresh == nil || slip.Status != db.SlipOpen {
+		return nil
+	}
+	if !syncLines && q.GameID == "" {
+		return nil
+	}
+	hasUpcoming, gameUpcoming, err := h.syncPickScope(ctx, slip, q.GameID, q.Now)
+	if err != nil {
+		return err
+	}
+	if gameUpcoming {
+		if err := h.deps.Refresh.SyncPickGame(ctx, slip.WeekID, q.GameID); err != nil {
+			h.deps.Logger.Warn().Err(err).Int64("slip_id", slip.ID).Str("game_id", q.GameID).Msg("sync pick game")
+		}
+		return nil
+	}
+	if syncLines && hasUpcoming {
+		if err := h.deps.Refresh.SyncPickLines(ctx, slip.WeekID); err != nil {
+			h.deps.Logger.Warn().Err(err).Int64("slip_id", slip.ID).Msg("sync pick lines")
+		}
+	}
+	return nil
+}
+
+// syncPickScope reports whether slip has any upcoming game in its slate scope
+// and whether gameID itself is an upcoming game in that scope.
+func (h *slipHandlers) syncPickScope(
+	ctx context.Context,
+	slip db.Slip,
+	gameID string,
+	now time.Time,
+) (hasUpcoming, gameUpcoming bool, err error) {
+	if slip.Status != db.SlipOpen || h.deps.Store == nil {
+		return false, false, nil
+	}
+	allGames, err := h.deps.Store.GamesForWeek(ctx, slip.WeekID)
+	if err != nil {
+		return false, false, err
+	}
+	games := slips.FilterGamesByScope(allGames, slip.SlateScope)
+	for _, game := range games {
+		if now.Before(game.Kickoff) {
+			hasUpcoming = true
+			if gameID != "" && game.ID == gameID {
+				gameUpcoming = true
+			}
+		}
+	}
+	return hasUpcoming, gameUpcoming, nil
 }
 
 // pickTray returns the tray partial for the dock's sheet.
@@ -439,6 +555,7 @@ func (h *slipHandlers) pickPageData(
 	slate.NoLines = !slate.NoGames && !slate.AllStarted && len(rows) == 0
 	slate.Empty = len(slate.Cards) == 0 &&
 		!slate.NoGames && !slate.NoLines && !slate.AllStarted
+	slate.CanRefresh = slip.Status == db.SlipOpen && !slate.NoGames && !slate.AllStarted
 
 	gamesByID := make(map[string]db.Game, len(games))
 	for _, game := range games {
@@ -462,6 +579,7 @@ func (h *slipHandlers) pickPageData(
 			Now:      now,
 		})
 		detail := pickDetailView(slip.ID, model, q, atLimit, !card.HasProps && rowGames[card.ID])
+		detail.CanRefresh = slip.Status == db.SlipOpen
 		body.Detail = &detail
 		body.Category = string(model.Category)
 		body.Sort = string(model.Sort)
