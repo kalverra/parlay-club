@@ -2100,3 +2100,182 @@ func TestPickRefreshCooldownAndRepeatedSearchWithService(t *testing.T) {
 	assert.Equal(t, int32(2), linesClient.calls.Load())
 	assert.Equal(t, int32(2), propsClient.calls.Load())
 }
+
+func TestPickBoardWiresSignalsBadgesSortAndHTMXSwaps(t *testing.T) {
+	t.Parallel()
+
+	seedBoardSignals := func(t *testing.T, fixture *slipFixture, syncedAt time.Time) db.Game {
+		t.Helper()
+		injuries := `[{"team":"Buffalo Bills","abbreviation":"BUF","injuries":[{"athlete_id":"999","full_name":"Curtis Samuel","position":"WR","status":"Out"}]}]`
+		game := addGame(t, fixture, gameKickoff())
+		game.InjuriesJSON = &injuries
+		_, err := fixture.store.UpsertGame(t.Context(), game)
+		require.NoError(t, err)
+
+		require.NoError(t, fixture.store.UpsertRosterPlayers(t.Context(), []db.RosterPlayer{
+			{AthleteID: "wr-smash", FullName: "Khalil Shakir", Team: "BUF", Position: "WR", UpdatedAt: syncedAt},
+			{AthleteID: "wr-plain", FullName: "Keon Coleman", Team: "BUF", Position: "WR", UpdatedAt: syncedAt},
+		}))
+
+		// Seed 32 teams so MIA (the away opponent in addGame) sits in the bottom 6 pass defenses (rank >= 27).
+		teams := []string{
+			"BUF", "BAL", "SF", "DET", "PHI", "MIN", "GB", "HOU",
+			"CIN", "LAC", "DEN", "PIT", "TB", "ATL", "LAR", "SEA",
+			"WAS", "ARI", "CHI", "IND", "DAL", "KC", "NYJ", "CLE",
+			"NO", "LV", "TEN", "NYG", "NE", "CAR", "JAX", "MIA",
+		}
+		teamWeeks := make([]db.NFLverseTeamWeek, 0, len(teams))
+		for i, abbr := range teams {
+			teamWeeks = append(teamWeeks, db.NFLverseTeamWeek{
+				Season:            2026,
+				SeasonType:        2,
+				WeekNum:           1,
+				Team:              abbr,
+				OffPassEPA:        0.10,
+				DefPassEPAAllowed: float64(i) * 0.02, // KC is highest (rank 32)
+				DefRushEPAAllowed: 0.0,
+				PlaysPerGame:      62,
+				PassRate:          0.56,
+				UpdatedAt:         syncedAt,
+			})
+		}
+		_, err = fixture.store.UpsertNFLverseTeamWeeks(t.Context(), teamWeeks)
+		require.NoError(t, err)
+		require.NoError(t, fixture.store.RecordSync(t.Context(), "nflverse:season:2026", syncedAt, nil))
+
+		var playerWeeks []db.NFLversePlayerWeek
+		for wk := 1; wk <= 3; wk++ {
+			playerWeeks = append(playerWeeks, db.NFLversePlayerWeek{
+				Season:        2026,
+				SeasonType:    2,
+				WeekNum:       wk,
+				ESPNID:        "wr-smash",
+				Team:          "BUF",
+				OffensePct:    0.85,
+				TargetShare:   0.26,
+				AirYardsShare: 0.32,
+				WOPR:          0.62,
+				Targets:       9,
+				UpdatedAt:     syncedAt,
+			})
+		}
+		_, err = fixture.store.UpsertNFLversePlayerWeeks(t.Context(), playerWeeks)
+		require.NoError(t, err)
+
+		_, err = fixture.store.UpsertOdds(t.Context(), []db.Odds{
+			{
+				GameID: game.ID, Book: "fanduel", MarketType: "REC_YDS", Team: "BUF",
+				PlayerName: "Khalil Shakir", Side: "OVER", Line: new(62.5), Price: -110, FetchedAt: syncedAt,
+			},
+			{
+				GameID: game.ID, Book: "fanduel", MarketType: "REC_YDS", Team: "BUF",
+				PlayerName: "Khalil Shakir", Side: "UNDER", Line: new(62.5), Price: -110, FetchedAt: syncedAt,
+			},
+			{
+				GameID: game.ID, Book: "fanduel", MarketType: "REC_YDS", Team: "BUF",
+				PlayerName: "Keon Coleman", Side: "OVER", Line: new(44.5), Price: -110, FetchedAt: syncedAt,
+			},
+			{
+				GameID: game.ID, Book: "fanduel", MarketType: "REC_YDS", Team: "BUF",
+				PlayerName: "Keon Coleman", Side: "UNDER", Line: new(44.5), Price: -110, FetchedAt: syncedAt,
+			},
+		})
+		require.NoError(t, err)
+		return game
+	}
+
+	t.Run("fresh signals render badges, Matchup sort, mobile wrap, and HTMX line swap", func(t *testing.T) {
+		t.Parallel()
+		fixture := newSlipFixture(t, 4)
+		now := gameKickoff().Add(-2 * time.Hour)
+		game := seedBoardSignals(t, fixture, now)
+		handler := pickHandlerWithRefresher(
+			t, fixture, fixture.user, &pickTestRefresher{}, func() time.Time { return now },
+		)
+
+		// Add Josh Allen PASS_YDS OVER so Khalil Shakir also qualifies for Fits slip.
+		_, err := fixture.store.CreateLeg(t.Context(), db.Leg{
+			SlipID:     fixture.slip.ID,
+			UserID:     fixture.user.ID,
+			GameID:     new(game.ID),
+			MarketType: "PASS_YDS",
+			Team:       new("BUF"),
+			PlayerName: new("Josh Allen"),
+			PlayerID:   new("qb-allen"),
+			Side:       new("OVER"),
+			Line:       new(255.5),
+			Odds:       -110,
+			Selection:  "Josh Allen Over 255.5 pass yds",
+		})
+		require.NoError(t, err)
+
+		// 1. HTMX detail request with sort=matchup renders badges & Matchup chip.
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequestWithContext(
+			t.Context(),
+			http.MethodGet,
+			fmt.Sprintf("/slips/%d/pick/detail?game=%s&cat=receiving&sort=matchup", fixture.slip.ID, game.ID),
+			nil,
+		)
+		req.Header.Set("Hx-Request", "true")
+		handler.ServeHTTP(rec, req)
+		require.Equal(t, http.StatusOK, rec.Code)
+
+		body := html.UnescapeString(rec.Body.String())
+		assert.Contains(t, body, `id="pick-detail"`)
+		assert.Contains(t, body, `data-sort="matchup"`)
+		assert.Contains(t, body, `Matchup`)
+		assert.Contains(t, body, `Smash matchup`)
+		assert.Contains(t, body, `Fits slip`)
+		// Mobile-width layout guards: flex-wrap for tags/sorts and 2-column grid for options.
+		assert.Contains(t, body, `flex-wrap gap-1.5`)
+		assert.Contains(t, body, `grid-cols-2`)
+		// Under SortMatchup, Khalil Shakir (Smash matchup) ranks before Keon Coleman.
+		assert.Less(t, strings.Index(body, "Khalil Shakir"), strings.Index(body, "Keon Coleman"))
+
+		// 2. HTMX POST /slips/{id}/legs from board returns pick-line-group with badge preserved.
+		form := url.Values{
+			"quick":       {"1"},
+			"from":        {"board"},
+			"game_id":     {game.ID},
+			"market_type": {"REC_YDS"},
+			"team":        {"BUF"},
+			"player_name": {"Khalil Shakir"},
+			"player_id":   {"wr-smash"},
+			"side":        {"OVER"},
+			"line":        {"62.5"},
+			"odds":        {"-110"},
+		}
+		postRec := httptest.NewRecorder()
+		postReq := httptest.NewRequestWithContext(
+			t.Context(),
+			http.MethodPost,
+			fmt.Sprintf("/slips/%d/legs", fixture.slip.ID),
+			strings.NewReader(form.Encode()),
+		)
+		postReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		postReq.Header.Set("Hx-Request", "true")
+		handler.ServeHTTP(postRec, postReq)
+		require.Equal(t, http.StatusOK, postRec.Code)
+
+		swapBody := html.UnescapeString(postRec.Body.String())
+		assert.Contains(t, swapBody, `class="pick-line-group"`)
+		assert.Contains(t, swapBody, `tap to remove`)
+		assert.Contains(t, swapBody, `Smash matchup`)
+	})
+
+	t.Run("stale nflverse fails soft without nflverse badges", func(t *testing.T) {
+		t.Parallel()
+		fixture := newSlipFixture(t, 4)
+		stale := time.Now().UTC().Add(-8 * 24 * time.Hour)
+		game := seedBoardSignals(t, fixture, stale)
+
+		rec := pickDetail(t, fixture, fmt.Sprintf("game=%s&cat=receiving&sort=matchup", game.ID))
+		require.Equal(t, http.StatusOK, rec.Code)
+
+		body := html.UnescapeString(rec.Body.String())
+		assert.Contains(t, body, "Khalil Shakir")
+		assert.NotContains(t, body, "Smash matchup")
+		assert.NotContains(t, body, "Role bump")
+	})
+}
