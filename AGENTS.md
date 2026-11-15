@@ -15,13 +15,16 @@ passing overs are risky"). Every pick stays allowed, and the tone stays free of 
 ## Free-tier guardrails
 
 - Odds API (500/month) and The Parlay API (1,000/month) credits are scarce. Fetch game lines on the Sunday morning
-  pre-fill (`POST /internal/prefill`) or on pick-time views, and props on pre-fill (Parlay-only) or for a game someone
-  opens, always through the cache in `sync_state`. Respect the credit floors.
+  pre-fill (first authenticated Sunday full-page visit at or after 6:00 AM ET while Sunday games remain, tracked via
+  `prefill:sunday` in `sync_state`, or the optional `POST /internal/prefill` fallback) or on pick-time views, and props
+  on pre-fill (Parlay-only) or for a game someone opens, always through the cache in `sync_state`. Respect the credit
+  floors.
 - Single instance. SQLite and the in-memory SSE hub assume one Cloud Run instance; keep shared state in SQLite or the
   hub, never in a second process.
 - Close idle SSE streams per the live-updates policy; an open stream keeps the instance billed.
-- Background `Kick()` syncs free/unmetered sources on full-page loads only; scheduled jobs are limited to the Sunday
-  morning pre-fill (`POST /internal/prefill`), and any additional scheduled jobs require a plan change.
+- Background `Kick()` runs on authenticated full-page loads only, syncing free/unmetered sources outside the one-shot
+  Sunday morning pre-fill (`prefill:sunday`); scheduled jobs are limited to the optional `POST /internal/prefill`
+  fallback, and any additional scheduled jobs require a plan change.
 
 <!-- good-vibes:begin -->
 <!-- Managed by `good-vibes init`. Edits inside this block are overwritten. -->

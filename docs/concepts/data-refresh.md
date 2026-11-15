@@ -11,38 +11,70 @@ tags: [refresh, sync, lazy, prefill, staleness, singleflight, backoff, credits, 
 ## Summary
 
 `internal/refresh` owns when outside data comes in. Free/unmetered sources (slate, weather, game summaries/injuries,
-unique week-team rosters, nfelo projections, auto-grading, and slip-leg game logs) refresh lazily on full-page `GET`s
-via `Kick()`, which returns at once and does the work in the background. Metered odds calls are reserved for the Sunday
-morning pre-fill (`RunPrefill` via `POST /internal/prefill`), synchronous `RunOnce` in sandbox bootstrap, pick-time
-syncs on `OPEN` slips with upcoming games, and on-demand game prop views. Each source has its own staleness window, its
-own single-flight, and its own failure backoff. Parlay API and The Odds API are the metered sources, so each free event
-list runs before its balances gate the paid calls.
+unique week-team rosters, nfelo projections, auto-grading, and slip-leg game logs) refresh lazily on authenticated
+full-page `GET`s via `Kick()`, which returns at once and does the work in the background. Metered odds calls are
+reserved for the one-shot Sunday morning pre-fill (`RunPrefill`, triggered automatically on the first authenticated
+Sunday full-page visit at or after 6:00 AM `America/New_York` while Sunday games remain, or via the optional
+`POST /internal/prefill` fallback), synchronous `RunOnce` in sandbox bootstrap, pick-time syncs on `OPEN` slips with
+upcoming games, and on-demand game prop views. Each source has its own staleness window, its own single-flight, and
+its own failure backoff. Parlay API and The Odds API are the metered sources, so each free event list runs before its
+balances gate the paid calls.
 
 ## What kicks a sync
 
-`kickOnPage` wraps the app inside the sign-in and group middleware, with `CSRF` outermost. It calls `Kick()` only for a
-full-page `GET`:
+`kickOnPage` wraps the app inside `auth.RequireUser` and `groups.Scope`, with `CSRF` outermost. It calls `Kick()` only
+for an authenticated full-page `GET`:
 
+- not an unauthenticated request (redirected to `/login` before reaching `kickOnPage`);
 - not a non-`GET` request;
 - not an HTMX partial (`HX-Request: true`);
 - not an SSE stream (`Accept: text/event-stream`, or a path ending in `/events`).
 
 Partials and streams skip it because the page load that mounted them already kicked, and an SSE reconnect must not spend
-credits. Health, static files, and the sign-in screens sit outside the wrapper.
+credits. Health (`/healthz`, `/readyz`), static files, and the sign-in screens (`/login`) sit outside `auth.RequireUser`
+and never call `Kick()`.
 
-`Kick()` returns immediately and runs **free/unmetered sources only** (omitting `odds:lines`). Its work detaches from
-the request with `context.WithoutCancel`, so a finished response does not cancel a sync, and every source gets its own
-30 second timeout. Tests wait for the background work through a `WaitGroup`; the server waits only at shutdown.
+```mermaid
+flowchart LR
+  Public["/healthz, /readyz, /login, /static/*"] -->|"no RequireUser"| PublicHandlers["Never calls Kick()"]
+  AppReq["App request"] --> RequireUser["auth.RequireUser"]
+  RequireUser -->|"no/inactive session"| Login["Redirect /login"]
+  RequireUser -->|"valid user"| Scope["groups.Scope"]
+  Scope --> KickOnPage["kickOnPage(Kick)"]
+  KickOnPage -->|"HTMX / SSE / non-GET"| App["App handlers only"]
+  KickOnPage -->|"full-page GET"| Kick["Kick() -> free sources (or one-shot Sunday RunPrefill)"]
+```
+
+`Kick()` returns immediately and normally runs **free/unmetered sources only** (omitting `odds:lines` and props). Its
+work detaches from the request with `context.WithoutCancel`, so a finished response does not cancel a sync, and every
+source gets its own 30 second timeout. Tests wait for the background work through a `WaitGroup`; the server waits only
+at shutdown.
+
+On the first authenticated full-page `GET` that enters the Sunday morning window (`sundayPrefillWindow`: Sunday at or
+after 6:00 AM `America/New_York` while at least one Sunday game has not yet kicked off), `Kick()` checks
+`sync_state["prefill:sunday"]` (`SundayPrefillSource`). When `prefill:sunday` has not yet been recorded for that
+`America/New_York` calendar date (`sundayPrefillStale`), `Kick()` deduplicates via `singleflight` (re-checking
+`sync_state` inside the flight) and runs `RunPrefill` asynchronously with a 2-minute timeout:
+
+- **Success or partial odds progress:** `RunPrefill` records `prefill:sunday` in `sync_state` (when not shutting down and
+  either there are no errors or `LinesSynced || PropsSynced > 0`), so later Sunday visits and Cloud Run cold starts skip
+  re-running pre-fill and fall back to free sources only.
+- **Zero-progress failure:** If `RunPrefill` fails without syncing lines or props, `prefill:sunday` is left unset,
+  `prefill:sunday` enters a 5-minute in-memory backoff, and `Kick()` still runs `freeSourcesFor` so free data is not
+  starved.
 
 `RunOnce(ctx)` is the synchronous counterpart used by sandbox bootstrap and tests. It runs the scoreboard-first pass
 followed by all free sources plus `odds:lines`, waits for every source it starts, and returns the failures joined.
 
-`RunPrefill(ctx)` is the synchronous Sunday morning pre-fill sweep invoked by `POST /internal/prefill` (with a 2-minute
-timeout linked to server shutdown). It warms the scoreboard, `odds:lines` (with a 15-minute idempotency window so
-retries do not double-spend), all free sources (`weather`, `espn:summary`, unique week-team `espn:roster`, `nfelo`,
-`grade`, and slip-leg `espn:gamelog`, bounded to 4 concurrent workers), and Parlay-only bulk props
-(`odds:props:{gameID}`) for upcoming games (bounded to 4 concurrent workers, 15-minute idempotency, skipping kicked-off
-games and The Odds API `EventProps` enrichment/fallback). It returns a `PrefillReport` JSON summary.
+`RunPrefill(ctx)` is the Sunday morning pre-fill sweep, invoked automatically once per Sunday by `Kick()` or on demand
+via the optional `POST /internal/prefill` endpoint (with a 2-minute timeout linked to server shutdown). It warms the
+scoreboard, `odds:lines` (with a 15-minute idempotency window so retries do not double-spend), all free sources
+(`weather`, `espn:summary`, unique week-team `espn:roster`, `nfelo`, `grade`, and slip-leg `espn:gamelog`, bounded to 4
+concurrent workers), and Parlay-only bulk props (`odds:props:{gameID}`) for upcoming games (bounded to 4 concurrent
+workers, 15-minute idempotency, skipping kicked-off games and The Odds API `EventProps` enrichment/fallback). When it
+completes without shutting down and either succeeds or syncs at least some odds (`LinesSynced || PropsSynced > 0`), it
+records `prefill:sunday` in `sync_state`, so an optional Cloud Scheduler hit to `POST /internal/prefill` also marks
+Sunday done for subsequent page loads. It returns a `PrefillReport` JSON summary.
 
 On-demand user actions also trigger syncs directly with a 10-second timeout, sharing the same single-flight
 deduplication, staleness windows, and failure backoff as background syncs:
@@ -64,11 +96,13 @@ deduplication, staleness windows, and failure backoff as background syncs:
 
 1. Read the latest week and its games. Before the first slate sync there is no week, which is not an error.
 2. Sync `espn:scoreboard` first, because it may add or change the week's games.
-3. Read the week's games again, then run `freeSourcesFor`: one weather source per game, one `espn:summary:{gameID}` and
-   deduped week-team `espn:roster:{teamID}` per non-`FINAL` game, the `nfelo:projections` source, the `grade` source,
-   and `espn:gamelog:{athleteID}` for any matched athletes on current-week slip legs. `Kick()` runs only these free
-   sources and omits `odds:lines`; `RunOnce()` appends `odds:lines`; `RunPrefill()` runs `odds:lines` before the free
-   sources and Parlay-only bulk props for upcoming games after them.
+3. Read the week's games again. Inside `Kick()`, check `maybeRunSundayPrefill`: on the first visit in the Sunday
+   morning window (`06:00+ America/New_York` before the last Sunday kickoff) when `prefill:sunday` is stale, `Kick()`
+   runs `RunPrefill()` (which runs `odds:lines`, free sources, and Parlay-only bulk props for upcoming games). Otherwise
+   `Kick()` runs `freeSourcesFor` only: one weather source per game, one `espn:summary:{gameID}` and deduped week-team
+   `espn:roster:{teamID}` per non-`FINAL` game, the `nfelo:projections` source, the `grade` source, and
+   `espn:gamelog:{athleteID}` for any matched athletes on current-week slip legs. `RunOnce()` runs `freeSourcesFor` plus
+   `odds:lines`.
 
 Within a source, `singleflight` keyed by its `sync_state` source key lets concurrent page loads share one fetch. The
 work inside the flight re-reads the staleness state before fetching, so a load that joined after the first run finished
@@ -111,6 +145,7 @@ Each source records its last successful sync in `sync_state.fetched_at`. A sourc
 | `espn:gamelog:{athleteID}`| Athlete season game log and stats | 1 h on Thursday, Sunday, or Monday; 4 h otherwise                                                                       | Never                                                              |
 | `nfelo:projections`| The week's model spreads, win probabilities, and QB adjustments | 1 h on Thursday, Sunday, or Monday; 4 h otherwise                                                       | Not a regular-season week, no games, or every game has kicked off  |
 | `grade`            | Auto-grade `PENDING` legs on `FINAL` games | Every pass when `PENDING` legs exist on `FINAL` games                                                                   | No `PENDING` legs on `FINAL` games                                 |
+| `prefill:sunday`   | One-shot Sunday morning pre-fill marker (`RunPrefill`) | Once per `America/New_York` calendar day (`sundayPrefillStale`)                                           | Outside Sunday 06:00 ET – last Sunday kickoff (`sundayPrefillWindow`), or already recorded for today's Eastern date |
 
 "Thursday", "Sunday", and "Monday" mean `America/New_York`. The zone database is embedded in the binary, so it resolves
 in the container without a separate `tzdata` package. The scoreboard's live flag comes from the stored games: any game
@@ -252,9 +287,9 @@ see [Live updates](live-updates.md).
 
 ## Guardrails
 
-- `Kick()` on page loads triggers only free/unmetered sources (`odds:lines` is omitted). Scheduled jobs are limited to
-  the Sunday morning pre-fill (`POST /internal/prefill`); adding other cron or scheduled jobs needs a plan change,
-  because it spends free-tier credits and keeps the instance warm.
+- `Kick()` runs on authenticated full-page loads only, syncing free/unmetered sources outside the one-shot Sunday morning
+  pre-fill (`prefill:sunday`). Scheduled jobs are limited to the optional `POST /internal/prefill` fallback; adding
+  other cron or scheduled jobs needs a plan change, because it spends free-tier credits and keeps the instance warm.
 - Keep the work detached from the request and bounded by its own timeout.
 - Put background writes in the service's `WaitGroup`, so the shutdown drain waits for them before the database closes.
 - Check each provider's credit floor after its free event list and before its paid call. Never buy lines on a stale or
