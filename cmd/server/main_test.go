@@ -29,6 +29,8 @@ import (
 	"github.com/kalverra/parlay-club/internal/ingest/weather"
 	"github.com/kalverra/parlay-club/internal/live"
 	"github.com/kalverra/parlay-club/internal/refresh"
+	webui "github.com/kalverra/parlay-club/internal/web"
+	assets "github.com/kalverra/parlay-club/web"
 )
 
 // passthrough stands in for the group scope in tests that do not need one.
@@ -1151,4 +1153,157 @@ func TestPrefillEndpoint(t *testing.T) {
 
 		assert.Equal(t, http.StatusInternalServerError, rec.Code)
 	})
+}
+
+func TestMuxKickBoundary(t *testing.T) {
+	t.Parallel()
+
+	database, err := db.Open(filepath.Join(t.TempDir(), "parlay.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { assert.NoError(t, database.Close()) })
+	require.NoError(t, db.Migrate(t.Context(), database))
+
+	store := db.NewStore(database)
+	user, err := store.CreateUserWithIdentity(
+		t.Context(), "Ada", "ada@example.com", "google-ada", "")
+	require.NoError(t, err)
+	_, err = store.Create(t.Context(), user.ID, "Sunday Parlay Club")
+	require.NoError(t, err)
+
+	cookies := auth.NewCookies("test-session-key-long-enough-for-anything", false)
+	renderer, err := webui.NewRenderer(assets.Templates, false)
+	require.NoError(t, err)
+
+	handlers := auth.NewHandlers(zerolog.Nop(), store, cookies, renderer, nil, false)
+	scope := groups.Scope(zerolog.Nop(), store, auth.UserFrom, cookies)
+	healthz := newHealthzHandler(database, zerolog.Nop())
+	shell := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+
+	kicks := 0
+	mux := newMux(
+		shell,
+		http.NotFoundHandler(),
+		http.NotFoundHandler(),
+		healthz,
+		nil,
+		handlers,
+		nil,
+		scope,
+		func() { kicks++ },
+		nil,
+	)
+
+	signed := httptest.NewRecorder()
+	cookies.SetSession(signed, user.ID)
+	sessionCookie := responseCookie(t, signed, auth.SessionCookie)
+
+	tests := []struct {
+		name       string
+		path       string
+		auth       bool
+		headers    map[string]string
+		wantStatus int
+		wantKicks  int
+	}{
+		{
+			name:       "unauthenticated GET /",
+			path:       "/",
+			wantStatus: http.StatusFound,
+			wantKicks:  0,
+		},
+		{
+			name:       "unauthenticated GET /games",
+			path:       "/games",
+			wantStatus: http.StatusFound,
+			wantKicks:  0,
+		},
+		{
+			name:       "GET /healthz",
+			path:       "/healthz",
+			wantStatus: http.StatusOK,
+			wantKicks:  0,
+		},
+		{
+			name:       "GET /readyz",
+			path:       "/readyz",
+			wantStatus: http.StatusOK,
+			wantKicks:  0,
+		},
+		{
+			name:       "unauthenticated GET /login",
+			path:       "/login",
+			wantStatus: http.StatusOK,
+			wantKicks:  0,
+		},
+		{
+			name:       "authenticated GET /login",
+			path:       "/login",
+			auth:       true,
+			wantStatus: http.StatusOK,
+			wantKicks:  0,
+		},
+		{
+			name:       "authenticated HTMX partial GET /",
+			path:       "/",
+			auth:       true,
+			headers:    map[string]string{"HX-Request": "true"},
+			wantStatus: http.StatusNoContent,
+			wantKicks:  0,
+		},
+		{
+			name:       "authenticated HTMX partial GET /slips/7/panel",
+			path:       "/slips/7/panel",
+			auth:       true,
+			headers:    map[string]string{"HX-Request": "true"},
+			wantStatus: http.StatusNoContent,
+			wantKicks:  0,
+		},
+		{
+			name:       "authenticated SSE stream GET /events",
+			path:       "/events",
+			auth:       true,
+			headers:    map[string]string{"Accept": "text/event-stream"},
+			wantStatus: http.StatusNoContent,
+			wantKicks:  0,
+		},
+		{
+			name:       "authenticated SSE stream GET /slips/7/events",
+			path:       "/slips/7/events",
+			auth:       true,
+			wantStatus: http.StatusNoContent,
+			wantKicks:  0,
+		},
+		{
+			name:       "authenticated full-page GET /",
+			path:       "/",
+			auth:       true,
+			wantStatus: http.StatusNoContent,
+			wantKicks:  1,
+		},
+		{
+			name:       "second authenticated full-page GET /",
+			path:       "/",
+			auth:       true,
+			wantStatus: http.StatusNoContent,
+			wantKicks:  1,
+		},
+	}
+
+	for _, tt := range tests {
+		kicks = 0
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, tt.path, nil)
+		if tt.auth {
+			req.AddCookie(sessionCookie)
+		}
+		for key, value := range tt.headers {
+			req.Header.Set(key, value)
+		}
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		assert.Equal(t, tt.wantStatus, rec.Code, tt.name)
+		assert.Equal(t, tt.wantKicks, kicks, tt.name)
+	}
 }

@@ -117,5 +117,5 @@ Effort: medium (multi-seam change across Eastern-time window rules, `sync_state`
 
 Effort: easy (narrow HTTP integration tests against existing `newMux` composition and doc updates across existing files)
 
-- [ ] Add `newMux` HTTP integration tests in `cmd/server/main_test.go` verifying unauthenticated requests, `/healthz`, `/readyz`, `/login`, HTMX partials, and SSE streams never trigger `kick`, while authenticated full-page `GET /` invokes it
+- [x] Add `newMux` HTTP integration tests in `cmd/server/main_test.go` verifying unauthenticated requests, `/healthz`, `/readyz`, `/login`, HTMX partials, and SSE streams never trigger `kick`, while authenticated full-page `GET /` invokes it
 - [ ] Docs: update `AGENTS.md`, `docs/concepts/data-refresh.md`, `docs/reference/data-sources.md`, `docs/guides/gcp-setup.md`, and `docs/runbooks/deploy.md` for first-authenticated-Sunday-visit pre-fill, `prefill:sunday` in `sync_state`, and optional `POST /internal/prefill` / Cloud Scheduler fallback, then run `good-vibes docs lint`
