@@ -219,11 +219,28 @@ team (with team logo), and every market that player has in the tab sits under it
 share a card. Prop buttons stay text-only and read short ("Over 245.5", "Yes") because the card already names the
 player; the pick they post is unchanged.
 
-The search text also filters the open game's rows. Sorts are player (default), odds (shortest price first), and line
-(highest line first). Kickoff and category drop out because one game has one kickoff. Tab and sort chips swap
-`#pick-detail` only, so the slate keeps its scroll and search; the back link drops `game` and `cat`, keeps `q` and
-`win`, and swaps the whole body. A live board signal refreshes the detail and the slate on their own URLs, so the open
-tab and sort stay put. A tab or sort swap also syncs the search form's hidden tab and sort for the next search.
+The search text also filters the open game's rows. Sorts are player (default), odds (shortest price first), line
+(highest line first), and matchup (strongest suggestion signal and softest opposing defense EPA rank first). Kickoff and
+category drop out because one game has one kickoff. Tab and sort chips swap `#pick-detail` only, so the slate keeps its
+scroll and search; the back link drops `game` and `cat`, keeps `q` and `win`, and swaps the whole body. A live board
+signal refreshes the detail and the slate on their own URLs, so the open tab and sort stay put. A tab or sort swap also
+syncs the search form's hidden tab and sort for the next search.
+
+When fresh nflverse stats, ESPN injury lists, or open-slip legs are present, `internal/board` passes `BoardSignals`
+through `ApplySignals` and `Detail` to attach suggestion pills (`Row.Badge` on options and up to two `PlayerGroup.Tags`
+per player card in priority order):
+
+- **Smash matchup:** player `OVER` prop with >= 20% `TargetShare` or >= 12 carries/game against a bottom-6 opposing
+  defense (EPA allowed rank >= 27).
+- **Fits slip:** line or prop that pairs positively with an existing leg on the open slip (such as a receiver `OVER` with
+  that team's QB passing yards `OVER`, or an opposing receiver or same-team RB `OVER` with a `-7.0` or larger favorite
+  spread).
+- **Role bump:** player `OVER`/`YES` prop where a same-position teammate is marked `Out` in `games.injuries_json` and
+  the player posted >= 15 percentage points higher `OffensePct` in a prior game this season.
+- **High volume:** player `OVER`/`YES` prop with top-quartile `WOPR`, `TargetShare`, `OffensePct`, or carries for their
+  position.
+
+Missing or stale signals omit badges cleanly without hiding any pick.
 
 Game selection replaces `#pick-body`, which can reset the slate's scroll. `app.js` saves the `scrollTop` of the
 `[data-keep-scroll]` pane before an HTMX swap and restores it after. Times keep the existing contract: a `<time>`
@@ -310,8 +327,11 @@ or game link. It is not a bottom-bar tab.
   (`POST /research/matches`) to fix unmatched names or corrections.
 - **Player research (`GET /research/players/{espnID}`):** fetches the player's ESPN game log on demand, shows the
   player's portrait and team logo in the header, and displays last-5 hit bars (green over the line, red under), callouts
-  for the last-5 median and season mean, and total games played this season. Opening from a slip leg or prop pill
-  preselects that market and line; otherwise it picks the player's primary prop line or the first available market.
+  for the last-5 median and season mean, and total games played this season. When fresh nflverse data is cached, a
+  2-column usage grid also surfaces `Snap % (L3)`, `Target share`, `WOPR`, and the opponent defense EPA rank (`Opp Pass
+  Def` or `Opp Rush Def`, switching with the active market or RB default); stale or missing data omits the grid cleanly.
+  Opening from a slip leg or prop pill preselects that market and line; otherwise it picks the player's primary prop
+  line or the first available market.
 - **Media fallbacks:** Team logos and player portraits (`web/templates/media.html`) load lazily from stored ESPN CDN
   URLs. When a URL is missing or fails to load in the browser, `app.js` hides the broken image and reveals the initials
   or text fallback badge.
