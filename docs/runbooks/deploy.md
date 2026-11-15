@@ -18,8 +18,9 @@ setup lives in [GCP setup](../guides/gcp-setup.md); this runbook covers every de
 - The [GCP setup](../guides/gcp-setup.md) is finished: the bucket, secrets, service accounts, Workload Identity, and
   GitHub variables all exist.
 - The five required secrets have an `ENABLED` version. `github-token` and `prefill-token` are optional: with a version,
-  bug reports open GitHub issues and `POST /internal/prefill` accepts bearer-token requests; without one, bug reports
-  stay in SQLite and `POST /internal/prefill` returns `404`.
+  bug reports open GitHub issues and the optional `POST /internal/prefill` fallback accepts bearer-token requests;
+  without one, bug reports stay in SQLite and `POST /internal/prefill` returns `404` (Sunday pre-fill still runs
+  automatically on the first authenticated Sunday visit via `prefill:sunday` in `sync_state`).
 - `parlay-deployer` can read Secret Manager metadata and the Litestream bucket. A project set up before the pre-flight
   checks existed needs `deploy/setup.sh` run once more; it grants `roles/secretmanager.viewer` and
   `roles/storage.bucketViewer`.
@@ -168,9 +169,9 @@ yourself under **Billing → Account management** if those mails never arrive.
   tier is a worry, check the repo size after a busy week.
 - Build layers live in the GitHub Actions cache, not Artifact Registry, so caching does not add to the repo size or the
   0.5 GB free tier.
-- Cloud Scheduler's free tier includes three jobs per billing account; the single Sunday morning pre-fill job
-  (`parlay-club-prefill`, set up in [GCP setup](../guides/gcp-setup.md#8-schedule-the-sunday-morning-pre-fill-optional))
-  stays within it.
+- Cloud Scheduler's free tier includes three jobs per billing account; if configured, the optional Sunday morning
+  pre-fill fallback job (`parlay-club-prefill`, set up in
+  [GCP setup](../guides/gcp-setup.md#8-schedule-the-sunday-morning-pre-fill-fallback-optional)) stays within it.
 - Odds credits are separate from GCP spend. The app tracks them in `sync_state`; see
   [Data refresh](../concepts/data-refresh.md).
 
