@@ -1,0 +1,135 @@
+{{define "content"}}
+<section class="space-y-6 pb-8">
+  <div class="space-y-2">
+    {{if .BackURL}}
+      <a href="{{.BackURL}}" class="inline-flex items-center gap-1 text-xs font-medium text-sky-400 hover:underline">
+        &larr; Back
+      </a>
+    {{end}}
+    <h1 class="text-xl font-semibold text-slate-100">Grading &amp; Analyzer Guide</h1>
+    <p class="text-sm text-slate-300">
+      Every leg stays allowed. Grades and warnings are a sharp friend's heads-up built from live lines, weather, nfelo projections, ESPN logs, and nflverse efficiency.
+    </p>
+    <nav class="flex flex-wrap gap-2 pt-1 text-xs">
+      <a href="#leg-grades" class="rounded-full border border-slate-700 bg-slate-900 px-2.5 py-1 text-slate-200 hover:border-slate-500">Leg grades</a>
+      <a href="#slip-grade" class="rounded-full border border-slate-700 bg-slate-900 px-2.5 py-1 text-slate-200 hover:border-slate-500">Slip grade</a>
+      <a href="#suggestions" class="rounded-full border border-slate-700 bg-slate-900 px-2.5 py-1 text-slate-200 hover:border-slate-500">Pick badges</a>
+      <a href="#rules" class="rounded-full border border-slate-700 bg-slate-900 px-2.5 py-1 text-slate-200 hover:border-slate-500">Warning rules</a>
+    </nav>
+  </div>
+
+  <section id="leg-grades" class="scroll-mt-16 space-y-3 rounded-xl border border-slate-800 bg-slate-900 p-4">
+    <div>
+      <h2 class="text-base font-semibold text-slate-100">Leg Grades (A–F)</h2>
+      <p class="mt-1 text-sm text-slate-300">
+        Each matched leg starts at a baseline score of <span class="font-semibold text-slate-100">{{.Rubric.BaselineScore}}</span> (B) and adds or subtracts points across form, matchup, and line price. Unmatched or custom <code class="text-xs text-slate-200">OTHER</code> legs are not graded.
+      </p>
+    </div>
+
+    <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
+      {{range .Bands}}
+        <div class="rounded-lg border border-slate-800 bg-slate-950/70 p-3">
+          <div class="flex items-center justify-between gap-2">
+            <span class="rounded-full border px-2 py-0.5 text-xs font-semibold {{.Class}}">Grade {{.Letter}}</span>
+            <span class="text-xs font-medium text-slate-400">{{.Range}} pts</span>
+          </div>
+          <p class="mt-1.5 text-xs text-slate-300">{{.Description}}</p>
+        </div>
+      {{end}}
+    </div>
+
+    <div class="space-y-2 pt-1">
+      <h3 class="text-xs font-semibold uppercase tracking-wide text-slate-400">Leg scoring factors</h3>
+      <ul class="divide-y divide-slate-800 rounded-lg border border-slate-800 bg-slate-950/60">
+        {{range .Rubric.LegFactors}}
+          <li class="flex items-start justify-between gap-3 px-3 py-2.5 text-xs">
+            <div class="min-w-0">
+              <p class="font-medium text-slate-200">
+                {{.Label}}
+                <span class="ml-1 text-[11px] font-normal text-slate-400">({{.Category}})</span>
+              </p>
+              <p class="mt-0.5 text-slate-400">{{.Description}}</p>
+            </div>
+            <span class="shrink-0 font-semibold text-slate-200">{{.Delta}}</span>
+          </li>
+        {{end}}
+      </ul>
+    </div>
+  </section>
+
+  <section id="slip-grade" class="scroll-mt-16 space-y-3 rounded-xl border border-slate-800 bg-slate-900 p-4">
+    <div>
+      <h2 class="text-base font-semibold text-slate-100">Overall Slip Grade</h2>
+      <p class="mt-1 text-sm text-slate-300">
+        The slip grade starts from the average score of its graded legs, then rewards positive game-script stacks and penalizes script conflicts, long-parlay drag, and extra heavy chalk.
+      </p>
+    </div>
+
+    <ul class="divide-y divide-slate-800 rounded-lg border border-slate-800 bg-slate-950/60">
+      {{range .Rubric.SlipFactors}}
+        <li class="flex items-start justify-between gap-3 px-3 py-2.5 text-xs">
+          <div class="min-w-0">
+            <p class="font-medium text-slate-200">{{.Label}}</p>
+            <p class="mt-0.5 text-slate-400">{{.Description}}</p>
+          </div>
+          <span class="shrink-0 font-semibold text-slate-200">{{.Delta}}</span>
+        </li>
+      {{end}}
+    </ul>
+  </section>
+
+  <section id="suggestions" class="scroll-mt-16 space-y-3 rounded-xl border border-slate-800 bg-slate-900 p-4">
+    <div>
+      <h2 class="text-base font-semibold text-slate-100">Pick-Board Badges</h2>
+      <p class="mt-1 text-sm text-slate-300">
+        On the pick board, nflverse usage, opponent defense ranks, injury reports, and your current slip legs surface quick signal tags.
+      </p>
+    </div>
+    <ul class="space-y-2 text-xs text-slate-300">
+      <li class="rounded-lg border border-slate-800 bg-slate-950/60 p-3">
+        <span class="font-semibold text-emerald-300">Smash matchup:</span> High-volume player Over (&ge; 20% target share or &ge; 12 carries/game) vs. a bottom-6 defense in EPA allowed.
+      </li>
+      <li class="rounded-lg border border-slate-800 bg-slate-950/60 p-3">
+        <span class="font-semibold text-sky-300">High volume:</span> Top-quartile snap share, target share, or WOPR even when recent yardage sits below the line.
+      </li>
+      <li class="rounded-lg border border-slate-800 bg-slate-950/60 p-3">
+        <span class="font-semibold text-amber-300">Role bump:</span> Teammate with a key starter marked Out who saw &ge; 15% higher snap share in earlier games.
+      </li>
+      <li class="rounded-lg border border-slate-800 bg-slate-950/60 p-3">
+        <span class="font-semibold text-slate-100">Fits slip:</span> Line or prop that pairs positively with a leg already on your slip.
+      </li>
+    </ul>
+  </section>
+
+  <section id="rules" class="scroll-mt-16 space-y-4">
+    <h2 class="text-base font-semibold text-slate-100">Warning Rules</h2>
+    {{range .Categories}}
+      <div class="space-y-2.5">
+        <h3 class="text-xs font-semibold uppercase tracking-wide text-slate-400">{{.Name}}</h3>
+        <div class="space-y-2.5">
+          {{range .Rules}}
+            <article
+              id="rule-{{.ID}}"
+              class="scroll-mt-16 rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-2"
+            >
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <h4 class="text-sm font-semibold text-slate-100">{{.Title}}</h4>
+                <span class="rounded-full border px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide {{.SeverityClass}}">
+                  {{.SeverityLabel}}
+                </span>
+              </div>
+              <p class="text-xs text-slate-300">
+                <span class="font-semibold text-slate-200">Trigger:</span> {{.Threshold}}
+              </p>
+              <p class="text-xs text-slate-400">{{.Rationale}}</p>
+              <p class="rounded-lg border border-slate-800 bg-slate-950/70 px-3 py-2 text-xs italic text-slate-300">
+                &ldquo;{{.Example}}&rdquo;
+              </p>
+            </article>
+          {{end}}
+        </div>
+      </div>
+    {{end}}
+  </section>
+</section>
+{{end}}
