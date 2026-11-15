@@ -2,10 +2,10 @@
 id: config
 title: Configuration
 type: reference
-summary: Environment variables the server reads, their dev defaults, the odds provider keys and GitHub issue reporting settings they configure, the offline sandbox switch, and the values it rejects in prod.
-tags: [config, environment, startup, google, oauth, odds, parlay-api, the-odds-api, sandbox, offline, github, bug-reports]
+summary: Environment variables the server reads, their dev defaults, the odds provider keys, pre-fill bearer token, and GitHub issue reporting settings they configure, the offline sandbox switch, and the values it rejects in prod.
+tags: [config, environment, startup, google, oauth, odds, parlay-api, the-odds-api, prefill, sandbox, offline, github, bug-reports]
 sources: [internal/config/config.go, cmd/server/main.go, cmd/server/sandbox.go, internal/sandbox/*.go, internal/ingest/odds/client.go]
-last_verified: 2026-11-13
+last_verified: 2026-11-15
 ---
 
 # Configuration
@@ -30,6 +30,7 @@ exits with status 1 when any value is invalid.
 | `THE_ODDS_API_KEY`     | empty                    | The Odds API key for enrichment and fallback lines. Empty disables that provider. |
 | `GITHUB_TOKEN`         | empty                    | GitHub token for creating bug report issues. Optional in dev and prod; empty saves reports to SQLite only. |
 | `GITHUB_REPO`          | `kalverra/parlay-club`   | Target `owner/repo` for bug report issues. Defaults to `kalverra/parlay-club` in dev and prod. |
+| `PREFILL_TOKEN`        | empty                    | Bearer token for `POST /internal/prefill`. Optional in dev and prod; empty disables the endpoint (`404`). |
 | `LOG_LEVEL`            | `debug`                  | A zerolog level: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `panic`, `disabled`. `prod` defaults to `info`. |
 | `SUNDAY_SANDBOX`       | empty                    | `1` runs the offline Sunday sandbox. It fixes the database at `./data/sunday-sandbox.db` and ignores `DB_PATH`. Rejected in prod. |
 | `LITESTREAM_BUCKET`    | unset                    | Read by Litestream, not by the app.                                           |
@@ -59,6 +60,10 @@ server instead.
 `GITHUB_TOKEN` and `GITHUB_REPO` configure GitHub issue creation for in-app bug reports. Both are trimmed of surrounding
 whitespace and are optional in both dev and prod. When `GITHUB_TOKEN` is empty, bug reports still save to SQLite without
 creating a GitHub issue. `GITHUB_REPO` defaults to `kalverra/parlay-club`.
+
+`PREFILL_TOKEN` is trimmed of surrounding whitespace and is optional in both dev and prod. When empty, `POST /internal/prefill`
+returns `404` fail-closed. When set, callers must send `Authorization: Bearer <PREFILL_TOKEN>`, verified with
+constant-time comparison (`subtle.ConstantTimeCompare`).
 
 Sign-up is open, so there is no email list to configure. Group membership is what decides who sees which slips; see
 [Groups](../concepts/groups.md).

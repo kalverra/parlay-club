@@ -208,7 +208,7 @@ invariants)
 - [x] Add optional `PrefillToken` (`PREFILL_TOKEN`) to `internal/config` and mount `POST /internal/prefill` outside
       cookie/CSRF middleware in `cmd/server` with constant-time bearer auth, synchronous execution, and handler/config
       tests
-- [ ] Docs: amend the lazy-only sync guardrail in `AGENTS.md` and update `docs/concepts/data-refresh.md`,
+- [x] Docs: amend the lazy-only sync guardrail in `AGENTS.md` and update `docs/concepts/data-refresh.md`,
       `docs/reference/config.md`, and `docs/reference/routes.md` for pre-fill and `Kick` scope
 
 ### Phase 2: Pick-time on-demand refresh rules and UI
