@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/kalverra/parlay-club/internal/db"
@@ -378,10 +379,13 @@ func (s *Service) syncOddsProps(ctx context.Context, game db.Game, now time.Time
 		s.logger.Warn().Err(failure).Msg("props provider unavailable; using surviving provider's props")
 	}
 
-	// 5. Convert to db.Odds rows.
+	// 5. Convert to db.Odds rows and write.
 	rows := s.mapPropsToOdds(ctx, game, finalProps, now)
+	return s.writeOddsProps(ctx, game, rows, now)
+}
 
-	// 6. Write rows & record sync.
+// writeOddsProps writes prop rows and records the game's props sync state.
+func (s *Service) writeOddsProps(ctx context.Context, game db.Game, rows []db.Odds, now time.Time) (bool, error) {
 	changed := false
 	err := s.store.Tx(ctx, func(tx *db.Store) error {
 		if len(rows) > 0 {
@@ -400,4 +404,68 @@ func (s *Service) syncOddsProps(ctx context.Context, game db.Game, now time.Time
 		s.publishWeek(ctx, game.WeekID)
 	}
 	return changed, nil
+}
+
+// prefillProps warms Parlay API bulk props for upcoming games using a bounded
+// worker pool. It never calls The Odds API fallback EventProps and respects the
+// 15-minute idempotency window.
+func (s *Service) prefillProps(
+	ctx context.Context,
+	games []db.Game,
+	now time.Time,
+) (synced, skipped, failed int, errs []error) {
+	workers := min(prefillConcurrency, len(games))
+	jobs := make(chan db.Game, len(games))
+	for _, game := range games {
+		jobs <- game
+	}
+	close(jobs)
+
+	var (
+		wg sync.WaitGroup
+		mu sync.Mutex
+	)
+	for range workers {
+		wg.Go(func() {
+			for game := range jobs {
+				if ctx.Err() != nil {
+					return
+				}
+				bought := false
+				src := source{
+					key: OddsPropsSource(game.ID),
+					due: func(_ context.Context, state db.SyncState) (bool, error) {
+						return prefillStale(state.FetchedAt, now), nil
+					},
+					run: func(ctx context.Context) (bool, error) {
+						primary := s.fetchParlayProps(ctx, &game)
+						if primary.disabled || !primary.bought {
+							return false, primary.err
+						}
+						rows := s.mapPropsToOdds(ctx, game, primary.props, now)
+						changed, err := s.writeOddsProps(ctx, game, rows, now)
+						if err != nil {
+							return false, err
+						}
+						bought = true
+						return changed, nil
+					},
+				}
+				err := s.refreshWithTimeout(ctx, src, now)
+				mu.Lock()
+				switch {
+				case err != nil:
+					failed++
+					errs = append(errs, err)
+				case bought:
+					synced++
+				default:
+					skipped++
+				}
+				mu.Unlock()
+			}
+		})
+	}
+	wg.Wait()
+	return synced, skipped, failed, errs
 }

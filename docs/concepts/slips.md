@@ -4,8 +4,6 @@ title: Slips
 type: concept
 summary: How a group builds shared parlays from the slate, with slate scopes and deadline isolation, multi-slip week views, sibling slip switching, one-off slip creation, the hub's next-step banner and deadline, the game-first pick board and its pick dock, members, legs, votes, wagers, quick-add, create-slip defaults, grading, the editing and locking rules, and research.
 tags: [slips, weeks, legs, members, locking, grading, results, activity, groups, games, quick-add, nfelo, props, autocomplete, research, next-step, hub, pick-board, slate, drilldown, tabs, search, dock, tray, votes, voting, wagers, slate-scopes, deadlines, multi-slip]
-sources: [internal/slips/slips.go, internal/slips/rules.go, internal/slips/next.go, internal/slips/wagers.go, internal/grader/*.go, internal/refresh/grade.go, internal/board/board.go, internal/db/slips.go, internal/db/legs.go, internal/db/votes.go, internal/db/wagers.go, internal/db/odds.go, internal/db/players.go, internal/db/weeks.go, internal/db/games.go, internal/web/games.go, internal/web/pick.go, internal/web/slips.go, internal/web/home.go, internal/web/research.go, web/templates/media.html, web/templates/week.html, web/templates/slip.html, web/templates/partials.html, web/static/app.js]
-last_verified: 2026-11-14
 ---
 
 # Slips
@@ -254,9 +252,16 @@ slot.
 A game that has stored lines but no prop rows offers "Load them" on its slate card and again in its open detail: "Props
 for BUF @ MIA aren't loaded yet." The button calls `GET /games/{id}/props?slip=`, which runs `SyncGameProps` for that
 one game (credit floors and all) and then fires `board-updated`, so the body refreshes in place and the open game stays
-open. A week with no odds at all keeps the one week-level "No lines" state instead of a button per game. The board
-itself never syncs props; opening a game, switching tabs, typing, filtering, and sorting spend no credits. See
-[Data refresh](data-refresh.md).
+open. A week with no odds at all keeps the one week-level "No lines" state instead of a button per game.
+
+While the slip is `OPEN` and upcoming games remain in its slate scope, opening `/slips/{id}/pick` syncs stale week lines
+via `SyncPickLines` (or `SyncPickGame` when an upcoming game is open), and selecting or refreshing an upcoming game in
+`/pick/results` or `/pick/detail` syncs stale lines and props for that game via `SyncPickGame` (15m lines / 30m props on
+game days; 2h otherwise). Once `sync_state` is fresh, typing, filtering, sorting, and `board-updated` SSE reloads read
+SQLite only and spend no credits. A phone-first "Refresh odds" button (`POST /slips/{id}/pick/refresh`) appears in the
+slate and detail header on `OPEN` slips with upcoming games, calling `ForcePickRefresh` with a 2-minute cooldown and
+returning `#pick-body` (returning 422 on locked slips). Locked or graded slips and `/pick/slate` refreshes trigger no
+odds syncs. See [Data refresh](data-refresh.md).
 
 The board has its own empty states. A week with no stored games says the slate has not synced. A week with games but no
 odds says the lines have not synced, once, instead of offering "Load them" for every game. Once every game has kicked
@@ -343,14 +348,15 @@ box scores for player props) and calls `slips.Service.AutoGradeLegs`.
 - **Override-safe writes:** `AutoGradeLegs` updates only legs where `result = 'PENDING'`, records `graded_by = "auto"`,
   writes a system activity entry (`user_id = NULL`, `"Auto-graded ..."`), recomputes the slip result and status, and
   publishes `slip:{id}`. Manual overrides and prior `NEEDS_GRADING` marks are never overwritten on subsequent passes.
-- **Unresolved legs (`NEEDS_GRADING`):** `OTHER` legs, missing scores or lines, and final games with an empty box
-  score grade as `NEEDS_GRADING` (`graded_by = "auto"`), which keeps the slip `PENDING` until a member overrides them.
+- **Unresolved legs (`NEEDS_GRADING`):** `OTHER` legs, missing scores or lines, and final games with an empty box score
+  grade as `NEEDS_GRADING` (`graded_by = "auto"`), which keeps the slip `PENDING` until a member overrides them.
 - **UI attribution and styling:** `LegView.GradedBy` formats `"auto"` as `"Auto"` and preserves member names. The chip
   label (`resultLabel`) renders `"Needs grading"` in amber (`border-amber-700 bg-amber-950 text-amber-300`) for
   `NEEDS_GRADING` and `"{RESULT} · {GradedBy}"` once graded. Every leg keeps the five-option override menu (`PENDING`,
   `WON`, `LOST`, `PUSH`, `VOID`).
 
-The per-market rules are in [Product](../../plan/product.md), and the refresh pass is in [Data refresh](data-refresh.md#auto-grading).
+The per-market rules are in [Product](../../plan/product.md), and the refresh pass is in
+[Data refresh](data-refresh.md#auto-grading).
 
 ## Status and result
 

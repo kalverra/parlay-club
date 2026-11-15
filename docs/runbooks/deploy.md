@@ -3,9 +3,7 @@ id: deploy
 title: Deploy
 type: runbook
 summary: How a commit reaches Cloud Run, why deploys pause during game windows, how to force one, and how to verify, roll back, and read the spend.
-tags: [deploy, cloud-run, github-actions, blackout, litestream, rollback, runbook]
-sources: [.github/workflows/deploy.yml, .github/workflows/ci.yml, deploy/blackout.sh, deploy/setup.sh, deploy/entrypoint.sh, Dockerfile, docs/concepts/persistence.md, internal/seed/seed.go, cmd/server/main.go, internal/db/migrate.go]
-last_verified: 2026-11-13
+tags: [deploy, cloud-run, github-actions, blackout, litestream, rollback, runbook, cloud-scheduler]
 ---
 
 # Deploy
@@ -19,8 +17,9 @@ setup lives in [GCP setup](../guides/gcp-setup.md); this runbook covers every de
 
 - The [GCP setup](../guides/gcp-setup.md) is finished: the bucket, secrets, service accounts, Workload Identity, and
   GitHub variables all exist.
-- The five required secrets have an `ENABLED` version. `github-token` is optional: with a version, bug reports open
-  GitHub issues; without one, they stay in SQLite.
+- The five required secrets have an `ENABLED` version. `github-token` and `prefill-token` are optional: with a version,
+  bug reports open GitHub issues and `POST /internal/prefill` accepts bearer-token requests; without one, bug reports
+  stay in SQLite and `POST /internal/prefill` returns `404`.
 - `parlay-deployer` can read Secret Manager metadata and the Litestream bucket. A project set up before the pre-flight
   checks existed needs `deploy/setup.sh` run once more; it grants `roles/secretmanager.viewer` and
   `roles/storage.bucketViewer`.
@@ -74,14 +73,17 @@ push, so a broken gate fails before it can block or allow a deploy.
 4. Authenticates to Google Cloud through Workload Identity Federation as `parlay-deployer`. No service account key is
    stored in GitHub.
 5. Pre-flights the GCP project: the Artifact Registry repo, the Litestream bucket, and an `ENABLED` version of each
-   required secret. It collects every failure, then exits before the build. `github-token` is checked separately; when
-   it has a version the deploy mounts it, and when it does not the job logs a notice and leaves bug reports in SQLite.
+   required secret. It collects every failure, then exits before the build. `github-token` and `prefill-token` are
+   checked separately; when each has an `ENABLED` version the job sets `MOUNT_GITHUB_TOKEN=true` or
+   `MOUNT_PREFILL_TOKEN=true` so the deploy mounts it, and when one does not the job logs a notice and leaves bug
+   reports in SQLite or `POST /internal/prefill` disabled (`404`).
 6. Builds the `Dockerfile` with Buildx and pushes the image to Artifact Registry tagged with the commit SHA, reusing
    layers from the GitHub Actions cache.
 7. Runs `gcloud run deploy` with one instance at most, concurrency 80, 1 CPU, 512 MiB, a 3600 second timeout, CPU boost,
    public access, the runtime account, `APP_ENV=prod`, `DB_PATH=/data/parlay.db`, `LITESTREAM_BUCKET`, `BASE_URL`, and
    `GITHUB_REPO` (from the optional `ISSUES_REPO` variable, or the repo that runs the workflow). It mounts the five
-   required Secret Manager secrets, plus `GITHUB_TOKEN` when `github-token` has a version.
+   required Secret Manager secrets, plus `GITHUB_TOKEN` when `github-token` has a version and `PREFILL_TOKEN` when
+   `prefill-token` has a version.
 8. Reads the service URL and retries once with `BASE_URL` set to that URL if the first revision could not boot. That is
    the first-deploy path; later deploys get `BASE_URL` from the repo variable.
 9. Waits for `GET /healthz` on the new revision, then writes the image and URL to the job summary.
@@ -166,6 +168,9 @@ yourself under **Billing → Account management** if those mails never arrive.
   tier is a worry, check the repo size after a busy week.
 - Build layers live in the GitHub Actions cache, not Artifact Registry, so caching does not add to the repo size or the
   0.5 GB free tier.
+- Cloud Scheduler's free tier includes three jobs per billing account; the single Sunday morning pre-fill job
+  (`parlay-club-prefill`, set up in [GCP setup](../guides/gcp-setup.md#8-schedule-the-sunday-morning-pre-fill-optional))
+  stays within it.
 - Odds credits are separate from GCP spend. The app tracks them in `sync_state`; see
   [Data refresh](../concepts/data-refresh.md).
 
@@ -188,6 +193,7 @@ yourself under **Billing → Account management** if those mails never arrive.
 | Health check times out                               | The revision did not boot. Read Cloud Run logs for the startup error or GCS permission.     |
 | `first revision had no BASE_URL; retrying` warning   | Expected on the first deploy. Set the `BASE_URL` repo variable to the printed URL.          |
 | Bug reports save but no GitHub issue appears         | `github-token` has no `ENABLED` version, so the deploy skipped it. Add one and deploy again. |
+| `POST /internal/prefill` returns `404`               | `prefill-token` has no `ENABLED` version, so the deploy skipped it. Add one and deploy again. |
 | History is missing after a deploy                    | No group existed at boot, or it is not the first group. Create the first group, deploy again.|
 | First boot logs `no matching backups found`          | The replica is empty. Normal. The revision starts a fresh database and replicates it.       |
 | A deploy lost writes                                 | It ran during a game window, probably forced. Prefer waiting, or `force` only when quiet.   |
