@@ -47,6 +47,7 @@ type Config struct {
 	TheOddsAPIKey      string
 	GitHubToken        string
 	GitHubRepo         string
+	PrefillToken       string
 	LogLevel           zerolog.Level
 	Sandbox            bool
 }
@@ -84,6 +85,7 @@ func Load(env Env) (Config, error) {
 		TheOddsAPIKey:      theOddsAPIKeyOr(env),
 		GitHubToken:        strings.TrimSpace(env("GITHUB_TOKEN")),
 		GitHubRepo:         gitHubRepoOr(env),
+		PrefillToken:       strings.TrimSpace(env("PREFILL_TOKEN")),
 		LogLevel:           levelOr(env, prod, &problems),
 		Sandbox:            sandbox,
 	}

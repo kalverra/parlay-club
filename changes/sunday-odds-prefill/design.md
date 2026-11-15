@@ -200,33 +200,33 @@ invariants)
 
 ### Phase 1: Sunday pre-fill engine and authenticated endpoint
 
-- [ ] Add `RunPrefill` (scoreboard -> lines -> free summaries/rosters + bounded parallel Parlay-only bulk props for
+- [x] Add `RunPrefill` (scoreboard -> lines -> free summaries/rosters + bounded parallel Parlay-only bulk props for
       upcoming games with 15m idempotency), tighten free-source staleness windows (`scoreboard`, `summary`, `roster`,
       `weather`, `nfelo`, `gamelog`), promote `summary` and unique week-team `roster` syncs into `Kick()`, and split
       `Kick` from `RunOnce` so `Kick` omits `odds:lines` in `internal/refresh` (updating
       `TestRefreshArchivesEveryIngestCall` and adding unit/integration tests)
-- [ ] Add optional `PrefillToken` (`PREFILL_TOKEN`) to `internal/config` and mount `POST /internal/prefill` outside
+- [x] Add optional `PrefillToken` (`PREFILL_TOKEN`) to `internal/config` and mount `POST /internal/prefill` outside
       cookie/CSRF middleware in `cmd/server` with constant-time bearer auth, synchronous execution, and handler/config
       tests
-- [ ] Docs: amend the lazy-only sync guardrail in `AGENTS.md` and update `docs/concepts/data-refresh.md`,
+- [x] Docs: amend the lazy-only sync guardrail in `AGENTS.md` and update `docs/concepts/data-refresh.md`,
       `docs/reference/config.md`, and `docs/reference/routes.md` for pre-fill and `Kick` scope
 
 ### Phase 2: Pick-time on-demand refresh rules and UI
 
-- [ ] Implement `SyncPickLines`, `SyncPickGame`, `ForcePickRefresh`, pick-time staleness rules (`15m`/`2h` lines,
+- [x] Implement `SyncPickLines`, `SyncPickGame`, `ForcePickRefresh`, pick-time staleness rules (`15m`/`2h` lines,
       `30m`/`2h` props), and the `2m` manual refresh cooldown in `internal/refresh` with unit and single-flight tests
-- [ ] Extend `web.Refresher`, trigger pick-time syncs on `OPEN` slips with upcoming games in
+- [x] Extend `web.Refresher`, trigger pick-time syncs on `OPEN` slips with upcoming games in
       `pickBoard`/`pickResults`/`pickDetail` (`internal/web/pick.go`), and add `POST /slips/{id}/pick/refresh` with the
       phone-first refresh button in `web/templates/partials.html` and handler/cooldown/locked-slip tests
-- [ ] Docs: update `docs/concepts/data-refresh.md`, `docs/concepts/slips.md`, `docs/reference/data-sources.md`, and
+- [x] Docs: update `docs/concepts/data-refresh.md`, `docs/concepts/slips.md`, `docs/reference/data-sources.md`, and
       `docs/reference/routes.md` for pick-time refreshes and the refresh route
 
 ### Phase 3: Cloud Scheduler deploy wiring and setup docs
 
 Effort: easy (narrow, pattern-following additions to existing setup script, deploy workflow, and runbooks)
 
-- [ ] Enable `cloudscheduler.googleapis.com`, add the `prefill-token` secret, and print the Sunday 9:30 AM
+- [x] Enable `cloudscheduler.googleapis.com`, add the `prefill-token` secret, and print the Sunday 9:30 AM
       `America/New_York` scheduler setup command in `deploy/setup.sh`, plus mount optional `PREFILL_TOKEN` in
       `.github/workflows/deploy.yml` (`bash -n` and `deploy/blackout_test.sh` pass)
-- [ ] Docs: update `docs/guides/gcp-setup.md` and `docs/runbooks/deploy.md` for `prefill-token` and the Cloud Scheduler
+- [x] Docs: update `docs/guides/gcp-setup.md` and `docs/runbooks/deploy.md` for `prefill-token` and the Cloud Scheduler
       job, then run `good-vibes docs lint` and `good-vibes docs index`

@@ -149,6 +149,19 @@ jobs:
             echo "::notice::github-token has no ENABLED version; bug reports stay in SQLite"
           fi
 
+          # prefill-token is optional. Mount it only when someone added a
+          # version; an empty secret would fail the revision at boot.
+          if versions=$(gcloud secrets versions list prefill-token \
+            --project "$PROJECT" \
+            --filter='state=ENABLED' \
+            --limit=1 \
+            --format='value(name)' 2>/dev/null) && [ -n "$versions" ]; then
+            echo "MOUNT_PREFILL_TOKEN=true" >> "$GITHUB_ENV"
+            echo "prefill-token has an ENABLED version; POST /internal/prefill will be enabled"
+          else
+            echo "::notice::prefill-token has no ENABLED version; POST /internal/prefill stays disabled (404)"
+          fi
+
           if [ "$failed" -ne 0 ]; then
             exit 1
           fi
@@ -210,6 +223,9 @@ jobs:
             local secrets="SESSION_KEY=session-key:latest,GOOGLE_CLIENT_ID=google-client-id:latest,GOOGLE_CLIENT_SECRET=google-client-secret:latest,ODDS_API_KEY=odds-api-key:latest,THE_ODDS_API_KEY=the-odds-api-key:latest"
             if [ "${MOUNT_GITHUB_TOKEN:-}" = "true" ]; then
               secrets="$secrets,GITHUB_TOKEN=github-token:latest"
+            fi
+            if [ "${MOUNT_PREFILL_TOKEN:-}" = "true" ]; then
+              secrets="$secrets,PREFILL_TOKEN=prefill-token:latest"
             fi
             gcloud run deploy "$SERVICE" \
               --project "$PROJECT" \

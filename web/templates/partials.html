@@ -1212,17 +1212,32 @@
       <input id="pick-game" type="hidden" name="game" value="{{.Game}}">
     </form>
 
-    <div class="flex flex-wrap items-center gap-1.5">
-      {{range .Windows}}
-        <a
-          href="{{.PushURL}}"
-          hx-get="{{.Href}}"
+    <div class="flex flex-wrap items-center justify-between gap-2">
+      <div class="flex flex-wrap items-center gap-1.5">
+        {{range .Windows}}
+          <a
+            href="{{.PushURL}}"
+            hx-get="{{.Href}}"
+            hx-target="#pick-body"
+            hx-swap="outerHTML"
+            hx-push-url="{{.PushURL}}"
+            class="inline-flex min-h-12 items-center rounded-full px-2.5 py-1 text-xs font-medium {{if .Active}}bg-sky-600 text-white{{else}}border border-slate-700 bg-slate-800 text-slate-300 hover:bg-slate-700{{end}}"
+            >{{.Label}}{{if .Count}} <span class="opacity-70">{{.Count}}</span>{{end}}</a
+          >
+        {{end}}
+      </div>
+      {{if .CanRefresh}}
+        <button
+          type="button"
+          hx-post="/slips/{{.SlipID}}/pick/refresh"
+          hx-include="#pick-q, #pick-cat, #pick-win, #pick-sort, #pick-game"
           hx-target="#pick-body"
           hx-swap="outerHTML"
-          hx-push-url="{{.PushURL}}"
-          class="inline-flex min-h-12 items-center rounded-full px-2.5 py-1 text-xs font-medium {{if .Active}}bg-sky-600 text-white{{else}}border border-slate-700 bg-slate-800 text-slate-300 hover:bg-slate-700{{end}}"
-          >{{.Label}}{{if .Count}} <span class="opacity-70">{{.Count}}</span>{{end}}</a
+          hx-disabled-elt="this"
+          class="inline-flex min-h-12 shrink-0 items-center rounded-full border border-slate-700 bg-slate-800 px-3 py-1 text-xs font-medium text-slate-200 hover:bg-slate-700 disabled:opacity-50"
         >
+          Refresh odds
+        </button>
       {{end}}
     </div>
 
@@ -1330,11 +1345,26 @@
         class="inline-flex min-h-12 items-center rounded-md border border-slate-700 px-2 py-1 text-sm text-slate-200 hover:bg-slate-800"
         >&larr; All games</a
       >
-      <a
-        href="/research?game_id={{.GameID}}"
-        class="text-xs font-medium text-sky-400 hover:text-sky-300"
-        >Research &rarr;</a
-      >
+      <div class="flex items-center gap-3">
+        {{if .CanRefresh}}
+          <button
+            type="button"
+            hx-post="/slips/{{.SlipID}}/pick/refresh"
+            hx-include="#pick-q, #pick-cat, #pick-win, #pick-sort, #pick-game"
+            hx-target="#pick-body"
+            hx-swap="outerHTML"
+            hx-disabled-elt="this"
+            class="inline-flex min-h-12 shrink-0 items-center rounded-md border border-slate-700 bg-slate-800 px-2.5 py-1 text-xs font-medium text-slate-200 hover:bg-slate-700 disabled:opacity-50"
+          >
+            Refresh odds
+          </button>
+        {{end}}
+        <a
+          href="/research?game_id={{.GameID}}"
+          class="inline-flex min-h-12 items-center text-xs font-medium text-sky-400 hover:text-sky-300"
+          >Research &rarr;</a
+        >
+      </div>
     </div>
     <div class="mt-2 flex min-w-0 items-center gap-2">
       {{template "matchup-logos" (dict "AwayURL" .AwayLogo "HomeURL" .HomeLogo "Size" "h-6 w-6")}}

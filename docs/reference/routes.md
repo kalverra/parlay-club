@@ -3,9 +3,7 @@ id: routes
 title: Routes
 type: reference
 summary: Every HTTP route the server serves, the middleware in front of them, and the status codes, HTMX headers, and SSE frames handlers return.
-tags: [routes, http, handlers, middleware, htmx, sse, props, research, schedules, wagers, record]
-sources: [cmd/server/main.go, cmd/server/sandbox.go, internal/auth/handlers.go, internal/groups/handlers.go, internal/board/board.go, internal/web/routes.go, internal/web/home.go, internal/web/games.go, internal/web/pick.go, internal/web/slips.go, internal/web/schedules.go, internal/web/research.go, internal/web/record.go, internal/web/export.go, internal/web/bugs.go, internal/web/screenshots.go, internal/record/record.go, internal/sandbox/seed.go, internal/sandbox/plan.go, internal/live/stream.go, web/templates/home.html, web/templates/pick.html, web/templates/week.html, web/templates/slip.html, web/templates/record.html, web/templates/partials.html, web/templates/sandbox.html]
-last_verified: 2026-11-14
+tags: [routes, http, handlers, middleware, htmx, sse, props, prefill, research, schedules, wagers, record]
 ---
 
 # Routes
@@ -18,9 +16,11 @@ One `http.ServeMux` holds every route, using Go 1.22 method patterns. Handlers s
 
 ## Middleware
 
-All routes except `/healthz`, `/static/`, `/screenshots/{token}.jpg`, `/login`, `POST /logout`, the Google sign-in
-routes, and the dev sign-in routes need a signed-in user. Those public routes are registered first. Everything else runs
-through three wrappers, outermost first. See [Access](../concepts/access.md) for cookies and sign-in.
+All routes except `/healthz`, `/readyz`, `/static/`, `/screenshots/{token}.jpg`, `/login`, `POST /logout`, the Google
+sign-in routes, the dev sign-in routes, and `POST /internal/prefill` need a signed-in user. Those public/internal routes
+are registered outside session checks (`POST /internal/prefill` also sits on an outer mux outside `CSRF` and uses bearer
+auth instead). Everything else runs through three wrappers, outermost first. See [Access](../concepts/access.md) for
+cookies and sign-in.
 
 | Middleware    | Rejects                                                        | Response                          |
 | ------------- | -------------------------------------------------------------- | --------------------------------- |
@@ -46,6 +46,7 @@ of their groups makes that group active instead.
 | `GET /auth/google/start`            | Start the Google round trip                                             | Registered only when a Google client is configured. Redirects to Google. |
 | `GET /auth/google/callback`         | Finish Google sign-in                                                   | Bad `state`, code exchange, or identity answers 400 with the sign-in page. |
 | `GET /dev/login`, `POST /dev/login` | Local sign-in form and submit                                           | Registered only when `APP_ENV=dev` and `GOOGLE_CLIENT_ID` is empty. |
+| `POST /internal/prefill`            | Run the Sunday morning pre-fill sweep synchronously                     | Outside cookie/CSRF middleware; requires `Authorization: Bearer <PREFILL_TOKEN>` (constant-time compare). Returns 404 when `PREFILL_TOKEN` is empty, 401 on missing/invalid token, 503 in sandbox mode, 200 JSON `PrefillReport` on success, or 500 JSON on failure. |
 
 `GET /healthz` is what Cloud Run's startup and liveness probes call. It pings SQLite with a two-second timeout derived
 from the request, so a probe never waits on a busy database. A healthy handle answers 200 with the body `ok`; a closed
@@ -144,6 +145,7 @@ slip outside every group is 404.
 | `GET /slips/{id}/pick`                     | Focused pick board: the game slate, the open game's picks, and the dock | Full page; no bottom bar. |
 | `GET /slips/{id}/pick/results`             | `#pick-body` for a search, window, or game change                | Optional `?q=`, `?cat=`, `?win=`, `?sort=`, and `?game=`; `#pick-body` partial. |
 | `GET /slips/{id}/pick/detail`              | `#pick-detail` for a tab or sort change                          | Optional `?q=`, `?cat=`, `?sort=`, `?win=`, and `?game=`; `#pick-detail` partial, or the "Pick a game" placeholder without an open game. |
+| `POST /slips/{id}/pick/refresh`            | Force a pick-time odds refresh on an `OPEN` slip                 | Optional `game`, `q`, `cat`, `win`, `sort`; `#pick-body` partial (2m cooldown). Returns 422 when the slip is not `OPEN`. |
 | `GET /slips/{id}/pick/swap`                | Swap sheet for one unpicked row                                 | Row fields in the query; swap partial. |
 | `GET /slips/{id}/pick/dock`                | The fixed dock's count and combined price                       | Dock partial. Refreshes on `tray-updated` and `slip-updated`. |
 | `GET /slips/{id}/tray`                     | The viewer's picks, warnings, and one action, loaded into the dock's sheet | Tray partial. Refreshes on `tray-updated` and `slip-updated`. |
@@ -208,6 +210,7 @@ bar in the header with links to each sibling slip and their status summaries (`(
 | `GET /slips/{id}/pick/results`  | `#pick-body` for a search, window, or game change                         | `#pick-body` partial |
 | `GET /slips/{id}/pick/slate`    | `#pick-slate` for a live board update                                     | Slate partial |
 | `GET /slips/{id}/pick/detail`   | `#pick-detail` for a tab or sort change                                   | `#pick-detail` partial, or the "Pick a game" placeholder |
+| `POST /slips/{id}/pick/refresh` | Manual pick-time odds refresh for an `OPEN` slip with upcoming games      | `#pick-body` partial (2m cooldown); 422 when not `OPEN`  |
 | `GET /slips/{id}/pick/swap`     | Swap sheet for one unpicked row                                          | Swap partial |
 | `GET /slips/{id}/pick/dock`     | The fixed dock's count and combined price                                | Dock partial |
 | `GET /slips/{id}/tray`          | The viewer's picks and warnings, loaded into the dock's sheet             | Tray partial |
@@ -285,9 +288,16 @@ combined price of the viewer's legs, and refreshes on the same two signals. Remo
 A game with stored lines but no prop rows offers "Load them" on its slate card and in its open detail. The button calls
 `GET /games/{id}/props?slip=`, which runs `SyncGameProps` for that one game and answers 200 with
 `Hx-Trigger: board-updated`; `#pick-slate` refetches from `/pick/slate` and `#pick-detail` refetches from its resolved
-tab and sort. Opening the board, opening a game, typing, filtering, and sorting call no sync. A week with no stored
-games says the slate has not synced. A week with games but no odds says the lines have not synced once, above cards that
-carry no lines. Once every game has kicked off, the slate says picks are closed.
+tab and sort. When the slip is `OPEN` and upcoming games remain in its slate scope, `GET /slips/{id}/pick` runs
+`SyncPickLines` (or `SyncPickGame` when an upcoming game is open), and `GET /slips/{id}/pick/results` and
+`GET /slips/{id}/pick/detail` run `SyncPickGame` when an upcoming game is selected (`game != ""`). Because `sync_state`
+stays fresh for 15 minutes (lines) and 30 minutes (props) on game days (2 hours otherwise), subsequent typing,
+filtering, sorting, and `board-updated` reloads read SQLite only. `GET /slips/{id}/pick/slate` and locked or graded
+slips never trigger odds syncs. On `OPEN` slips with upcoming games, `pick-slate` and `pick-detail` also show a "Refresh
+odds" button that posts `POST /slips/{id}/pick/refresh`, enforces group scope and `OPEN` status (422 if locked), runs
+`ForcePickRefresh` with a 2-minute cooldown, and returns `#pick-body`. A week with no stored games says the slate has
+not synced. A week with games but no odds says the lines have not synced once, above cards that carry no lines. Once
+every game has kicked off, the slate says picks are closed.
 
 `GET /games` uses the old Games link as a 303 to `/groups/{active}/week`, where the week route opens the group's newest
 slip. Without an active group it redirects to `/`.
@@ -376,10 +386,12 @@ confirmation even when GitHub is unconfigured or unreachable.
 | 204  | A successful write with no content returned, such as deleting a schedule. |
 | 303  | A plain form redirect or landing redirect, such as create slip, save profile, logout, joining a group, or the one-group landing. |
 | 400  | A malformed form body, a bug report validation error, or a failed Google round trip. |
+| 401  | Missing or invalid bearer token on `POST /internal/prefill`. |
 | 403  | A non-GET request without `HX-Request: true`. |
-| 404  | A missing slip, leg, member, or group; a resource in another group; or an unknown invite token. |
+| 404  | A missing slip, leg, member, or group; a resource in another group; an unknown invite token; or `POST /internal/prefill` when `PREFILL_TOKEN` is empty. |
 | 422  | A fixable rule refusal or form error. The body is the short message shown in the form. |
-| 500  | An unexpected store or render failure, or a signed-in user with no group. |
+| 500  | An unexpected store or render failure, a signed-in user with no group, or a failed `RunPrefill` pass. |
+| 503  | `POST /internal/prefill` in sandbox mode, or `/healthz` when SQLite is unreachable. |
 
 Rule violations from `internal/slips` (`ErrLegLimit`, `ErrKickoffLocked`, `ErrGameOutsideScope`, `ErrLockedIn`,
 `ErrLegsNotReady`, and the rest) and schedule rules (`ErrScheduleNameRequired`, `ErrScheduleNameTaken`, invalid scope,

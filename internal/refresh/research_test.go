@@ -188,22 +188,22 @@ func TestOpeningSameGameTwiceWithinCacheWindowSpendsCreditsOnce(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "https://a.espncdn.com/allen.png", allen.HeadshotURL)
 
-	// 2. Open again within the 2-hour cache window (1 hour later).
-	clock.Advance(1 * time.Hour)
+	// 2. Open again within the 30-minute game-day cache window (20 minutes later).
+	clock.Advance(20 * time.Minute)
 	err = service.SyncGameProps(t.Context(), "401")
 	require.NoError(t, err)
 
 	propsClient.mu.Lock()
-	assert.Equal(t, 1, propsClient.propsCalls, "within 2h window, no second props call was made")
+	assert.Equal(t, 1, propsClient.propsCalls, "within 30m game-day window, no second props call was made")
 	propsClient.mu.Unlock()
 
-	// 3. Open after the 2-hour cache window expires (another 61 minutes later = 2h 1m total).
-	clock.Advance(61 * time.Minute)
+	// 3. Open after the 30-minute cache window expires (another 11 minutes later = 31m total).
+	clock.Advance(11 * time.Minute)
 	err = service.SyncGameProps(t.Context(), "401")
 	require.NoError(t, err)
 
 	propsClient.mu.Lock()
-	assert.Equal(t, 2, propsClient.propsCalls, "after 2h window, a second props call was made")
+	assert.Equal(t, 2, propsClient.propsCalls, "after 30m game-day window, a second props call was made")
 	propsClient.mu.Unlock()
 }
 
@@ -470,8 +470,8 @@ func TestSyncPlayerResearchGameLog(t *testing.T) {
 	assert.Equal(t, 6, log.GamesPlayed)
 	assert.JSONEq(t, `{"PASS_YDS":[280.0,310.0,240.0]}`, log.StatsJSON)
 
-	// Within 12h window, no second fetch.
-	clock.Advance(6 * time.Hour)
+	// Within 1h game-day window, no second fetch.
+	clock.Advance(30 * time.Minute)
 	err = service.SyncPlayerResearch(t.Context(), "3918298")
 	require.NoError(t, err)
 
@@ -479,8 +479,8 @@ func TestSyncPlayerResearchGameLog(t *testing.T) {
 	assert.Equal(t, 1, espnClient.gamelogCalls)
 	espnClient.mu.Unlock()
 
-	// After 12h, re-fetches.
-	clock.Advance(7 * time.Hour)
+	// After 1h, re-fetches.
+	clock.Advance(31 * time.Minute)
 	err = service.SyncPlayerResearch(t.Context(), "3918298")
 	require.NoError(t, err)
 

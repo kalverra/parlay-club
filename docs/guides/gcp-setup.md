@@ -3,9 +3,7 @@ id: gcp-setup
 title: GCP setup
 type: guide
 summary: Create the Google Cloud project resources once, add the secrets and GitHub variables, and run the first deploy that puts the app on Cloud Run.
-tags: [gcp, setup, cloud-run, artifact-registry, secret-manager, workload-identity, github, deploy, litestream]
-sources: [deploy/setup.sh, deploy/entrypoint.sh, .github/workflows/deploy.yml, Dockerfile, internal/config/config.go, .github/workflows/ci.yml]
-last_verified: 2026-11-13
+tags: [gcp, setup, cloud-run, artifact-registry, secret-manager, cloud-scheduler, workload-identity, github, deploy, litestream]
 ---
 
 # GCP setup
@@ -50,11 +48,11 @@ The script stops at the first failure and prints what it finished. It creates:
 
 | Resource             | Details                                                                                   |
 | -------------------- | ----------------------------------------------------------------------------------------- |
-| APIs                 | Cloud Run, Artifact Registry, Secret Manager, IAM, STS, billing budgets, GCS              |
+| APIs                 | Cloud Run, Artifact Registry, Secret Manager, Cloud Scheduler, IAM, STS, billing budgets, GCS |
 | GCS bucket           | `gs://PROJECT_ID-parlay-litestream` in `us-central1`, for Litestream                      |
 | Artifact Registry    | Docker repo `parlay-club` with a cleanup policy that keeps the last 3 images               |
-| Secrets              | `session-key`, `google-client-id`, `google-client-secret`, `odds-api-key`, `the-odds-api-key`, all empty; `github-token`, empty and optional |
-| Runtime account      | `parlay-runtime`, read/write on the bucket and read on all six secrets                   |
+| Secrets              | `session-key`, `google-client-id`, `google-client-secret`, `odds-api-key`, `the-odds-api-key`, all empty; `github-token` and `prefill-token`, empty and optional |
+| Runtime account      | `parlay-runtime`, read/write on the bucket and read on all seven secrets                  |
 | Deployer account     | `parlay-deployer`, `run.admin`, `artifactregistry.writer`, and `secretmanager.viewer`, plus `storage.bucketViewer` on the bucket and act-as on the runtime account |
 | Cloud Run agent      | read on the image repo, so Cloud Run can pull the image                                   |
 | Workload Identity    | pool `github` and provider `github`, limited to `kalverra/parlay-club`                    |
@@ -79,9 +77,9 @@ GITHUB_REPO=you/parlay-club deploy/setup.sh PROJECT_ID BILLING_ACCOUNT
 
 The script prints the values you need in the next steps. Copy them.
 
-Re-run it once on a project that was set up before the deploy pre-flight checks existed. The script adds the
-`github-token` secret and grants `parlay-deployer` the read access the checks need; every other step finds its resource
-and skips it.
+Re-run it once on an existing project when new optional resources are added (such as `github-token`, `prefill-token`, or
+the Cloud Scheduler API) or to grant `parlay-deployer` the read access the pre-flight checks need; every existing
+resource is skipped.
 
 ### 2. Create the Google OAuth client
 
@@ -123,16 +121,27 @@ printf '%s' "$THE_ODDS_API_KEY" | gcloud secrets versions add the-odds-api-key -
 To replace a value later, add a new version of that secret and deploy again. `:latest` points Cloud Run at the newest
 version, so no flag changes.
 
-The sixth secret, `github-token`, is optional. With a version, in-app bug reports open GitHub issues; without one,
-reports still save in SQLite. Add a fine-grained personal access token with **Issues: read and write** on the repo, or a
-classic token with the `repo` scope:
+The two remaining secrets, `github-token` and `prefill-token`, are optional. The deploy checks each for an `ENABLED`
+version and mounts it only when one exists, so leaving either empty is safe.
+
+With a `github-token` version, in-app bug reports open GitHub issues; without one, reports still save in SQLite. Add a
+fine-grained personal access token with **Issues: read and write** on the repo, or a classic token with the `repo`
+scope:
 
 ```sh
 printf '%s' "$GH_ISSUES_TOKEN" | gcloud secrets versions add github-token --data-file=-
 ```
 
-The deploy checks for an `ENABLED` version and mounts the secret only when one exists, so leaving it empty is safe.
 Tokens expire: when the issue call starts failing, add a new version and deploy again.
+
+With a `prefill-token` version, the Sunday morning pre-fill endpoint (`POST /internal/prefill`) accepts bearer-token
+requests; without one, the endpoint stays disabled (`404`). Generate a random bearer token and save the value so you can
+pass it to Cloud Scheduler in step 8:
+
+```sh
+PREFILL_TOKEN=$(openssl rand -base64 32 | tr -d '\n')
+printf '%s' "$PREFILL_TOKEN" | gcloud secrets versions add prefill-token --data-file=-
+```
 
 ### 4. Set the GitHub repository variables
 
@@ -215,6 +224,26 @@ Copy the URL from the job summary, then:
 The file is idempotent by week and name, so a restart adds nothing twice. To change a slip that already loaded, edit it
 in the app or give the file entry a new name. An edit to the file is not a re-import of the same slip.
 
+### 8. Schedule the Sunday morning pre-fill (optional)
+
+Once `BASE_URL` is set and `prefill-token` has an `ENABLED` version, create the Cloud Scheduler job that warms Sunday
+game lines and Parlay API props at 9:30 AM `America/New_York` (`30 9 * * 0`):
+
+```sh
+gcloud scheduler jobs create http parlay-club-prefill \
+  --project="PROJECT_ID" \
+  --location="us-central1" \
+  --schedule="30 9 * * 0" \
+  --time-zone="America/New_York" \
+  --uri="https://SERVICE_URL/internal/prefill" \
+  --http-method=POST \
+  --headers="Authorization=Bearer $PREFILL_TOKEN" \
+  --attempt-deadline=3m
+```
+
+Replace `parlay-club`, `us-central1`, and `SERVICE_URL` if you overrode `SERVICE` or `REGION`. `deploy/setup.sh` prints
+this command with your project, region, and service filled in.
+
 ## Verify
 
 - `curl -s SERVICE_URL/healthz` prints `ok`.
@@ -258,8 +287,9 @@ The free-tier pieces this app leans on:
 | Startup says `GOOGLE_CLIENT_ID is required in prod`  | `google-client-id` has no version, or the client value is empty. Add one.                |
 | Startup says `BASE_URL is required in prod`          | Set the `BASE_URL` repo variable, then deploy again.                                     |
 | Startup says `entrypoint: set LITESTREAM_BUCKET`     | `LITESTREAM_BUCKET` is missing from the repo variables.                                  |
-| `secret ... not found` on deploy                     | Run `deploy/setup.sh` first; it creates the six secrets.                                 |
+| `secret ... not found` on deploy                     | Run `deploy/setup.sh` first; it creates the seven secrets.                               |
 | Bug reports save but never open a GitHub issue       | `github-token` has no version, so the deploy skipped it. Add one and deploy again.        |
+| `POST /internal/prefill` returns `404`               | `prefill-token` has no version, so the deploy skipped it. Add one and deploy again.       |
 | Cloud Run cannot pull the image                      | Re-run `deploy/setup.sh`; it grants the Cloud Run service agent read on the repo.        |
 | History does not appear                              | No group existed at boot, or the history belongs to another group. Create the first group and redeploy. |
 | Budget emails never arrive                           | Add yourself as a billing administrator or user on the billing account.                  |

@@ -51,9 +51,10 @@ DEPLOY_SA_NAME="parlay-deployer"
 RUNTIME_SA="${RUNTIME_SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
 DEPLOY_SA="${DEPLOY_SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
 
-# github-token is optional: the deploy mounts it only when it has a version, so
-# bug reports open GitHub issues. An empty secret leaves reports in SQLite.
-SECRETS=(session-key google-client-id google-client-secret odds-api-key the-odds-api-key github-token)
+# github-token and prefill-token are optional: the deploy mounts each only when
+# it has a version. An empty github-token leaves bug reports in SQLite; an empty
+# prefill-token leaves POST /internal/prefill disabled (404).
+SECRETS=(session-key google-client-id google-client-secret odds-api-key the-odds-api-key github-token prefill-token)
 
 say() { printf '\n==> %s\n' "$*"; }
 ok() { printf '    %s\n' "$*"; }
@@ -77,6 +78,7 @@ gcloud services enable \
 	run.googleapis.com \
 	artifactregistry.googleapis.com \
 	secretmanager.googleapis.com \
+	cloudscheduler.googleapis.com \
 	iamcredentials.googleapis.com \
 	sts.googleapis.com \
 	billingbudgets.googleapis.com \
@@ -290,7 +292,21 @@ Next:
      version.
      github-token is optional. Add a version only if you want in-app bug
      reports to open GitHub issues; without one they save locally instead.
+     prefill-token is optional. Add a random bearer token version to enable
+     the Sunday morning pre-fill endpoint (POST /internal/prefill).
   2. Deploy once, then set BASE_URL to the Cloud Run URL it prints.
   3. Create a group in the app, then restart the service once so
      seed/history.yaml imports. It waits for a group and only runs at boot.
+  4. (Optional) Schedule the Sunday 9:30 AM America/New_York pre-fill job once
+     BASE_URL and prefill-token are set:
+
+     gcloud scheduler jobs create http ${SERVICE}-prefill \\
+       --project="${PROJECT_ID}" \\
+       --location="${REGION}" \\
+       --schedule="30 9 * * 0" \\
+       --time-zone="America/New_York" \\
+       --uri="<BASE_URL>/internal/prefill" \\
+       --http-method=POST \\
+       --headers="Authorization=Bearer <PREFILL_TOKEN>" \\
+       --attempt-deadline=3m
 EOF

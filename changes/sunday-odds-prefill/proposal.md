@@ -1,6 +1,6 @@
 ---
 slug: sunday-odds-prefill
-status: designed
+status: implementing
 created: "2026-11-15"
 effort: medium
 ---

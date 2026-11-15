@@ -99,6 +99,7 @@ func TestHealthz(t *testing.T) {
 		http.NotFoundHandler(),
 		http.NotFoundHandler(),
 		newHealthzHandler(database, zerolog.Nop()),
+		nil,
 		newTestHandlers(),
 		nil,
 		passthrough,
@@ -139,6 +140,7 @@ func TestMuxProtectsShell(t *testing.T) {
 		http.NotFoundHandler(),
 		http.NotFoundHandler(),
 		http.NotFoundHandler(),
+		nil,
 		newTestHandlers(),
 		nil,
 		passthrough,
@@ -164,6 +166,7 @@ func TestMuxServesStaticWithoutAuth(t *testing.T) {
 		static,
 		http.NotFoundHandler(),
 		http.NotFoundHandler(),
+		nil,
 		newTestHandlers(),
 		nil,
 		passthrough,
@@ -193,6 +196,7 @@ func TestMuxServesScreenshotsWithoutAuth(t *testing.T) {
 		http.NotFoundHandler(),
 		screenshots,
 		http.NotFoundHandler(),
+		nil,
 		newTestHandlers(),
 		nil,
 		passthrough,
@@ -250,6 +254,7 @@ func TestMuxScopesShellToActiveGroup(t *testing.T) {
 		http.NotFoundHandler(),
 		http.NotFoundHandler(),
 		http.NotFoundHandler(),
+		nil,
 		handlers,
 		nil,
 		scope,
@@ -584,16 +589,20 @@ func TestRefreshArchivesEveryIngestCall(t *testing.T) {
 		Now:        func() time.Time { return ingestNow },
 		Logger:     zerolog.Nop(),
 	})
-	service.KickContext(t.Context())
+	require.NoError(t, service.RunOnce(t.Context()))
 
 	weatherKey := refresh.WeatherSource("401")
-	waitForSyncStates(t, store, refresh.ScoreboardSource, weatherKey, refresh.OddsLinesSource)
+	summaryKey := refresh.SummarySource("401")
+	homeRosterKey := refresh.RosterSource("2")
+	awayRosterKey := refresh.RosterSource("15")
+	waitForSyncStates(t, store,
+		refresh.ScoreboardSource, weatherKey, summaryKey, homeRosterKey, awayRosterKey, refresh.OddsLinesSource)
 
 	rows, err := store.ListAPIResponses(t.Context(), db.APIResponseFilter{})
 	require.NoError(t, err)
-	require.Len(t, rows, 4, "one row per outside call")
+	require.Len(t, rows, 7, "one row per outside call")
 
-	keyCounts := make(map[string]int, 3)
+	keyCounts := make(map[string]int, 6)
 	var eventsRow, linesRow db.APIResponse
 	for _, row := range rows {
 		keyCounts[row.Key]++
@@ -607,7 +616,7 @@ func TestRefreshArchivesEveryIngestCall(t *testing.T) {
 		assert.NotEmpty(t, body)
 
 		switch row.Key {
-		case refresh.ScoreboardSource:
+		case refresh.ScoreboardSource, summaryKey, homeRosterKey, awayRosterKey:
 			assert.Equal(t, archive.SourceESPN, row.Source)
 			assert.Nil(t, row.CreditsRemaining)
 			assert.Nil(t, row.CreditsUsed)
@@ -628,8 +637,11 @@ func TestRefreshArchivesEveryIngestCall(t *testing.T) {
 	assert.Equal(t, map[string]int{
 		refresh.ScoreboardSource: 1,
 		weatherKey:               1,
+		summaryKey:               1,
+		homeRosterKey:            1,
+		awayRosterKey:            1,
 		refresh.OddsLinesSource:  2,
-	}, keyCounts, "ESPN and weather once each, and the Odds API's free event list plus paid lines")
+	}, keyCounts, "ESPN scoreboard/summary/rosters and weather once each, and the Odds API's free event list plus paid lines")
 
 	require.NotEmpty(t, eventsRow.BodySHA256, "the free event list is archived")
 	require.NotNil(t, eventsRow.CreditsRemaining)
@@ -782,41 +794,51 @@ func waitForSyncStates(t *testing.T, store *db.Store, keys ...string) {
 	}
 }
 
-// fakeESPN serves one scheduled Sunday game at Highmark Stadium.
+// fakeESPN serves one scheduled Sunday game at Highmark Stadium, along with
+// its summary and team rosters.
 func fakeESPN(t *testing.T) *httptest.Server {
 	t.Helper()
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, "/scoreboard", r.URL.Path)
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"season": map[string]any{"year": 2026, "type": 2},
-			"week":   map[string]any{"number": 9},
-			"events": []any{map[string]any{
-				"id":     "401",
-				"date":   ingestKickoff.Format(time.RFC3339),
-				"status": map[string]any{"type": map[string]any{"state": "pre"}},
-				"competitions": []any{map[string]any{
-					"competitors": []any{
-						map[string]any{
-							"homeAway": "home",
-							"team": map[string]any{
-								"id": "2", "abbreviation": "BUF", "displayName": "Buffalo Bills",
+		switch {
+		case r.URL.Path == "/scoreboard":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"season": map[string]any{"year": 2026, "type": 2},
+				"week":   map[string]any{"number": 9},
+				"events": []any{map[string]any{
+					"id":     "401",
+					"date":   ingestKickoff.Format(time.RFC3339),
+					"status": map[string]any{"type": map[string]any{"state": "pre"}},
+					"competitions": []any{map[string]any{
+						"competitors": []any{
+							map[string]any{
+								"homeAway": "home",
+								"team": map[string]any{
+									"id": "2", "abbreviation": "BUF", "displayName": "Buffalo Bills",
+								},
+							},
+							map[string]any{
+								"homeAway": "away",
+								"team": map[string]any{
+									"id": "15", "abbreviation": "MIA", "displayName": "Miami Dolphins",
+								},
 							},
 						},
-						map[string]any{
-							"homeAway": "away",
-							"team": map[string]any{
-								"id": "15", "abbreviation": "MIA", "displayName": "Miami Dolphins",
-							},
+						"venue": map[string]any{
+							"id": "11938", "fullName": "Highmark Stadium", "indoor": false,
 						},
-					},
-					"venue": map[string]any{
-						"id": "11938", "fullName": "Highmark Stadium", "indoor": false,
-					},
+					}},
 				}},
-			}},
-		})
+			})
+		case r.URL.Path == "/summary":
+			_ = json.NewEncoder(w).Encode(map[string]any{"injuries": []any{}})
+		case strings.HasPrefix(r.URL.Path, "/teams/") && strings.HasSuffix(r.URL.Path, "/roster"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"athletes": []any{}})
+		default:
+			t.Errorf("unexpected ESPN path %q", r.URL.Path)
+			http.NotFound(w, r)
+		}
 	}))
 	t.Cleanup(server.Close)
 	return server
@@ -909,6 +931,7 @@ func TestMuxProtectsBugReports(t *testing.T) {
 		http.NotFoundHandler(),
 		http.NotFoundHandler(),
 		http.NotFoundHandler(),
+		nil,
 		newTestHandlers(),
 		nil,
 		passthrough,
@@ -936,5 +959,196 @@ func TestMuxProtectsBugReports(t *testing.T) {
 
 		assert.Equal(t, http.StatusOK, rec.Code)
 		assert.Equal(t, "/login", rec.Header().Get("Hx-Redirect"))
+	})
+}
+
+type stubPrefillRunner struct {
+	run func(ctx context.Context) (refresh.PrefillReport, error)
+}
+
+func (s stubPrefillRunner) RunPrefill(ctx context.Context) (refresh.PrefillReport, error) {
+	return s.run(ctx)
+}
+
+func TestPrefillEndpoint(t *testing.T) {
+	t.Parallel()
+
+	newTestMux := func(stopCtx context.Context, token string, sandbox bool, runner prefillRunner) http.Handler {
+		prefill := newPrefillHandler(stopCtx, token, sandbox, runner, zerolog.Nop())
+		return newMux(
+			http.NotFoundHandler(),
+			http.NotFoundHandler(),
+			http.NotFoundHandler(),
+			http.NotFoundHandler(),
+			prefill,
+			newTestHandlers(),
+			nil,
+			passthrough,
+			nil,
+			nil,
+		)
+	}
+
+	t.Run("404 when PREFILL_TOKEN is empty", func(t *testing.T) {
+		t.Parallel()
+
+		called := false
+		mux := newTestMux(t.Context(), "", false, stubPrefillRunner{
+			run: func(_ context.Context) (refresh.PrefillReport, error) {
+				called = true
+				return refresh.PrefillReport{}, nil
+			},
+		})
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/internal/prefill", nil)
+		req.Header.Set("Authorization", "Bearer anything")
+		mux.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusNotFound, rec.Code)
+		assert.False(t, called)
+	})
+
+	t.Run("401 on missing or invalid bearer token", func(t *testing.T) {
+		t.Parallel()
+
+		cases := []struct {
+			name string
+			auth string
+		}{
+			{name: "missing header"},
+			{name: "wrong scheme", auth: "Basic dXNlcjpwYXNz"},
+			{name: "empty bearer", auth: "Bearer "},
+			{name: "wrong token", auth: "Bearer wrong-secret"},
+			{name: "prefix match only", auth: "Bearer super-secret-extra"},
+		}
+
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+
+				called := false
+				mux := newTestMux(t.Context(), "super-secret", false, stubPrefillRunner{
+					run: func(_ context.Context) (refresh.PrefillReport, error) {
+						called = true
+						return refresh.PrefillReport{}, nil
+					},
+				})
+
+				rec := httptest.NewRecorder()
+				req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/internal/prefill", nil)
+				if tc.auth != "" {
+					req.Header.Set("Authorization", tc.auth)
+				}
+				mux.ServeHTTP(rec, req)
+
+				assert.Equal(t, http.StatusUnauthorized, rec.Code)
+				assert.Equal(t, "Bearer", rec.Header().Get("WWW-Authenticate"))
+				assert.False(t, called)
+			})
+		}
+	})
+
+	t.Run("503 in sandbox mode", func(t *testing.T) {
+		t.Parallel()
+
+		called := false
+		mux := newTestMux(t.Context(), "super-secret", true, stubPrefillRunner{
+			run: func(_ context.Context) (refresh.PrefillReport, error) {
+				called = true
+				return refresh.PrefillReport{}, nil
+			},
+		})
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/internal/prefill", nil)
+		req.Header.Set("Authorization", "Bearer super-secret")
+		mux.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
+		assert.False(t, called)
+	})
+
+	t.Run("200 JSON summary on valid bearer token without cookies or CSRF header", func(t *testing.T) {
+		t.Parallel()
+
+		remaining := 420
+		finished := false
+		mux := newTestMux(t.Context(), "super-secret", false, stubPrefillRunner{
+			run: func(ctx context.Context) (refresh.PrefillReport, error) {
+				deadline, ok := ctx.Deadline()
+				assert.True(t, ok, "prefill context should have a deadline")
+				assert.LessOrEqual(t, time.Until(deadline), prefillTimeout)
+				finished = true
+				return refresh.PrefillReport{
+					WeekID:          11,
+					UpcomingGames:   13,
+					LinesSynced:     true,
+					PropsSynced:     12,
+					PropsSkipped:    1,
+					FreeSourcesRun:  30,
+					ParlayRemaining: &remaining,
+				}, nil
+			},
+		})
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/internal/prefill", nil)
+		req.Header.Set("Authorization", "Bearer super-secret")
+		mux.ServeHTTP(rec, req)
+
+		assert.True(t, finished, "handler must run synchronously before returning")
+		assert.Equal(t, http.StatusOK, rec.Code)
+		assert.Contains(t, rec.Header().Get("Content-Type"), "application/json")
+
+		var got refresh.PrefillReport
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+		assert.Equal(t, int64(11), got.WeekID)
+		assert.Equal(t, 13, got.UpcomingGames)
+		assert.True(t, got.LinesSynced)
+		assert.Equal(t, 12, got.PropsSynced)
+		assert.Equal(t, 1, got.PropsSkipped)
+		assert.Equal(t, 30, got.FreeSourcesRun)
+		require.NotNil(t, got.ParlayRemaining)
+		assert.Equal(t, 420, *got.ParlayRemaining)
+	})
+
+	t.Run("500 JSON when RunPrefill fails", func(t *testing.T) {
+		t.Parallel()
+
+		mux := newTestMux(t.Context(), "super-secret", false, stubPrefillRunner{
+			run: func(_ context.Context) (refresh.PrefillReport, error) {
+				return refresh.PrefillReport{WeekID: 11, PropsFailed: 2}, errors.New("boom")
+			},
+		})
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/internal/prefill", nil)
+		req.Header.Set("Authorization", "Bearer super-secret")
+		mux.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusInternalServerError, rec.Code)
+		assert.Contains(t, rec.Header().Get("Content-Type"), "application/json")
+		assert.Contains(t, rec.Body.String(), `"boom"`)
+	})
+
+	t.Run("stopCtx cancellation cancels RunPrefill context", func(t *testing.T) {
+		t.Parallel()
+
+		stopCtx, stop := context.WithCancel(t.Context())
+		mux := newTestMux(stopCtx, "super-secret", false, stubPrefillRunner{
+			run: func(ctx context.Context) (refresh.PrefillReport, error) {
+				stop()
+				<-ctx.Done()
+				return refresh.PrefillReport{}, ctx.Err()
+			},
+		})
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/internal/prefill", nil)
+		req.Header.Set("Authorization", "Bearer super-secret")
+		mux.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusInternalServerError, rec.Code)
 	})
 }
