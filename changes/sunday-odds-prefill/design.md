@@ -228,5 +228,5 @@ Effort: easy (narrow, pattern-following additions to existing setup script, depl
 - [x] Enable `cloudscheduler.googleapis.com`, add the `prefill-token` secret, and print the Sunday 9:30 AM
       `America/New_York` scheduler setup command in `deploy/setup.sh`, plus mount optional `PREFILL_TOKEN` in
       `.github/workflows/deploy.yml` (`bash -n` and `deploy/blackout_test.sh` pass)
-- [ ] Docs: update `docs/guides/gcp-setup.md` and `docs/runbooks/deploy.md` for `prefill-token` and the Cloud Scheduler
+- [x] Docs: update `docs/guides/gcp-setup.md` and `docs/runbooks/deploy.md` for `prefill-token` and the Cloud Scheduler
       job, then run `good-vibes docs lint` and `good-vibes docs index`
