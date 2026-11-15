@@ -111,7 +111,7 @@ Effort: medium (multi-seam change across Eastern-time window rules, `sync_state`
 ### Phase 1: Sunday window rules, persistence, and `Kick` orchestration
 
 - [x] Add `SundayPrefillSource`, `sundayPrefillStartHour`, `sundayPrefillWindow`, and `sundayPrefillStale` in `internal/refresh/rules.go` and `refresh.go` with table-driven unit tests in `internal/refresh/rules_test.go`
-- [ ] Update `RunPrefill` (ignore `odds.ErrNoAPIKey` on lines, persist `SundayPrefillSource` under `s.stopCtx` on success or partial odds progress) and wire `maybeRunSundayPrefill` into `s.kick(ctx)` with `singleflight`, `prefillKickTimeout`, 5-minute failure backoff, and `freeSourcesFor` fallback, updating `TestKickSyncsSummariesAndUniqueRostersWithoutOddsLines` and adding orchestration, cold-start persistence, concurrency, and failure tests in `internal/refresh/prefill_test.go`
+- [x] Update `RunPrefill` (ignore `odds.ErrNoAPIKey` on lines, persist `SundayPrefillSource` under `s.stopCtx` on success or partial odds progress) and wire `maybeRunSundayPrefill` into `s.kick(ctx)` with `singleflight`, `prefillKickTimeout`, 5-minute failure backoff, and `freeSourcesFor` fallback, updating `TestKickSyncsSummariesAndUniqueRostersWithoutOddsLines` and adding orchestration, cold-start persistence, concurrency, and failure tests in `internal/refresh/prefill_test.go`
 
 ### Phase 2: Mux auth-boundary tests and documentation
 

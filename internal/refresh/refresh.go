@@ -112,6 +112,7 @@ const (
 	nfeloIdleAge            = 4 * time.Hour
 	prefillIdempotencyAge   = 15 * time.Minute
 	prefillConcurrency      = 4
+	prefillKickTimeout      = 2 * time.Minute
 	sundayPrefillStartHour  = 6
 	failureBackoff          = 5 * time.Minute
 	syncTimeout             = 30 * time.Second
@@ -389,11 +390,72 @@ func (s *Service) kick(ctx context.Context) {
 		return
 	}
 
+	if s.maybeRunSundayPrefill(ctx, games, now) {
+		return
+	}
+
 	sources, err := s.freeSourcesFor(ctx, week, games, now)
 	if err != nil {
 		s.logger.Error().Err(err).Msg("build refresh sources")
 	}
 	s.runSources(ctx, now, sources)
+}
+
+// maybeRunSundayPrefill triggers RunPrefill once per Sunday morning when
+// upcoming Sunday games remain, deduplicating concurrent page loads with
+// singleflight and backing off for 5 minutes on zero-progress failures so
+// kick can still fall back to freeSourcesFor.
+func (s *Service) maybeRunSundayPrefill(ctx context.Context, games []db.Game, now time.Time) bool {
+	if !sundayPrefillWindow(games, now) || s.paused(SundayPrefillSource, now) {
+		return false
+	}
+
+	src := source{
+		key: SundayPrefillSource,
+		due: func(_ context.Context, state db.SyncState) (bool, error) {
+			return sundayPrefillStale(state.FetchedAt, now), nil
+		},
+	}
+	due, err := s.shouldRun(ctx, src)
+	if err != nil {
+		if !s.stopping() {
+			s.logger.Error().Err(err).Str("source", SundayPrefillSource).Msg("check sunday prefill")
+			s.backOff(SundayPrefillSource, now)
+		}
+		return false
+	}
+	if !due {
+		return false
+	}
+
+	res, err, _ := s.flight.Do(SundayPrefillSource, func() (any, error) {
+		due, err := s.shouldRun(ctx, src)
+		if err != nil || !due {
+			return false, err
+		}
+
+		prefillCtx, cancel := context.WithTimeout(ctx, prefillKickTimeout)
+		defer cancel()
+
+		report, err := s.RunPrefill(prefillCtx)
+		if err != nil && !report.LinesSynced && report.PropsSynced == 0 {
+			return false, err
+		}
+		if err != nil && !s.stopping() {
+			s.logger.Error().Err(err).Str("source", SundayPrefillSource).Msg("sunday prefill partial failure")
+		}
+		return true, nil
+	})
+	if err != nil {
+		if !s.stopping() {
+			s.logger.Error().Err(err).Str("source", SundayPrefillSource).Msg("sunday prefill failed")
+			s.backOff(SundayPrefillSource, now)
+		}
+		return false
+	}
+	s.clearBackoff(SundayPrefillSource)
+	ran, _ := res.(bool)
+	return ran
 }
 
 // RunOnce is the synchronous counterpart used by sandbox bootstrap and tests.
@@ -504,7 +566,9 @@ func (s *Service) RunPrefill(ctx context.Context) (PrefillReport, error) {
 			},
 		}
 		if err := s.refreshWithTimeout(ctx, linesSrc, now); err != nil {
-			errs = append(errs, err)
+			if !errors.Is(err, odds.ErrNoAPIKey) {
+				errs = append(errs, err)
+			}
 		} else if linesRan {
 			report.LinesSynced = true
 		}
@@ -543,6 +607,14 @@ func (s *Service) RunPrefill(ctx context.Context) (PrefillReport, error) {
 
 	if state, err := s.store.SyncState(ctx, OddsLinesSource); err == nil && state.OddsCreditsRemaining != nil {
 		report.ParlayRemaining = state.OddsCreditsRemaining
+	}
+
+	if !s.stopping() && (len(errs) == 0 || report.LinesSynced || report.PropsSynced > 0) {
+		recordCtx, cancelRecord := context.WithTimeout(s.stopCtx, syncTimeout)
+		defer cancelRecord()
+		if err := s.store.RecordSync(recordCtx, SundayPrefillSource, now, nil); err != nil {
+			errs = append(errs, fmt.Errorf("record %s: %w", SundayPrefillSource, err))
+		}
 	}
 
 	return report, errors.Join(errs...)
