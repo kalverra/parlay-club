@@ -14,12 +14,14 @@ passing overs are risky"). Every pick stays allowed, and the tone stays free of 
 
 ## Free-tier guardrails
 
-- Odds API (500/month) and The Parlay API (1,000/month) credits are scarce. Fetch game lines on lazy sync only, props
-  only for a game someone opens, always through the cache in sync_state. Respect the credit floors.
+- Odds API (500/month) and The Parlay API (1,000/month) credits are scarce. Fetch game lines on the Sunday morning
+  pre-fill (`POST /internal/prefill`) or on pick-time views, and props on pre-fill (Parlay-only) or for a game someone
+  opens, always through the cache in `sync_state`. Respect the credit floors.
 - Single instance. SQLite and the in-memory SSE hub assume one Cloud Run instance; keep shared state in SQLite or the
   hub, never in a second process.
 - Close idle SSE streams per the live-updates policy; an open stream keeps the instance billed.
-- Sync is lazy (triggered by page loads); add scheduled jobs only with a plan change.
+- Background `Kick()` syncs free/unmetered sources on full-page loads only; scheduled jobs are limited to the Sunday
+  morning pre-fill (`POST /internal/prefill`), and any additional scheduled jobs require a plan change.
 
 <!-- good-vibes:begin -->
 <!-- Managed by `good-vibes init`. Edits inside this block are overwritten. -->
