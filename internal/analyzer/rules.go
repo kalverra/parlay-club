@@ -46,9 +46,13 @@ const (
 	ruleChalk              = "chalk"
 	ruleQBDrag             = "qb_drag"
 	ruleMedianTrap         = "median_trap"
+	ruleToughMatchup       = "tough_matchup"
+	ruleShrinkingRole      = "shrinking_role"
+	rulePaceClash          = "pace_clash"
+	ruleTDSpikeRisk        = "td_spike_risk"
 )
 
-// Thresholds from plan/analyzer.md.
+// Thresholds from plan/analyzer.md and nflverse signal rules.
 const (
 	blowoutSpread  = -7.0
 	trailingSpread = 4.5
@@ -66,6 +70,26 @@ const (
 	// rating down. 25 Elo is about a point of spread.
 	qbDragElo   = -30.0
 	eloPerPoint = 25.0
+
+	toughDefenseMaxRank     = 5
+	favorableDefenseMinRank = 25
+
+	shrinkingSnapDrop        = 0.15
+	shrinkingTargetShareDrop = 0.08
+	risingSnapGain           = 0.08
+	risingTargetShareGain    = 0.04
+
+	paceSlowMinRank      = 25
+	passRateLowMinRank   = 23
+	paceFastMaxRank      = 8
+	offPassEPATopMaxRank = 8
+
+	tdSpikeMinTDs            = 3.0
+	tdSpikePassMinTDs        = 6.0
+	tdSpikeMaxTargetShare    = 0.15
+	tdSpikeMaxCarriesPerGame = 8.0
+
+	floatEps = 1e-9
 )
 
 // totalKeyNumbers are the NFL final totals that decide the most bets.
@@ -530,6 +554,229 @@ func medianTrap(a *analysis) []Warning {
 		warnings = append(warnings, a.warning(ruleMedianTrap, Warn, message, []Leg{leg}))
 	}
 	return warnings
+}
+
+// toughMatchup warns when a yardage or TD over faces a top-5 opposing defense
+// in the matching pass or rush EPA-allowed split.
+func toughMatchup(a *analysis) []Warning {
+	var warnings []Warning
+	for _, leg := range a.legs {
+		game, ok := a.games[leg.GameID]
+		if !ok {
+			continue
+		}
+		split, rank, hit := toughMatchupHit(leg, game)
+		if !hit {
+			continue
+		}
+		opp := teamOrOther(a.opponent(leg))
+		message := fmt.Sprintf(
+			"%s ranks #%d against the %s by EPA allowed, so %s is a tough matchup.",
+			opp, rank, split, selection(leg))
+		warnings = append(warnings, a.warning(ruleToughMatchup, Warn, message, []Leg{leg}))
+	}
+	return warnings
+}
+
+// shrinkingRole warns when a player prop over's recent snap share or target
+// share has dropped meaningfully below their season average.
+func shrinkingRole(a *analysis) []Warning {
+	if len(a.stats) == 0 {
+		return nil
+	}
+	var warnings []Warning
+	for _, leg := range a.legs {
+		ps, ok := a.stats[leg.PlayerID]
+		if !ok {
+			continue
+		}
+		reason, hit := shrinkingRoleHit(leg, ps)
+		if !hit {
+			continue
+		}
+		message := fmt.Sprintf(
+			"%s's %s — recent volume is fading for %s.",
+			playerName(leg), reason, selection(leg))
+		warnings = append(warnings, a.warning(ruleShrinkingRole, Warn, message, []Leg{leg}))
+	}
+	return warnings
+}
+
+// paceClash warns when a game total fights both teams' pace and efficiency
+// profile (slow & run-heavy vs. an Over, or fast & pass-efficient vs. an Under).
+func paceClash(a *analysis) []Warning {
+	var warnings []Warning
+	for _, leg := range a.legs {
+		if leg.Market != marketTotal {
+			continue
+		}
+		game, ok := a.games[leg.GameID]
+		if !ok || game.HomeEPA == nil || game.AwayEPA == nil {
+			continue
+		}
+		switch leg.Side {
+		case sideOver:
+			if game.HomeEPA.PlaysPerGameRank >= paceSlowMinRank &&
+				game.AwayEPA.PlaysPerGameRank >= paceSlowMinRank &&
+				game.HomeEPA.PassRateRank >= passRateLowMinRank &&
+				game.AwayEPA.PassRateRank >= passRateLowMinRank {
+				message := fmt.Sprintf(
+					"Both %s and %s sit bottom-8 in pace and bottom-10 in pass rate, so %s needs a lot of efficiency.",
+					game.Away, game.Home, selection(leg))
+				warnings = append(warnings, a.warning(rulePaceClash, Warn, message, []Leg{leg}))
+			}
+		case sideUnder:
+			if inTopRank(game.HomeEPA.PlaysPerGameRank, paceFastMaxRank) &&
+				inTopRank(game.AwayEPA.PlaysPerGameRank, paceFastMaxRank) &&
+				inTopRank(game.HomeEPA.OffPassEPARank, offPassEPATopMaxRank) &&
+				inTopRank(game.AwayEPA.OffPassEPARank, offPassEPATopMaxRank) {
+				message := fmt.Sprintf(
+					"Both %s and %s sit top-8 in pace and passing EPA, so %s is fighting two fast, efficient offenses.",
+					game.Away, game.Home, selection(leg))
+				warnings = append(warnings, a.warning(rulePaceClash, Warn, message, []Leg{leg}))
+			}
+		}
+	}
+	return warnings
+}
+
+// tdSpikeRisk notes when recent TD scoring outpaces a player's underlying
+// opportunity (low target share and carry volume for Anytime TD, or negative EPA
+// on high recent passing TDs).
+func tdSpikeRisk(a *analysis) []Warning {
+	if len(a.stats) == 0 {
+		return nil
+	}
+	var warnings []Warning
+	for _, leg := range a.legs {
+		if leg.PlayerID == "" {
+			continue
+		}
+		ps, ok := a.stats[leg.PlayerID]
+		if !ok || ps.Usage == nil || len(ps.Usage.Weeks) < 3 {
+			continue
+		}
+		games := ps.Games[leg.Market]
+		if len(games) < 3 {
+			continue
+		}
+		last3TDs := games[0] + games[1] + games[2]
+
+		switch {
+		case leg.Market == marketAnytimeTD && leg.Side == sideYes:
+			avgCarries := last3CarriesAvg(ps.Usage.Weeks)
+			if last3TDs >= tdSpikeMinTDs &&
+				ps.Usage.Last3TargetShare < tdSpikeMaxTargetShare &&
+				avgCarries < tdSpikeMaxCarriesPerGame {
+				message := fmt.Sprintf(
+					"%s has %s TDs in the last 3 games on a %d%% target share and %s carries/game — TD luck can cool off.",
+					playerName(leg),
+					number(last3TDs),
+					int(math.Round(ps.Usage.Last3TargetShare*100)),
+					number(math.Round(avgCarries*10)/10),
+				)
+				warnings = append(warnings, a.warning(ruleTDSpikeRisk, Info, message, []Leg{leg}))
+			}
+		case leg.Market == marketPassTDs && leg.Side == sideOver:
+			avgEPA := last3TotalEPAAvg(ps.Usage.Weeks)
+			if last3TDs >= tdSpikePassMinTDs && avgEPA <= 0 {
+				message := fmt.Sprintf(
+					"%s has %s passing TDs in the last 3 games despite negative EPA — TD efficiency can cool off.",
+					playerName(leg), number(last3TDs))
+				warnings = append(warnings, a.warning(ruleTDSpikeRisk, Info, message, []Leg{leg}))
+			}
+		}
+	}
+	return warnings
+}
+
+func inTopRank(rank, maxRank int) bool {
+	return rank >= 1 && rank <= maxRank
+}
+
+// matchupRank returns the opposing defense's EPA-allowed rank and split name
+// ("pass" or "rush") for a yardage/TD over leg.
+func matchupRank(leg Leg, game Game) (split string, rank int, ok bool) {
+	if leg.Side != sideOver {
+		return "", 0, false
+	}
+	oppEPA := game.OpponentEPA(leg.Team)
+	if oppEPA == nil {
+		return "", 0, false
+	}
+	switch leg.Market {
+	case marketPassYds, marketPassTDs, marketRecYds, marketReceptions:
+		if oppEPA.DefPassEPAAllowedRank <= 0 {
+			return "", 0, false
+		}
+		return "pass", oppEPA.DefPassEPAAllowedRank, true
+	case marketRushYds, marketRushAtt:
+		if oppEPA.DefRushEPAAllowedRank <= 0 {
+			return "", 0, false
+		}
+		return "rush", oppEPA.DefRushEPAAllowedRank, true
+	default:
+		return "", 0, false
+	}
+}
+
+func toughMatchupHit(leg Leg, game Game) (split string, rank int, hit bool) {
+	split, rank, ok := matchupRank(leg, game)
+	if !ok || !inTopRank(rank, toughDefenseMaxRank) {
+		return "", 0, false
+	}
+	return split, rank, true
+}
+
+func favorableMatchupHit(leg Leg, game Game) (split string, rank int, hit bool) {
+	split, rank, ok := matchupRank(leg, game)
+	if !ok || rank < favorableDefenseMinRank {
+		return "", 0, false
+	}
+	return split, rank, true
+}
+
+func isPlayerPropMarket(market string) bool {
+	switch market {
+	case marketPassYds, marketPassTDs, marketRushYds, marketRushAtt, marketRecYds, marketReceptions:
+		return true
+	default:
+		return false
+	}
+}
+
+func shrinkingRoleHit(leg Leg, ps PlayerStats) (string, bool) {
+	if leg.Side != sideOver || leg.PlayerID == "" || !isPlayerPropMarket(leg.Market) {
+		return "", false
+	}
+	if ps.Usage == nil || len(ps.Usage.Weeks) < 3 {
+		return "", false
+	}
+	last2Snap := (ps.Usage.Weeks[0].OffensePct + ps.Usage.Weeks[1].OffensePct) / 2
+	if ps.Usage.SeasonSnapAvg-last2Snap >= shrinkingSnapDrop-floatEps {
+		return fmt.Sprintf(
+			"snap share dropped from %d%% on the season to %d%% over the last 2 games",
+			int(math.Round(ps.Usage.SeasonSnapAvg*100)),
+			int(math.Round(last2Snap*100)),
+		), true
+	}
+	last2Target := (ps.Usage.Weeks[0].TargetShare + ps.Usage.Weeks[1].TargetShare) / 2
+	if ps.Usage.SeasonTargetShare-last2Target >= shrinkingTargetShareDrop-floatEps {
+		return fmt.Sprintf(
+			"target share dropped from %d%% on the season to %d%% over the last 2 games",
+			int(math.Round(ps.Usage.SeasonTargetShare*100)),
+			int(math.Round(last2Target*100)),
+		), true
+	}
+	return "", false
+}
+
+func last3CarriesAvg(weeks []PlayerWeekUsage) float64 {
+	return float64(weeks[0].Carries+weeks[1].Carries+weeks[2].Carries) / 3.0
+}
+
+func last3TotalEPAAvg(weeks []PlayerWeekUsage) float64 {
+	return (weeks[0].TotalEPA + weeks[1].TotalEPA + weeks[2].TotalEPA) / 3.0
 }
 
 // isYardageMarket reports whether the market is measured in yards.

@@ -45,14 +45,43 @@ type Leg struct {
 }
 
 // Game is the slice of a game the analyzer needs: the two teams, whether it is
-// indoors, the forecast when there is one, and nfelo's model when it is fresh.
+// indoors, the forecast when there is one, nfelo's model when it is fresh, and
+// optional nflverse team EPA/pace profiles.
 type Game struct {
 	ID      string
 	Home    string
 	Away    string
 	Indoor  bool
-	Weather *Weather // nil when unknown
-	Nfelo   *Nfelo   // nil when unknown or stale
+	Weather *Weather            // nil when unknown
+	Nfelo   *Nfelo              // nil when unknown or stale
+	HomeEPA *TeamDefenseProfile // nil when unknown or stale (> 7 days)
+	AwayEPA *TeamDefenseProfile // nil when unknown or stale (> 7 days)
+}
+
+// TeamDefenseProfile holds one team's season-to-date and last-4-week
+// offensive/defensive EPA, pace, and league ranks (1..32, where 1 is toughest
+// defense, highest offense, fastest pace, or highest pass rate; 0 means unset).
+type TeamDefenseProfile struct {
+	OffPassEPA        float64
+	OffRushEPA        float64
+	DefPassEPAAllowed float64
+	DefRushEPAAllowed float64
+	PlaysPerGame      float64
+	PassRate          float64
+
+	L4OffPassEPA        float64
+	L4OffRushEPA        float64
+	L4DefPassEPAAllowed float64
+	L4DefRushEPAAllowed float64
+	L4PlaysPerGame      float64
+	L4PassRate          float64
+
+	OffPassEPARank        int
+	OffRushEPARank        int
+	DefPassEPAAllowedRank int
+	DefRushEPAAllowedRank int
+	PlaysPerGameRank      int
+	PassRateRank          int
 }
 
 // Nfelo is nfelo's pre-game model for one game. HomeSpread is from the home
@@ -102,10 +131,61 @@ func (g Game) ModelWinProb(team string) (float64, bool) {
 	}
 }
 
+// TeamEPA returns the EPA and pace profile for team, or nil when missing or
+// the team is not in the game.
+func (g Game) TeamEPA(team string) *TeamDefenseProfile {
+	switch team {
+	case g.Home:
+		return g.HomeEPA
+	case g.Away:
+		return g.AwayEPA
+	default:
+		return nil
+	}
+}
+
+// OpponentEPA returns the opposing team's EPA and pace profile for team, or
+// nil when missing or the team is not in the game.
+func (g Game) OpponentEPA(team string) *TeamDefenseProfile {
+	switch team {
+	case g.Home:
+		return g.AwayEPA
+	case g.Away:
+		return g.HomeEPA
+	default:
+		return nil
+	}
+}
+
+// PlayerWeekUsage holds one week of nflverse usage and efficiency for a player.
+// Share fields (OffensePct, TargetShare, AirYardsShare) are 0..1 fractions.
+type PlayerWeekUsage struct {
+	WeekNum       int
+	OffensePct    float64
+	TargetShare   float64
+	AirYardsShare float64
+	WOPR          float64
+	Carries       int
+	Targets       int
+	TotalEPA      float64
+	RZOpps        int
+}
+
+// PlayerUsage holds a matched player's nflverse usage weeks (most recent first)
+// and rolling averages. Nil when missing or fewer than 3 games exist.
+type PlayerUsage struct {
+	Weeks             []PlayerWeekUsage
+	Last3SnapAvg      float64
+	SeasonSnapAvg     float64
+	Last3TargetShare  float64
+	SeasonTargetShare float64
+}
+
 // PlayerStats holds a matched player's recent games per market, most recent
-// game first, this season only.
+// game first, this season only, plus optional nflverse usage metrics.
 type PlayerStats struct {
 	Games map[string][]float64
+	Usage *PlayerUsage
 }
 
 // AnalyzeSlip runs every rule over the slip and returns the warnings sorted by
@@ -130,8 +210,8 @@ func AnalyzeSlip(legs []Leg, games map[string]Game, stats map[string]PlayerStats
 	}
 
 	var warnings []Warning
-	for _, rule := range rules {
-		warnings = append(warnings, rule(a)...)
+	for _, r := range rules {
+		warnings = append(warnings, r.fn(a)...)
 	}
 	slices.SortStableFunc(warnings, func(left, right Warning) int {
 		if bySeverity := cmp.Compare(right.Severity, left.Severity); bySeverity != 0 {
@@ -142,24 +222,42 @@ func AnalyzeSlip(legs []Leg, games map[string]Game, stats map[string]PlayerStats
 	return warnings
 }
 
+// RuleIDs returns the stable IDs of every active analyzer rule in run order.
+func RuleIDs() []string {
+	ids := make([]string, len(rules))
+	for i, r := range rules {
+		ids[i] = r.id
+	}
+	return ids
+}
+
 // rule is one check. Each runs over the same filtered legs in a fixed order.
 type rule func(*analysis) []Warning
 
+type ruleSpec struct {
+	id string
+	fn rule
+}
+
 // rules is the fixed run order. Later phases append their rules here; the
 // final sort handles severity and slip position.
-var rules = []rule{
-	blowoutPassing,
-	trailingRB,
-	totalContradiction,
-	stackClockDrain,
-	stackShootout,
-	wind,
-	fakeWeather,
-	hook,
-	totalKeyNumber,
-	chalk,
-	qbDrag,
-	medianTrap,
+var rules = []ruleSpec{
+	{ruleBlowoutPassing, blowoutPassing},
+	{ruleTrailingRB, trailingRB},
+	{ruleTotalContradiction, totalContradiction},
+	{ruleStackClockDrain, stackClockDrain},
+	{ruleStackShootout, stackShootout},
+	{ruleWind, wind},
+	{ruleFakeWeather, fakeWeather},
+	{ruleHook, hook},
+	{ruleTotalKeyNumber, totalKeyNumber},
+	{ruleChalk, chalk},
+	{ruleQBDrag, qbDrag},
+	{ruleMedianTrap, medianTrap},
+	{ruleToughMatchup, toughMatchup},
+	{ruleShrinkingRole, shrinkingRole},
+	{rulePaceClash, paceClash},
+	{ruleTDSpikeRisk, tdSpikeRisk},
 }
 
 // analysis is the filtered input shared by every rule.
