@@ -163,7 +163,7 @@ Effort: medium (coordinates across ingest, SQLite migrations, pure analyzer scor
 ### Phase 2: Analyzer `nflverse` rules, leg/parlay grades, and in-app docs page
 
 - [x] Extend `internal/analyzer` (`Game.HomeEPA`/`AwayEPA`, `PlayerStats.Usage`) with `tough_matchup`, `shrinking_role`, `pace_clash`, and `td_spike_risk` rules, deterministic `ScoreLeg` and `ScoreSlip` (`A`–`F` grades with `GradeFactor` breakdowns), and `RuleDocs`/`GradeRubric` metadata, plus boundary and 1:1 rule-coverage tests.
-- [ ] Wire `nflverse` DB lookups into `internal/web/analyzer.go` and `internal/web/slips.go`, render clickable slip/leg grade pills with inline factor breakdowns and `#rule-<id>` links in `web/templates/partials.html` (and `#pick-tray`), and serve `GET /analyzer/guide` (`web/templates/analyzer_guide.html`) with handler render tests.
+- [x] Wire `nflverse` DB lookups into `internal/web/analyzer.go` and `internal/web/slips.go`, render clickable slip/leg grade pills with inline factor breakdowns and `#rule-<id>` links in `web/templates/partials.html` (and `#pick-tray`), and serve `GET /analyzer/guide` (`web/templates/analyzer_guide.html`) with handler render tests.
 - [ ] Docs: update `docs/concepts/analyzer.md`, `docs/reference/analyzer-rules.md`, and `docs/reference/routes.md` with the new rules, leg/slip grade rubric, and `/analyzer/guide` route.
 
 ### Phase 3: Pick-board leg suggestions and research usage view

@@ -171,6 +171,7 @@ type PickDockView struct {
 	Combined         string
 	CombinedAmerican string
 	Legs             []TrayLegView
+	Grade            GradeView
 	Warnings         []AnalyzerWarningView
 	ActionLabel      string
 	ActionHref       string
@@ -181,6 +182,7 @@ type TrayLegView struct {
 	ID        int64
 	Selection string
 	Odds      string
+	Grade     GradeView
 	Locked    bool
 }
 
@@ -941,9 +943,14 @@ func (h *slipHandlers) dockFrom(
 	view.CombinedAmerican = formatOdds(parlay.DecimalToAmerican(combined))
 
 	nfelo := h.nfeloForGames(ctx, games)
-	gamesByID := analyzerGameMap(games, nfelo)
-	stats := h.playerStatsForLegs(ctx, legs)
-	analysis := analyzerView(legs, gamesByID, stats, names)
+	teamEPA, usageByPlayer := h.nflverseForSlip(ctx, slip.WeekID, legs)
+	gamesByID := analyzerGameMap(games, nfelo, teamEPA)
+	stats := h.playerStatsForLegs(ctx, legs, usageByPlayer)
+	analysis, legGrades := analyzerView(legs, gamesByID, stats, names)
+	view.Grade = analysis.Grade
+	for i := range view.Legs {
+		view.Legs[i].Grade = legGrades[view.Legs[i].ID]
+	}
 	for _, warning := range analysis.Warnings {
 		for _, leg := range warning.Legs {
 			if leg.OwnerID == viewerID {

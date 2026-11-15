@@ -210,6 +210,38 @@
                     >{{.Model}}</span
                   >
                 {{end}}
+                {{if .Grade.Letter}}
+                  <details class="min-w-0" data-leg-grade>
+                    <summary
+                      class="cursor-pointer list-none whitespace-nowrap rounded-full border px-1.5 py-0.5 font-semibold {{.Grade.Class}}"
+                      title="Leg grade {{.Grade.Letter}} ({{.Grade.Score}}/100)"
+                    >
+                      Grade {{.Grade.Letter}}
+                    </summary>
+                    <div class="mt-1.5 w-64 max-w-full rounded-lg border border-slate-700 bg-slate-950 p-2.5 text-xs shadow-lg">
+                      <div class="flex items-center justify-between gap-2 border-b border-slate-800 pb-1.5">
+                        <span class="font-semibold text-slate-200">Leg grade: {{.Grade.Letter}} ({{.Grade.Score}})</span>
+                        <a
+                          href="/analyzer/guide?from=/slips/{{$.Slip.ID}}#leg-grades"
+                          class="font-medium text-sky-400 hover:underline"
+                          >See full rubric</a
+                        >
+                      </div>
+                      {{if .Grade.Factors}}
+                        <ul class="mt-1.5 space-y-1">
+                          {{range .Grade.Factors}}
+                            <li class="flex items-start justify-between gap-2">
+                              <span class="min-w-0 text-slate-300">{{.Label}}</span>
+                              <span class="shrink-0 font-semibold {{if .Positive}}text-emerald-300{{else if .Negative}}text-amber-300{{else}}text-slate-300{{end}}">{{.DeltaText}}</span>
+                            </li>
+                          {{end}}
+                        </ul>
+                      {{else}}
+                        <p class="mt-1.5 text-slate-400">Baseline 75 — no extra adjustments.</p>
+                      {{end}}
+                    </div>
+                  </details>
+                {{end}}
                 {{if .CanGrade}}
                   <details class="relative">
                     <summary
@@ -284,7 +316,51 @@
   {{end}}
 
   <section class="rounded-xl border border-slate-800 bg-slate-900 p-4">
-    <h2 class="text-sm font-semibold text-slate-300">Analyzer</h2>
+    <div class="flex items-center justify-between gap-2">
+      <h2 class="text-sm font-semibold text-slate-300">Analyzer</h2>
+      <a
+        href="/analyzer/guide?from=/slips/{{.Slip.ID}}"
+        class="text-xs font-medium text-sky-400 hover:underline"
+        >How grading works</a
+      >
+    </div>
+    {{if .Slip.Analyzer.Grade.Letter}}
+      <details class="mt-2 rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-2" data-slip-grade>
+        <summary class="flex cursor-pointer list-none items-center justify-between gap-2 text-xs">
+          <span class="flex min-w-0 items-center gap-2">
+            <span class="shrink-0 rounded-full border px-2 py-0.5 font-semibold {{.Slip.Analyzer.Grade.Class}}">
+              Slip grade: {{.Slip.Analyzer.Grade.Letter}}
+            </span>
+            {{if .Slip.Analyzer.Grade.Summary}}
+              <span class="truncate text-slate-300">{{.Slip.Analyzer.Grade.Summary}}</span>
+            {{end}}
+          </span>
+          <span class="shrink-0 text-slate-400">Details &#9662;</span>
+        </summary>
+        <div class="mt-2 space-y-1.5 border-t border-slate-800 pt-2 text-xs">
+          <div class="flex items-center justify-between gap-2">
+            <span class="font-medium text-slate-300">Score: {{.Slip.Analyzer.Grade.Score}}/100</span>
+            <a
+              href="/analyzer/guide?from=/slips/{{.Slip.ID}}#slip-grade"
+              class="font-medium text-sky-400 hover:underline"
+              >See full rubric</a
+            >
+          </div>
+          {{if .Slip.Analyzer.Grade.Factors}}
+            <ul class="space-y-1">
+              {{range .Slip.Analyzer.Grade.Factors}}
+                <li class="flex items-start justify-between gap-2">
+                  <span class="min-w-0 text-slate-300">{{.Label}}{{if .Detail}} — {{.Detail}}{{end}}</span>
+                  <span class="shrink-0 font-semibold {{if .Positive}}text-emerald-300{{else if .Negative}}text-amber-300{{else}}text-slate-300{{end}}">{{.DeltaText}}</span>
+                </li>
+              {{end}}
+            </ul>
+          {{else}}
+            <p class="text-slate-400">Weighted leg average with no extra correlation or drag adjustments.</p>
+          {{end}}
+        </div>
+      </details>
+    {{end}}
     {{if .Slip.Analyzer.Clean}}
       <p class="mt-2 rounded-lg border border-emerald-800 bg-emerald-950 px-3 py-2 text-sm text-emerald-300">
         Looks clean
@@ -293,7 +369,14 @@
       <ul class="mt-2 space-y-2">
         {{range .Slip.Analyzer.Warnings}}
           <li class="rounded-lg border px-3 py-2 {{.Class}}" data-rule="{{.Rule}}">
-            <p class="text-xs font-semibold uppercase tracking-wide">{{.Severity}}</p>
+            <div class="flex items-center justify-between gap-2">
+              <p class="text-xs font-semibold uppercase tracking-wide">{{.Severity}}</p>
+              <a
+                href="/analyzer/guide?from=/slips/{{$.Slip.ID}}#rule-{{.Rule}}"
+                class="text-xs font-medium underline opacity-85 hover:opacity-100"
+                >Why?</a
+              >
+            </div>
             <p class="mt-1 text-sm font-medium">{{.Message}}</p>
             {{if .Legs}}
               <ul class="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-400">
@@ -1500,9 +1583,43 @@
   <ul class="space-y-2">
     {{range .Legs}}
       <li class="flex items-start justify-between gap-2 rounded-lg border border-slate-800 px-3 py-2">
-        <div class="min-w-0">
+        <div class="min-w-0 flex-1">
           <p class="truncate text-sm font-medium">{{.Selection}}</p>
-          <p class="text-xs text-slate-400">{{.Odds}}</p>
+          <div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-400">
+            <span>{{.Odds}}</span>
+            {{if .Grade.Letter}}
+              <details class="min-w-0" data-leg-grade>
+                <summary
+                  class="cursor-pointer list-none whitespace-nowrap rounded-full border px-1.5 py-0.5 text-[11px] font-semibold {{.Grade.Class}}"
+                  title="Leg grade {{.Grade.Letter}} ({{.Grade.Score}}/100)"
+                >
+                  Grade {{.Grade.Letter}}
+                </summary>
+                <div class="mt-1.5 w-60 max-w-full rounded-lg border border-slate-700 bg-slate-950 p-2 text-xs shadow-lg">
+                  <div class="flex items-center justify-between gap-2 border-b border-slate-800 pb-1">
+                    <span class="font-semibold text-slate-200">Leg grade: {{.Grade.Letter}} ({{.Grade.Score}})</span>
+                    <a
+                      href="/analyzer/guide?from=/slips/{{$.SlipID}}/pick#leg-grades"
+                      class="font-medium text-sky-400 hover:underline"
+                      >See full rubric</a
+                    >
+                  </div>
+                  {{if .Grade.Factors}}
+                    <ul class="mt-1 space-y-1">
+                      {{range .Grade.Factors}}
+                        <li class="flex items-start justify-between gap-2">
+                          <span class="min-w-0 text-slate-300">{{.Label}}</span>
+                          <span class="shrink-0 font-semibold {{if .Positive}}text-emerald-300{{else if .Negative}}text-amber-300{{else}}text-slate-300{{end}}">{{.DeltaText}}</span>
+                        </li>
+                      {{end}}
+                    </ul>
+                  {{else}}
+                    <p class="mt-1 text-slate-400">Baseline 75 — no extra adjustments.</p>
+                  {{end}}
+                </div>
+              </details>
+            {{end}}
+          </div>
         </div>
         {{if .Locked}}
           <span class="shrink-0 text-xs text-slate-500">Locked</span>
@@ -1521,11 +1638,56 @@
     {{end}}
   </ul>
 
+  {{if .Grade.Letter}}
+    <details class="rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-2" data-slip-grade>
+      <summary class="flex cursor-pointer list-none items-center justify-between gap-2 text-xs">
+        <span class="flex min-w-0 items-center gap-2">
+          <span class="shrink-0 rounded-full border px-2 py-0.5 font-semibold {{.Grade.Class}}">
+            Slip grade: {{.Grade.Letter}}
+          </span>
+          {{if .Grade.Summary}}
+            <span class="truncate text-slate-300">{{.Grade.Summary}}</span>
+          {{end}}
+        </span>
+        <span class="shrink-0 text-slate-400">Details &#9662;</span>
+      </summary>
+      <div class="mt-2 space-y-1.5 border-t border-slate-800 pt-2 text-xs">
+        <div class="flex items-center justify-between gap-2">
+          <span class="font-medium text-slate-300">Score: {{.Grade.Score}}/100</span>
+          <a
+            href="/analyzer/guide?from=/slips/{{.SlipID}}/pick#slip-grade"
+            class="font-medium text-sky-400 hover:underline"
+            >See full rubric</a
+          >
+        </div>
+        {{if .Grade.Factors}}
+          <ul class="space-y-1">
+            {{range .Grade.Factors}}
+              <li class="flex items-start justify-between gap-2">
+                <span class="min-w-0 text-slate-300">{{.Label}}{{if .Detail}} — {{.Detail}}{{end}}</span>
+                <span class="shrink-0 font-semibold {{if .Positive}}text-emerald-300{{else if .Negative}}text-amber-300{{else}}text-slate-300{{end}}">{{.DeltaText}}</span>
+              </li>
+            {{end}}
+          </ul>
+        {{else}}
+          <p class="text-slate-400">Weighted leg average with no extra correlation or drag adjustments.</p>
+        {{end}}
+      </div>
+    </details>
+  {{end}}
+
   {{if .Warnings}}
     <div class="space-y-2">
       {{range .Warnings}}
         <div class="rounded-lg border px-3 py-2 {{.Class}}" data-rule="{{.Rule}}">
-          <p class="text-[11px] font-semibold uppercase tracking-wide">{{.Severity}}</p>
+          <div class="flex items-center justify-between gap-2">
+            <p class="text-[11px] font-semibold uppercase tracking-wide">{{.Severity}}</p>
+            <a
+              href="/analyzer/guide?from=/slips/{{$.SlipID}}/pick#rule-{{.Rule}}"
+              class="text-[11px] font-medium underline opacity-85 hover:opacity-100"
+              >Why?</a
+            >
+          </div>
           <p class="mt-1 text-sm font-medium">{{.Message}}</p>
         </div>
       {{end}}

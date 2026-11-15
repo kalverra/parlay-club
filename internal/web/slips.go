@@ -63,6 +63,7 @@ type slipHandlers struct {
 // scope, so the signed-in person and active group are already on the context.
 func (h *slipHandlers) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /{$}", h.home)
+	mux.HandleFunc("GET /analyzer/guide", h.analyzerGuide)
 	mux.HandleFunc("GET /record", h.recordBook)
 	mux.HandleFunc("GET /groups/{id}/week", h.groupWeek)
 	mux.HandleFunc("GET /me", h.profile)
@@ -195,6 +196,7 @@ type LegView struct {
 	Selection       string
 	Odds            string
 	Model           string // nfelo chip; "" when there is no fresh model
+	Grade           GradeView
 	Result          string
 	GradedBy        string
 	OwnerName       string
@@ -1528,15 +1530,28 @@ func (h *slipHandlers) slipPageData(ctx context.Context, slip db.Slip) (SlipPage
 
 	open := slip.Status == db.SlipOpen
 	nfelo := h.nfeloForGames(ctx, games)
-	gamesByID := analyzerGameMap(games, nfelo)
-	playerStats := h.playerStatsForLegs(ctx, legs)
+	teamEPA, usageByPlayer := h.nflverseForSlip(ctx, slip.WeekID, legs)
+	gamesByID := analyzerGameMap(games, nfelo, teamEPA)
+	playerStats := h.playerStatsForLegs(ctx, legs, usageByPlayer)
+	analysis, legGrades := analyzerView(legs, gamesByID, playerStats, names)
 	media, err := h.legMedia(ctx, legs, allWeekGames)
 	if err != nil {
 		return SlipPage{}, err
 	}
 	viewerID := user.ID
 	votesByLeg := voteViews(votes, viewerID)
-	legsByUser := legViews(legs, names, gamesByID, media, open, hasUser, viewerIsMember, viewerID, votesByLeg)
+	legsByUser := legViews(
+		legs,
+		names,
+		gamesByID,
+		legGrades,
+		media,
+		open,
+		hasUser,
+		viewerIsMember,
+		viewerID,
+		votesByLeg,
+	)
 
 	locked := 0
 	for _, member := range members {
@@ -1582,7 +1597,7 @@ func (h *slipHandlers) slipPageData(ctx context.Context, slip db.Slip) (SlipPage
 		MemberCount:   len(members),
 		Members:       memberViews,
 		Activity:      activity,
-		Analyzer:      analyzerView(legs, gamesByID, playerStats, names),
+		Analyzer:      analysis,
 		Siblings:      siblings,
 	}
 
@@ -1690,6 +1705,7 @@ func legViews(
 	legs []db.Leg,
 	names map[int64]string,
 	games map[string]analyzer.Game,
+	legGrades map[int64]GradeView,
 	media legMediaIndex,
 	open, hasUser, viewerIsMember bool,
 	viewerID int64,
@@ -1703,6 +1719,7 @@ func legViews(
 			Selection:   leg.Selection,
 			Odds:        formatOdds(leg.Odds),
 			Model:       legModel(leg, games),
+			Grade:       legGrades[leg.ID],
 			Result:      string(leg.Result),
 			GradedBy:    legGradedBy(leg.GradedBy),
 			OwnerName:   names[leg.UserID],

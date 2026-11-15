@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/kalverra/parlay-club/internal/analyzer"
 	"github.com/kalverra/parlay-club/internal/db"
 )
 
@@ -440,4 +441,262 @@ func addStoredLeg(t *testing.T, fixture *slipFixture, leg db.Leg) db.Leg {
 	created, err := fixture.store.CreateLeg(t.Context(), leg)
 	require.NoError(t, err)
 	return created
+}
+
+func TestAnalyzerGuideRendersAllRulesAndAnchors(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodGet,
+		"/analyzer/guide?from=/slips/42",
+		nil,
+	)
+	fixture.handler.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	body := recorder.Body.String()
+	assert.Contains(t, body, `href="/slips/42"`)
+	assert.Contains(t, body, `id="leg-grades"`)
+	assert.Contains(t, body, `id="slip-grade"`)
+	assert.Contains(t, body, `id="suggestions"`)
+	assert.Contains(t, body, "Grade A")
+	assert.Contains(t, body, "Grade F")
+	for _, ruleID := range analyzer.RuleIDs() {
+		assert.Contains(t, body, fmt.Sprintf(`id="rule-%s"`, ruleID))
+	}
+}
+
+func TestAnalyzerGuideRejectsUnsafeBackURL(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+
+	for _, raw := range []string{"//evil.com/phish", "https://evil.com/phish"} {
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequestWithContext(
+			t.Context(),
+			http.MethodGet,
+			"/analyzer/guide?from="+raw,
+			nil,
+		)
+		fixture.handler.ServeHTTP(recorder, request)
+
+		require.Equal(t, http.StatusOK, recorder.Code)
+		assert.NotContains(t, recorder.Body.String(), raw)
+	}
+}
+
+func TestSlipPanelAndTrayWireNFLverseGradesAndRuleLinks(t *testing.T) {
+	t.Parallel()
+
+	seedNFLverse := func(t *testing.T, fixture *slipFixture, syncedAt time.Time) {
+		t.Helper()
+		game := addGame(t, fixture, gameKickoff())
+
+		require.NoError(t, fixture.store.RecordSync(t.Context(), "nflverse:season:2026", syncedAt, nil))
+
+		// Make MIA rank #1 toughest pass defense (lowest DefPassEPAAllowed) across 6 teams.
+		teamWeeks := []db.NFLverseTeamWeek{
+			{
+				Season:            2026,
+				SeasonType:        2,
+				WeekNum:           1,
+				Team:              "MIA",
+				DefPassEPAAllowed: -0.25,
+				PlaysPerGame:      62,
+				PassRate:          0.55,
+				UpdatedAt:         syncedAt,
+			},
+			{
+				Season:            2026,
+				SeasonType:        2,
+				WeekNum:           1,
+				Team:              "BUF",
+				DefPassEPAAllowed: 0.02,
+				PlaysPerGame:      64,
+				PassRate:          0.58,
+				UpdatedAt:         syncedAt,
+			},
+			{
+				Season:            2026,
+				SeasonType:        2,
+				WeekNum:           1,
+				Team:              "KC",
+				DefPassEPAAllowed: 0.05,
+				PlaysPerGame:      65,
+				PassRate:          0.60,
+				UpdatedAt:         syncedAt,
+			},
+			{
+				Season:            2026,
+				SeasonType:        2,
+				WeekNum:           1,
+				Team:              "BAL",
+				DefPassEPAAllowed: 0.08,
+				PlaysPerGame:      63,
+				PassRate:          0.50,
+				UpdatedAt:         syncedAt,
+			},
+			{
+				Season:            2026,
+				SeasonType:        2,
+				WeekNum:           1,
+				Team:              "SF",
+				DefPassEPAAllowed: 0.12,
+				PlaysPerGame:      61,
+				PassRate:          0.52,
+				UpdatedAt:         syncedAt,
+			},
+			{
+				Season:            2026,
+				SeasonType:        2,
+				WeekNum:           1,
+				Team:              "NYJ",
+				DefPassEPAAllowed: 0.18,
+				PlaysPerGame:      59,
+				PassRate:          0.54,
+				UpdatedAt:         syncedAt,
+			},
+		}
+		_, err := fixture.store.UpsertNFLverseTeamWeeks(t.Context(), teamWeeks)
+		require.NoError(t, err)
+
+		// Player with 4 weeks where last-2 snap share dropped >= 15 pp below season average.
+		playerWeeks := []db.NFLversePlayerWeek{
+			{
+				ESPNID:      "4362628",
+				Season:      2026,
+				SeasonType:  2,
+				WeekNum:     1,
+				Team:        "BUF",
+				OffensePct:  0.90,
+				TargetShare: 0.25,
+				UpdatedAt:   syncedAt,
+			},
+			{
+				ESPNID:      "4362628",
+				Season:      2026,
+				SeasonType:  2,
+				WeekNum:     2,
+				Team:        "BUF",
+				OffensePct:  0.90,
+				TargetShare: 0.25,
+				UpdatedAt:   syncedAt,
+			},
+			{
+				ESPNID:      "4362628",
+				Season:      2026,
+				SeasonType:  2,
+				WeekNum:     3,
+				Team:        "BUF",
+				OffensePct:  0.50,
+				TargetShare: 0.15,
+				UpdatedAt:   syncedAt,
+			},
+			{
+				ESPNID:      "4362628",
+				Season:      2026,
+				SeasonType:  2,
+				WeekNum:     4,
+				Team:        "BUF",
+				OffensePct:  0.50,
+				TargetShare: 0.15,
+				UpdatedAt:   syncedAt,
+			},
+		}
+		_, err = fixture.store.UpsertNFLversePlayerWeeks(t.Context(), playerWeeks)
+		require.NoError(t, err)
+
+		addStoredLeg(t, fixture, db.Leg{
+			UserID:     fixture.user.ID,
+			GameID:     new(game.ID),
+			MarketType: "REC_YDS",
+			Selection:  "Khalil Shakir Over 55.5 Rec Yds",
+			Team:       new("BUF"),
+			PlayerID:   new("4362628"),
+			PlayerName: new("Khalil Shakir"),
+			Side:       new("OVER"),
+			Line:       new(55.5),
+			Odds:       -110,
+		})
+	}
+
+	t.Run("fresh nflverse triggers rules, grades, and guide links", func(t *testing.T) {
+		t.Parallel()
+
+		fixture := newSlipFixture(t, 2)
+		seedNFLverse(t, fixture, time.Now().UTC())
+
+		panelRec := httptest.NewRecorder()
+		panelReq := httptest.NewRequestWithContext(
+			t.Context(),
+			http.MethodGet,
+			fmt.Sprintf("/slips/%d/panel", fixture.slip.ID),
+			nil,
+		)
+		fixture.handler.ServeHTTP(panelRec, panelReq)
+		require.Equal(t, http.StatusOK, panelRec.Code)
+
+		panelBody := panelRec.Body.String()
+		assert.Contains(t, panelBody, `data-rule="tough_matchup"`)
+		assert.Contains(t, panelBody, `data-rule="shrinking_role"`)
+		assert.Contains(t, panelBody, fmt.Sprintf(`/analyzer/guide?from=/slips/%d#rule-tough_matchup`, fixture.slip.ID))
+		assert.Contains(
+			t,
+			panelBody,
+			fmt.Sprintf(`/analyzer/guide?from=/slips/%d#rule-shrinking_role`, fixture.slip.ID),
+		)
+		assert.Contains(t, panelBody, fmt.Sprintf(`/analyzer/guide?from=/slips/%d"`, fixture.slip.ID))
+		assert.Contains(t, panelBody, `data-slip-grade`)
+		assert.Contains(t, panelBody, `data-leg-grade`)
+		assert.Contains(t, panelBody, fmt.Sprintf(`/analyzer/guide?from=/slips/%d#leg-grades`, fixture.slip.ID))
+		assert.Contains(t, panelBody, fmt.Sprintf(`/analyzer/guide?from=/slips/%d#slip-grade`, fixture.slip.ID))
+
+		trayRec := httptest.NewRecorder()
+		trayReq := httptest.NewRequestWithContext(
+			t.Context(),
+			http.MethodGet,
+			fmt.Sprintf("/slips/%d/tray", fixture.slip.ID),
+			nil,
+		)
+		fixture.handler.ServeHTTP(trayRec, trayReq)
+		require.Equal(t, http.StatusOK, trayRec.Code)
+
+		trayBody := trayRec.Body.String()
+		assert.Contains(t, trayBody, `data-leg-grade`)
+		assert.Contains(t, trayBody, `data-slip-grade`)
+		assert.Contains(
+			t,
+			trayBody,
+			fmt.Sprintf(`/analyzer/guide?from=/slips/%d/pick#rule-tough_matchup`, fixture.slip.ID),
+		)
+		assert.Contains(t, trayBody, fmt.Sprintf(`/analyzer/guide?from=/slips/%d/pick#leg-grades`, fixture.slip.ID))
+	})
+
+	t.Run("stale nflverse fails soft without rules", func(t *testing.T) {
+		t.Parallel()
+
+		fixture := newSlipFixture(t, 2)
+		seedNFLverse(t, fixture, time.Now().UTC().Add(-8*24*time.Hour))
+
+		panelRec := httptest.NewRecorder()
+		panelReq := httptest.NewRequestWithContext(
+			t.Context(),
+			http.MethodGet,
+			fmt.Sprintf("/slips/%d/panel", fixture.slip.ID),
+			nil,
+		)
+		fixture.handler.ServeHTTP(panelRec, panelReq)
+		require.Equal(t, http.StatusOK, panelRec.Code)
+
+		panelBody := panelRec.Body.String()
+		assert.NotContains(t, panelBody, `data-rule="tough_matchup"`)
+		assert.NotContains(t, panelBody, `data-rule="shrinking_role"`)
+		assert.Contains(t, panelBody, `data-slip-grade`)
+		assert.Contains(t, panelBody, `data-leg-grade`)
+	})
 }
