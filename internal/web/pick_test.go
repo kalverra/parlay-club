@@ -2322,3 +2322,172 @@ func TestPickBoardWiresSignalsBadgesSortAndHTMXSwaps(t *testing.T) {
 		assert.Contains(t, body, `Fits slip`)
 	})
 }
+
+func TestPickSlateSkipsDockAndDetail(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	game := addGame(t, fixture, gameKickoff())
+	addGameOdds(t, fixture.store, game.ID)
+	addPropOdds(t, fixture.store, game.ID, "PASS_YDS", "Josh Allen", 245.5, -110)
+
+	_, err := fixture.store.CreateLeg(t.Context(), db.Leg{
+		SlipID:     fixture.slip.ID,
+		UserID:     fixture.user.ID,
+		GameID:     new(game.ID),
+		MarketType: "PASS_YDS",
+		Team:       new("BUF"),
+		PlayerName: new("Josh Allen"),
+		Side:       new("OVER"),
+		Line:       new(245.5),
+		Odds:       -110,
+		Selection:  "Josh Allen Over 245.5 pass yds",
+	})
+	require.NoError(t, err)
+
+	reqOpen := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodGet,
+		fmt.Sprintf("/slips/%d/pick/slate?game=%s&cat=passing&sort=line", fixture.slip.ID, game.ID),
+		nil,
+	)
+	recOpen := httptest.NewRecorder()
+	fixture.handler.ServeHTTP(recOpen, reqOpen)
+	require.Equal(t, http.StatusOK, recOpen.Code, recOpen.Body.String())
+
+	openBody := html.UnescapeString(recOpen.Body.String())
+	assert.Contains(t, openBody, `id="pick-slate"`)
+	assert.Contains(t, openBody, `hidden lg:block`)
+	assert.Contains(t, openBody, `id="pick-cat" type="hidden" name="cat" value="passing"`)
+	assert.Contains(t, openBody, `id="pick-sort" type="hidden" name="sort" value="line"`)
+	assert.Contains(t, openBody, "MIA @ BUF")
+	assert.NotContains(t, openBody, `id="pick-detail"`)
+	assert.NotContains(t, openBody, `id="pick-dock"`)
+
+	reqClosed := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodGet,
+		fmt.Sprintf("/slips/%d/pick/slate", fixture.slip.ID),
+		nil,
+	)
+	recClosed := httptest.NewRecorder()
+	fixture.handler.ServeHTTP(recClosed, reqClosed)
+	require.Equal(t, http.StatusOK, recClosed.Code, recClosed.Body.String())
+
+	closedBody := html.UnescapeString(recClosed.Body.String())
+	assert.Contains(t, closedBody, `id="pick-slate"`)
+	assert.NotContains(t, closedBody, `hidden lg:block`)
+	assert.Contains(t, closedBody, "MIA @ BUF")
+}
+
+func TestPickDetailScopesToOpenGameAndFiltersScope(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	game1 := addGame(t, fixture, gameKickoff())
+	addGameOdds(t, fixture.store, game1.ID)
+	addPropOdds(t, fixture.store, game1.ID, "PASS_YDS", "Josh Allen", 245.5, -110)
+
+	game2, err := fixture.store.UpsertGame(t.Context(), db.Game{
+		ID:       "game-kc-cin",
+		WeekID:   fixture.week.ID,
+		HomeTeam: "KC",
+		AwayTeam: "CIN",
+		Kickoff:  gameKickoff().Add(3 * time.Hour),
+		Status:   "SCHEDULED",
+	})
+	require.NoError(t, err)
+	addGameOdds(t, fixture.store, game2.ID)
+	addPropOdds(t, fixture.store, game2.ID, "PASS_YDS", "Patrick Mahomes", 275.5, -110)
+
+	rec := pickDetail(t, fixture, "game="+game1.ID+"&cat=passing")
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	body := html.UnescapeString(rec.Body.String())
+	assert.Contains(t, body, "Josh Allen")
+	assert.NotContains(t, body, "Patrick Mahomes")
+
+	// A kicked-off game falls back to the empty detail placeholder.
+	started, err := fixture.store.UpsertGame(t.Context(), db.Game{
+		ID:       "game-started",
+		WeekID:   fixture.week.ID,
+		HomeTeam: "DET",
+		AwayTeam: "GB",
+		Kickoff:  time.Now().UTC().Add(-1 * time.Hour),
+		Status:   "SCHEDULED",
+	})
+	require.NoError(t, err)
+	addGameOdds(t, fixture.store, started.ID)
+
+	recStarted := pickDetail(t, fixture, "game="+started.ID)
+	require.Equal(t, http.StatusOK, recStarted.Code, recStarted.Body.String())
+	assert.Contains(t, html.UnescapeString(recStarted.Body.String()), "Pick a game to see its lines and props.")
+
+	// A game from another week also falls back to the empty detail placeholder.
+	otherWeek, err := fixture.store.UpsertWeek(t.Context(), 2026, 2, 11)
+	require.NoError(t, err)
+	otherGame, err := fixture.store.UpsertGame(t.Context(), db.Game{
+		ID:       "game-other-week",
+		WeekID:   otherWeek.ID,
+		HomeTeam: "DAL",
+		AwayTeam: "PHI",
+		Kickoff:  gameKickoff(),
+		Status:   "SCHEDULED",
+	})
+	require.NoError(t, err)
+
+	recOther := pickDetail(t, fixture, "game="+otherGame.ID)
+	require.Equal(t, http.StatusOK, recOther.Code, recOther.Body.String())
+	assert.Contains(t, html.UnescapeString(recOther.Body.String()), "Pick a game to see its lines and props.")
+}
+
+func TestPickPageDataSingleSlatesPassWhenSearchEmpty(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	game1 := addGame(t, fixture, gameKickoff())
+	addGameOdds(t, fixture.store, game1.ID)
+	addPropOdds(t, fixture.store, game1.ID, "PASS_YDS", "Josh Allen", 245.5, -110)
+
+	game2, err := fixture.store.UpsertGame(t.Context(), db.Game{
+		ID:       "game-kc-cin",
+		WeekID:   fixture.week.ID,
+		HomeTeam: "KC",
+		AwayTeam: "CIN",
+		Kickoff:  gameKickoff().Add(3 * time.Hour),
+		Status:   "SCHEDULED",
+	})
+	require.NoError(t, err)
+	addGameOdds(t, fixture.store, game2.ID)
+	addPropOdds(t, fixture.store, game2.ID, "PASS_YDS", "Patrick Mahomes", 275.5, -110)
+	require.NoError(t, fixture.store.UpsertRosterPlayers(t.Context(), []db.RosterPlayer{{
+		Team:     "KC",
+		FullName: "Patrick Mahomes",
+		NormName: "patrick mahomes",
+		Position: "QB",
+	}}))
+
+	// Empty search: both games appear on the slate and game1 detail is open.
+	recEmpty := pickBoard(t, fixture, "game="+game1.ID+"&cat=passing")
+	require.Equal(t, http.StatusOK, recEmpty.Code, recEmpty.Body.String())
+	emptyBody := html.UnescapeString(recEmpty.Body.String())
+	assert.Contains(t, emptyBody, "MIA @ BUF")
+	assert.Contains(t, emptyBody, "CIN @ KC")
+	assert.Contains(t, emptyBody, "Josh Allen")
+
+	// Non-empty search: slate filters to game2, while game1's detail stays open.
+	reqSearch := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodGet,
+		fmt.Sprintf("/slips/%d/pick/results?game=%s&q=Patrick+Mahomes", fixture.slip.ID, game1.ID),
+		nil,
+	)
+	recSearch := httptest.NewRecorder()
+	fixture.handler.ServeHTTP(recSearch, reqSearch)
+	require.Equal(t, http.StatusOK, recSearch.Code, recSearch.Body.String())
+	searchBody := html.UnescapeString(recSearch.Body.String())
+	slateHTML, detailHTML, foundDetail := strings.Cut(searchBody, `id="pick-detail"`)
+	require.True(t, foundDetail)
+	assert.Contains(t, slateHTML, "CIN @ KC")
+	assert.NotContains(t, slateHTML, "MIA @ BUF")
+	assert.Contains(t, detailHTML, "Nothing matches that search.")
+}

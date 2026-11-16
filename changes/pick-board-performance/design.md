@@ -151,7 +151,7 @@ while keeping single-instance and credit invariants)
 - [x] Replace the linear roster scan in `internal/board/board.go` (`Build`, `Slates`, `matchPlayer`, `gameMatchesQuery`)
       with a pre-normalized `rosterIndex` built once per call, with a prod-scale benchmark in
       `internal/board/board_test.go`.
-- [ ] Trim redundant work in `internal/web/pick.go` (`pickSlate` skips `dockFrom`/`Detail`, `pickDetail` loads only the
+- [x] Trim redundant work in `internal/web/pick.go` (`pickSlate` skips `dockFrom`/`Detail`, `pickDetail` loads only the
       open game's odds/roster, `pickPageData` avoids calling `board.Slates` twice when `q.Q == ""`), with handler tests
       in `internal/web/pick_test.go`.
 
