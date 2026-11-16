@@ -4,8 +4,6 @@ title: Local development
 type: guide
 summary: Start the app with hot reload, run the offline Sunday sandbox, set up the git hooks, and fall back to a plain server run when you need it.
 tags: [development, mise, air, tailwind, server, sandbox, offline]
-sources: [mise.toml, .air.toml, scripts/dev.sh, lefthook.yml, web/*.go, web/tailwind/*.css, web/templates/*.html, cmd/server/main.go, cmd/server/sandbox.go, internal/config/config.go, internal/sandbox/*.go, internal/auth/*.go, internal/groups/*.go]
-last_verified: 2026-11-11
 ---
 
 # Local development
@@ -203,6 +201,39 @@ it:
 
 ```sh
 rm -rf data
+```
+
+## Benchmarks and profiling
+
+Run the prod-scale benchmarks (`14` games, `15,500` odds rows, `2,100` roster rows) across `internal/board`, `internal/db`, and `internal/web`:
+
+```sh
+mise run bench
+```
+
+That runs `go test -run='^$' -bench=. -benchmem ./internal/board ./internal/db ./internal/web`. To focus on a single benchmark, pass `-bench` to `go test` directly:
+
+```sh
+go test -run='^$' -bench=BenchmarkBuild -benchmem ./internal/board
+```
+
+### Request phase timings (`Server-Timing`)
+
+In non-prod (`APP_ENV` other than `prod`), every HTTP response except `/events` SSE streams includes a `Server-Timing` header with `db`, `board`, `render`, and `total` durations in milliseconds. Check it in browser DevTools under **Network > Timing**, or from the terminal:
+
+```sh
+curl -sI http://localhost:8080/healthz | grep -i server-timing
+```
+
+The server also logs every request with `duration_ms`, `db_ms`, `board_ms`, and `render_ms` (`WARN` at `>= 250ms`, `DEBUG` otherwise), and logs SQLite operations in `Store.Tx`, `UpsertOdds`, and `OddsForWeek` at `WARN` when they take `>= 100ms`.
+
+### CPU and heap profiling (`pprof`)
+
+`/debug/pprof/` is mounted in non-prod and returns `404` when `APP_ENV=prod`. Capture a 15-second CPU profile or inspect the live heap while reproducing slow requests locally (for example, against `mise run sandbox` or a restored database):
+
+```sh
+go tool pprof -http=:6060 "http://localhost:8080/debug/pprof/profile?seconds=15"
+go tool pprof -http=:6060 http://localhost:8080/debug/pprof/heap
 ```
 
 ## Check your work
