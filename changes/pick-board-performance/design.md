@@ -181,3 +181,7 @@ while keeping single-instance and credit invariants)
       SQLite/refresh `zerolog` timing logs, and non-prod-only `/debug/pprof/` routes in `cmd/server`, with tests in
       `cmd/server/main_test.go`.
 - [x] Docs: update `docs/guides/local-dev.md` with benchmark and `pprof` / `Server-Timing` debugging commands.
+
+## Reviews
+
+- [x] Final review: agy@gemini-4-argon-high

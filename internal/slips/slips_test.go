@@ -449,6 +449,7 @@ func TestEnsureWeekSlipsDatabaseIntegration(t *testing.T) {
 	t.Cleanup(func() { assert.NoError(t, database.Close()) })
 	require.NoError(t, db.Migrate(t.Context(), database))
 	store := db.NewStore(database)
+	t.Cleanup(func() { assert.NoError(t, store.Close()) })
 
 	owner, err := store.CreateUserWithIdentity(t.Context(), "Owner", "", "", "")
 	require.NoError(t, err)

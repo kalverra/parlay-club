@@ -21,6 +21,7 @@ func TestPostseasonNFLverseMergesRegularAndPostseason(t *testing.T) {
 	t.Cleanup(func() { assert.NoError(t, database.Close()) })
 	require.NoError(t, db.Migrate(t.Context(), database))
 	store := db.NewStore(database)
+	t.Cleanup(func() { assert.NoError(t, store.Close()) })
 	now := time.Date(2027, 1, 16, 12, 0, 0, 0, time.UTC)
 	require.NoError(t, store.RecordSync(t.Context(), nflverseSource(2026), now, nil))
 

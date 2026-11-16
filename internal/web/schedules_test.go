@@ -42,6 +42,7 @@ func newScheduleTestFixture(t *testing.T) *scheduleTestFixture {
 	require.NoError(t, db.Migrate(t.Context(), database))
 
 	store := db.NewStore(database)
+	t.Cleanup(func() { assert.NoError(t, store.Close()) })
 	user, err := store.CreateUserWithIdentity(t.Context(), "Ada", "ada@example.com", "google-ada", "")
 	require.NoError(t, err)
 	other, err := store.CreateUserWithIdentity(t.Context(), "Ben", "ben@example.com", "google-ben", "")

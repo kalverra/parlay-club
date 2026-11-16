@@ -102,6 +102,11 @@ func run() error {
 	}
 
 	store := db.NewStore(database).WithLogger(logger)
+	defer func() {
+		if err := store.Close(); err != nil {
+			logger.Error().Err(err).Msg("close store read pool")
+		}
+	}()
 	cookies := auth.NewCookies(cfg.SessionKey, cfg.IsProd())
 	hub := &live.Hub{}
 

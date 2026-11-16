@@ -59,6 +59,7 @@ func newJoinFixtureWithBaseURL(t *testing.T, baseURL string) *joinFixture {
 	require.NoError(t, db.Migrate(t.Context(), database))
 
 	store := db.NewStore(database)
+	t.Cleanup(func() { assert.NoError(t, store.Close()) })
 	renderer, err := webui.NewRenderer(assets.Templates, false)
 	require.NoError(t, err)
 	cookies := auth.NewCookies("test-session-key-long-enough-for-anything", false)

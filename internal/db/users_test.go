@@ -20,7 +20,9 @@ func openTestStore(t *testing.T) (*db.Store, *sql.DB) {
 	database := openTestDB(t)
 	require.NoError(t, db.Migrate(t.Context(), database))
 
-	return db.NewStore(database), database
+	store := db.NewStore(database)
+	t.Cleanup(func() { assert.NoError(t, store.Close()) })
+	return store, database
 }
 
 // createUser adds an unlinked user with just a name.
