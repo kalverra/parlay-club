@@ -21,7 +21,7 @@ type LegVote struct {
 // voted.
 func (s *Store) LegVoteValue(ctx context.Context, legID, userID int64) (int, error) {
 	var value int
-	err := s.conn().QueryRowContext(ctx,
+	err := s.readConn().QueryRowContext(ctx,
 		"SELECT value FROM leg_votes WHERE leg_id = ? AND user_id = ?", legID, userID).Scan(&value)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, nil
@@ -85,7 +85,7 @@ func (s *Store) DeleteUserVotesForSlip(ctx context.Context, slipID, userID int64
 
 // VotesForSlip returns every vote on a slip's legs, ordered by leg and voter.
 func (s *Store) VotesForSlip(ctx context.Context, slipID int64) ([]LegVote, error) {
-	rows, err := s.conn().QueryContext(ctx, `
+	rows, err := s.readConn().QueryContext(ctx, `
 		SELECT v.leg_id, v.user_id, v.value, v.updated_at
 		FROM leg_votes v
 		JOIN legs l ON l.id = v.leg_id

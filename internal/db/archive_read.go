@@ -71,7 +71,7 @@ func (s *Store) ListAPIResponses(ctx context.Context, filter APIResponseFilter) 
 	}
 	query += " ORDER BY fetched_at, id"
 
-	rows, err := s.conn().QueryContext(ctx, query, args...)
+	rows, err := s.readConn().QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list API responses: %w", err)
 	}
@@ -140,7 +140,7 @@ func (s *Store) APIResponseBody(ctx context.Context, sha string) ([]byte, error)
 		size       int
 		compressed []byte
 	)
-	err := s.conn().QueryRowContext(ctx, `
+	err := s.readConn().QueryRowContext(ctx, `
 		SELECT encoding, size, body
 		FROM api_bodies
 		WHERE sha256 = ?`, sha).Scan(&encoding, &size, &compressed)

@@ -157,7 +157,7 @@ while keeping single-instance and credit invariants)
 
 ### Phase 2: Separate SQLite WAL read pool and batch `UpsertOdds`
 
-- [ ] Update `internal/db/db.go` and `internal/db/store.go` to open a multi-connection `query_only=ON` read pool
+- [x] Update `internal/db/db.go` and `internal/db/store.go` to open a multi-connection `query_only=ON` read pool
       alongside the single-writer handle (falling back to one handle for `:memory:` DBs), prepare statements once in
       `UpsertOdds`, and test concurrent read-during-write in `internal/db/db_test.go`.
 

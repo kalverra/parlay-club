@@ -83,7 +83,7 @@ func (s *Store) CreateLeg(ctx context.Context, leg Leg) (Leg, error) {
 // LegByID returns the leg with the given ID. A missing row wraps
 // ErrLegNotFound.
 func (s *Store) LegByID(ctx context.Context, id int64) (Leg, error) {
-	leg, err := scanLeg(s.conn().QueryRowContext(ctx,
+	leg, err := scanLeg(s.readConn().QueryRowContext(ctx,
 		"SELECT"+legColumns+" FROM legs WHERE id = ?", id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return Leg{}, fmt.Errorf("leg %d: %w", id, ErrLegNotFound)
@@ -96,7 +96,7 @@ func (s *Store) LegByID(ctx context.Context, id int64) (Leg, error) {
 
 // LegsForSlip returns a slip's legs in the order they were added.
 func (s *Store) LegsForSlip(ctx context.Context, slipID int64) ([]Leg, error) {
-	rows, err := s.conn().QueryContext(ctx,
+	rows, err := s.readConn().QueryContext(ctx,
 		"SELECT"+legColumns+" FROM legs WHERE slip_id = ? ORDER BY id", slipID)
 	if err != nil {
 		return nil, fmt.Errorf("list legs of slip %d: %w", slipID, err)
@@ -162,7 +162,7 @@ type PendingFinalLeg struct {
 // PendingLegsOnFinalGames returns every PENDING leg whose game is FINAL,
 // ordered by game ID then leg ID.
 func (s *Store) PendingLegsOnFinalGames(ctx context.Context) ([]PendingFinalLeg, error) {
-	rows, err := s.conn().QueryContext(ctx, `
+	rows, err := s.readConn().QueryContext(ctx, `
 		SELECT
 			l.id, l.slip_id, l.user_id, l.game_id, l.market_type, l.selection, l.team,
 			l.player_name, l.player_id, l.side, l.line, l.odds, l.result, l.graded_by, l.created_at,

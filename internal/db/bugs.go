@@ -109,7 +109,7 @@ func (s *Store) CreateBugReport(ctx context.Context, report BugReport) (BugRepor
 
 // BugReportByID looks up a bug report by its primary key ID.
 func (s *Store) BugReportByID(ctx context.Context, id int64) (BugReport, error) {
-	report, err := scanBugReport(s.conn().QueryRowContext(ctx,
+	report, err := scanBugReport(s.readConn().QueryRowContext(ctx,
 		"SELECT"+bugReportColumns+" FROM bug_reports WHERE id = ?", id))
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -126,7 +126,7 @@ func (s *Store) ScreenshotByToken(ctx context.Context, token string) ([]byte, st
 		screenshot []byte
 		mime       string
 	)
-	err := s.conn().QueryRowContext(ctx,
+	err := s.readConn().QueryRowContext(ctx,
 		"SELECT screenshot, screenshot_mime FROM bug_reports WHERE token = ?", token).
 		Scan(&screenshot, &mime)
 	if err != nil {

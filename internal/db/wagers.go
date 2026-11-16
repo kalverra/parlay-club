@@ -52,7 +52,7 @@ func (s *Store) DeleteWager(ctx context.Context, slipID, userID int64) error {
 // WagerForUser returns one member's logged bet on a slip, and reports whether
 // one exists.
 func (s *Store) WagerForUser(ctx context.Context, slipID, userID int64) (Wager, bool, error) {
-	row := s.conn().QueryRowContext(ctx, `
+	row := s.readConn().QueryRowContext(ctx, `
 		SELECT `+wagerColumns+`
 		FROM wagers
 		WHERE slip_id = ? AND user_id = ?`, slipID, userID)
@@ -68,7 +68,7 @@ func (s *Store) WagerForUser(ctx context.Context, slipID, userID int64) (Wager, 
 
 // WagersForSlip returns every logged wager on a slip, ordered by user ID.
 func (s *Store) WagersForSlip(ctx context.Context, slipID int64) ([]Wager, error) {
-	rows, err := s.conn().QueryContext(ctx, `
+	rows, err := s.readConn().QueryContext(ctx, `
 		SELECT `+wagerColumns+`
 		FROM wagers
 		WHERE slip_id = ?
@@ -95,7 +95,7 @@ func (s *Store) WagersForSlip(ctx context.Context, slipID int64) ([]Wager, error
 // WagersForGroupSeason returns every logged wager on slips in groupID during
 // season, ordered by slip ID and user ID.
 func (s *Store) WagersForGroupSeason(ctx context.Context, groupID int64, season int) ([]Wager, error) {
-	rows, err := s.conn().QueryContext(ctx, `
+	rows, err := s.readConn().QueryContext(ctx, `
 		SELECT w.slip_id, w.user_id, w.book, w.stake, w.odds, w.boost_pct
 		FROM wagers w
 		JOIN slips s ON s.id = w.slip_id

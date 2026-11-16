@@ -44,7 +44,7 @@ func (s *Store) seasonsForGroup(ctx context.Context, groupID int64, gradedOnly b
 		args = append(args, string(SlipGraded))
 	}
 
-	rows, err := s.conn().QueryContext(ctx, query, args...)
+	rows, err := s.readConn().QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list seasons for group %d: %w", groupID, err)
 	}
@@ -67,7 +67,7 @@ func (s *Store) seasonsForGroup(ctx context.Context, groupID int64, gradedOnly b
 // GradedSlipsForGroupSeason returns every GRADED slip in groupID for season,
 // ordered chronologically by week, creation time, and slip ID.
 func (s *Store) GradedSlipsForGroupSeason(ctx context.Context, groupID int64, season int) ([]GradedSlip, error) {
-	rows, err := s.conn().QueryContext(ctx, `
+	rows, err := s.readConn().QueryContext(ctx, `
 		SELECT `+prefixedSlipColumns("s")+`,
 			wk.id, wk.season, wk.season_type, wk.week_num
 		FROM slips s
@@ -97,7 +97,7 @@ func (s *Store) GradedSlipsForGroupSeason(ctx context.Context, groupID int64, se
 // GradedLegsForGroupSeason returns every leg on GRADED slips in groupID for
 // season, ordered by slip ID and leg ID.
 func (s *Store) GradedLegsForGroupSeason(ctx context.Context, groupID int64, season int) ([]Leg, error) {
-	rows, err := s.conn().QueryContext(ctx, `
+	rows, err := s.readConn().QueryContext(ctx, `
 		SELECT `+prefixedLegColumns("l")+`
 		FROM legs l
 		JOIN slips s ON s.id = l.slip_id
@@ -127,7 +127,7 @@ func (s *Store) GradedLegsForGroupSeason(ctx context.Context, groupID int64, sea
 // RecordUsersForGroupSeason returns every user who is a member of groupID or
 // who authored a leg on a GRADED slip in groupID during season.
 func (s *Store) RecordUsersForGroupSeason(ctx context.Context, groupID int64, season int) ([]User, error) {
-	rows, err := s.conn().QueryContext(ctx, `
+	rows, err := s.readConn().QueryContext(ctx, `
 		SELECT u.id, u.name, u.avatar_color, u.home_book, u.active, u.email, u.picture_url
 		FROM users u
 		WHERE u.id IN (

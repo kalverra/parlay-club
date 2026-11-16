@@ -122,7 +122,7 @@ func (s *Store) UpsertRosterPlayers(ctx context.Context, players []RosterPlayer)
 
 // RosterPlayerByID returns one athlete by ESPN athlete ID.
 func (s *Store) RosterPlayerByID(ctx context.Context, athleteID string) (RosterPlayer, error) {
-	row := s.conn().QueryRowContext(ctx,
+	row := s.readConn().QueryRowContext(ctx,
 		"SELECT "+rosterColumns+" FROM roster_players WHERE athlete_id = ?", athleteID)
 	player, err := scanRosterPlayer(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -146,7 +146,7 @@ func (s *Store) RosterPlayersByIDs(ctx context.Context, athleteIDs []string) (ma
 	for i, id := range athleteIDs {
 		args[i] = id
 	}
-	rows, err := s.conn().QueryContext(ctx,
+	rows, err := s.readConn().QueryContext(ctx,
 		"SELECT "+rosterColumns+" FROM roster_players WHERE athlete_id IN ("+placeholders+")", args...)
 	if err != nil {
 		return nil, fmt.Errorf("roster players by ids: %w", err)
@@ -169,7 +169,7 @@ func (s *Store) RosterPlayersByIDs(ctx context.Context, athleteIDs []string) (ma
 
 // RosterForTeam returns all roster players for an NFL team.
 func (s *Store) RosterForTeam(ctx context.Context, team string) ([]RosterPlayer, error) {
-	rows, err := s.conn().QueryContext(ctx,
+	rows, err := s.readConn().QueryContext(ctx,
 		"SELECT "+rosterColumns+" FROM roster_players WHERE team = ? ORDER BY full_name", team)
 	if err != nil {
 		return nil, fmt.Errorf("roster for team %s: %w", team, err)
@@ -201,7 +201,7 @@ func (s *Store) RosterForTeams(ctx context.Context, teams []string) ([]RosterPla
 	for i, t := range teams {
 		args[i] = t
 	}
-	rows, err := s.conn().QueryContext(ctx,
+	rows, err := s.readConn().QueryContext(ctx,
 		"SELECT "+rosterColumns+" FROM roster_players WHERE team IN ("+placeholders+") ORDER BY team, full_name", args...)
 	if err != nil {
 		return nil, fmt.Errorf("rosters for teams: %w", err)
@@ -264,7 +264,7 @@ func (s *Store) WeekPlayerNames(ctx context.Context, weekID int64) ([]string, er
 		for i, id := range gameIDs {
 			args[i] = id
 		}
-		rows, err := s.conn().QueryContext(ctx,
+		rows, err := s.readConn().QueryContext(ctx,
 			"SELECT DISTINCT player_name FROM odds WHERE game_id IN ("+placeholders+") AND player_name != ''",
 			args...,
 		)
@@ -320,7 +320,7 @@ func (s *Store) UpsertPlayerGameLog(ctx context.Context, log PlayerGameLog) erro
 
 // PlayerGameLog returns one athlete's game log.
 func (s *Store) PlayerGameLog(ctx context.Context, athleteID string) (PlayerGameLog, error) {
-	row := s.conn().QueryRowContext(ctx,
+	row := s.readConn().QueryRowContext(ctx,
 		"SELECT "+gameLogColumns+" FROM player_gamelogs WHERE athlete_id = ?", athleteID)
 	log, err := scanPlayerGameLog(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -343,7 +343,7 @@ func (s *Store) PlayerGameLogs(ctx context.Context, athleteIDs []string) (map[st
 	for i, id := range athleteIDs {
 		args[i] = id
 	}
-	rows, err := s.conn().QueryContext(ctx,
+	rows, err := s.readConn().QueryContext(ctx,
 		"SELECT "+gameLogColumns+" FROM player_gamelogs WHERE athlete_id IN ("+placeholders+")", args...)
 	if err != nil {
 		return nil, fmt.Errorf("player gamelogs: %w", err)
@@ -565,7 +565,7 @@ func (s *Store) PlayerMatchesForTeams(ctx context.Context, teams []string) ([]Pl
 	for i, t := range teams {
 		args[i] = t
 	}
-	rows, err := s.conn().QueryContext(ctx,
+	rows, err := s.readConn().QueryContext(ctx,
 		"SELECT "+matchColumns+" FROM player_matches WHERE team IN ("+placeholders+") ORDER BY team, odds_name", args...)
 	if err != nil {
 		return nil, fmt.Errorf("player matches for teams: %w", err)
