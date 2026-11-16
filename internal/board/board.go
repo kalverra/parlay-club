@@ -327,12 +327,13 @@ func Build(
 		found.rows = append(found.rows, row)
 	}
 
+	index := newRosterIndex(roster)
 	rows := make([]Row, 0, len(groups))
 	for _, key := range order {
 		group := groups[key]
 		game := byGame[group.gameID]
 		line, price := selectionPrice(group.rows, homeBook)
-		playerID, position, headshotURL := matchPlayer(roster, group.player, group.team)
+		playerID, position, headshotURL := matchPlayer(&index, group.player, group.team)
 		rows = append(rows, Row{
 			GameID:      group.gameID,
 			Market:      group.market,
@@ -539,31 +540,81 @@ func marketLabel(market string) string {
 	}
 }
 
+type rosterEntry struct {
+	player   db.RosterPlayer
+	normFull string
+	normAlt  string
+}
+
+type rosterIndex struct {
+	byTeamAndName map[string]db.RosterPlayer // team + "\x00" + norm
+	byName        map[string]db.RosterPlayer // first match when team == "" or fallback
+	byGameTeam    map[string][]rosterEntry   // team -> normalized entries for search
+}
+
+func newRosterIndex(roster []db.RosterPlayer) rosterIndex {
+	if len(roster) == 0 {
+		return rosterIndex{}
+	}
+	idx := rosterIndex{
+		byTeamAndName: make(map[string]db.RosterPlayer, len(roster)),
+		byName:        make(map[string]db.RosterPlayer, len(roster)),
+		byGameTeam:    make(map[string][]rosterEntry),
+	}
+	for _, player := range roster {
+		normFull := normalize(player.FullName)
+		normAlt := ""
+		if player.NormName != "" {
+			normAlt = normalize(player.NormName)
+		}
+		idx.byGameTeam[player.Team] = append(idx.byGameTeam[player.Team], rosterEntry{
+			player:   player,
+			normFull: normFull,
+			normAlt:  normAlt,
+		})
+		idx.addLookup(player, normFull)
+		if normAlt != "" && normAlt != normFull {
+			idx.addLookup(player, normAlt)
+		}
+	}
+	return idx
+}
+
+func (idx *rosterIndex) addLookup(player db.RosterPlayer, norm string) {
+	if norm == "" {
+		return
+	}
+	if player.Team != "" {
+		key := player.Team + "\x00" + norm
+		if _, exists := idx.byTeamAndName[key]; !exists {
+			idx.byTeamAndName[key] = player
+		}
+	}
+	if _, exists := idx.byName[norm]; !exists {
+		idx.byName[norm] = player
+	}
+}
+
 // matchPlayer finds the roster athlete for a prop row's player name and team,
 // returning its ID, position, and headshot URL. A name on the row's own team
 // wins over the same name on another team.
-func matchPlayer(roster []db.RosterPlayer, name, team string) (string, string, string) {
-	if name == "" {
+func matchPlayer(index *rosterIndex, name, team string) (string, string, string) {
+	if name == "" || index == nil {
 		return "", "", ""
 	}
 	want := normalize(name)
-	var fallback *db.RosterPlayer
-	for i := range roster {
-		player := &roster[i]
-		if normalize(player.FullName) != want && normalize(player.NormName) != want {
-			continue
-		}
-		if team == "" || player.Team == team {
-			return player.AthleteID, player.Position, player.HeadshotURL
-		}
-		if fallback == nil {
-			fallback = player
-		}
-	}
-	if fallback == nil {
+	if want == "" {
 		return "", "", ""
 	}
-	return fallback.AthleteID, fallback.Position, fallback.HeadshotURL
+	if team != "" {
+		if player, ok := index.byTeamAndName[team+"\x00"+want]; ok {
+			return player.AthleteID, player.Position, player.HeadshotURL
+		}
+	}
+	if player, ok := index.byName[want]; ok {
+		return player.AthleteID, player.Position, player.HeadshotURL
+	}
+	return "", "", ""
 }
 
 // StartedCount counts the games that had kicked off by now, so the slate can
@@ -590,6 +641,11 @@ func Slates(games []db.Game, rows []Row, roster []db.RosterPlayer, q Query) []Ga
 		now = time.Now()
 	}
 	needle := normalize(q.Q)
+	var index *rosterIndex
+	if needle != "" {
+		built := newRosterIndex(roster)
+		index = &built
+	}
 
 	byGame := make(map[string][]Row, len(games))
 	for _, row := range rows {
@@ -604,7 +660,7 @@ func Slates(games []db.Game, rows []Row, roster []db.RosterPlayer, q Query) []Ga
 		if q.Window != "" && windowFor(game.Kickoff) != q.Window {
 			continue
 		}
-		if !gameMatchesQuery(game, roster, needle) {
+		if !gameMatchesQuery(game, index, needle) {
 			continue
 		}
 		gameRows := byGame[game.ID]
@@ -1215,7 +1271,7 @@ func rowMatches(row Row, game db.Game, needle string) bool {
 
 // gameMatchesQuery reports whether an empty query, a team, a venue, or a
 // roster player makes a game worth showing.
-func gameMatchesQuery(game db.Game, roster []db.RosterPlayer, needle string) bool {
+func gameMatchesQuery(game db.Game, index *rosterIndex, needle string) bool {
 	if needle == "" {
 		return true
 	}
@@ -1229,13 +1285,17 @@ func gameMatchesQuery(game db.Game, roster []db.RosterPlayer, needle string) boo
 			return true
 		}
 	}
-	for _, player := range roster {
-		if player.Team != game.AwayTeam && player.Team != game.HomeTeam {
-			continue
-		}
-		name := normalize(player.FullName)
-		if strings.Contains(name, needle) || strings.Contains(needle, name) {
-			return true
+	if index == nil {
+		return false
+	}
+	for _, team := range [2]string{game.AwayTeam, game.HomeTeam} {
+		for _, entry := range index.byGameTeam[team] {
+			if entry.normFull == "" {
+				continue
+			}
+			if strings.Contains(entry.normFull, needle) || strings.Contains(needle, entry.normFull) {
+				return true
+			}
 		}
 	}
 	return false
