@@ -225,7 +225,7 @@ func (h *slipHandlers) pickBoard(w http.ResponseWriter, r *http.Request) {
 	page.Tab = ""
 	page.Wide = true
 	data.Page = page
-	h.renderPage(w, "pick", data)
+	h.renderPageCtx(r.Context(), w, "pick", data)
 }
 
 // pickResults returns the #pick-body partial for HTMX searches, filters, game
@@ -255,7 +255,7 @@ func (h *slipHandlers) pickResults(w http.ResponseWriter, r *http.Request) {
 		GameID:   data.Body.Game,
 	}
 	w.Header().Set("Hx-Push-Url", pickPushURL(slip.ID, self, "", ""))
-	h.renderPartial(w, "pick-body", data.Body)
+	h.renderPartialCtx(r.Context(), w, "pick-body", data.Body)
 }
 
 // pickSlate returns the slate alone, so a live board signal refreshes the game
@@ -270,7 +270,7 @@ func (h *slipHandlers) pickSlate(w http.ResponseWriter, r *http.Request) {
 		h.serverError(w, err)
 		return
 	}
-	h.renderPartial(w, "pick-slate", slate)
+	h.renderPartialCtx(r.Context(), w, "pick-slate", slate)
 }
 
 // pickDetail returns the #pick-detail partial for a tab or sort change. It
@@ -291,13 +291,13 @@ func (h *slipHandlers) pickDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !ok {
-		h.renderPartial(w, "pick-detail-empty", nil)
+		h.renderPartialCtx(r.Context(), w, "pick-detail-empty", nil)
 		return
 	}
 	// The tab and sort live in the detail's URL, but the search form still posts
 	// hidden copies. Swap them out of band so the next search keeps the tab.
 	detail.OOB = true
-	h.renderPartial(w, "pick-detail", detail)
+	h.renderPartialCtx(r.Context(), w, "pick-detail", detail)
 }
 
 // pickRefresh triggers a manual pick-time odds refresh on an open slip and
@@ -341,7 +341,7 @@ func (h *slipHandlers) pickRefresh(w http.ResponseWriter, r *http.Request) {
 		h.serverError(w, err)
 		return
 	}
-	h.renderPartial(w, "pick-body", data.Body)
+	h.renderPartialCtx(r.Context(), w, "pick-body", data.Body)
 }
 
 // syncPickIfOpen triggers pick-time odds syncs only when slip is OPEN and
@@ -481,6 +481,7 @@ func (h *slipHandlers) pickPageData(
 	slip db.Slip,
 	q board.Query,
 ) (PickPage, error) {
+	dbStart := time.Now()
 	legs, err := h.deps.Store.LegsForSlip(ctx, slip.ID)
 	if err != nil {
 		return PickPage{}, err
@@ -498,6 +499,7 @@ func (h *slipHandlers) pickPageData(
 	if err != nil {
 		return PickPage{}, err
 	}
+	AddDBTiming(ctx, time.Since(dbStart))
 
 	user, _ := h.user(ctx)
 	homeBook := ""
@@ -511,12 +513,16 @@ func (h *slipHandlers) pickPageData(
 	}
 	q.Now = now
 
+	boardStart := time.Now()
 	rows := board.Build(games, currentOdds(odds), roster, homeBook, mine, now)
+	AddBoardTiming(ctx, time.Since(boardStart))
+
 	dock, err := h.dockFrom(ctx, slip, legs, allGames, mine)
 	if err != nil {
 		return PickPage{}, err
 	}
 
+	slateStart := time.Now()
 	slate, openByID, rowGames, resolvedGameID := buildPickSlate(slip, games, rows, roster, q, now)
 	q.GameID = resolvedGameID
 
@@ -541,6 +547,7 @@ func (h *slipHandlers) pickPageData(
 		body.Category = detail.Category
 		body.Sort = detail.Sort
 	}
+	AddBoardTiming(ctx, time.Since(slateStart))
 	body.Slate.Category = body.Category
 	body.Slate.Sort = body.Sort
 	body.Slate.Detail = body.Detail != nil
@@ -558,6 +565,7 @@ func (h *slipHandlers) pickSlateData(
 	slip db.Slip,
 	q board.Query,
 ) (PickSlateView, error) {
+	dbStart := time.Now()
 	allGames, err := h.deps.Store.GamesForWeek(ctx, slip.WeekID)
 	if err != nil {
 		return PickSlateView{}, err
@@ -571,6 +579,7 @@ func (h *slipHandlers) pickSlateData(
 	if err != nil {
 		return PickSlateView{}, err
 	}
+	AddDBTiming(ctx, time.Since(dbStart))
 
 	user, _ := h.user(ctx)
 	homeBook := ""
@@ -583,8 +592,10 @@ func (h *slipHandlers) pickSlateData(
 	}
 	q.Now = now
 
+	boardStart := time.Now()
 	rows := board.Build(games, currentOdds(odds), roster, homeBook, nil, now)
 	slate, _, _, _ := buildPickSlate(slip, games, rows, roster, q, now)
+	AddBoardTiming(ctx, time.Since(boardStart))
 	return slate, nil
 }
 
@@ -597,6 +608,7 @@ func (h *slipHandlers) pickDetailData(
 	if q.GameID == "" {
 		return PickDetailView{}, false, nil
 	}
+	dbStart := time.Now()
 	game, err := h.deps.Store.GameByID(ctx, q.GameID)
 	if errors.Is(err, db.ErrGameNotFound) {
 		return PickDetailView{}, false, nil
@@ -620,6 +632,7 @@ func (h *slipHandlers) pickDetailData(
 	if err != nil {
 		return PickDetailView{}, false, err
 	}
+	AddDBTiming(ctx, time.Since(dbStart))
 
 	user, _ := h.user(ctx)
 	homeBook := ""
@@ -633,15 +646,18 @@ func (h *slipHandlers) pickDetailData(
 	}
 	q.Now = now
 
+	boardStart := time.Now()
 	gameSlice := []db.Game{game}
 	rows := board.Build(gameSlice, currentOdds(odds), roster, homeBook, mine, now)
 	openCards := board.Slates(gameSlice, rows, roster, board.Query{Window: q.Window, Now: now})
 	if len(openCards) == 0 {
+		AddBoardTiming(ctx, time.Since(boardStart))
 		return PickDetailView{}, false, nil
 	}
 
 	atLimit := len(mine) >= slip.LegsPerMember
 	detail := h.buildPickDetail(ctx, slip, game, openCards[0], rows, legs, q, now, atLimit, len(rows) > 0)
+	AddBoardTiming(ctx, time.Since(boardStart))
 	return detail, true, nil
 }
 

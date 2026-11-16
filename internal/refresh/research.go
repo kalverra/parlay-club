@@ -316,6 +316,7 @@ func (s *Service) syncOddsProps(ctx context.Context, game db.Game, now time.Time
 	if !now.Before(game.Kickoff) {
 		return false, nil
 	}
+	start := time.Now()
 
 	// 1. Sync rosters for both teams before matching props.
 	if s.espn != nil {
@@ -381,7 +382,15 @@ func (s *Service) syncOddsProps(ctx context.Context, game db.Game, now time.Time
 
 	// 5. Convert to db.Odds rows and write.
 	rows := s.mapPropsToOdds(ctx, game, finalProps, now)
-	return s.writeOddsProps(ctx, game, rows, now)
+	changed, err := s.writeOddsProps(ctx, game, rows, now)
+	s.logger.Info().
+		Float64("duration_ms", durationMS(time.Since(start))).
+		Str("game_id", game.ID).
+		Int("rows", len(rows)).
+		Bool("changed", changed).
+		Err(err).
+		Msg("refresh sync odds props")
+	return changed, err
 }
 
 // writeOddsProps writes prop rows and records the game's props sync state.

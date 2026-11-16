@@ -4,13 +4,23 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"time"
+
+	"github.com/rs/zerolog"
 )
+
+const slowQueryThreshold = 100 * time.Millisecond
+
+func durationMS(d time.Duration) float64 {
+	return float64(d.Microseconds()) / 1000.0
+}
 
 // Store runs the app's hand-written SQL against the database.
 type Store struct {
 	db     *sql.DB
 	readDB *sql.DB
 	tx     *sql.Tx
+	logger zerolog.Logger
 }
 
 // NewStore wraps database in a Store. For file-backed databases it opens a
@@ -24,7 +34,18 @@ func NewStore(database *sql.DB) *Store {
 			readDB = pool
 		}
 	}
-	return &Store{db: database, readDB: readDB}
+	return &Store{db: database, readDB: readDB, logger: zerolog.Nop()}
+}
+
+// WithLogger returns a shallow copy of s configured to emit slow-query warnings
+// to logger.
+func (s *Store) WithLogger(logger zerolog.Logger) *Store {
+	return &Store{
+		db:     s.db,
+		readDB: s.readDB,
+		tx:     s.tx,
+		logger: logger,
+	}
 }
 
 // Close closes the read pool when the store opened one separate from the
@@ -53,17 +74,23 @@ func (s *Store) Tx(ctx context.Context, fn func(*Store) error) error {
 		return fn(s)
 	}
 
+	start := time.Now()
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	if err := fn(&Store{db: s.db, readDB: s.readDB, tx: tx}); err != nil {
+	if err := fn(&Store{db: s.db, readDB: s.readDB, tx: tx, logger: s.logger}); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit transaction: %w", err)
+	}
+	if elapsed := time.Since(start); elapsed >= slowQueryThreshold {
+		s.logger.Warn().
+			Float64("duration_ms", durationMS(elapsed)).
+			Msg("slow sqlite tx")
 	}
 	return nil
 }
