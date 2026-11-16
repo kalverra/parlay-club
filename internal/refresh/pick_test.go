@@ -466,3 +466,150 @@ func TestPickSyncSingleFlight(t *testing.T) {
 		assert.Equal(t, int32(1), props.calls.Load())
 	})
 }
+
+func TestKickPickLinesAsyncSingleFlightAndPublish(t *testing.T) {
+	t.Parallel()
+
+	store, week, slip := publishTestStore(t)
+	kickoff := novemberTime(8, 13, 0)
+	_, err := store.UpsertGame(t.Context(), db.Game{
+		ID:        "401772001",
+		WeekID:    week.ID,
+		HomeTeam:  "BUF",
+		AwayTeam:  "MIA",
+		HomeName:  "Buffalo Bills",
+		AwayName:  "Miami Dolphins",
+		Kickoff:   kickoff,
+		Status:    db.GameScheduled,
+		UpdatedAt: novemberTime(4, 12, 0),
+	})
+	require.NoError(t, err)
+
+	lines := &blockingLinesClient{
+		events: []odds.Event{{
+			ID:           "evt-401",
+			HomeTeam:     "Buffalo Bills",
+			AwayTeam:     "Miami Dolphins",
+			CommenceTime: kickoff,
+		}},
+		eventsCredits: odds.Credits{Remaining: 400},
+		lines: []odds.Line{{
+			EventID:    "evt-401",
+			Book:       "draftkings",
+			MarketType: odds.MarketSpread,
+			Side:       odds.SideTeam,
+			Team:       "Buffalo Bills",
+			Line:       new(-3.5),
+			Price:      -110,
+		}},
+		lineCredits: odds.Credits{Remaining: 397},
+		started:     make(chan struct{}),
+		release:     make(chan struct{}),
+	}
+	publisher := &recordingPublisher{}
+	svc := New(Deps{
+		Store:     store,
+		Lines:     lines,
+		Publisher: publisher,
+		Now:       func() time.Time { return novemberTime(8, 10, 0) },
+		Logger:    zerolog.Nop(),
+	})
+
+	// Cancel caller context immediately after kicking to verify request
+	// cancellation does not abort the background refresh.
+	for range 4 {
+		reqCtx, cancel := context.WithCancel(t.Context())
+		svc.KickPickLines(reqCtx, week.ID)
+		cancel()
+	}
+
+	// Upstream fetch should be in flight without blocking KickPickLines.
+	<-lines.started
+	assert.Empty(t, publisher.seen())
+
+	close(lines.release)
+	svc.wait()
+
+	assert.Equal(t, int32(1), lines.calls.Load())
+	assert.ElementsMatch(t, weekTopics(week.ID, slip.ID), publisher.seen())
+
+	// Calling KickPickLines after Shutdown does not start new work.
+	require.NoError(t, svc.Shutdown(t.Context()))
+	svc.KickPickLines(t.Context(), week.ID)
+	svc.wait()
+	assert.Equal(t, int32(1), lines.calls.Load())
+}
+
+func TestKickPickGameAsyncSingleFlightAndPublish(t *testing.T) {
+	t.Parallel()
+
+	store, week, slip := publishTestStore(t)
+	kickoff := novemberTime(8, 13, 0)
+	game, err := store.UpsertGame(t.Context(), db.Game{
+		ID:        "401772001",
+		WeekID:    week.ID,
+		HomeTeam:  "BUF",
+		AwayTeam:  "MIA",
+		HomeName:  "Buffalo Bills",
+		AwayName:  "Miami Dolphins",
+		Kickoff:   kickoff,
+		Status:    db.GameScheduled,
+		UpdatedAt: novemberTime(4, 12, 0),
+	})
+	require.NoError(t, err)
+	_, err = store.SetGameOddsEvent(t.Context(), game.ID, "evt-401")
+	require.NoError(t, err)
+
+	clock := &fakeClock{now: novemberTime(8, 10, 0)}
+	require.NoError(t, store.RecordSync(t.Context(), OddsLinesSource, clock.Now().Add(-time.Minute), new(400)))
+
+	props := &blockingPropsClient{
+		props: map[string][]odds.Prop{
+			"evt-401": {{
+				EventID:    "evt-401",
+				Book:       "draftkings",
+				MarketType: odds.MarketPassYds,
+				PlayerName: "Josh Allen",
+				Side:       odds.SideOver,
+				Line:       new(265.5),
+				Price:      -115,
+			}},
+		},
+		propsCredits: odds.Credits{Remaining: 397},
+		started:      make(chan struct{}),
+		release:      make(chan struct{}),
+	}
+	publisher := &recordingPublisher{}
+	svc := New(Deps{
+		Store:     store,
+		Props:     props,
+		Publisher: publisher,
+		Now:       clock.Now,
+		Logger:    zerolog.Nop(),
+	})
+
+	for range 4 {
+		reqCtx, cancel := context.WithCancel(t.Context())
+		svc.KickPickGame(reqCtx, week.ID, game.ID)
+		cancel()
+	}
+
+	<-props.started
+	assert.Empty(t, publisher.seen())
+
+	close(props.release)
+	svc.wait()
+
+	assert.Equal(t, int32(1), props.calls.Load())
+	assert.ElementsMatch(t, weekTopics(week.ID, slip.ID), publisher.seen())
+
+	// Subsequent stale refresh with no prop rows does not republish.
+	publisher.reset()
+	props.props = nil
+	clock.Advance(31 * time.Minute)
+	svc.KickPickGame(t.Context(), week.ID, game.ID)
+	svc.wait()
+
+	assert.Equal(t, int32(2), props.calls.Load())
+	assert.Empty(t, publisher.seen())
+}

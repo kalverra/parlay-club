@@ -359,15 +359,11 @@ func (h *slipHandlers) syncPickIfOpen(ctx context.Context, slip db.Slip, q board
 		return err
 	}
 	if gameUpcoming {
-		if err := h.deps.Refresh.SyncPickGame(ctx, slip.WeekID, q.GameID); err != nil {
-			h.deps.Logger.Warn().Err(err).Int64("slip_id", slip.ID).Str("game_id", q.GameID).Msg("sync pick game")
-		}
+		h.deps.Refresh.KickPickGame(ctx, slip.WeekID, q.GameID)
 		return nil
 	}
 	if syncLines && hasUpcoming {
-		if err := h.deps.Refresh.SyncPickLines(ctx, slip.WeekID); err != nil {
-			h.deps.Logger.Warn().Err(err).Int64("slip_id", slip.ID).Msg("sync pick lines")
-		}
+		h.deps.Refresh.KickPickLines(ctx, slip.WeekID)
 	}
 	return nil
 }

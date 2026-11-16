@@ -949,6 +949,62 @@ func (s *Service) SyncPickGame(ctx context.Context, weekID int64, gameID string)
 	return errors.Join(errs...)
 }
 
+// KickPickLines starts a background pick-time lines refresh for weekID if stale
+// and returns immediately. Concurrent callers share one upstream fetch via
+// singleflight, and Shutdown waits for or cancels in-flight work.
+func (s *Service) KickPickLines(ctx context.Context, weekID int64) {
+	if weekID == 0 || (s.lines == nil && s.fallbackLines == nil) {
+		return
+	}
+	s.kickPick(ctx, "kick pick lines", weekID, "", func(runCtx context.Context) error {
+		return s.SyncPickLines(runCtx, weekID)
+	})
+}
+
+// KickPickGame starts a background pick-time refresh for weekID's lines and
+// gameID's props if stale, and returns immediately. Concurrent callers share
+// upstream fetches via singleflight, and Shutdown waits for or cancels in-flight
+// work.
+func (s *Service) KickPickGame(ctx context.Context, weekID int64, gameID string) {
+	if weekID == 0 && gameID == "" {
+		return
+	}
+	s.kickPick(ctx, "kick pick game", weekID, gameID, func(runCtx context.Context) error {
+		return s.SyncPickGame(runCtx, weekID, gameID)
+	})
+}
+
+func (s *Service) kickPick(
+	ctx context.Context,
+	msg string,
+	weekID int64,
+	gameID string,
+	run func(context.Context) error,
+) {
+	s.stopMu.Lock()
+	defer s.stopMu.Unlock()
+
+	if s.stopping() {
+		return
+	}
+
+	parent := context.WithoutCancel(ctx)
+	s.wg.Go(func() {
+		runCtx, stopWork := context.WithCancel(parent)
+		defer stopWork()
+		unregister := context.AfterFunc(s.stopCtx, stopWork)
+		defer unregister()
+
+		if err := run(runCtx); err != nil && !s.stopping() {
+			s.logger.Warn().
+				Err(err).
+				Int64("week_id", weekID).
+				Str("game_id", gameID).
+				Msg(msg)
+		}
+	})
+}
+
 // ForcePickRefresh refreshes the week's lines and, when gameID is non-empty,
 // that game's props, subject to a 2-minute cooldown per source so rapid
 // clicks cannot drain credits.

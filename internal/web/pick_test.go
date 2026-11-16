@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -1727,14 +1728,12 @@ func (r *pickTestRefresher) SyncPlayerResearch(_ context.Context, _ string) erro
 	return nil
 }
 
-func (r *pickTestRefresher) SyncPickLines(_ context.Context, weekID int64) error {
+func (r *pickTestRefresher) KickPickLines(_ context.Context, weekID int64) {
 	r.linesCalls = append(r.linesCalls, weekID)
-	return nil
 }
 
-func (r *pickTestRefresher) SyncPickGame(_ context.Context, weekID int64, gameID string) error {
+func (r *pickTestRefresher) KickPickGame(_ context.Context, weekID int64, gameID string) {
 	r.gameCalls = append(r.gameCalls, pickSyncCall{weekID: weekID, gameID: gameID})
-	return nil
 }
 
 func (r *pickTestRefresher) ForcePickRefresh(_ context.Context, weekID int64, gameID string) error {
@@ -2009,8 +2008,13 @@ func TestPickRefreshCooldownAndRepeatedSearchWithService(t *testing.T) {
 
 	fixture := newSlipFixture(t, 2)
 	game := addGame(t, fixture, gameKickoff())
+	var clockMu sync.Mutex
 	clockNow := gameKickoff().Add(-1 * time.Hour)
-	now := func() time.Time { return clockNow }
+	now := func() time.Time {
+		clockMu.Lock()
+		defer clockMu.Unlock()
+		return clockNow
+	}
 
 	event := odds.Event{
 		ID:           "evt-pick-1",
@@ -2049,16 +2053,20 @@ func TestPickRefreshCooldownAndRepeatedSearchWithService(t *testing.T) {
 		Now:    now,
 		Logger: zerolog.Nop(),
 	})
+	t.Cleanup(func() {
+		assert.NoError(t, svc.Shutdown(context.Background()))
+	})
 	handler := pickHandlerWithRefresher(t, fixture, fixture.user, svc, now)
 
-	// 1. Opening pickDetail/pickResults for a game fetches lines and props once.
+	// 1. Opening pickDetail/pickResults for a game triggers an async refresh once.
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, httptest.NewRequestWithContext(
 		t.Context(), http.MethodGet, fmt.Sprintf("/slips/%d/pick/detail?game=%s", fixture.slip.ID, game.ID), nil,
 	))
 	require.Equal(t, http.StatusOK, rec.Code)
-	assert.Equal(t, int32(1), linesClient.calls.Load())
-	assert.Equal(t, int32(1), propsClient.calls.Load())
+	require.Eventually(t, func() bool {
+		return linesClient.calls.Load() == 1 && propsClient.calls.Load() == 1
+	}, 2*time.Second, 5*time.Millisecond)
 
 	// 2. Repeated search queries on that game spend 0 extra API calls.
 	for _, q := range []string{"j", "jo", "jos", "josh"} {
@@ -2071,6 +2079,7 @@ func TestPickRefreshCooldownAndRepeatedSearchWithService(t *testing.T) {
 		))
 		require.Equal(t, http.StatusOK, rec.Code)
 	}
+	require.NoError(t, svc.Shutdown(t.Context()))
 	assert.Equal(t, int32(1), linesClient.calls.Load())
 	assert.Equal(t, int32(1), propsClient.calls.Load())
 
@@ -2088,7 +2097,9 @@ func TestPickRefreshCooldownAndRepeatedSearchWithService(t *testing.T) {
 	assert.Equal(t, int32(1), propsClient.calls.Load())
 
 	// 4. After 2m cooldown expires, POST /pick/refresh refreshes both lines and props.
+	clockMu.Lock()
 	clockNow = clockNow.Add(2 * time.Minute)
+	clockMu.Unlock()
 	rec = httptest.NewRecorder()
 	req = httptest.NewRequestWithContext(
 		t.Context(), http.MethodPost, fmt.Sprintf("/slips/%d/pick/refresh", fixture.slip.ID),
@@ -2490,4 +2501,216 @@ func TestPickPageDataSingleSlatesPassWhenSearchEmpty(t *testing.T) {
 	assert.Contains(t, slateHTML, "CIN @ KC")
 	assert.NotContains(t, slateHTML, "MIA @ BUF")
 	assert.Contains(t, detailHTML, "Nothing matches that search.")
+}
+
+type blockingPickLinesClient struct {
+	event   odds.Event
+	lines   []odds.Line
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (c *blockingPickLinesClient) Events(context.Context) ([]odds.Event, odds.Credits, error) {
+	return []odds.Event{c.event}, odds.Credits{Remaining: 400}, nil
+}
+
+func (c *blockingPickLinesClient) Lines(ctx context.Context) ([]odds.Line, odds.Credits, error) {
+	c.once.Do(func() { close(c.started) })
+	select {
+	case <-c.release:
+	case <-ctx.Done():
+		return nil, odds.Credits{}, ctx.Err()
+	}
+	return c.lines, odds.Credits{Remaining: 397}, nil
+}
+
+type blockingPickPropsClient struct {
+	event   odds.Event
+	props   []odds.Prop
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (c *blockingPickPropsClient) Events(context.Context) ([]odds.Event, odds.Credits, error) {
+	return []odds.Event{c.event}, odds.Credits{Remaining: 800}, nil
+}
+
+func (c *blockingPickPropsClient) Props(ctx context.Context, _ string) ([]odds.Prop, odds.Credits, error) {
+	c.once.Do(func() { close(c.started) })
+	select {
+	case <-c.release:
+	case <-ctx.Done():
+		return nil, odds.Credits{}, ctx.Err()
+	}
+	return c.props, odds.Credits{Remaining: 797}, nil
+}
+
+func TestPickBoardAndDetailReturnCachedRowsWhileAsyncRefreshPublishes(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	game := addGame(t, fixture, gameKickoff())
+	clockNow := gameKickoff().Add(-1 * time.Hour)
+	now := func() time.Time { return clockNow }
+
+	// Seed cached spread and prop rows before the stale refresh runs.
+	require.NoError(t, fixture.store.Tx(t.Context(), func(tx *db.Store) error {
+		_, err := tx.UpsertOdds(t.Context(), []db.Odds{
+			{
+				GameID:     game.ID,
+				Book:       "draftkings",
+				MarketType: "SPREAD",
+				Team:       "BUF",
+				Side:       "TEAM",
+				Line:       new(-3.5),
+				Price:      -110,
+				FetchedAt:  clockNow.Add(-2 * time.Hour),
+			},
+			{
+				GameID:     game.ID,
+				Book:       "draftkings",
+				MarketType: "PASS_YDS",
+				PlayerName: "Josh Allen",
+				Side:       "OVER",
+				Line:       new(265.5),
+				Price:      -115,
+				FetchedAt:  clockNow.Add(-2 * time.Hour),
+			},
+		})
+		return err
+	}))
+
+	event := odds.Event{
+		ID:           "evt-async-1",
+		HomeTeam:     game.HomeName,
+		AwayTeam:     game.AwayName,
+		CommenceTime: game.Kickoff,
+	}
+	linesClient := &blockingPickLinesClient{
+		event: event,
+		lines: []odds.Line{{
+			EventID:    event.ID,
+			Book:       "draftkings",
+			MarketType: odds.MarketSpread,
+			Side:       odds.SideTeam,
+			Team:       game.HomeName,
+			Line:       new(-4.5),
+			Price:      -110,
+		}},
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	propsClient := &blockingPickPropsClient{
+		event: event,
+		props: []odds.Prop{{
+			EventID:    event.ID,
+			Book:       "draftkings",
+			MarketType: odds.MarketPassYds,
+			PlayerName: "Josh Allen",
+			Side:       odds.SideOver,
+			Line:       new(275.5),
+			Price:      -115,
+		}},
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+
+	hub := &live.Hub{}
+	slipCh, unsubSlip := hub.Subscribe(fmt.Sprintf("slip:%d", fixture.slip.ID))
+	defer unsubSlip()
+	weekCh, unsubWeek := hub.Subscribe(fmt.Sprintf("week:%d", fixture.slip.WeekID))
+	defer unsubWeek()
+
+	svc := refresh.New(refresh.Deps{
+		Store:     fixture.store,
+		Lines:     linesClient,
+		Props:     propsClient,
+		Publisher: hub,
+		Now:       now,
+		Logger:    zerolog.Nop(),
+	})
+	t.Cleanup(func() {
+		assert.NoError(t, svc.Shutdown(context.Background()))
+	})
+
+	renderer, err := webui.NewRenderer(assets.Templates, false)
+	require.NoError(t, err)
+	handler := webui.NewWithDeps(webui.Dependencies{
+		Logger:   zerolog.Nop(),
+		Renderer: renderer,
+		UserFrom: func(context.Context) (db.User, bool) {
+			return fixture.user, true
+		},
+		GroupsFrom: func(context.Context) []webui.GroupOption {
+			return []webui.GroupOption{{ID: fixture.group.ID, Name: fixture.group.Name, Current: true}}
+		},
+		GroupFrom: func(context.Context) (db.Group, bool) {
+			return fixture.group, true
+		},
+		Store:   fixture.store,
+		Slips:   slips.New(fixture.store, hub, nil),
+		Stream:  live.NewStream(hub, func(int64) bool { return false }),
+		Refresh: svc,
+		Now:     now,
+	})
+
+	// 1. pickBoard returns cached rows immediately while lines fetch is blocked.
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequestWithContext(
+		t.Context(), http.MethodGet, fmt.Sprintf("/slips/%d/pick", fixture.slip.ID), nil,
+	))
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Body.String(), "-3.5")
+
+	<-linesClient.started
+	close(linesClient.release)
+
+	select {
+	case <-slipCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for slip board-updated signal after async lines refresh")
+	}
+	select {
+	case <-weekCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for week board-updated signal after async lines refresh")
+	}
+
+	// 2. pickDetail returns cached props immediately while props fetch is blocked.
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodGet,
+		fmt.Sprintf("/slips/%d/pick/detail?game=%s&cat=passing", fixture.slip.ID, game.ID),
+		nil,
+	))
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Body.String(), "265.5")
+
+	<-propsClient.started
+	close(propsClient.release)
+
+	select {
+	case <-slipCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for slip board-updated signal after async props refresh")
+	}
+	select {
+	case <-weekCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for week board-updated signal after async props refresh")
+	}
+
+	// 3. Subsequent pickDetail sees the updated prop line persisted by the async refresh.
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodGet,
+		fmt.Sprintf("/slips/%d/pick/detail?game=%s&cat=passing", fixture.slip.ID, game.ID),
+		nil,
+	))
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Body.String(), "275.5")
 }
