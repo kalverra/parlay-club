@@ -174,7 +174,7 @@ while keeping single-instance and credit invariants)
 
 ### Phase 4: Benchmarks and performance observability
 
-- [ ] Add prod-scale `Benchmark*` tests across `internal/board/board_test.go` (`Build`, `Slates`, `Detail`),
+- [x] Add prod-scale `Benchmark*` tests across `internal/board/board_test.go` (`Build`, `Slates`, `Detail`),
       `internal/db/sync_test.go` (`OddsForWeek`, `UpsertOdds`, concurrent read-during-write), and
       `internal/web/pick_test.go` (`pickBoard`, `pickDetail`, `pickSlate`), plus a `mise` task (`bench`) in `mise.toml`.
 - [ ] Add slow-request and phase-timing middleware (`db_ms`, `board_ms`, `render_ms`, `Server-Timing` in non-prod), slow

@@ -1,6 +1,10 @@
 package db_test
 
 import (
+	"context"
+	"fmt"
+	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -326,4 +330,201 @@ func TestUpsertOddsStoresAndRefreshesLinksWithPrices(t *testing.T) {
 			assert.Nil(t, row.EventSid, "a vanished event id becomes NULL")
 		}
 	}
+}
+
+func openBenchStore(b *testing.B) *db.Store {
+	b.Helper()
+
+	database, err := db.Open(filepath.Join(b.TempDir(), "bench.db"))
+	require.NoError(b, err)
+	require.NoError(b, db.Migrate(b.Context(), database))
+
+	store := db.NewStore(database)
+	b.Cleanup(func() {
+		_ = store.Close()
+		_ = database.Close()
+	})
+	return store
+}
+
+func benchOddsBatch(gameID, awayTeam, homeTeam string, count int, fetchedAt time.Time) []db.Odds {
+	books := []string{"draftkings", "fanduel"}
+	markets := []string{"PASS_YDS", "RUSH_YDS", "REC_YDS", "RECEPTIONS", "ANYTIME_TD", "PASS_TDS"}
+	rows := make([]db.Odds, 0, count)
+
+	for _, book := range books {
+		rows = append(rows,
+			db.Odds{
+				GameID: gameID, Book: book, MarketType: "ML", Team: awayTeam,
+				Side: "TEAM", Price: 120, FetchedAt: fetchedAt,
+			},
+			db.Odds{
+				GameID: gameID, Book: book, MarketType: "ML", Team: homeTeam,
+				Side: "TEAM", Price: -140, FetchedAt: fetchedAt,
+			},
+			db.Odds{
+				GameID: gameID, Book: book, MarketType: "SPREAD", Team: awayTeam,
+				Side: "TEAM", Line: new(2.5), Price: -110, FetchedAt: fetchedAt,
+			},
+			db.Odds{
+				GameID: gameID, Book: book, MarketType: "SPREAD", Team: homeTeam,
+				Side: "TEAM", Line: new(-2.5), Price: -110, FetchedAt: fetchedAt,
+			},
+			db.Odds{
+				GameID: gameID, Book: book, MarketType: "TOTAL", Team: "",
+				Side: "OVER", Line: new(45.5), Price: -110, FetchedAt: fetchedAt,
+			},
+			db.Odds{
+				GameID: gameID, Book: book, MarketType: "TOTAL", Team: "",
+				Side: "UNDER", Line: new(45.5), Price: -110, FetchedAt: fetchedAt,
+			},
+		)
+	}
+
+	for p := range 60 {
+		team := awayTeam
+		if p%2 == 1 {
+			team = homeTeam
+		}
+		player := fmt.Sprintf("Player %s %02d", team, p)
+		for _, market := range markets {
+			for _, book := range books {
+				if market == "ANYTIME_TD" {
+					rows = append(rows, db.Odds{
+						GameID: gameID, Book: book, MarketType: market, Team: team,
+						PlayerName: player, Side: "YES", Price: 150, FetchedAt: fetchedAt,
+					})
+				} else {
+					line := new(45.5)
+					rows = append(rows,
+						db.Odds{
+							GameID: gameID, Book: book, MarketType: market, Team: team,
+							PlayerName: player, Side: "OVER", Line: line, Price: -110, FetchedAt: fetchedAt,
+						},
+						db.Odds{
+							GameID: gameID, Book: book, MarketType: market, Team: team,
+							PlayerName: player, Side: "UNDER", Line: line, Price: -110, FetchedAt: fetchedAt,
+						},
+					)
+				}
+				if len(rows) >= count {
+					return rows[:count]
+				}
+			}
+		}
+	}
+	return rows
+}
+
+func seedProdScaleWeekOdds(b *testing.B, store *db.Store, numGames, totalOdds int) (db.Week, []db.Game) {
+	b.Helper()
+
+	week, err := store.UpsertWeek(b.Context(), 2026, 2, 9)
+	require.NoError(b, err)
+
+	fetchedAt := time.Date(2026, time.November, 8, 11, 0, 0, 0, time.UTC)
+	games := make([]db.Game, 0, numGames)
+	perGame := totalOdds / numGames
+	remainder := totalOdds % numGames
+
+	for i := range numGames {
+		away := fmt.Sprintf("T%02d", i*2)
+		home := fmt.Sprintf("T%02d", i*2+1)
+		game := testSlateGame(week)
+		game.ID = fmt.Sprintf("40167%04d", i)
+		game.AwayTeam = away
+		game.HomeTeam = home
+		game.AwayName = "Away " + away
+		game.HomeName = "Home " + home
+		game.Kickoff = game.Kickoff.Add(time.Duration(i%3) * 3 * time.Hour)
+
+		stored, err := store.UpsertGame(b.Context(), game)
+		require.NoError(b, err)
+		games = append(games, stored)
+
+		count := perGame
+		if i < remainder {
+			count++
+		}
+		_, err = store.UpsertOdds(b.Context(), benchOddsBatch(stored.ID, away, home, count, fetchedAt))
+		require.NoError(b, err)
+	}
+	return week, games
+}
+
+func BenchmarkOddsForWeek(b *testing.B) {
+	store := openBenchStore(b)
+	week, _ := seedProdScaleWeekOdds(b, store, 14, 15500)
+
+	b.ReportAllocs()
+	for b.Loop() {
+		rows, err := store.OddsForWeek(b.Context(), week.ID)
+		if err != nil {
+			b.Fatal(err)
+		}
+		if len(rows) != 15500 {
+			b.Fatalf("got %d rows, want 15500", len(rows))
+		}
+	}
+}
+
+func BenchmarkUpsertOdds(b *testing.B) {
+	store := openBenchStore(b)
+	week, games := seedProdScaleWeekOdds(b, store, 1, 1200)
+	_ = week
+
+	fetchedAt := time.Date(2026, time.November, 8, 12, 0, 0, 0, time.UTC)
+	batch := benchOddsBatch(games[0].ID, games[0].AwayTeam, games[0].HomeTeam, 1200, fetchedAt)
+
+	b.ReportAllocs()
+	for i := 0; b.Loop(); i++ {
+		price := -110 - (i%2)*5
+		for j := 0; j < len(batch); j += 10 {
+			batch[j].Price = price
+		}
+		if _, err := store.UpsertOdds(b.Context(), batch); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkConcurrentReadsDuringWrite(b *testing.B) {
+	store := openBenchStore(b)
+	week, games := seedProdScaleWeekOdds(b, store, 14, 15500)
+
+	fetchedAt := time.Date(2026, time.November, 8, 12, 0, 0, 0, time.UTC)
+	writeBatch := benchOddsBatch(games[0].ID, games[0].AwayTeam, games[0].HomeTeam, 1200, fetchedAt)
+
+	writerCtx, cancelWriter := context.WithCancel(b.Context())
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		for i := 0; writerCtx.Err() == nil; i++ {
+			price := -110 - (i%2)*5
+			for j := 0; j < len(writeBatch); j += 10 {
+				writeBatch[j].Price = price
+			}
+			if _, err := store.UpsertOdds(writerCtx, writeBatch); err != nil {
+				return
+			}
+		}
+	})
+
+	b.ReportAllocs()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			rows, err := store.OddsForWeek(b.Context(), week.ID)
+			if err != nil {
+				b.Error(err)
+				return
+			}
+			if len(rows) < 15500 {
+				b.Errorf("got %d rows, want >= 15500", len(rows))
+				return
+			}
+		}
+	})
+
+	b.StopTimer()
+	cancelWriter()
+	wg.Wait()
 }

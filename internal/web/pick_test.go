@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -2717,4 +2719,232 @@ func TestPickBoardAndDetailReturnCachedRowsWhileAsyncRefreshPublishes(t *testing
 	))
 	require.Equal(t, http.StatusOK, rec.Code)
 	assert.Contains(t, rec.Body.String(), "275.5")
+}
+
+func newProdScalePickFixture(b *testing.B) (*slipFixture, string) {
+	b.Helper()
+
+	database, err := db.Open(filepath.Join(b.TempDir(), "parlay.db"))
+	require.NoError(b, err)
+	require.NoError(b, db.Migrate(b.Context(), database))
+
+	store := db.NewStore(database)
+	b.Cleanup(func() {
+		_ = store.Close()
+		_ = database.Close()
+	})
+
+	user, err := store.CreateUserWithIdentity(b.Context(), "Ada", "ada@example.com", "google-ada", "")
+	require.NoError(b, err)
+	group, err := store.Create(b.Context(), user.ID, "Sunday Parlay Club")
+	require.NoError(b, err)
+	week, err := store.UpsertWeek(b.Context(), 2026, 2, 9)
+	require.NoError(b, err)
+	slip, err := store.CreateSlip(
+		b.Context(),
+		group.ID,
+		week.ID,
+		nil,
+		"Week 9",
+		db.SlateScopeFullWeek,
+		2,
+		[]int64{user.ID},
+	)
+	require.NoError(b, err)
+
+	kickoff := gameKickoff()
+	const (
+		numGames       = 14
+		playersPerTeam = 75
+		totalOdds      = 15500
+	)
+
+	teams := make([]string, numGames*2)
+	for i := range teams {
+		teams[i] = fmt.Sprintf("T%02d", i)
+	}
+
+	positions := []string{"QB", "RB", "WR", "TE", "K"}
+	roster := make([]db.RosterPlayer, 0, len(teams)*playersPerTeam)
+	for tIdx, team := range teams {
+		for p := range playersPerTeam {
+			id := strconv.Itoa(tIdx*100 + p + 1)
+			fullName := fmt.Sprintf("Player %s %02d Jr.", team, p)
+			roster = append(roster, db.RosterPlayer{
+				AthleteID:   id,
+				Team:        team,
+				FullName:    fullName,
+				NormName:    db.NormalizePlayerName(fullName),
+				Position:    positions[p%len(positions)],
+				HeadshotURL: "https://a.espncdn.com/" + id + ".png",
+				UpdatedAt:   kickoff,
+			})
+		}
+	}
+	require.NoError(b, store.UpsertRosterPlayers(b.Context(), roster))
+
+	fetchedAt := kickoff.Add(-2 * time.Hour)
+	books := []string{"draftkings", "fanduel"}
+	markets := []string{"PASS_YDS", "RUSH_YDS", "REC_YDS", "RECEPTIONS", "ANYTIME_TD", "PASS_TDS"}
+	perGame := totalOdds / numGames
+	remainder := totalOdds % numGames
+
+	var firstGameID string
+	for i := range numGames {
+		away := teams[i*2]
+		home := teams[i*2+1]
+		game, err := store.UpsertGame(b.Context(), db.Game{
+			ID:         fmt.Sprintf("40167%04d", i),
+			WeekID:     week.ID,
+			HomeTeam:   home,
+			AwayTeam:   away,
+			HomeName:   "Home " + home,
+			AwayName:   "Away " + away,
+			HomeESPNID: strconv.Itoa(i*2 + 2),
+			AwayESPNID: strconv.Itoa(i*2 + 1),
+			Kickoff:    kickoff.Add(time.Duration(i%3) * 3 * time.Hour),
+			Status:     db.GameScheduled,
+			VenueID:    new("1"),
+			VenueName:  new("A stadium"),
+			UpdatedAt:  kickoff,
+		})
+		require.NoError(b, err)
+		if i == 0 {
+			firstGameID = game.ID
+		}
+
+		want := perGame
+		if i < remainder {
+			want++
+		}
+		gameOdds := make([]db.Odds, 0, want)
+		for _, book := range books {
+			gameOdds = append(gameOdds,
+				db.Odds{
+					GameID: game.ID, Book: book, MarketType: "ML", Team: away,
+					Side: "TEAM", Price: 120, FetchedAt: fetchedAt,
+				},
+				db.Odds{
+					GameID: game.ID, Book: book, MarketType: "ML", Team: home,
+					Side: "TEAM", Price: -140, FetchedAt: fetchedAt,
+				},
+				db.Odds{
+					GameID: game.ID, Book: book, MarketType: "SPREAD", Team: away,
+					Side: "TEAM", Line: new(2.5), Price: -110, FetchedAt: fetchedAt,
+				},
+				db.Odds{
+					GameID: game.ID, Book: book, MarketType: "SPREAD", Team: home,
+					Side: "TEAM", Line: new(-2.5), Price: -110, FetchedAt: fetchedAt,
+				},
+				db.Odds{
+					GameID: game.ID, Book: book, MarketType: "TOTAL", Team: "",
+					Side: "OVER", Line: new(45.5), Price: -110, FetchedAt: fetchedAt,
+				},
+				db.Odds{
+					GameID: game.ID, Book: book, MarketType: "TOTAL", Team: "",
+					Side: "UNDER", Line: new(45.5), Price: -110, FetchedAt: fetchedAt,
+				},
+			)
+		}
+	fillGameOdds:
+		for p := range playersPerTeam {
+			team := away
+			if p%2 == 1 {
+				team = home
+			}
+			player := fmt.Sprintf("Player %s %02d Jr.", team, p)
+			for _, market := range markets {
+				for _, book := range books {
+					if market == "ANYTIME_TD" {
+						gameOdds = append(gameOdds, db.Odds{
+							GameID: game.ID, Book: book, MarketType: market, Team: team,
+							PlayerName: player, Side: "YES", Price: 150, FetchedAt: fetchedAt,
+						})
+					} else {
+						line := new(45.5)
+						gameOdds = append(gameOdds,
+							db.Odds{
+								GameID: game.ID, Book: book, MarketType: market, Team: team,
+								PlayerName: player, Side: "OVER", Line: line, Price: -110, FetchedAt: fetchedAt,
+							},
+							db.Odds{
+								GameID: game.ID, Book: book, MarketType: market, Team: team,
+								PlayerName: player, Side: "UNDER", Line: line, Price: -110, FetchedAt: fetchedAt,
+							},
+						)
+					}
+					if len(gameOdds) >= want {
+						gameOdds = gameOdds[:want]
+						break fillGameOdds
+					}
+				}
+			}
+		}
+		_, err = store.UpsertOdds(b.Context(), gameOdds)
+		require.NoError(b, err)
+	}
+
+	renderer, err := webui.NewRenderer(assets.Templates, false)
+	require.NoError(b, err)
+
+	hub := &live.Hub{}
+	service := slips.New(store, hub, nil)
+	stream := live.NewStream(hub, func(int64) bool { return false })
+
+	handler := webui.NewWithDeps(webui.Dependencies{
+		Logger:   zerolog.Nop(),
+		Renderer: renderer,
+		UserFrom: func(context.Context) (db.User, bool) {
+			return user, true
+		},
+		GroupsFrom: func(context.Context) []webui.GroupOption {
+			return []webui.GroupOption{{ID: group.ID, Name: group.Name, Current: true}}
+		},
+		GroupFrom: func(context.Context) (db.Group, bool) {
+			return group, true
+		},
+		Store:  store,
+		Slips:  service,
+		Stream: stream,
+		Now:    func() time.Time { return kickoff.Add(-24 * time.Hour) },
+	})
+
+	return &slipFixture{
+		handler: handler,
+		store:   store,
+		hub:     hub,
+		user:    user,
+		group:   group,
+		week:    week,
+		slip:    slip,
+	}, firstGameID
+}
+
+func benchmarkPickRequest(b *testing.B, fixture *slipFixture, target string) {
+	b.Helper()
+
+	b.ReportAllocs()
+	for b.Loop() {
+		recorder := httptest.NewRecorder()
+		req := httptest.NewRequestWithContext(b.Context(), http.MethodGet, target, nil)
+		fixture.handler.ServeHTTP(recorder, req)
+		if recorder.Code != http.StatusOK {
+			b.Fatalf("GET %s: status %d: %s", target, recorder.Code, recorder.Body.String())
+		}
+	}
+}
+
+func BenchmarkPickBoard(b *testing.B) {
+	fixture, _ := newProdScalePickFixture(b)
+	benchmarkPickRequest(b, fixture, fmt.Sprintf("/slips/%d/pick", fixture.slip.ID))
+}
+
+func BenchmarkPickDetail(b *testing.B) {
+	fixture, gameID := newProdScalePickFixture(b)
+	benchmarkPickRequest(b, fixture, fmt.Sprintf("/slips/%d/pick/detail?game=%s", fixture.slip.ID, gameID))
+}
+
+func BenchmarkPickSlate(b *testing.B) {
+	fixture, _ := newProdScalePickFixture(b)
+	benchmarkPickRequest(b, fixture, fmt.Sprintf("/slips/%d/pick/slate", fixture.slip.ID))
 }
