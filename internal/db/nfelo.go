@@ -89,7 +89,7 @@ func (s *Store) NfeloForGame(ctx context.Context, gameID string) (NfeloGame, boo
 		projection NfeloGame
 		updatedAt  string
 	)
-	err := s.conn().QueryRowContext(ctx, "SELECT"+nfeloColumns+`
+	err := s.readConn().QueryRowContext(ctx, "SELECT"+nfeloColumns+`
 		FROM nfelo_games
 		WHERE game_id = ?`, gameID).Scan(
 		&projection.GameID,

@@ -85,28 +85,37 @@ const oddsColumns = `
 // values are identical apart from nothing is left alone; a new fetch time is a
 // real change because the board shows how fresh the lines are.
 func (s *Store) UpsertOdds(ctx context.Context, rows []Odds) (bool, error) {
+	if len(rows) == 0 {
+		return false, nil
+	}
 	changed := false
 	err := s.Tx(ctx, func(tx *Store) error {
+		stmt, err := tx.conn().PrepareContext(ctx, `
+			INSERT INTO odds (
+				game_id, book, market_type, team, player_name, side,
+				line, price, link, sid, event_sid, fetched_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT (game_id, book, market_type, team, player_name, side)
+			DO UPDATE SET
+				line = excluded.line,
+				price = excluded.price,
+				link = excluded.link,
+				sid = excluded.sid,
+				event_sid = excluded.event_sid,
+				fetched_at = excluded.fetched_at
+			WHERE odds.line IS NOT excluded.line
+				OR odds.price IS NOT excluded.price
+				OR odds.link IS NOT excluded.link
+				OR odds.sid IS NOT excluded.sid
+				OR odds.event_sid IS NOT excluded.event_sid
+				OR odds.fetched_at IS NOT excluded.fetched_at`)
+		if err != nil {
+			return fmt.Errorf("prepare upsert odds: %w", err)
+		}
+		defer func() { _ = stmt.Close() }()
+
 		for _, row := range rows {
-			result, err := tx.conn().ExecContext(ctx, `
-				INSERT INTO odds (
-					game_id, book, market_type, team, player_name, side,
-					line, price, link, sid, event_sid, fetched_at
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-				ON CONFLICT (game_id, book, market_type, team, player_name, side)
-				DO UPDATE SET
-					line = excluded.line,
-					price = excluded.price,
-					link = excluded.link,
-					sid = excluded.sid,
-					event_sid = excluded.event_sid,
-					fetched_at = excluded.fetched_at
-				WHERE odds.line IS NOT excluded.line
-					OR odds.price IS NOT excluded.price
-					OR odds.link IS NOT excluded.link
-					OR odds.sid IS NOT excluded.sid
-					OR odds.event_sid IS NOT excluded.event_sid
-					OR odds.fetched_at IS NOT excluded.fetched_at`,
+			result, err := stmt.ExecContext(ctx,
 				row.GameID,
 				row.Book,
 				row.MarketType,
@@ -145,7 +154,7 @@ func (s *Store) UpsertOdds(ctx context.Context, rows []Odds) (bool, error) {
 // OddsForGame returns every stored price for one game, ordered by book, market,
 // team, player, and side so callers get a stable list.
 func (s *Store) OddsForGame(ctx context.Context, gameID string) ([]Odds, error) {
-	rows, err := s.conn().QueryContext(ctx, "SELECT"+oddsColumns+`
+	rows, err := s.readConn().QueryContext(ctx, "SELECT"+oddsColumns+`
 		FROM odds
 		WHERE game_id = ?
 		ORDER BY book, market_type, team, player_name, side`, gameID)
@@ -172,7 +181,7 @@ func (s *Store) OddsForGame(ctx context.Context, gameID string) ([]Odds, error) 
 // query so the pick board does not ask per game. Rows are ordered by game,
 // book, market, team, player, and side so callers get a stable list.
 func (s *Store) OddsForWeek(ctx context.Context, weekID int64) ([]Odds, error) {
-	rows, err := s.conn().QueryContext(ctx, "SELECT"+oddsColumns+`
+	rows, err := s.readConn().QueryContext(ctx, "SELECT"+oddsColumns+`
 		FROM odds
 		WHERE game_id IN (SELECT id FROM games WHERE week_id = ?)
 		ORDER BY game_id, book, market_type, team, player_name, side`, weekID)
@@ -245,7 +254,7 @@ func (s *Store) LatestPropForPlayer(ctx context.Context, athleteID, playerName, 
 		}
 	}
 	if athleteID != "" {
-		rows, err := s.conn().QueryContext(ctx,
+		rows, err := s.readConn().QueryContext(ctx,
 			"SELECT odds_name FROM player_matches WHERE espn_athlete_id = ?", athleteID)
 		if err == nil {
 			defer func() { _ = rows.Close() }()
@@ -278,7 +287,7 @@ func (s *Store) LatestPropForPlayer(ctx context.Context, athleteID, playerName, 
 	}
 	query += " ORDER BY fetched_at DESC LIMIT 1"
 
-	row := s.conn().QueryRowContext(ctx, query, args...)
+	row := s.readConn().QueryRowContext(ctx, query, args...)
 	o, err := scanOdds(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Odds{}, false, nil

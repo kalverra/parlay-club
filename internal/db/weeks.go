@@ -41,7 +41,7 @@ func (s *Store) UpsertWeek(ctx context.Context, season, seasonType, weekNum int)
 
 // Weeks returns every known week, newest first.
 func (s *Store) Weeks(ctx context.Context) ([]Week, error) {
-	rows, err := s.conn().QueryContext(ctx, `
+	rows, err := s.readConn().QueryContext(ctx, `
 		SELECT id, season, season_type, week_num
 		FROM weeks
 		ORDER BY season DESC, season_type DESC, week_num DESC`)
@@ -69,7 +69,7 @@ func (s *Store) Weeks(ctx context.Context) ([]Week, error) {
 // ErrWeekNotFound.
 func (s *Store) LatestWeek(ctx context.Context) (Week, error) {
 	var week Week
-	err := s.conn().QueryRowContext(ctx, `
+	err := s.readConn().QueryRowContext(ctx, `
 		SELECT id, season, season_type, week_num
 		FROM weeks
 		ORDER BY season DESC, season_type DESC, week_num DESC
@@ -88,7 +88,7 @@ func (s *Store) LatestWeek(ctx context.Context) (Week, error) {
 // ErrWeekNotFound.
 func (s *Store) WeekByID(ctx context.Context, id int64) (Week, error) {
 	var week Week
-	err := s.conn().QueryRowContext(ctx, `
+	err := s.readConn().QueryRowContext(ctx, `
 		SELECT id, season, season_type, week_num
 		FROM weeks
 		WHERE id = ?`, id).

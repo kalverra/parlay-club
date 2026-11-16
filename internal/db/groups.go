@@ -80,7 +80,7 @@ func (s *Store) Create(ctx context.Context, userID int64, name string) (Group, e
 // when the file names no group. A missing row wraps ErrGroupNotFound.
 func (s *Store) FirstGroup(ctx context.Context) (Group, error) {
 	var group Group
-	err := s.conn().QueryRowContext(ctx, `
+	err := s.readConn().QueryRowContext(ctx, `
 		SELECT id, name, invite_token
 		FROM groups
 		ORDER BY id
@@ -98,7 +98,7 @@ func (s *Store) FirstGroup(ctx context.Context) (Group, error) {
 // GroupByID returns one group. A missing row wraps ErrGroupNotFound.
 func (s *Store) GroupByID(ctx context.Context, id int64) (Group, error) {
 	var group Group
-	err := s.conn().QueryRowContext(ctx, `
+	err := s.readConn().QueryRowContext(ctx, `
 		SELECT id, name, invite_token
 		FROM groups
 		WHERE id = ?`, id).
@@ -115,7 +115,7 @@ func (s *Store) GroupByID(ctx context.Context, id int64) (Group, error) {
 // ForUser returns the groups userID belongs to, oldest membership first. A
 // user with no groups gets an empty slice, not nil.
 func (s *Store) ForUser(ctx context.Context, userID int64) ([]Group, error) {
-	rows, err := s.conn().QueryContext(ctx, `
+	rows, err := s.readConn().QueryContext(ctx, `
 		SELECT g.id, g.name, g.invite_token
 		FROM groups g
 		JOIN group_members m ON m.group_id = g.id
@@ -143,7 +143,7 @@ func (s *Store) ForUser(ctx context.Context, userID int64) ([]Group, error) {
 // IsMember reports whether userID belongs to groupID.
 func (s *Store) IsMember(ctx context.Context, groupID, userID int64) (bool, error) {
 	var member bool
-	err := s.conn().QueryRowContext(ctx, `
+	err := s.readConn().QueryRowContext(ctx, `
 		SELECT EXISTS (
 			SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ?
 		)`, groupID, userID).Scan(&member)
@@ -161,7 +161,7 @@ func (s *Store) ByToken(ctx context.Context, token string) (Group, error) {
 	}
 
 	var group Group
-	err := s.conn().QueryRowContext(ctx, `
+	err := s.readConn().QueryRowContext(ctx, `
 		SELECT id, name, invite_token
 		FROM groups
 		WHERE invite_token = ?`, token).
@@ -259,7 +259,7 @@ func (s *Store) Leave(ctx context.Context, groupID, userID int64) error {
 
 // Members returns the active people in groupID, oldest membership first.
 func (s *Store) Members(ctx context.Context, groupID int64) ([]User, error) {
-	rows, err := s.conn().QueryContext(ctx, `
+	rows, err := s.readConn().QueryContext(ctx, `
 		SELECT u.id, u.name, u.avatar_color, u.home_book, u.active, u.email, u.picture_url
 		FROM users u
 		JOIN group_members m ON m.user_id = u.id
@@ -288,7 +288,7 @@ func (s *Store) Members(ctx context.Context, groupID int64) ([]User, error) {
 // membership first. The profile uses it so an inactive person can be turned
 // back on; pickers and new slips still use Members.
 func (s *Store) GroupMembers(ctx context.Context, groupID int64) ([]User, error) {
-	rows, err := s.conn().QueryContext(ctx, `
+	rows, err := s.readConn().QueryContext(ctx, `
 		SELECT u.id, u.name, u.avatar_color, u.home_book, u.active, u.email, u.picture_url
 		FROM users u
 		JOIN group_members m ON m.user_id = u.id

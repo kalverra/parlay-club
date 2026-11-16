@@ -110,7 +110,7 @@ func (s *Store) NFLversePlayerIDByESPN(ctx context.Context, espnID string) (NFLv
 		row       NFLversePlayerID
 		updatedAt string
 	)
-	err := s.conn().QueryRowContext(ctx, `
+	err := s.readConn().QueryRowContext(ctx, `
 		SELECT espn_id, gsis_id, pfr_id, updated_at
 		FROM nflverse_player_ids
 		WHERE espn_id = ?`, espnID).Scan(
@@ -229,7 +229,7 @@ func (s *Store) NFLverseTeamWeeksForSeasonTypes(
 		args = append(args, st)
 	}
 
-	rows, err := s.conn().QueryContext(ctx, "SELECT"+nflverseTeamWeekColumns+`
+	rows, err := s.readConn().QueryContext(ctx, "SELECT"+nflverseTeamWeekColumns+`
 		FROM nflverse_team_weeks
 		WHERE season = ? AND season_type IN (`+placeholders+`)
 		ORDER BY season_type ASC, week_num ASC, team ASC`, args...)
@@ -385,7 +385,7 @@ func (s *Store) NFLversePlayerWeeksForPlayerTypes(
 		args = append(args, st)
 	}
 
-	rows, err := s.conn().QueryContext(ctx, "SELECT"+nflversePlayerWeekColumns+`
+	rows, err := s.readConn().QueryContext(ctx, "SELECT"+nflversePlayerWeekColumns+`
 		FROM nflverse_player_weeks
 		WHERE espn_id = ? AND season = ? AND season_type IN (`+placeholders+`)
 		ORDER BY season_type DESC, week_num DESC`, args...)
@@ -432,7 +432,7 @@ func (s *Store) NFLversePlayerWeeksForPlayersTypes(
 		args = append(args, st)
 	}
 
-	rows, err := s.conn().QueryContext(ctx, "SELECT"+nflversePlayerWeekColumns+`
+	rows, err := s.readConn().QueryContext(ctx, "SELECT"+nflversePlayerWeekColumns+`
 		FROM nflverse_player_weeks
 		WHERE espn_id IN (`+idPlaceholders+`) AND season = ? AND season_type IN (`+typePlaceholders+`)
 		ORDER BY season_type DESC, week_num DESC`, args...)
@@ -458,7 +458,7 @@ func (s *Store) NFLversePlayerWeeksForSeason(
 	ctx context.Context,
 	season, seasonType int,
 ) ([]NFLversePlayerWeek, error) {
-	rows, err := s.conn().QueryContext(ctx, "SELECT"+nflversePlayerWeekColumns+`
+	rows, err := s.readConn().QueryContext(ctx, "SELECT"+nflversePlayerWeekColumns+`
 		FROM nflverse_player_weeks
 		WHERE season = ? AND season_type = ?
 		ORDER BY week_num DESC, espn_id ASC`, season, seasonType)

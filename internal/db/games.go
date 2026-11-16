@@ -151,7 +151,7 @@ func (s *Store) UpsertGame(ctx context.Context, game Game) (Game, error) {
 // GameByID returns the game with the given ID. A missing row wraps
 // ErrGameNotFound.
 func (s *Store) GameByID(ctx context.Context, id string) (Game, error) {
-	game, err := scanGame(s.conn().QueryRowContext(ctx,
+	game, err := scanGame(s.readConn().QueryRowContext(ctx,
 		"SELECT"+gameColumns+" FROM games WHERE id = ?", id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return Game{}, fmt.Errorf("game %s: %w", id, ErrGameNotFound)
@@ -166,7 +166,7 @@ func (s *Store) GameByID(ctx context.Context, id string) (Game, error) {
 // ErrGameNotFound.
 func (s *Store) GameKickoff(ctx context.Context, id string) (time.Time, error) {
 	var kickoff string
-	err := s.conn().QueryRowContext(ctx,
+	err := s.readConn().QueryRowContext(ctx,
 		"SELECT kickoff_utc FROM games WHERE id = ?", id).Scan(&kickoff)
 	if errors.Is(err, sql.ErrNoRows) {
 		return time.Time{}, fmt.Errorf("game %s: %w", id, ErrGameNotFound)
@@ -190,7 +190,7 @@ func (s *Store) WeekPast(ctx context.Context, weekID int64, now time.Time) (bool
 		games  int
 		latest sql.NullString
 	)
-	err := s.conn().QueryRowContext(ctx,
+	err := s.readConn().QueryRowContext(ctx,
 		"SELECT count(*), MAX(kickoff_utc) FROM games WHERE week_id = ?", weekID).
 		Scan(&games, &latest)
 	if err != nil {
@@ -209,7 +209,7 @@ func (s *Store) WeekPast(ctx context.Context, weekID int64, now time.Time) (bool
 
 // GamesForWeek returns one week's games in kickoff order.
 func (s *Store) GamesForWeek(ctx context.Context, weekID int64) ([]Game, error) {
-	rows, err := s.conn().QueryContext(ctx, "SELECT"+gameColumns+`
+	rows, err := s.readConn().QueryContext(ctx, "SELECT"+gameColumns+`
 		FROM games
 		WHERE week_id = ?
 		ORDER BY kickoff_utc, id`, weekID)
@@ -334,7 +334,7 @@ func (s *Store) SetGameInjuries(ctx context.Context, gameID, injuriesJSON string
 // TeamLogos returns the most recent non-empty logo URL for each team
 // abbreviation stored in games.
 func (s *Store) TeamLogos(ctx context.Context) (map[string]string, error) {
-	rows, err := s.conn().QueryContext(ctx, `
+	rows, err := s.readConn().QueryContext(ctx, `
 		SELECT team, logo FROM (
 			SELECT home_team AS team, home_logo AS logo, kickoff_utc
 			FROM games

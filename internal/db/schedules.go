@@ -63,7 +63,7 @@ func scanSchedule(row rowScanner) (GroupSlipSchedule, error) {
 // GroupSlipScheduleByID returns one schedule by its ID. A missing row wraps
 // ErrScheduleNotFound.
 func (s *Store) GroupSlipScheduleByID(ctx context.Context, id int64) (GroupSlipSchedule, error) {
-	sched, err := scanSchedule(s.conn().QueryRowContext(ctx, `
+	sched, err := scanSchedule(s.readConn().QueryRowContext(ctx, `
 		SELECT`+scheduleColumns+`
 		FROM group_slip_schedules
 		WHERE id = ?`, id))
@@ -93,7 +93,7 @@ func (s *Store) groupSlipSchedules(ctx context.Context, groupID int64, onlyActiv
 	}
 	query += ` ORDER BY id`
 
-	rows, err := s.conn().QueryContext(ctx, query, groupID)
+	rows, err := s.readConn().QueryContext(ctx, query, groupID)
 	if err != nil {
 		return nil, fmt.Errorf("list schedules for group %d: %w", groupID, err)
 	}

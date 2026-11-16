@@ -54,7 +54,7 @@ func (s *Store) AddActivity(
 
 // ActivityForSlip returns a slip's history, newest first.
 func (s *Store) ActivityForSlip(ctx context.Context, slipID int64) ([]Activity, error) {
-	rows, err := s.conn().QueryContext(ctx,
+	rows, err := s.readConn().QueryContext(ctx,
 		"SELECT"+activityColumns+" FROM activity WHERE slip_id = ? ORDER BY id DESC", slipID)
 	if err != nil {
 		return nil, fmt.Errorf("list activity for slip %d: %w", slipID, err)

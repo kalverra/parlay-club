@@ -30,7 +30,7 @@ func (s *Store) SyncState(ctx context.Context, source string) (SyncState, error)
 		fetchedAt string
 		credits   sql.NullInt64
 	)
-	err := s.conn().QueryRowContext(ctx, `
+	err := s.readConn().QueryRowContext(ctx, `
 		SELECT source, fetched_at, odds_credits_remaining
 		FROM sync_state
 		WHERE source = ?`, source).

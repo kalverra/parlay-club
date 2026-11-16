@@ -199,7 +199,7 @@ func (s *Store) CreateSlip(
 // SlipByID returns the slip with the given ID. A missing row wraps
 // ErrSlipNotFound.
 func (s *Store) SlipByID(ctx context.Context, id int64) (Slip, error) {
-	slip, err := scanSlip(s.conn().QueryRowContext(ctx,
+	slip, err := scanSlip(s.readConn().QueryRowContext(ctx,
 		"SELECT"+slipColumns+" FROM slips WHERE id = ?", id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return Slip{}, fmt.Errorf("slip %d: %w", id, ErrSlipNotFound)
@@ -212,7 +212,7 @@ func (s *Store) SlipByID(ctx context.Context, id int64) (Slip, error) {
 
 // SlipsForWeek returns a group's slips in one week, newest first.
 func (s *Store) SlipsForWeek(ctx context.Context, groupID, weekID int64) ([]Slip, error) {
-	rows, err := s.conn().QueryContext(ctx,
+	rows, err := s.readConn().QueryContext(ctx,
 		"SELECT"+slipColumns+`
 		FROM slips
 		WHERE group_id = ? AND week_id = ?
@@ -239,7 +239,7 @@ func (s *Store) SlipsForWeek(ctx context.Context, groupID, weekID int64) ([]Slip
 // SlipIDsForWeek returns every slip ID in a week across all groups, oldest
 // first. Refresh uses it to signal every affected slip after a board change.
 func (s *Store) SlipIDsForWeek(ctx context.Context, weekID int64) ([]int64, error) {
-	rows, err := s.conn().QueryContext(ctx,
+	rows, err := s.readConn().QueryContext(ctx,
 		"SELECT id FROM slips WHERE week_id = ? ORDER BY id", weekID)
 	if err != nil {
 		return nil, fmt.Errorf("list slip ids for week %d: %w", weekID, err)
@@ -263,7 +263,7 @@ func (s *Store) SlipIDsForWeek(ctx context.Context, weekID int64) ([]int64, erro
 // NewestSlipForWeek returns the most recently created slip in a group's week.
 // A missing row wraps ErrSlipNotFound.
 func (s *Store) NewestSlipForWeek(ctx context.Context, groupID, weekID int64) (Slip, error) {
-	slip, err := scanSlip(s.conn().QueryRowContext(ctx,
+	slip, err := scanSlip(s.readConn().QueryRowContext(ctx,
 		"SELECT"+slipColumns+`
 		FROM slips
 		WHERE group_id = ? AND week_id = ?
@@ -283,7 +283,7 @@ func (s *Store) NewestSlipForWeek(ctx context.Context, groupID, weekID int64) (S
 // in the same week copies that week's first slip. A group with no slip that old
 // wraps ErrSlipNotFound.
 func (s *Store) PreviousSlip(ctx context.Context, groupID, weekID int64) (Slip, error) {
-	slip, err := scanSlip(s.conn().QueryRowContext(ctx,
+	slip, err := scanSlip(s.readConn().QueryRowContext(ctx,
 		"SELECT"+slipColumns+`
 		FROM slips
 		WHERE group_id = ? AND week_id <= ?
@@ -300,7 +300,7 @@ func (s *Store) PreviousSlip(ctx context.Context, groupID, weekID int64) (Slip, 
 
 // SlipMembers returns a slip's people and their lock times, ordered by user ID.
 func (s *Store) SlipMembers(ctx context.Context, slipID int64) ([]SlipMember, error) {
-	rows, err := s.conn().QueryContext(ctx, `
+	rows, err := s.readConn().QueryContext(ctx, `
 		SELECT u.id, u.name, u.avatar_color, u.home_book, u.active, u.email, u.picture_url, m.locked_at
 		FROM users u
 		JOIN slip_members m ON m.user_id = u.id
@@ -360,7 +360,7 @@ func (s *Store) SlipMembers(ctx context.Context, slipID int64) ([]SlipMember, er
 
 // SlipMemberIDs returns a slip's user IDs in order.
 func (s *Store) SlipMemberIDs(ctx context.Context, slipID int64) ([]int64, error) {
-	rows, err := s.conn().QueryContext(ctx, `
+	rows, err := s.readConn().QueryContext(ctx, `
 		SELECT user_id FROM slip_members WHERE slip_id = ? ORDER BY user_id`, slipID)
 	if err != nil {
 		return nil, fmt.Errorf("list member IDs of slip %d: %w", slipID, err)

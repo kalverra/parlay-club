@@ -62,7 +62,7 @@ type User struct {
 // ListActiveUsers returns the users shown in the picker and member lists,
 // ordered by name. Inactive users keep their history but drop out of both.
 func (s *Store) ListActiveUsers(ctx context.Context) ([]User, error) {
-	rows, err := s.conn().QueryContext(ctx, `
+	rows, err := s.readConn().QueryContext(ctx, `
 		SELECT id, name, avatar_color, home_book, active, email, picture_url
 		FROM users
 		WHERE active = 1
@@ -137,7 +137,7 @@ func (s *Store) insertUser(ctx context.Context, name, email, googleSub, picture 
 // ErrUserNotFound. The Active flag comes back so callers can refuse a signed
 // cookie for a user who has since been deactivated.
 func (s *Store) UserByID(ctx context.Context, id int64) (User, error) {
-	user, err := scanUser(s.conn().QueryRowContext(ctx, `
+	user, err := scanUser(s.readConn().QueryRowContext(ctx, `
 		SELECT id, name, avatar_color, home_book, active, email, picture_url
 		FROM users
 		WHERE id = ?`, id))
@@ -153,7 +153,7 @@ func (s *Store) UserByID(ctx context.Context, id int64) (User, error) {
 // UserByGoogleSub returns the user linked to an OpenID Connect subject. A
 // missing row wraps ErrUserNotFound.
 func (s *Store) UserByGoogleSub(ctx context.Context, sub string) (User, error) {
-	user, err := scanUser(s.conn().QueryRowContext(ctx, `
+	user, err := scanUser(s.readConn().QueryRowContext(ctx, `
 		SELECT id, name, avatar_color, home_book, active, email, picture_url
 		FROM users
 		WHERE google_sub = ?`, sub))
@@ -170,7 +170,7 @@ func (s *Store) UserByGoogleSub(ctx context.Context, sub string) (User, error) {
 // unique, so a repeated display name resolves to the person created first. A
 // missing row wraps ErrUserNotFound.
 func (s *Store) UserByName(ctx context.Context, name string) (User, error) {
-	user, err := scanUser(s.conn().QueryRowContext(ctx, `
+	user, err := scanUser(s.readConn().QueryRowContext(ctx, `
 		SELECT id, name, avatar_color, home_book, active, email, picture_url
 		FROM users
 		WHERE name = ?
@@ -188,7 +188,7 @@ func (s *Store) UserByName(ctx context.Context, name string) (User, error) {
 // UserByEmail returns the user holding email, ignoring case. A missing row
 // wraps ErrUserNotFound.
 func (s *Store) UserByEmail(ctx context.Context, email string) (User, error) {
-	user, err := scanUser(s.conn().QueryRowContext(ctx, `
+	user, err := scanUser(s.readConn().QueryRowContext(ctx, `
 		SELECT id, name, avatar_color, home_book, active, email, picture_url
 		FROM users
 		WHERE email = ?`, email))
