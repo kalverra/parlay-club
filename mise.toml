@@ -27,3 +27,7 @@ run = "SUNDAY_SANDBOX=1 ./scripts/dev.sh"
 [tasks.setup]
 description = "Install the git hooks in this clone"
 run = "lefthook install"
+
+[tasks.bench]
+description = "Run prod-scale benchmarks across board, db, and web"
+run = "go test -run='^$' -bench=. -benchmem ./internal/board ./internal/db ./internal/web"
