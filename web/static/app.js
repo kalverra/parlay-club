@@ -408,6 +408,20 @@ document.addEventListener("change", (event) => {
 // the stream while hidden because iOS Safari drops background connections.
 let liveURL = "";
 let liveSource = null;
+let boardUpdateTimer = null;
+const boardUpdateDebounceMs = 150;
+
+function triggerBoardUpdated() {
+  if (!window.htmx || !document.body) {
+    return;
+  }
+
+  clearTimeout(boardUpdateTimer);
+  boardUpdateTimer = setTimeout(() => {
+    boardUpdateTimer = null;
+    htmx.trigger(document.body, "board-updated");
+  }, boardUpdateDebounceMs);
+}
 
 function openLive() {
   if (!liveURL || document.hidden || liveSource) {
@@ -420,9 +434,7 @@ function openLive() {
     htmx.trigger(document.body, "slip-updated");
   });
 
-  liveSource.addEventListener("board-updated", () => {
-    htmx.trigger(document.body, "board-updated");
-  });
+  liveSource.addEventListener("board-updated", triggerBoardUpdated);
 
   liveSource.addEventListener("bye", closeLive);
 }
@@ -444,7 +456,7 @@ function refreshLive() {
   }
 
   htmx.trigger(document.body, "slip-updated");
-  htmx.trigger(document.body, "board-updated");
+  triggerBoardUpdated();
 }
 
 const liveRoot = document.querySelector("[data-live-url]");
@@ -470,6 +482,8 @@ function refreshOnVisible() {
 
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) {
+    clearTimeout(boardUpdateTimer);
+    boardUpdateTimer = null;
     closeLive();
     return;
   }

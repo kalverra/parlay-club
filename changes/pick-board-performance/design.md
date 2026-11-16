@@ -167,7 +167,7 @@ while keeping single-instance and credit invariants)
       `singleflight`, tracked in `s.wg`, publishing `publishWeek` on change) and wire `internal/web/pick.go` to trigger
       them without blocking responses, with async tests in `internal/refresh/pick_test.go` and
       `internal/web/pick_test.go`.
-- [ ] Add HTMX `hx-sync` / search debounce guards in `web/templates/partials.html` and `web/static/app.js` so SSE
+- [x] Add HTMX `hx-sync` / search debounce guards in `web/templates/partials.html` and `web/static/app.js` so SSE
       `board-updated` and rapid typing do not stack redundant partial requests.
 - [ ] Docs: update `docs/reference/schema.md` (WAL read/write connection pools) and `docs/concepts/data-refresh.md`
       (async pick-time refresh flow).

@@ -203,6 +203,10 @@ func TestPickBoardShowsSearchChipsSortsAndDock(t *testing.T) {
 	assert.Contains(t, body, `data-category="lines"`, "an open game starts on the Lines tab")
 	assert.Contains(t, body, `data-sort="player"`)
 	assert.Contains(t, body, `hx-trigger="board-updated from:body"`, "a fresh prop sync refreshes the board")
+	assert.Contains(t, body, `hx-sync="this:drop"`, "board-updated refreshes drop duplicate in-flight requests")
+	assert.Contains(t, body, `hx-disinherit="hx-include hx-sync"`, "pick-slate does not pass hx-sync to child controls")
+	assert.Contains(t, body, `hx-disinherit="hx-sync"`, "pick-detail does not pass hx-sync to child controls")
+	assert.Contains(t, body, `hx-sync="this:replace"`, "rapid search input replaces any in-flight search request")
 
 	assert.Contains(t, body, `id="pick-dock"`, "the dock replaces the aside tray")
 	assert.Contains(t, body, fmt.Sprintf(`hx-get="/slips/%d/pick/dock"`, fixture.slip.ID))
