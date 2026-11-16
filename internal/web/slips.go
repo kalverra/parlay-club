@@ -2377,7 +2377,14 @@ func (h *slipHandlers) pageForGroup(r *http.Request, title string, groupID int64
 
 // renderPage writes a full page.
 func (h *slipHandlers) renderPage(w http.ResponseWriter, name string, data any) {
+	h.renderPageCtx(context.Background(), w, name, data)
+}
+
+// renderPageCtx writes a full page and records render phase timing on ctx.
+func (h *slipHandlers) renderPageCtx(ctx context.Context, w http.ResponseWriter, name string, data any) {
+	start := time.Now()
 	html, err := h.deps.Renderer.Render(name, data)
+	AddRenderTiming(ctx, time.Since(start))
 	if err != nil {
 		h.deps.Logger.Error().Err(err).Str("page", name).Msg("render page")
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
@@ -2390,7 +2397,14 @@ func (h *slipHandlers) renderPage(w http.ResponseWriter, name string, data any) 
 
 // renderPartial writes one HTMX fragment.
 func (h *slipHandlers) renderPartial(w http.ResponseWriter, name string, data any) {
+	h.renderPartialCtx(context.Background(), w, name, data)
+}
+
+// renderPartialCtx writes one HTMX fragment and records render phase timing on ctx.
+func (h *slipHandlers) renderPartialCtx(ctx context.Context, w http.ResponseWriter, name string, data any) {
+	start := time.Now()
 	html, err := h.deps.Renderer.RenderPartial(name, data)
+	AddRenderTiming(ctx, time.Since(start))
 	if err != nil {
 		h.deps.Logger.Error().Err(err).Str("partial", name).Msg("render partial")
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)

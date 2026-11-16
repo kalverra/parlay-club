@@ -88,6 +88,7 @@ func (s *Store) UpsertOdds(ctx context.Context, rows []Odds) (bool, error) {
 	if len(rows) == 0 {
 		return false, nil
 	}
+	start := time.Now()
 	changed := false
 	err := s.Tx(ctx, func(tx *Store) error {
 		stmt, err := tx.conn().PrepareContext(ctx, `
@@ -148,6 +149,13 @@ func (s *Store) UpsertOdds(ctx context.Context, rows []Odds) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	if elapsed := time.Since(start); elapsed >= slowQueryThreshold {
+		s.logger.Warn().
+			Float64("duration_ms", durationMS(elapsed)).
+			Int("rows", len(rows)).
+			Bool("changed", changed).
+			Msg("slow sqlite upsert odds")
+	}
 	return changed, nil
 }
 
@@ -181,6 +189,7 @@ func (s *Store) OddsForGame(ctx context.Context, gameID string) ([]Odds, error) 
 // query so the pick board does not ask per game. Rows are ordered by game,
 // book, market, team, player, and side so callers get a stable list.
 func (s *Store) OddsForWeek(ctx context.Context, weekID int64) ([]Odds, error) {
+	start := time.Now()
 	rows, err := s.readConn().QueryContext(ctx, "SELECT"+oddsColumns+`
 		FROM odds
 		WHERE game_id IN (SELECT id FROM games WHERE week_id = ?)
@@ -200,6 +209,13 @@ func (s *Store) OddsForWeek(ctx context.Context, weekID int64) ([]Odds, error) {
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("list odds for week %d: %w", weekID, err)
+	}
+	if elapsed := time.Since(start); elapsed >= slowQueryThreshold {
+		s.logger.Warn().
+			Float64("duration_ms", durationMS(elapsed)).
+			Int64("week_id", weekID).
+			Int("rows", len(odds)).
+			Msg("slow sqlite odds for week")
 	}
 	return odds, nil
 }

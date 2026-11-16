@@ -285,6 +285,7 @@ func (s *Service) syncOdds(ctx context.Context, games []db.Game, now time.Time) 
 	if len(games) == 0 || allKickedOff(games, now) {
 		return false, nil
 	}
+	start := time.Now()
 
 	weekID := games[0].WeekID
 	byID := make(map[string]db.Game, len(games))
@@ -363,7 +364,15 @@ func (s *Service) syncOdds(ctx context.Context, games []db.Game, now time.Time) 
 	}
 
 	rows := mergeOdds(primary.rows, fallback.rows)
-	return s.publishOdds(ctx, weekID, matches, rows, primary.remaining, now)
+	changed, err := s.publishOdds(ctx, weekID, matches, rows, primary.remaining, now)
+	s.logger.Info().
+		Float64("duration_ms", durationMS(time.Since(start))).
+		Int64("week_id", weekID).
+		Int("rows", len(rows)).
+		Bool("changed", changed).
+		Err(err).
+		Msg("refresh sync odds")
+	return changed, err
 }
 
 // oddsKey identifies one book's price for one selection across providers.

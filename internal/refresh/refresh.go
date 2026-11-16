@@ -392,11 +392,24 @@ func waitFor(ctx context.Context, wg *sync.WaitGroup) error {
 	}
 }
 
+func durationMS(d time.Duration) float64 {
+	return float64(d.Microseconds()) / 1000.0
+}
+
 // kick runs the slate first, then the free sources that depend on it. The
 // slate sync may add or change the week's games, so the free-source pass reads
 // them again. Page-load kicks omit odds:lines to avoid spending credits outside
 // RunPrefill, RunOnce, and pick-time refreshes.
 func (s *Service) kick(ctx context.Context) {
+	start := time.Now()
+	sourcesCount := 0
+	defer func() {
+		s.logger.Debug().
+			Float64("duration_ms", durationMS(time.Since(start))).
+			Int("sources", sourcesCount).
+			Msg("refresh kick")
+	}()
+
 	now := s.now()
 
 	_, games, err := s.currentWeek(ctx)
@@ -420,6 +433,7 @@ func (s *Service) kick(ctx context.Context) {
 	if err != nil {
 		s.logger.Error().Err(err).Msg("build refresh sources")
 	}
+	sourcesCount = len(sources)
 	s.runSources(ctx, now, sources)
 }
 

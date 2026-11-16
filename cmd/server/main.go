@@ -11,6 +11,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/pprof"
 	"os"
 	"os/signal"
 	"strconv"
@@ -100,7 +101,7 @@ func run() error {
 		return err
 	}
 
-	store := db.NewStore(database)
+	store := db.NewStore(database).WithLogger(logger)
 	cookies := auth.NewCookies(cfg.SessionKey, cfg.IsProd())
 	hub := &live.Hub{}
 
@@ -182,17 +183,20 @@ func run() error {
 
 	server := &http.Server{
 		Addr: net.JoinHostPort("", strconv.Itoa(cfg.Port)),
-		Handler: newMux(
-			shell,
-			web.StaticHandler(),
-			web.ScreenshotHandler(store, logger),
-			newHealthzHandler(database, logger),
-			newPrefillHandler(ctx, cfg.PrefillToken, cfg.Sandbox, refresher, logger),
-			handlers,
-			groupHandlers,
-			scope,
-			kick,
-			sandboxApp,
+		Handler: withPprof(
+			withRequestTiming(logger, !cfg.IsProd())(newMux(
+				shell,
+				web.StaticHandler(),
+				web.ScreenshotHandler(store, logger),
+				newHealthzHandler(database, logger),
+				newPrefillHandler(ctx, cfg.PrefillToken, cfg.Sandbox, refresher, logger),
+				handlers,
+				groupHandlers,
+				scope,
+				kick,
+				sandboxApp,
+			)),
+			cfg.IsProd(),
 		),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
@@ -552,4 +556,123 @@ func waitForGroup(ctx context.Context, wg *sync.WaitGroup) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+const slowRequestThreshold = 250 * time.Millisecond
+
+func durationMS(d time.Duration) float64 {
+	return float64(d.Microseconds()) / 1000.0
+}
+
+// withRequestTiming logs HTTP request durations with per-phase breakdowns
+// (db_ms, board_ms, render_ms) and emits Server-Timing headers when
+// emitServerTiming is true. Long-lived SSE streams are skipped.
+func withRequestTiming(logger zerolog.Logger, emitServerTiming bool) func(http.Handler) http.Handler {
+	return withRequestTimingThreshold(logger, emitServerTiming, slowRequestThreshold)
+}
+
+func withRequestTimingThreshold(
+	logger zerolog.Logger,
+	emitServerTiming bool,
+	slowThreshold time.Duration,
+) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if isSSEStream(r) {
+				next.ServeHTTP(w, r)
+				return
+			}
+			ctx, timings := web.WithPhaseTimings(r.Context())
+			start := time.Now()
+			rw := &timingResponseWriter{
+				ResponseWriter:   w,
+				status:           http.StatusOK,
+				start:            start,
+				timings:          timings,
+				emitServerTiming: emitServerTiming,
+			}
+			next.ServeHTTP(rw, r.WithContext(ctx))
+
+			duration := time.Since(start)
+			level := zerolog.DebugLevel
+			if duration >= slowThreshold {
+				level = zerolog.WarnLevel
+			}
+			logger.WithLevel(level).
+				Str("method", r.Method).
+				Str("path", r.URL.Path).
+				Int("status", rw.status).
+				Float64("duration_ms", durationMS(duration)).
+				Float64("db_ms", durationMS(timings.DB())).
+				Float64("board_ms", durationMS(timings.Board())).
+				Float64("render_ms", durationMS(timings.Render())).
+				Msg("http request")
+		})
+	}
+}
+
+type timingResponseWriter struct {
+	http.ResponseWriter
+	status           int
+	wroteHeader      bool
+	start            time.Time
+	timings          *web.PhaseTimings
+	emitServerTiming bool
+}
+
+func (w *timingResponseWriter) WriteHeader(statusCode int) {
+	if w.wroteHeader {
+		return
+	}
+	w.status = statusCode
+	w.wroteHeader = true
+	if w.emitServerTiming {
+		w.Header().Set("Server-Timing", formatServerTiming(w.timings, time.Since(w.start)))
+	}
+	w.ResponseWriter.WriteHeader(statusCode)
+}
+
+func (w *timingResponseWriter) Write(p []byte) (int, error) {
+	if !w.wroteHeader {
+		w.WriteHeader(http.StatusOK)
+	}
+	return w.ResponseWriter.Write(p)
+}
+
+func (w *timingResponseWriter) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
+}
+
+func formatServerTiming(timings *web.PhaseTimings, total time.Duration) string {
+	return fmt.Sprintf(
+		"db;dur=%.2f, board;dur=%.2f, render;dur=%.2f, total;dur=%.2f",
+		durationMS(timings.DB()),
+		durationMS(timings.Board()),
+		durationMS(timings.Render()),
+		durationMS(total),
+	)
+}
+
+func isSSEStream(r *http.Request) bool {
+	if strings.Contains(r.Header.Get("Accept"), "text/event-stream") {
+		return true
+	}
+	return strings.HasSuffix(r.URL.Path, "/events")
+}
+
+// withPprof exposes net/http/pprof under /debug/pprof/ in non-prod
+// environments and returns 404 in prod.
+func withPprof(next http.Handler, isProd bool) http.Handler {
+	mux := http.NewServeMux()
+	if !isProd {
+		mux.HandleFunc("GET /debug/pprof/", pprof.Index)
+		mux.HandleFunc("GET /debug/pprof/cmdline", pprof.Cmdline)
+		mux.HandleFunc("GET /debug/pprof/profile", pprof.Profile)
+		mux.HandleFunc("GET /debug/pprof/symbol", pprof.Symbol)
+		mux.HandleFunc("GET /debug/pprof/trace", pprof.Trace)
+	} else {
+		mux.Handle("/debug/pprof/", http.NotFoundHandler())
+	}
+	mux.Handle("/", next)
+	return mux
 }

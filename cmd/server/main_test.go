@@ -1307,3 +1307,147 @@ func TestMuxKickBoundary(t *testing.T) {
 		assert.Equal(t, tt.wantKicks, kicks, tt.name)
 	}
 }
+
+func TestRequestTimingMiddleware(t *testing.T) {
+	t.Parallel()
+
+	type logEntry struct {
+		Level      string  `json:"level"`
+		Message    string  `json:"message"`
+		Method     string  `json:"method"`
+		Path       string  `json:"path"`
+		Status     int     `json:"status"`
+		DurationMS float64 `json:"duration_ms"`
+		DBMS       float64 `json:"db_ms"`
+		BoardMS    float64 `json:"board_ms"`
+		RenderMS   float64 `json:"render_ms"`
+	}
+
+	t.Run("slow request logs phase timings and emits Server-Timing in non-prod", func(t *testing.T) {
+		t.Parallel()
+
+		var logs bytes.Buffer
+		logger := zerolog.New(&logs).Level(zerolog.InfoLevel)
+
+		handler := withRequestTimingThreshold(logger, true, 5*time.Millisecond)(http.HandlerFunc(
+			func(w http.ResponseWriter, r *http.Request) {
+				webui.AddDBTiming(r.Context(), 12*time.Millisecond)
+				webui.AddBoardTiming(r.Context(), 7*time.Millisecond)
+				webui.AddRenderTiming(r.Context(), 3*time.Millisecond)
+				time.Sleep(10 * time.Millisecond)
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte("ok"))
+			},
+		))
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/slips/2/pick", nil)
+		handler.ServeHTTP(rec, req)
+
+		require.Equal(t, http.StatusOK, rec.Code)
+		serverTiming := rec.Header().Get("Server-Timing")
+		assert.Contains(t, serverTiming, "db;dur=12.00")
+		assert.Contains(t, serverTiming, "board;dur=7.00")
+		assert.Contains(t, serverTiming, "render;dur=3.00")
+		assert.Contains(t, serverTiming, "total;dur=")
+
+		var entry logEntry
+		require.NoError(t, json.Unmarshal(bytes.TrimSpace(logs.Bytes()), &entry))
+		assert.Equal(t, "warn", entry.Level)
+		assert.Equal(t, "http request", entry.Message)
+		assert.Equal(t, http.MethodGet, entry.Method)
+		assert.Equal(t, "/slips/2/pick", entry.Path)
+		assert.Equal(t, http.StatusOK, entry.Status)
+		assert.GreaterOrEqual(t, entry.DurationMS, 5.0)
+		assert.InDelta(t, 12.0, entry.DBMS, 0.01)
+		assert.InDelta(t, 7.0, entry.BoardMS, 0.01)
+		assert.InDelta(t, 3.0, entry.RenderMS, 0.01)
+	})
+
+	t.Run("prod omits Server-Timing and fast requests log at debug", func(t *testing.T) {
+		t.Parallel()
+
+		var logs bytes.Buffer
+		logger := zerolog.New(&logs).Level(zerolog.DebugLevel)
+
+		handler := withRequestTimingThreshold(logger, false, 500*time.Millisecond)(http.HandlerFunc(
+			func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusNoContent)
+			},
+		))
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/slips/2", nil)
+		handler.ServeHTTP(rec, req)
+
+		require.Equal(t, http.StatusNoContent, rec.Code)
+		assert.Empty(t, rec.Header().Get("Server-Timing"))
+
+		var entry logEntry
+		require.NoError(t, json.Unmarshal(bytes.TrimSpace(logs.Bytes()), &entry))
+		assert.Equal(t, "debug", entry.Level)
+		assert.Equal(t, http.StatusNoContent, entry.Status)
+	})
+
+	t.Run("skips SSE streams", func(t *testing.T) {
+		t.Parallel()
+
+		var logs bytes.Buffer
+		logger := zerolog.New(&logs).Level(zerolog.DebugLevel)
+
+		handler := withRequestTimingThreshold(logger, true, 0)(http.HandlerFunc(
+			func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusOK)
+			},
+		))
+
+		for _, path := range []string{"/slips/2/events", "/events"} {
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
+			if path == "/events" {
+				req.Header.Set("Accept", "text/event-stream")
+			}
+			handler.ServeHTTP(rec, req)
+			assert.Equal(t, http.StatusOK, rec.Code)
+			assert.Empty(t, rec.Header().Get("Server-Timing"))
+		}
+		assert.Empty(t, logs.String())
+	})
+}
+
+func TestPprofRoutes(t *testing.T) {
+	t.Parallel()
+
+	fallback := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusTeapot)
+	})
+
+	t.Run("enabled in non-prod", func(t *testing.T) {
+		t.Parallel()
+
+		handler := withPprof(fallback, false)
+
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/debug/pprof/", nil))
+		assert.Equal(t, http.StatusOK, rec.Code)
+
+		cmdline := httptest.NewRecorder()
+		handler.ServeHTTP(
+			cmdline,
+			httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/debug/pprof/cmdline", nil),
+		)
+		assert.Equal(t, http.StatusOK, cmdline.Code)
+	})
+
+	t.Run("returns 404 in prod", func(t *testing.T) {
+		t.Parallel()
+
+		handler := withPprof(fallback, true)
+
+		for _, path := range []string{"/debug/pprof/", "/debug/pprof/heap", "/debug/pprof/cmdline"} {
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil))
+			assert.Equal(t, http.StatusNotFound, rec.Code, path)
+		}
+	})
+}
