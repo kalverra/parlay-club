@@ -163,7 +163,7 @@ while keeping single-instance and credit invariants)
 
 ### Phase 3: Move automatic pick-time refreshes off the request path
 
-- [ ] Add non-blocking `KickPickLines` and `KickPickGame` methods in `internal/refresh/refresh.go` (deduplicated via
+- [x] Add non-blocking `KickPickLines` and `KickPickGame` methods in `internal/refresh/refresh.go` (deduplicated via
       `singleflight`, tracked in `s.wg`, publishing `publishWeek` on change) and wire `internal/web/pick.go` to trigger
       them without blocking responses, with async tests in `internal/refresh/pick_test.go` and
       `internal/web/pick_test.go`.
