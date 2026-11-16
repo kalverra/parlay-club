@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -264,12 +265,12 @@ func (h *slipHandlers) pickSlate(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	data, err := h.pickPageData(r.Context(), slip, pickQuery(r, h.deps.now()))
+	slate, err := h.pickSlateData(r.Context(), slip, pickQuery(r, h.deps.now()))
 	if err != nil {
 		h.serverError(w, err)
 		return
 	}
-	h.renderPartial(w, "pick-slate", data.Body.Slate)
+	h.renderPartial(w, "pick-slate", slate)
 }
 
 // pickDetail returns the #pick-detail partial for a tab or sort change. It
@@ -284,16 +285,15 @@ func (h *slipHandlers) pickDetail(w http.ResponseWriter, r *http.Request) {
 		h.serverError(w, err)
 		return
 	}
-	data, err := h.pickPageData(r.Context(), slip, q)
+	detail, ok, err := h.pickDetailData(r.Context(), slip, q)
 	if err != nil {
 		h.serverError(w, err)
 		return
 	}
-	if data.Body.Detail == nil {
+	if !ok {
 		h.renderPartial(w, "pick-detail-empty", nil)
 		return
 	}
-	detail := *data.Body.Detail
 	// The tab and sort live in the detail's URL, but the search form still posts
 	// hidden copies. Swap them out of band so the next search keeps the tab.
 	detail.OOB = true
@@ -516,53 +516,15 @@ func (h *slipHandlers) pickPageData(
 	q.Now = now
 
 	rows := board.Build(games, currentOdds(odds), roster, homeBook, mine, now)
-	started := board.StartedCount(games, now)
 	dock, err := h.dockFrom(ctx, slip, legs, allGames, mine)
 	if err != nil {
 		return PickPage{}, err
 	}
 
-	// The detail exists even when the current search matches only one of the
-	// open game's rows, so open it from a slate that ignores the search text.
-	openCards := board.Slates(games, rows, roster, board.Query{Window: q.Window, Now: now})
-	openByID := make(map[string]board.GameCard, len(openCards))
-	for _, card := range openCards {
-		openByID[card.ID] = card
-	}
-	if _, ok := openByID[q.GameID]; !ok {
-		// An unknown game, a kicked-off game, or a window change falls back to
-		// the slate instead of 404ing.
-		q.GameID = ""
-	}
+	slate, openByID, rowGames, resolvedGameID := buildPickSlate(slip, games, rows, roster, q, now)
+	q.GameID = resolvedGameID
 
 	atLimit := len(mine) >= slip.LegsPerMember
-	// A game can only offer to load props when it already has lines. A game
-	// with no rows at all is a week-level "no lines" state, not a prompt.
-	rowGames := make(map[string]bool, len(games))
-	for _, row := range rows {
-		rowGames[row.GameID] = true
-	}
-	slateCards := board.Slates(games, rows, roster, q)
-	slate := PickSlateView{
-		SlipID:     slip.ID,
-		Search:     q.Q,
-		Window:     string(q.Window),
-		Game:       q.GameID,
-		RefreshURL: slateHref(slip.ID),
-		Windows:    windowChips(slip.ID, rows, q),
-		Started:    started,
-	}
-	for _, card := range slateCards {
-		unloaded := !card.HasProps && rowGames[card.ID]
-		slate.Cards = append(slate.Cards, pickGameCardView(slip.ID, card, q, unloaded))
-	}
-	slate.NoGames = len(games) == 0
-	slate.AllStarted = len(games) > 0 && started == len(games)
-	slate.NoLines = !slate.NoGames && !slate.AllStarted && len(rows) == 0
-	slate.Empty = len(slate.Cards) == 0 &&
-		!slate.NoGames && !slate.NoLines && !slate.AllStarted
-	slate.CanRefresh = slip.Status == db.SlipOpen && !slate.NoGames && !slate.AllStarted
-
 	gamesByID := make(map[string]db.Game, len(games))
 	for _, game := range games {
 		gamesByID[game.ID] = game
@@ -578,19 +540,10 @@ func (h *slipHandlers) pickPageData(
 	}
 	if card, ok := openByID[q.GameID]; ok {
 		game := gamesByID[card.ID]
-		signals := h.boardSignalsForGame(ctx, slip.WeekID, game, legs, boardRowPlayerIDs(game.ID, rows))
-		model := board.Detail(game, rows, board.Query{
-			Q:        q.Q,
-			Category: q.Category,
-			Sort:     q.Sort,
-			Now:      now,
-			Signals:  signals,
-		})
-		detail := pickDetailView(slip.ID, model, q, atLimit, !card.HasProps && rowGames[card.ID])
-		detail.CanRefresh = slip.Status == db.SlipOpen
+		detail := h.buildPickDetail(ctx, slip, game, card, rows, legs, q, now, atLimit, rowGames[card.ID])
 		body.Detail = &detail
-		body.Category = string(model.Category)
-		body.Sort = string(model.Sort)
+		body.Category = detail.Category
+		body.Sort = detail.Sort
 	}
 	body.Slate.Category = body.Category
 	body.Slate.Sort = body.Sort
@@ -601,6 +554,182 @@ func (h *slipHandlers) pickPageData(
 		Body:     body,
 		Dock:     dock,
 	}, nil
+}
+
+// pickSlateData loads only the slate for pickSlate, skipping dockFrom and Detail.
+func (h *slipHandlers) pickSlateData(
+	ctx context.Context,
+	slip db.Slip,
+	q board.Query,
+) (PickSlateView, error) {
+	allGames, err := h.deps.Store.GamesForWeek(ctx, slip.WeekID)
+	if err != nil {
+		return PickSlateView{}, err
+	}
+	games := slips.FilterGamesByScope(allGames, slip.SlateScope)
+	odds, err := h.deps.Store.OddsForWeek(ctx, slip.WeekID)
+	if err != nil {
+		return PickSlateView{}, err
+	}
+	roster, err := h.deps.Store.RosterForTeams(ctx, weekTeams(games))
+	if err != nil {
+		return PickSlateView{}, err
+	}
+
+	user, _ := h.user(ctx)
+	homeBook := ""
+	if user.HomeBook != nil {
+		homeBook = *user.HomeBook
+	}
+	now := q.Now
+	if now.IsZero() {
+		now = h.deps.now()
+	}
+	q.Now = now
+
+	rows := board.Build(games, currentOdds(odds), roster, homeBook, nil, now)
+	slate, _, _, _ := buildPickSlate(slip, games, rows, roster, q, now)
+	return slate, nil
+}
+
+// pickDetailData loads only the open game's odds and roster for pickDetail.
+func (h *slipHandlers) pickDetailData(
+	ctx context.Context,
+	slip db.Slip,
+	q board.Query,
+) (PickDetailView, bool, error) {
+	if q.GameID == "" {
+		return PickDetailView{}, false, nil
+	}
+	game, err := h.deps.Store.GameByID(ctx, q.GameID)
+	if errors.Is(err, db.ErrGameNotFound) {
+		return PickDetailView{}, false, nil
+	}
+	if err != nil {
+		return PickDetailView{}, false, err
+	}
+	if game.WeekID != slip.WeekID || !slip.SlateScope.Matches(game.Kickoff) {
+		return PickDetailView{}, false, nil
+	}
+
+	legs, err := h.deps.Store.LegsForSlip(ctx, slip.ID)
+	if err != nil {
+		return PickDetailView{}, false, err
+	}
+	odds, err := h.deps.Store.OddsForGame(ctx, game.ID)
+	if err != nil {
+		return PickDetailView{}, false, err
+	}
+	roster, err := h.deps.Store.RosterForTeams(ctx, []string{game.AwayTeam, game.HomeTeam})
+	if err != nil {
+		return PickDetailView{}, false, err
+	}
+
+	user, _ := h.user(ctx)
+	homeBook := ""
+	if user.HomeBook != nil {
+		homeBook = *user.HomeBook
+	}
+	mine := legsForUser(legs, user.ID)
+	now := q.Now
+	if now.IsZero() {
+		now = h.deps.now()
+	}
+	q.Now = now
+
+	gameSlice := []db.Game{game}
+	rows := board.Build(gameSlice, currentOdds(odds), roster, homeBook, mine, now)
+	openCards := board.Slates(gameSlice, rows, roster, board.Query{Window: q.Window, Now: now})
+	if len(openCards) == 0 {
+		return PickDetailView{}, false, nil
+	}
+
+	atLimit := len(mine) >= slip.LegsPerMember
+	detail := h.buildPickDetail(ctx, slip, game, openCards[0], rows, legs, q, now, atLimit, len(rows) > 0)
+	return detail, true, nil
+}
+
+func buildPickSlate(
+	slip db.Slip,
+	games []db.Game,
+	rows []board.Row,
+	roster []db.RosterPlayer,
+	q board.Query,
+	now time.Time,
+) (PickSlateView, map[string]board.GameCard, map[string]bool, string) {
+	started := board.StartedCount(games, now)
+
+	// The detail exists even when the current search matches only one of the
+	// open game's rows, so open it from a slate that ignores the search text.
+	openCards := board.Slates(games, rows, roster, board.Query{Window: q.Window, Now: now})
+	openByID := make(map[string]board.GameCard, len(openCards))
+	for _, card := range openCards {
+		openByID[card.ID] = card
+	}
+	if _, ok := openByID[q.GameID]; !ok {
+		// An unknown game, a kicked-off game, or a window change falls back to
+		// the slate instead of 404ing.
+		q.GameID = ""
+	}
+
+	// A game can only offer to load props when it already has lines. A game
+	// with no rows at all is a week-level "no lines" state, not a prompt.
+	rowGames := make(map[string]bool, len(games))
+	for _, row := range rows {
+		rowGames[row.GameID] = true
+	}
+	slateCards := openCards
+	if q.Q != "" {
+		slateCards = board.Slates(games, rows, roster, q)
+	}
+	slate := PickSlateView{
+		SlipID:     slip.ID,
+		Search:     q.Q,
+		Category:   string(q.Category),
+		Window:     string(q.Window),
+		Sort:       string(q.Sort),
+		Game:       q.GameID,
+		RefreshURL: slateHref(slip.ID),
+		Windows:    windowChips(slip.ID, rows, q),
+		Started:    started,
+	}
+	for _, card := range slateCards {
+		unloaded := !card.HasProps && rowGames[card.ID]
+		slate.Cards = append(slate.Cards, pickGameCardView(slip.ID, card, q, unloaded))
+	}
+	slate.NoGames = len(games) == 0
+	slate.AllStarted = len(games) > 0 && started == len(games)
+	slate.NoLines = !slate.NoGames && !slate.AllStarted && len(rows) == 0
+	slate.Empty = len(slate.Cards) == 0 &&
+		!slate.NoGames && !slate.NoLines && !slate.AllStarted
+	slate.CanRefresh = slip.Status == db.SlipOpen && !slate.NoGames && !slate.AllStarted
+	slate.Detail = q.GameID != ""
+	return slate, openByID, rowGames, q.GameID
+}
+
+func (h *slipHandlers) buildPickDetail(
+	ctx context.Context,
+	slip db.Slip,
+	game db.Game,
+	card board.GameCard,
+	rows []board.Row,
+	legs []db.Leg,
+	q board.Query,
+	now time.Time,
+	atLimit bool,
+	hasRows bool,
+) PickDetailView {
+	signals := h.boardSignalsForGame(ctx, slip.WeekID, game, legs, boardRowPlayerIDs(game.ID, rows))
+	model := board.Detail(game, rows, board.Query{
+		Q:        q.Q,
+		Category: q.Category,
+		Sort:     q.Sort,
+		Now:      now,
+		Signals:  signals,
+	})
+	detail := pickDetailView(slip.ID, model, q, atLimit, !card.HasProps && hasRows)
+	detail.CanRefresh = slip.Status == db.SlipOpen
+	return detail
 }
 
 // pickDetailView maps one game's detail model to the template's fields. The
