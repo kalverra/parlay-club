@@ -1,6 +1,8 @@
 package board_test
 
 import (
+	"fmt"
+	"strconv"
 	"testing"
 	"time"
 
@@ -862,4 +864,160 @@ func TestLogosAndHeadshots(t *testing.T) {
 	receiving := board.Detail(g, built, board.Query{Category: board.CategoryReceiving})
 	require.Len(t, receiving.Players, 1)
 	assert.Empty(t, receiving.Players[0].HeadshotURL)
+}
+
+func TestBuildMatchPlayerTeamPriorityAndFallback(t *testing.T) {
+	t.Parallel()
+
+	kickoff := at(t, 8, 13, 0)
+	games := []db.Game{game("401", kickoff)}
+	roster := []db.RosterPlayer{
+		{AthleteID: "other-1", Team: "MIA", FullName: "Josh Allen", Position: "DE"},
+		{AthleteID: "buf-1", Team: "BUF", FullName: "Josh Allen", Position: "QB"},
+		{AthleteID: "other-2", Team: "KC", FullName: "Patrick Mahomes II", NormName: "patrick mahomes", Position: "QB"},
+	}
+	rows := []db.Odds{
+		odds("401", "draftkings", "PASS_YDS", "BUF", "Josh Allen", "OVER", new(245.5), -110),
+		odds("401", "draftkings", "PASS_YDS", "MIA", "Patrick Mahomes", "OVER", new(275.5), -110),
+	}
+
+	built := board.Build(games, rows, roster, "", nil, kickoff.Add(-time.Hour))
+	require.Len(t, built, 2)
+
+	byPlayer := make(map[string]board.Row, len(built))
+	for _, row := range built {
+		byPlayer[row.PlayerName] = row
+	}
+	assert.Equal(t, "buf-1", byPlayer["Josh Allen"].PlayerID, "same-team match wins over earlier roster entry")
+	assert.Equal(t, "other-2", byPlayer["Patrick Mahomes"].PlayerID, "falls back to another team via normalized name")
+}
+
+func prodScaleBoardFixture(b *testing.B) ([]db.Game, []db.Odds, []db.RosterPlayer, time.Time) {
+	b.Helper()
+
+	now := time.Date(2026, time.November, 7, 12, 0, 0, 0, eastern)
+	kickoff := time.Date(2026, time.November, 8, 13, 0, 0, 0, eastern)
+
+	const (
+		numGames       = 14
+		playersPerTeam = 75 // 28 teams * 75 = 2,100 roster rows
+	)
+
+	teams := make([]string, numGames*2)
+	for i := range teams {
+		teams[i] = fmt.Sprintf("T%02d", i)
+	}
+
+	games := make([]db.Game, numGames)
+	for i := range games {
+		away := teams[i*2]
+		home := teams[i*2+1]
+		games[i] = db.Game{
+			ID:       fmt.Sprintf("40167%04d", i),
+			AwayTeam: away,
+			HomeTeam: home,
+			AwayName: "Away " + away,
+			HomeName: "Home " + home,
+			Kickoff:  kickoff.Add(time.Duration(i%3) * 3 * time.Hour),
+			Status:   db.GameScheduled,
+		}
+	}
+
+	positions := []string{"QB", "RB", "WR", "TE", "K"}
+	roster := make([]db.RosterPlayer, 0, len(teams)*playersPerTeam)
+	for tIdx, team := range teams {
+		for p := range playersPerTeam {
+			id := strconv.Itoa(tIdx*100 + p + 1)
+			fullName := fmt.Sprintf("Player %s %02d Jr.", team, p)
+			if p%10 == 0 {
+				fullName = fmt.Sprintf("José %s %02d", team, p)
+			}
+			roster = append(roster, db.RosterPlayer{
+				AthleteID:   id,
+				Team:        team,
+				FullName:    fullName,
+				NormName:    db.NormalizePlayerName(fullName),
+				Position:    positions[p%len(positions)],
+				HeadshotURL: "https://a.espncdn.com/" + id + ".png",
+			})
+		}
+	}
+
+	books := []string{"draftkings", "fanduel"}
+	markets := []string{"PASS_YDS", "RUSH_YDS", "REC_YDS", "RECEPTIONS", "ANYTIME_TD", "PASS_TDS"}
+	oddsRows := make([]db.Odds, 0, 15500)
+	for _, g := range games {
+		for _, book := range books {
+			oddsRows = append(oddsRows,
+				odds(g.ID, book, "ML", g.AwayTeam, "", "TEAM", nil, 120),
+				odds(g.ID, book, "ML", g.HomeTeam, "", "TEAM", nil, -140),
+				odds(g.ID, book, "SPREAD", g.AwayTeam, "", "TEAM", new(2.5), -110),
+				odds(g.ID, book, "SPREAD", g.HomeTeam, "", "TEAM", new(-2.5), -110),
+				odds(g.ID, book, "TOTAL", "", "", "OVER", new(45.5), -110),
+				odds(g.ID, book, "TOTAL", "", "", "UNDER", new(45.5), -110),
+			)
+		}
+		for p := range 46 {
+			team := g.AwayTeam
+			if p%2 == 1 {
+				team = g.HomeTeam
+			}
+			player := fmt.Sprintf("Player %s %02d Jr.", team, p)
+			for _, m := range markets {
+				for _, book := range books {
+					if m == "ANYTIME_TD" {
+						oddsRows = append(oddsRows, odds(g.ID, book, m, team, player, "YES", nil, 150))
+						continue
+					}
+					line := new(45.5)
+					oddsRows = append(oddsRows,
+						odds(g.ID, book, m, team, player, "OVER", line, -110),
+						odds(g.ID, book, m, team, player, "UNDER", line, -110),
+					)
+				}
+			}
+		}
+	}
+
+	return games, oddsRows, roster, now
+}
+
+func BenchmarkBuild(b *testing.B) {
+	games, oddsRows, roster, now := prodScaleBoardFixture(b)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		rows := board.Build(games, oddsRows, roster, "fanduel", nil, now)
+		if len(rows) == 0 {
+			b.Fatal("expected rows")
+		}
+	}
+}
+
+func BenchmarkSlates(b *testing.B) {
+	games, oddsRows, roster, now := prodScaleBoardFixture(b)
+	built := board.Build(games, oddsRows, roster, "fanduel", nil, now)
+	q := board.Query{Q: "Player T03 11", Now: now}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		cards := board.Slates(games, built, roster, q)
+		if len(cards) == 0 {
+			b.Fatal("expected cards")
+		}
+	}
+}
+
+func BenchmarkDetail(b *testing.B) {
+	games, oddsRows, roster, now := prodScaleBoardFixture(b)
+	built := board.Build(games, oddsRows, roster, "fanduel", nil, now)
+	q := board.Query{Category: board.CategoryReceiving, Now: now}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		detail := board.Detail(games[0], built, q)
+		if len(detail.Players) == 0 {
+			b.Fatal("expected players")
+		}
+	}
 }
