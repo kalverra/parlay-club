@@ -33,7 +33,9 @@ func openArchiveStore(t *testing.T) (*db.Store, *sql.DB) {
 	t.Cleanup(func() { assert.NoError(t, database.Close()) })
 	require.NoError(t, db.Migrate(t.Context(), database))
 
-	return db.NewStore(database), database
+	store := db.NewStore(database)
+	t.Cleanup(func() { assert.NoError(t, store.Close()) })
+	return store, database
 }
 
 // archivedClient builds an HTTP client whose transport archives every call.

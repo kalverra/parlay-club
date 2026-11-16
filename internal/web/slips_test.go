@@ -57,6 +57,7 @@ func newSlipFixtureAt(t *testing.T, legsPerMember int, now func() time.Time) *sl
 	require.NoError(t, db.Migrate(t.Context(), database))
 
 	store := db.NewStore(database)
+	t.Cleanup(func() { assert.NoError(t, store.Close()) })
 	user, err := store.CreateUserWithIdentity(t.Context(), "Ada", "ada@example.com", "google-ada", "")
 	require.NoError(t, err)
 	group, err := store.Create(t.Context(), user.ID, "Sunday Parlay Club")

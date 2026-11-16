@@ -232,6 +232,7 @@ func TestMuxScopesShellToActiveGroup(t *testing.T) {
 	require.NoError(t, db.Migrate(t.Context(), database))
 
 	store := db.NewStore(database)
+	t.Cleanup(func() { assert.NoError(t, store.Close()) })
 	user, err := store.CreateUserWithIdentity(
 		t.Context(), "Ada", "ada@example.com", "google-ada", "")
 	require.NoError(t, err)
@@ -399,9 +400,11 @@ func TestServeDrainsOpenStreamAndInflightRequestsOnShutdown(t *testing.T) {
 	t.Cleanup(func() { assert.NoError(t, database.Close()) })
 	require.NoError(t, db.Migrate(t.Context(), database))
 
+	store := db.NewStore(database)
+	t.Cleanup(func() { assert.NoError(t, store.Close()) })
 	sync := &blockingScoreboard{entered: make(chan struct{}), left: make(chan struct{})}
 	refresher := refresh.New(refresh.Deps{
-		Store:      db.NewStore(database),
+		Store:      store,
 		Scoreboard: sync,
 		Logger:     zerolog.Nop(),
 	})
@@ -578,6 +581,7 @@ func TestRefreshArchivesEveryIngestCall(t *testing.T) {
 	t.Cleanup(func() { assert.NoError(t, database.Close()) })
 	require.NoError(t, db.Migrate(t.Context(), database))
 	store := db.NewStore(database)
+	t.Cleanup(func() { assert.NoError(t, store.Close()) })
 
 	client := newIngestClient(store)
 	require.IsType(t, &archive.Transport{}, client.Transport, "the ingest client archives every call")
@@ -692,6 +696,7 @@ func TestGoogleSignInLeavesTheArchiveEmpty(t *testing.T) {
 	t.Cleanup(func() { assert.NoError(t, database.Close()) })
 	require.NoError(t, db.Migrate(t.Context(), database))
 	store := db.NewStore(database)
+	t.Cleanup(func() { assert.NoError(t, store.Close()) })
 
 	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"events":[]}`))
@@ -1164,6 +1169,7 @@ func TestMuxKickBoundary(t *testing.T) {
 	require.NoError(t, db.Migrate(t.Context(), database))
 
 	store := db.NewStore(database)
+	t.Cleanup(func() { assert.NoError(t, store.Close()) })
 	user, err := store.CreateUserWithIdentity(
 		t.Context(), "Ada", "ada@example.com", "google-ada", "")
 	require.NoError(t, err)

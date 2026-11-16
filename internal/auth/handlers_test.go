@@ -93,9 +93,12 @@ func newFixtureWith(
 	renderer, err := webui.NewRenderer(assets.Templates, false)
 	require.NoError(t, err)
 
+	store := db.NewStore(database)
+	t.Cleanup(func() { assert.NoError(t, store.Close()) })
+
 	f := &fixture{
 		mux:      http.NewServeMux(),
-		store:    db.NewStore(database),
+		store:    store,
 		database: database,
 		cookies:  auth.NewCookies(testSessionKey, false),
 	}

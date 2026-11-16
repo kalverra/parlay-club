@@ -31,8 +31,10 @@ func newFixture(t *testing.T) *fixture {
 	t.Cleanup(func() { assert.NoError(t, database.Close()) })
 	require.NoError(t, db.Migrate(t.Context(), database))
 
+	store := db.NewStore(database)
+	t.Cleanup(func() { assert.NoError(t, store.Close()) })
 	return &fixture{
-		store:   db.NewStore(database),
+		store:   store,
 		cookies: auth.NewCookies("test-session-key-long-enough-for-anything", false),
 	}
 }

@@ -17,10 +17,11 @@ func durationMS(d time.Duration) float64 {
 
 // Store runs the app's hand-written SQL against the database.
 type Store struct {
-	db     *sql.DB
-	readDB *sql.DB
-	tx     *sql.Tx
-	logger zerolog.Logger
+	db          *sql.DB
+	readDB      *sql.DB
+	readPoolErr error
+	tx          *sql.Tx
+	logger      zerolog.Logger
 }
 
 // NewStore wraps database in a Store. For file-backed databases it opens a
@@ -29,17 +30,29 @@ type Store struct {
 // ownership of the writer handle.
 func NewStore(database *sql.DB) *Store {
 	readDB := database
+	var readPoolErr error
 	if file := dbFilePath(database); file != "" {
-		if pool, err := openReadDB(file); err == nil {
+		pool, err := openReadDB(file)
+		if err != nil {
+			readPoolErr = err
+		} else {
 			readDB = pool
 		}
 	}
-	return &Store{db: database, readDB: readDB, logger: zerolog.Nop()}
+	return &Store{
+		db:          database,
+		readDB:      readDB,
+		readPoolErr: readPoolErr,
+		logger:      zerolog.Nop(),
+	}
 }
 
 // WithLogger returns a shallow copy of s configured to emit slow-query warnings
-// to logger.
+// to logger. If opening the separate read pool failed, it logs the fallback once.
 func (s *Store) WithLogger(logger zerolog.Logger) *Store {
+	if s.readPoolErr != nil {
+		logger.Warn().Err(s.readPoolErr).Msg("open sqlite read pool; falling back to writer handle")
+	}
 	return &Store{
 		db:     s.db,
 		readDB: s.readDB,

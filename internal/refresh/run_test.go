@@ -27,7 +27,9 @@ func openTestStore(t *testing.T) *db.Store {
 	t.Cleanup(func() { assert.NoError(t, database.Close()) })
 	require.NoError(t, db.Migrate(t.Context(), database))
 
-	return db.NewStore(database)
+	store := db.NewStore(database)
+	t.Cleanup(func() { assert.NoError(t, store.Close()) })
+	return store
 }
 
 // testService builds a service with no clients; run tests never touch them.

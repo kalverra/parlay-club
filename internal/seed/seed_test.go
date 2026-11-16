@@ -35,7 +35,9 @@ func newStore(t *testing.T) *db.Store {
 	require.NoError(t, err)
 	t.Cleanup(func() { assert.NoError(t, database.Close()) })
 	require.NoError(t, db.Migrate(t.Context(), database))
-	return db.NewStore(database)
+	store := db.NewStore(database)
+	t.Cleanup(func() { assert.NoError(t, store.Close()) })
+	return store
 }
 
 // newGroup creates a group owned by a new user.

@@ -212,7 +212,7 @@ func (h *slipHandlers) pickBoard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := pickQuery(r, h.deps.now())
-	if err := h.syncPickIfOpen(r.Context(), slip, q, true); err != nil {
+	if err := h.kickPickIfOpen(r.Context(), slip, q, true); err != nil {
 		h.serverError(w, err)
 		return
 	}
@@ -236,7 +236,7 @@ func (h *slipHandlers) pickResults(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := pickQuery(r, h.deps.now())
-	if err := h.syncPickIfOpen(r.Context(), slip, q, false); err != nil {
+	if err := h.kickPickIfOpen(r.Context(), slip, q, false); err != nil {
 		h.serverError(w, err)
 		return
 	}
@@ -281,7 +281,7 @@ func (h *slipHandlers) pickDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := pickQuery(r, h.deps.now())
-	if err := h.syncPickIfOpen(r.Context(), slip, q, false); err != nil {
+	if err := h.kickPickIfOpen(r.Context(), slip, q, false); err != nil {
 		h.serverError(w, err)
 		return
 	}
@@ -344,14 +344,15 @@ func (h *slipHandlers) pickRefresh(w http.ResponseWriter, r *http.Request) {
 	h.renderPartialCtx(r.Context(), w, "pick-body", data.Body)
 }
 
-// syncPickIfOpen triggers pick-time odds syncs only when slip is OPEN and
-// upcoming games remain in its scope. When syncLines is false, it syncs only
-// when an upcoming game is selected.
-func (h *slipHandlers) syncPickIfOpen(ctx context.Context, slip db.Slip, q board.Query, syncLines bool) error {
+// kickPickIfOpen starts a background pick-time odds refresh when slip is OPEN
+// and upcoming games remain in its scope, while the response renders from cached
+// rows. When kickLines is false, it refreshes only when an upcoming game is
+// selected.
+func (h *slipHandlers) kickPickIfOpen(ctx context.Context, slip db.Slip, q board.Query, kickLines bool) error {
 	if h.deps.Refresh == nil || slip.Status != db.SlipOpen {
 		return nil
 	}
-	if !syncLines && q.GameID == "" {
+	if !kickLines && q.GameID == "" {
 		return nil
 	}
 	hasUpcoming, gameUpcoming, err := h.syncPickScope(ctx, slip, q.GameID, q.Now)
@@ -362,7 +363,7 @@ func (h *slipHandlers) syncPickIfOpen(ctx context.Context, slip db.Slip, q board
 		h.deps.Refresh.KickPickGame(ctx, slip.WeekID, q.GameID)
 		return nil
 	}
-	if syncLines && hasUpcoming {
+	if kickLines && hasUpcoming {
 		h.deps.Refresh.KickPickLines(ctx, slip.WeekID)
 	}
 	return nil
@@ -501,29 +502,24 @@ func (h *slipHandlers) pickPageData(
 	}
 	AddDBTiming(ctx, time.Since(dbStart))
 
-	user, _ := h.user(ctx)
-	homeBook := ""
-	if user.HomeBook != nil {
-		homeBook = *user.HomeBook
-	}
+	user, homeBook, q := h.pickViewer(ctx, q)
 	mine := legsForUser(legs, user.ID)
 	now := q.Now
-	if now.IsZero() {
-		now = h.deps.now()
-	}
-	q.Now = now
 
 	boardStart := time.Now()
 	rows := board.Build(games, currentOdds(odds), roster, homeBook, mine, now)
 	AddBoardTiming(ctx, time.Since(boardStart))
 
+	dockStart := time.Now()
 	dock, err := h.dockFrom(ctx, slip, legs, allGames, mine)
+	AddDBTiming(ctx, time.Since(dockStart))
 	if err != nil {
 		return PickPage{}, err
 	}
 
 	slateStart := time.Now()
 	slate, openByID, rowGames, resolvedGameID := buildPickSlate(slip, games, rows, roster, q, now)
+	AddBoardTiming(ctx, time.Since(slateStart))
 	q.GameID = resolvedGameID
 
 	atLimit := len(mine) >= slip.LegsPerMember
@@ -547,7 +543,6 @@ func (h *slipHandlers) pickPageData(
 		body.Category = detail.Category
 		body.Sort = detail.Sort
 	}
-	AddBoardTiming(ctx, time.Since(slateStart))
 	body.Slate.Category = body.Category
 	body.Slate.Sort = body.Sort
 	body.Slate.Detail = body.Detail != nil
@@ -581,16 +576,8 @@ func (h *slipHandlers) pickSlateData(
 	}
 	AddDBTiming(ctx, time.Since(dbStart))
 
-	user, _ := h.user(ctx)
-	homeBook := ""
-	if user.HomeBook != nil {
-		homeBook = *user.HomeBook
-	}
+	_, homeBook, q := h.pickViewer(ctx, q)
 	now := q.Now
-	if now.IsZero() {
-		now = h.deps.now()
-	}
-	q.Now = now
 
 	boardStart := time.Now()
 	rows := board.Build(games, currentOdds(odds), roster, homeBook, nil, now)
@@ -634,31 +621,34 @@ func (h *slipHandlers) pickDetailData(
 	}
 	AddDBTiming(ctx, time.Since(dbStart))
 
-	user, _ := h.user(ctx)
-	homeBook := ""
-	if user.HomeBook != nil {
-		homeBook = *user.HomeBook
-	}
+	user, homeBook, q := h.pickViewer(ctx, q)
 	mine := legsForUser(legs, user.ID)
 	now := q.Now
-	if now.IsZero() {
-		now = h.deps.now()
-	}
-	q.Now = now
 
 	boardStart := time.Now()
 	gameSlice := []db.Game{game}
 	rows := board.Build(gameSlice, currentOdds(odds), roster, homeBook, mine, now)
 	openCards := board.Slates(gameSlice, rows, roster, board.Query{Window: q.Window, Now: now})
+	AddBoardTiming(ctx, time.Since(boardStart))
 	if len(openCards) == 0 {
-		AddBoardTiming(ctx, time.Since(boardStart))
 		return PickDetailView{}, false, nil
 	}
 
 	atLimit := len(mine) >= slip.LegsPerMember
 	detail := h.buildPickDetail(ctx, slip, game, openCards[0], rows, legs, q, now, atLimit, len(rows) > 0)
-	AddBoardTiming(ctx, time.Since(boardStart))
 	return detail, true, nil
+}
+
+func (h *slipHandlers) pickViewer(ctx context.Context, q board.Query) (db.User, string, board.Query) {
+	user, _ := h.user(ctx)
+	homeBook := ""
+	if user.HomeBook != nil {
+		homeBook = *user.HomeBook
+	}
+	if q.Now.IsZero() {
+		q.Now = h.deps.now()
+	}
+	return user, homeBook, q
 }
 
 func buildPickSlate(
@@ -731,7 +721,11 @@ func (h *slipHandlers) buildPickDetail(
 	atLimit bool,
 	hasRows bool,
 ) PickDetailView {
+	dbStart := time.Now()
 	signals := h.boardSignalsForGame(ctx, slip.WeekID, game, legs, boardRowPlayerIDs(game.ID, rows))
+	AddDBTiming(ctx, time.Since(dbStart))
+
+	boardStart := time.Now()
 	model := board.Detail(game, rows, board.Query{
 		Q:        q.Q,
 		Category: q.Category,
@@ -741,6 +735,7 @@ func (h *slipHandlers) buildPickDetail(
 	})
 	detail := pickDetailView(slip.ID, model, q, atLimit, !card.HasProps && hasRows)
 	detail.CanRefresh = slip.Status == db.SlipOpen
+	AddBoardTiming(ctx, time.Since(boardStart))
 	return detail
 }
 

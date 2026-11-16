@@ -64,6 +64,7 @@ func openSandbox(t *testing.T, hub *live.Hub, cookies *auth.Cookies) (
 	require.NoError(t, db.Migrate(t.Context(), database))
 
 	store := db.NewStore(database)
+	t.Cleanup(func() { assert.NoError(t, store.Close()) })
 	runtime, err := newSandboxRuntime(
 		t.Context(), database, store, hub, sandboxFixtures(t), zerolog.Nop(),
 	)
@@ -363,6 +364,7 @@ func TestSandboxRestartRestoresStageAndClock(t *testing.T) {
 	t.Cleanup(func() { assert.NoError(t, database.Close()) })
 	require.NoError(t, db.Migrate(t.Context(), database))
 	store := db.NewStore(database)
+	t.Cleanup(func() { assert.NoError(t, store.Close()) })
 	fixtures := sandboxFixtures(t)
 
 	first, err := newSandboxRuntime(
@@ -871,6 +873,7 @@ func TestSandboxControlRoutesStayOffOutsideSandbox(t *testing.T) {
 	t.Cleanup(func() { assert.NoError(t, database.Close()) })
 	require.NoError(t, db.Migrate(t.Context(), database))
 	store := db.NewStore(database)
+	t.Cleanup(func() { assert.NoError(t, store.Close()) })
 
 	user, err := store.CreateUserWithIdentity(
 		t.Context(), "Ada", "ada@example.com", "dev:ada@example.com", "")

@@ -53,6 +53,7 @@ func newLandingFixtureWithWeek(t *testing.T, withWeek bool) *landingFixture {
 	require.NoError(t, db.Migrate(t.Context(), database))
 
 	store := db.NewStore(database)
+	t.Cleanup(func() { assert.NoError(t, store.Close()) })
 	user, err := store.CreateUserWithIdentity(t.Context(), "Ada", "ada@example.com", "google-ada", "")
 	require.NoError(t, err)
 	first, err := store.Create(t.Context(), user.ID, "Sunday Parlay Club")

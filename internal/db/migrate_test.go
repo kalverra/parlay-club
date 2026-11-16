@@ -181,6 +181,7 @@ func TestMigrationUpgradePathEnsureWeekSlipsSingleSlip(t *testing.T) {
 
 	// Verify backfilled schedule is created and linked to the existing slip
 	store := db.NewStore(database)
+	t.Cleanup(func() { assert.NoError(t, store.Close()) })
 	schedules, err := store.GroupSlipSchedules(t.Context(), 1)
 	require.NoError(t, err)
 	require.Len(t, schedules, 1)

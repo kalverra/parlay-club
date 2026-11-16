@@ -69,6 +69,7 @@ func newFixture(t *testing.T) *fixture {
 	t.Cleanup(func() { assert.NoError(t, database.Close()) })
 	require.NoError(t, db.Migrate(t.Context(), database))
 	store := db.NewStore(database)
+	t.Cleanup(func() { assert.NoError(t, store.Close()) })
 
 	f := &fixture{store: store, database: database, published: &recordingPublisher{}}
 	f.ada = createUser(t, store, "Ada")
