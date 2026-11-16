@@ -35,6 +35,8 @@
   class="space-y-3"
   hx-get="/slips/{{.Slip.ID}}/panel"
   hx-trigger="slip-updated from:body, board-updated from:body"
+  hx-sync="this:drop"
+  hx-disinherit="hx-sync"
   hx-swap="outerHTML"
 >
   <section class="rounded-xl border border-sky-800 bg-sky-950/50 p-4">
@@ -1291,7 +1293,8 @@
   hx-get="{{.RefreshURL}}"
   hx-trigger="board-updated from:body"
   hx-include="#pick-q, #pick-cat, #pick-win, #pick-sort, #pick-game"
-  hx-disinherit="hx-include"
+  hx-sync="this:drop"
+  hx-disinherit="hx-include hx-sync"
   hx-swap="outerHTML"
   aria-label="Game slate"
 >
@@ -1302,6 +1305,7 @@
       hx-target="#pick-body"
       hx-swap="outerHTML"
       hx-trigger="input changed delay:250ms, submit"
+      hx-sync="this:replace"
     >
       <label for="pick-q" class="sr-only">Search games</label>
       <input
@@ -1439,6 +1443,8 @@
   class="min-w-0 space-y-3 lg:min-h-0 lg:overflow-y-auto lg:pl-1"
   hx-get="{{.RefreshURL}}"
   hx-trigger="board-updated from:body"
+  hx-sync="this:drop"
+  hx-disinherit="hx-sync"
   hx-swap="outerHTML"
   aria-label="Game picks"
 >
