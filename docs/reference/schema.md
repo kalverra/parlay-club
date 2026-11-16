@@ -23,7 +23,8 @@ team efficiency, player usage, and snap-count signals.
 
 ## Connection settings
 
-`internal/db.Open` sets these pragmas on every connection:
+`internal/db.Open` opens the writer handle capped at one connection (`SetMaxOpenConns(1)`) with `_txlock=immediate` and
+sets these pragmas on every connection:
 
 | Pragma        | Value    | Why                                               |
 | ------------- | -------- | ------------------------------------------------- |
@@ -32,8 +33,15 @@ team efficiency, player usage, and snap-count signals.
 | `foreign_keys` | `1`     | SQLite enforces foreign keys only when asked.     |
 | `synchronous`  | `NORMAL`| The safe pairing with WAL.                        |
 
-Transactions begin with `_txlock=immediate`, and the pool is capped at one connection. Traffic is tiny, and a single
-connection rules out `SQLITE_BUSY`.
+For file-backed databases, `db.NewStore` opens a separate read-only pool (`SetMaxOpenConns(4)`, `SetMaxIdleConns(4)`)
+with `busy_timeout(5000)`, `foreign_keys(1)`, and `query_only(ON)`. Non-transactional read queries use this read pool,
+while writes and `Store.Tx` transactions use the single-writer handle. Splitting the pools lets page reads proceed
+concurrently under WAL instead of queueing behind background writes (`Kick`, `UpsertOdds`), while keeping a single
+writer so writers never hit `SQLITE_BUSY`.
+
+`:memory:` databases share the single writer handle for both reads and writes because a second pool would open a
+separate empty database. `Store.Close` closes the read pool when one was opened; the caller keeps ownership of the
+writer handle.
 
 `Open` creates the database directory when missing and fails if the first connection cannot be made.
 

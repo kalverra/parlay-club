@@ -169,7 +169,7 @@ while keeping single-instance and credit invariants)
       `internal/web/pick_test.go`.
 - [x] Add HTMX `hx-sync` / search debounce guards in `web/templates/partials.html` and `web/static/app.js` so SSE
       `board-updated` and rapid typing do not stack redundant partial requests.
-- [ ] Docs: update `docs/reference/schema.md` (WAL read/write connection pools) and `docs/concepts/data-refresh.md`
+- [x] Docs: update `docs/reference/schema.md` (WAL read/write connection pools) and `docs/concepts/data-refresh.md`
       (async pick-time refresh flow).
 
 ### Phase 4: Benchmarks and performance observability

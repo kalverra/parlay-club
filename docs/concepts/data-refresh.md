@@ -77,19 +77,23 @@ completes without shutting down and either succeeds or syncs at least some odds 
 records `prefill:sunday` in `sync_state`, so an optional Cloud Scheduler hit to `POST /internal/prefill` also marks
 Sunday done for subsequent page loads. It returns a `PrefillReport` JSON summary.
 
-On-demand user actions also trigger syncs directly with a 10-second timeout, sharing the same single-flight
-deduplication, staleness windows, and failure backoff as background syncs:
+Pick-time views on `OPEN` slips trigger refreshes asynchronously, while explicit user actions run synchronously with a
+10-second timeout; both share the same single-flight deduplication, staleness windows, and failure backoff as background
+syncs:
 
-- **Pick-time lines and props (`OPEN` slips only):** Opening `GET /slips/{id}/pick` on an `OPEN` slip with upcoming
-  games in its slate scope calls `SyncPickLines(ctx, weekID)` (or `SyncPickGame(ctx, weekID, gameID)` when an upcoming
-  game is selected). `GET /slips/{id}/pick/results` and `GET /slips/{id}/pick/detail` call
-  `SyncPickGame(ctx, weekID, gameID)` only when the slip is `OPEN` and an upcoming game is selected. Once synced,
-  `sync_state.fetched_at` is fresh, so repeated search keystrokes, tab/sort clicks, and `board-updated` SSE reloads
-  short-circuit in SQLite with zero API calls. `GET /slips/{id}/pick/slate` and locked or graded slips stay strictly
-  read-only.
+- **Async pick-time lines and props (`OPEN` slips only):** Opening `GET /slips/{id}/pick` on an `OPEN` slip with
+  upcoming games in its slate scope calls `KickPickLines(ctx, weekID)` (or `KickPickGame(ctx, weekID, gameID)` when an
+  upcoming game is selected). `GET /slips/{id}/pick/results` and `GET /slips/{id}/pick/detail` call
+  `KickPickGame(ctx, weekID, gameID)` only when the slip is `OPEN` and an upcoming game is selected. Both return
+  immediately so the response renders from cached SQLite without waiting on upstream APIs. The background goroutine
+  detaches request cancellation (`context.WithoutCancel`), cancels on server shutdown, is tracked in `s.wg`,
+  deduplicates via `singleflight` inside `SyncPickLines` / `SyncPickGame` (10-second timeout), and publishes the week
+  (`board-updated` on the pick board) when rows change. Once synced, `sync_state.fetched_at` is fresh, so repeated
+  search keystrokes, tab/sort clicks, and `board-updated` SSE reloads short-circuit in SQLite with zero API calls.
+  `GET /slips/{id}/pick/slate` and locked or graded slips stay strictly read-only.
 - **Manual pick refresh:** Tapping "Refresh odds" (`POST /slips/{id}/pick/refresh`) on an `OPEN` slip with upcoming
-  games calls `ForcePickRefresh(ctx, weekID, gameID)`, bypassing the normal staleness windows subject to a 2-minute
-  cooldown (`pickRefreshCooldown`).
+  games calls `ForcePickRefresh(ctx, weekID, gameID)` synchronously, bypassing the normal staleness windows subject to a
+  2-minute cooldown (`pickRefreshCooldown`).
 - **Prop load and research:** Tapping "Load them" on the pick board calls `SyncGameProps(ctx, gameID)`. Loading game
   research calls `SyncGameResearch(ctx, gameID)`. Loading player research calls `SyncPlayerResearch(ctx, athleteID)`.
 
@@ -218,11 +222,12 @@ disabled, not failed. If one provider fails while the other succeeds, refresh lo
 rows, so `odds:lines` does not enter backoff. If every configured provider fails, the sync returns the joined error and
 the source backs off with cached rows still served.
 
-Props and research data run on demand through `SyncGameProps`, `SyncPickLines`, `SyncPickGame`, `ForcePickRefresh`,
-`SyncGameResearch`, and `SyncPlayerResearch`, and bulk upcoming-game props also warm during `RunPrefill`. The pick
-board's "Load them" prompt, "Refresh odds" button, pick-time views on `OPEN` slips, or a research partial trigger an
-on-demand sync with a short 10-second timeout. The board never loops over games on page load: each tap or game selection
-targets at most that one game.
+Props and research data run on demand through `SyncGameProps`, `KickPickLines` (`SyncPickLines`), `KickPickGame`
+(`SyncPickGame`), `ForcePickRefresh`, `SyncGameResearch`, and `SyncPlayerResearch`, and bulk upcoming-game props also
+warm during `RunPrefill`. Pick-time views on `OPEN` slips kick off refreshes asynchronously off the request path, while
+the pick board's "Load them" prompt, "Refresh odds" button, or a research partial run synchronously with a short
+10-second timeout. The board never loops over games on page load: each tap or game selection targets at most that one
+game.
 
 - `odds:props:{gameID}`: Stale after 30 minutes on game days or within 6 hours of kickoff, and 2 hours otherwise
   (15-minute idempotency window in `RunPrefill`; 2-minute manual cooldown in `ForcePickRefresh`), skipped once kickoff
