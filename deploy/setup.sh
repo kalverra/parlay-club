@@ -96,6 +96,14 @@ else
 		--uniform-bucket-level-access
 fi
 
+# Litestream compacts and deletes LTX segments frequently; GCS's default 7-day
+# soft-delete policy would keep every old segment billed for a week.
+say "Clearing soft-delete policy on gs://$BUCKET"
+gcloud storage buckets update "gs://$BUCKET" \
+	--project="$PROJECT_ID" \
+	--clear-soft-delete \
+	--quiet
+
 say "Creating the Artifact Registry repo $AR_REPO"
 if gcloud artifacts repositories describe "$AR_REPO" \
 	--project="$PROJECT_ID" --location="$REGION" >/dev/null 2>&1; then
