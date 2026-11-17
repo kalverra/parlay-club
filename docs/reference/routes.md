@@ -190,9 +190,11 @@ saved wager idempotently and renders the reset form. Any member of the slip's gr
 regardless of slip status. Unreadable numbers, non-positive stakes, American odds between `-99` and `99` (including
 `0`), negative boosts, or book names over 40 characters answer 422. See [Slips](../concepts/slips.md#wagers).
 
-`GET /slips/{id}/events` serves one connection for one slip. It subscribes to `slip:{id}` and `week:{weekID}`, sends
+`GET /slips/{id}/events` serves one connection for one slip. If the slip is already `GRADED`, it answers immediately
+with `event: bye` and returns without subscribing. Otherwise it subscribes to `slip:{id}` and `week:{weekID}`, sends
 `slip-updated` and `board-updated` signals, pings every 25 seconds, and ends with `bye` at its deadline. The slip page
-sets `data-live-url` so the client opens the stream. See [Live updates](../concepts/live-updates.md).
+sets `data-live-url` for `OPEN` and `LOCKED` slips so the client opens the stream, and omits it for `GRADED` slips. See
+[Live updates](../concepts/live-updates.md).
 
 `GET /slips/{id}/export` renders the export card on a `LOCKED` slip: a one-tap combined DraftKings or FanDuel link when
 the book can take several picks, per-leg taps otherwise, the manual list, and the copy text. It reads stored odds only
@@ -226,7 +228,7 @@ and the median across books otherwise, and drops games that have kicked off. `bo
 card per upcoming game for the slate, `board.StartedCount` counts the games that already kicked off for the empty state,
 and `board.Detail` shapes the open game's header, tabs, and the active tab's lines or player cards. A card is marked
 unloaded when its game has lines but no prop rows. The handler sets `Page.Wide`, so the header and main use `max-w-6xl`,
-and sets the slip's `data-live-url`, so the page opens one stream.
+and sets `data-live-url` for `OPEN` and `LOCKED` slips so the page opens one stream, omitting it for `GRADED` slips.
 
 The board's query contract:
 
@@ -432,7 +434,7 @@ The stream answers with `Content-Type: text/event-stream`, `Cache-Control: no-ca
 | ------------------------ | ------- |
 | `event: slip-updated`    | The slip changed; refetch the panel and activity. |
 | `event: board-updated`   | The week's games or odds changed; refetch the board. |
-| `event: bye`             | The stream hit its deadline; close without retrying, and reopen when the tab becomes visible. |
+| `event: bye`             | The slip is `GRADED` or the stream hit its deadline; close without retrying, and reopen on user interaction, window focus, or tab visibility. |
 | `: ping`                 | A comment every 25 seconds to keep proxies from closing the connection. |
 
 Every event carries `data: {}`. Events are signals only, never slip data, so the page fetches its own view.
