@@ -431,6 +431,11 @@
             >
               Open in {{.Label}}
             </a>
+            {{range .Linked}}
+              {{if .LineMoved}}
+                <p class="mt-1.5 text-xs text-amber-300">{{.Selection}}: {{.DriftNote}}</p>
+              {{end}}
+            {{end}}
           {{else if .Linked}}
             <ol class="mt-2 space-y-1">
               {{range $index, $link := .Linked}}
@@ -441,9 +446,14 @@
                     rel="noopener"
                     class="flex items-center justify-between gap-2 rounded-md border border-sky-800 bg-sky-950/40 px-2 py-1.5 text-sm text-sky-300 hover:bg-sky-900/60"
                   >
-                    <span class="flex min-w-0 items-center gap-2">
-                      <span class="shrink-0 text-xs text-sky-400">{{inc $index}}.</span>
-                      <span class="min-w-0 truncate">{{$link.Selection}}</span>
+                    <span class="min-w-0">
+                      <span class="flex min-w-0 items-center gap-2">
+                        <span class="shrink-0 text-xs text-sky-400">{{inc $index}}.</span>
+                        <span class="min-w-0 truncate">{{$link.Selection}}</span>
+                      </span>
+                      {{if $link.LineMoved}}
+                        <span class="mt-0.5 block text-xs text-amber-300">{{$link.DriftNote}}</span>
+                      {{end}}
                     </span>
                     <span class="shrink-0 text-xs text-slate-400">{{$link.Price}}</span>
                   </a>

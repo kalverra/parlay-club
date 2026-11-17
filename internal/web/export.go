@@ -47,6 +47,8 @@ type ExportLinkView struct {
 	Selection string
 	URL       string
 	Price     string
+	LineMoved bool
+	DriftNote string
 }
 
 // ExportManualView is one manual leg and the friendly note that says why.
@@ -155,6 +157,8 @@ func exportBookView(plan export.BookPlan, label string) ExportBookView {
 			Selection: link.Leg.Selection,
 			URL:       link.URL,
 			Price:     formatOdds(link.Price),
+			LineMoved: link.LineMoved,
+			DriftNote: driftNote(link),
 		})
 	}
 	for _, manual := range plan.Manual {
@@ -164,6 +168,35 @@ func exportBookView(plan export.BookPlan, label string) ExportBookView {
 		})
 	}
 	return book
+}
+
+// driftNote formats a concise line-drift callout when a linked leg's live
+// sportsbook line differs from the line stored on the slip.
+func driftNote(link export.LegLink) string {
+	if !link.LineMoved {
+		return ""
+	}
+	bookLine := formatExportLine(link.Leg.MarketType, link.Line)
+	slipLine := formatExportLine(link.Leg.MarketType, link.Leg.Line)
+	if bookLine != "" && slipLine != "" {
+		return fmt.Sprintf("Book at %s · slip %s", bookLine, slipLine)
+	}
+	if bookLine != "" {
+		return "Book at " + bookLine
+	}
+	return "Line moved"
+}
+
+// formatExportLine formats an optional market line for display, keeping signs on
+// spreads while omitting them on totals and props.
+func formatExportLine(marketType string, line *float64) string {
+	if line == nil {
+		return ""
+	}
+	if marketType == "SPREAD" {
+		return signedLine(*line)
+	}
+	return formatFloat(*line)
 }
 
 // manualNote says why a leg needs a hand, in plain words. It never blocks the
@@ -176,11 +209,7 @@ func manualNote(manual export.ManualLeg, book string) string {
 			book,
 		)
 	case export.ReasonLineMoved:
-		if manual.Line != nil {
-			line := formatFloat(*manual.Line)
-			if manual.Leg.MarketType == "SPREAD" {
-				line = signedLine(*manual.Line)
-			}
+		if line := formatExportLine(manual.Leg.MarketType, manual.Line); line != "" {
 			return fmt.Sprintf(
 				"Heads up: %s moved this line to %s, so add it by hand at your line.",
 				book,

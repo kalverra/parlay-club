@@ -198,20 +198,6 @@ func TestPlanManualReasons(t *testing.T) {
 			odds:       []db.Odds{withoutLink("SPREAD", "BUF", "", "TEAM", new(-3.5))},
 			wantReason: export.ReasonNoLink,
 		},
-		"a line that moved": {
-			leg:        spread,
-			odds:       []db.Odds{withLink("SPREAD", "BUF", "", "TEAM", new(-4.5))},
-			wantReason: export.ReasonLineMoved,
-			wantLine:   new(-4.5),
-		},
-		"a total line that moved": {
-			leg: makeLeg(15, &upcoming, "TOTAL", "", "", "OVER", new(47.5)),
-			odds: []db.Odds{
-				withLink("TOTAL", "", "", "OVER", new(48.5)),
-			},
-			wantReason: export.ReasonLineMoved,
-			wantLine:   new(48.5),
-		},
 		"a game that has started": {
 			leg:        started,
 			odds:       []db.Odds{withLink("SPREAD", "BUF", "", "TEAM", new(-3.5))},
@@ -343,10 +329,10 @@ func TestPlanPlacesEveryLegInExactlyOneList(t *testing.T) {
 
 	plan := export.Plan(lockedSlip(), legs, odds, export.DraftKings, testNow)
 
-	require.Len(t, plan.Linked, 1)
-	require.Len(t, plan.Manual, len(legs)-1)
-	assert.Equal(t, []int64{41}, linkedIDs(plan))
-	assert.Equal(t, []int64{42, 43, 44, 45, 46, 47}, manualIDs(plan))
+	require.Len(t, plan.Linked, 2)
+	require.Len(t, plan.Manual, len(legs)-2)
+	assert.Equal(t, []int64{41, 43}, linkedIDs(plan))
+	assert.Equal(t, []int64{42, 44, 45, 46, 47}, manualIDs(plan))
 
 	seen := make(map[int64]int, len(legs))
 	for _, id := range linkedIDs(plan) {
@@ -358,6 +344,82 @@ func TestPlanPlacesEveryLegInExactlyOneList(t *testing.T) {
 	for _, leg := range legs {
 		assert.Equal(t, 1, seen[leg.ID], "leg %d", leg.ID)
 	}
+}
+
+// TestPlanLinksMovedLinesAndNameVariants checks that SameSelection resolves
+// player name variants (prod Leg 19) and moved lines (prod Leg 20) to live
+// sportsbook links with LineMoved set accurately and combined URLs intact.
+func TestPlanLinksMovedLinesAndNameVariants(t *testing.T) {
+	t.Parallel()
+
+	const game = "game-1"
+
+	t.Run("matches generational suffix variant without flagging drift", func(t *testing.T) {
+		t.Parallel()
+
+		leg := makeLeg(19, &upcoming, "RUSH_YDS", "MIA", "Ollie Gordon", "OVER", new(17.5))
+		odds := []db.Odds{
+			row(game, export.DraftKings, "RUSH_YDS", "MIA", "Ollie Gordon II", "OVER", new(17.5), -110,
+				"https://sportsbook.draftkings.com/event/123?outcomes=dk-gordon", "0ML#gordon"),
+		}
+
+		plan := export.Plan(lockedSlip(), []export.Leg{leg}, odds, export.DraftKings, testNow)
+		require.Empty(t, plan.Manual)
+		require.Len(t, plan.Linked, 1)
+		assert.Equal(t, "https://sportsbook.draftkings.com/event/123?outcomes=dk-gordon", plan.Linked[0].URL)
+		assert.Equal(t, new(17.5), plan.Linked[0].Line)
+		assert.False(t, plan.Linked[0].LineMoved)
+	})
+
+	t.Run("links moved prop line with LineMoved and keeps combined DraftKings URL", func(t *testing.T) {
+		t.Parallel()
+
+		bryce := makeLeg(20, &upcoming, "PASS_YDS", "CAR", "Bryce Young", "OVER", new(248.5))
+		gordon := makeLeg(19, &upcoming, "RUSH_YDS", "MIA", "Ollie Gordon", "OVER", new(17.5))
+
+		dkRow := func(market, team, player, side string, point *float64, sid string) db.Odds {
+			o := row(game, export.DraftKings, market, team, player, side, point, -115,
+				"https://sportsbook.draftkings.com/event/dk-evt?outcomes="+sid, sid)
+			o.EventSid = new("dk-evt")
+			return o
+		}
+		odds := []db.Odds{
+			dkRow("PASS_YDS", "CAR", "Bryce Young", "OVER", new(254.5), "0ML#bryce"),
+			dkRow("RUSH_YDS", "MIA", "Ollie Gordon II", "OVER", new(17.5), "0ML#gordon"),
+		}
+
+		plan := export.Plan(lockedSlip(), []export.Leg{bryce, gordon}, odds, export.DraftKings, testNow)
+		require.Empty(t, plan.Manual)
+		require.Len(t, plan.Linked, 2)
+
+		assert.True(t, plan.Linked[0].LineMoved)
+		assert.Equal(t, new(254.5), plan.Linked[0].Line)
+		assert.Equal(t, new(248.5), plan.Linked[0].Leg.Line)
+		assert.False(t, plan.Linked[1].LineMoved)
+		assert.Equal(t,
+			"https://sportsbook.draftkings.com/event/dk-evt?outcomes=0ML%23bryce,0ML%23gordon",
+			plan.Combined,
+		)
+	})
+
+	t.Run("links moved spread and total lines with LineMoved true", func(t *testing.T) {
+		t.Parallel()
+
+		spread := makeLeg(12, &upcoming, "SPREAD", "BUF", "", "TEAM", new(-3.5))
+		total := makeLeg(15, &upcoming, "TOTAL", "", "", "OVER", new(47.5))
+		odds := []db.Odds{
+			row(game, export.DraftKings, "SPREAD", "BUF", "", "TEAM", new(-4.5), -110, "https://dk/spread", "sid-s"),
+			row(game, export.DraftKings, "TOTAL", "", "", "OVER", new(48.5), -110, "https://dk/total", "sid-t"),
+		}
+
+		plan := export.Plan(lockedSlip(), []export.Leg{spread, total}, odds, export.DraftKings, testNow)
+		require.Empty(t, plan.Manual)
+		require.Len(t, plan.Linked, 2)
+		assert.True(t, plan.Linked[0].LineMoved)
+		assert.Equal(t, new(-4.5), plan.Linked[0].Line)
+		assert.True(t, plan.Linked[1].LineMoved)
+		assert.Equal(t, new(48.5), plan.Linked[1].Line)
+	})
 }
 
 // fakeCombiner records what it was asked to combine.

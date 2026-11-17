@@ -141,18 +141,20 @@ func TestExportCardLinksSomeLegsAndListsTheRest(t *testing.T) {
 	assert.Contains(t, body, "DraftKings")
 	assert.Contains(t, body, "FanDuel")
 	assert.Contains(t, body, "https://sportsbook.draftkings.com/?outcomes=dk-ml")
+	assert.Contains(t, body, "https://sportsbook.draftkings.com/?outcomes=dk-spread")
 	assert.Contains(t, body, "Open in FanDuel")
 	assert.Contains(t, body, "https://sportsbook.fanduel.com/addToBetslip"+
 		"?marketId%5B0%5D=1&selectionId%5B0%5D=fd-ml"+
-		"&marketId%5B1%5D=2&selectionId%5B1%5D=fd-over")
+		"&marketId%5B1%5D=2&selectionId%5B1%5D=fd-over"+
+		"&marketId%5B2%5D=2&selectionId%5B2%5D=fd-over")
 	assert.NotContains(t, body, "https://sportsbook.fanduel.com/addToBetslip?marketId=1&selectionId=fd-ml")
 	assert.Contains(t, body, `target="_blank"`)
 	assert.Contains(t, body, `rel="noopener"`)
 
 	assert.Contains(t, body, "this pick didn't come with a DraftKings link")
-	assert.Contains(t, body, "DraftKings moved this line to -3")
-	assert.Contains(t, body, "DraftKings moved this line to 47.5")
-	assert.NotContains(t, body, "moved this line to +47.5")
+	assert.Contains(t, body, "Book at -3 · slip -3.5")
+	assert.Contains(t, body, "Over 48.5: Book at 47.5 · slip 48.5")
+	assert.NotContains(t, body, "Book at +47.5")
 	assert.Contains(t, body, "FanDuel has no line for this pick yet")
 
 	assert.Contains(t, body, "Prices may have moved since")
@@ -349,6 +351,75 @@ func TestLockAndUnlockRefreshTheExportCard(t *testing.T) {
 	unlocked := postForm(t, fixture.handler, fmt.Sprintf("/slips/%d/unlock", fixture.slip.ID), url.Values{})
 	require.Equal(t, http.StatusOK, unlocked.Code)
 	assert.Equal(t, "slip-updated", unlocked.Header().Get("Hx-Trigger"))
+}
+
+// TestExportCardLinksMovedPropAndNameVariant checks that a prop picked under
+// a suffix-free player name or an older line still links to the sportsbook and
+// surfaces the line-drift callout on the export card.
+func TestExportCardLinksMovedPropAndNameVariant(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	game := addGame(t, fixture, gameKickoff())
+	rows := []db.Odds{
+		{
+			GameID:     game.ID,
+			Book:       "draftkings",
+			MarketType: "RUSH_YDS",
+			Team:       "MIA",
+			PlayerName: "Ollie Gordon II",
+			Side:       "OVER",
+			Line:       new(17.5),
+			Price:      -110,
+			Link:       new("https://sportsbook.draftkings.com/event/123?outcomes=dk-gordon"),
+			Sid:        new("0ML#gordon"),
+			FetchedAt:  exportFetched,
+		},
+		{
+			GameID:     game.ID,
+			Book:       "draftkings",
+			MarketType: "PASS_YDS",
+			Team:       "CAR",
+			PlayerName: "Bryce Young",
+			Side:       "OVER",
+			Line:       new(254.5),
+			Price:      -115,
+			Link:       new("https://sportsbook.draftkings.com/event/123?outcomes=dk-bryce"),
+			Sid:        new("0ML#bryce"),
+			FetchedAt:  exportFetched,
+		},
+	}
+	changed, err := fixture.store.UpsertOdds(t.Context(), rows)
+	require.NoError(t, err)
+	require.True(t, changed)
+
+	addExportLeg(t, fixture, url.Values{
+		"game_id":     {game.ID},
+		"market_type": {"RUSH_YDS"},
+		"team":        {"MIA"},
+		"player_name": {"Ollie Gordon"},
+		"side":        {"OVER"},
+		"line":        {"17.5"},
+		"selection":   {"Ollie Gordon Over 17.5 Rush Yds"},
+		"odds":        {"-110"},
+	})
+	addExportLeg(t, fixture, url.Values{
+		"game_id":     {game.ID},
+		"market_type": {"PASS_YDS"},
+		"team":        {"CAR"},
+		"player_name": {"Bryce Young"},
+		"side":        {"OVER"},
+		"line":        {"248.5"},
+		"selection":   {"Bryce Young Over 248.5 Pass Yds"},
+		"odds":        {"-110"},
+	})
+	lockSlip(t, fixture)
+
+	body := html.UnescapeString(getExport(t, fixture.handler, fixture.slip.ID).Body.String())
+	assert.Contains(t, body, "https://sportsbook.draftkings.com/event/123?outcomes=dk-gordon")
+	assert.Contains(t, body, "https://sportsbook.draftkings.com/event/123?outcomes=dk-bryce")
+	assert.Contains(t, body, "Book at 254.5 · slip 248.5")
+	assert.NotContains(t, body, "DraftKings has no line for this pick yet")
 }
 
 // getExport fetches the export partial the way HTMX does.

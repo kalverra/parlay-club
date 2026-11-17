@@ -113,7 +113,7 @@ and grading invariants)
 
 ### Phase 2: Dynamic sportsbook export links with drift callout
 
-- [ ] Update `internal/export/export.go` (`matchOdds`, `planLeg`, `LegLink.LineMoved`) to resolve deep links by
+- [x] Update `internal/export/export.go` (`matchOdds`, `planLeg`, `LegLink.LineMoved`) to resolve deep links by
       `SameSelection` across line moves and name variants, surface drift in `internal/web/export.go` and
       `web/templates/partials.html`, and add tests in `internal/export/export_test.go` and
       `internal/web/export_test.go`.
