@@ -1423,18 +1423,24 @@ func (h *slipHandlers) pickPairRow(
 	return fallback()
 }
 
-// sameBoardLine reports whether two legs sit on the same line, so a switch
-// needs only that row refreshed. A leg that moves to another line or game
-// leaves a stale row behind, and the board needs a full refresh.
+// sameBoardLine reports whether two legs sit on the same board line group, so a
+// switch needs only that row refreshed. A leg that moves to another market,
+// player, or game leaves a stale row behind, and the board needs a full refresh.
 func sameBoardLine(left, right db.Leg) bool {
-	if db.StringValue(left.GameID) != db.StringValue(right.GameID) {
+	if db.StringValue(left.GameID) != db.StringValue(right.GameID) ||
+		left.MarketType != right.MarketType {
 		return false
 	}
-	return board.LineKey(
-		left.MarketType, db.StringValue(left.Team), db.StringValue(left.PlayerName), left.Line,
-	) == board.LineKey(
-		right.MarketType, db.StringValue(right.Team), db.StringValue(right.PlayerName), right.Line,
-	)
+	switch left.MarketType {
+	case "SPREAD", "ML", "TOTAL":
+		return true
+	default:
+		leftSel := db.LegSelection(left)
+		rightSel := db.LegSelection(right)
+		leftSel.Side = ""
+		rightSel.Side = ""
+		return db.SameSelection(leftSel, rightSel)
+	}
 }
 
 // groupHoldsLeg reports whether a line group carries the leg's selection. A

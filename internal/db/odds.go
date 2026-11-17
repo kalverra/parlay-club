@@ -29,17 +29,81 @@ type Odds struct {
 	FetchedAt  time.Time
 }
 
+// SelectionKey identifies one pickable selection across legs, odds rows, and
+// board rows, ignoring book, line, price, and link.
+type SelectionKey struct {
+	GameID     string
+	MarketType string
+	Team       string
+	PlayerName string
+	PlayerID   string
+	Side       string
+}
+
+// IsPlayerMarket reports whether a market type targets an athlete rather than
+// a game or team.
+func IsPlayerMarket(market string) bool {
+	switch market {
+	case "PASS_YDS", "PASS_TDS", "RUSH_YDS", "RUSH_ATT", "REC_YDS", "RECEPTIONS", "ANYTIME_TD", "KICKER_PTS":
+		return true
+	default:
+		return false
+	}
+}
+
+// LegSelection extracts the canonical selection key for a stored or draft leg.
+func LegSelection(leg Leg) SelectionKey {
+	return SelectionKey{
+		GameID:     StringValue(leg.GameID),
+		MarketType: leg.MarketType,
+		Team:       StringValue(leg.Team),
+		PlayerName: StringValue(leg.PlayerName),
+		PlayerID:   StringValue(leg.PlayerID),
+		Side:       StringValue(leg.Side),
+	}
+}
+
+// OddsSelection extracts the selection key for a stored odds row.
+func OddsSelection(o Odds) SelectionKey {
+	return SelectionKey{
+		GameID:     o.GameID,
+		MarketType: o.MarketType,
+		Team:       o.Team,
+		PlayerName: o.PlayerName,
+		Side:       o.Side,
+	}
+}
+
+// SameSelection reports whether two selections represent the same pick,
+// ignoring book, line, price, and link. Player props match by ESPN PlayerID
+// when both carry one, or by normalized player name and non-empty team
+// otherwise. Game markets match on game, market, team, and side.
+func SameSelection(left, right SelectionKey) bool {
+	if left.GameID == "" || left.GameID != right.GameID {
+		return false
+	}
+	if left.MarketType != right.MarketType || left.Side != right.Side {
+		return false
+	}
+	if IsPlayerMarket(left.MarketType) || left.PlayerName != "" || right.PlayerName != "" {
+		if left.PlayerID != "" && right.PlayerID != "" {
+			return left.PlayerID == right.PlayerID
+		}
+		if left.Team != "" && right.Team != "" && left.Team != right.Team {
+			return false
+		}
+		leftName := NormalizePlayerName(left.PlayerName)
+		rightName := NormalizePlayerName(right.PlayerName)
+		return leftName != "" && leftName == rightName
+	}
+	return left.Team == right.Team
+}
+
 // MatchesSelection reports whether o prices the same selection as leg, ignoring
 // book, line, price, and link. It is the one definition of "the same
 // selection" shared by the games board, the slip reference prices, and export.
 func (o Odds) MatchesSelection(leg Leg) bool {
-	if leg.GameID == nil || o.GameID != *leg.GameID {
-		return false
-	}
-	return o.MarketType == leg.MarketType &&
-		o.Team == StringValue(leg.Team) &&
-		o.PlayerName == StringValue(leg.PlayerName) &&
-		o.Side == StringValue(leg.Side)
+	return SameSelection(LegSelection(leg), OddsSelection(o))
 }
 
 // SameLine compares two optional lines for an exact match. Two nil lines are

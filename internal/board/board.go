@@ -273,12 +273,7 @@ func IsPropRow(row db.Odds) bool {
 // isPlayerMarket reports whether a market type targets an athlete rather than
 // a game or team.
 func isPlayerMarket(market string) bool {
-	switch market {
-	case "PASS_YDS", "PASS_TDS", "RUSH_YDS", "RUSH_ATT", "REC_YDS", "RECEPTIONS", "ANYTIME_TD", "KICKER_PTS":
-		return true
-	default:
-		return false
-	}
+	return db.IsPlayerMarket(market)
 }
 
 // Build turns one week's games and odds into rows. Games that kicked off
@@ -399,27 +394,17 @@ func Build(
 	return rows
 }
 
-// MatchesLeg reports whether the row's selection is the leg's pick.
+// MatchesLeg reports whether the row's selection is the leg's pick, ignoring
+// moved lines so picked legs stay bound on the board.
 func (r Row) MatchesLeg(leg db.Leg) bool {
-	if r.GameID != db.StringValue(leg.GameID) ||
-		r.Market != leg.MarketType ||
-		r.Side != db.StringValue(leg.Side) {
-		return false
-	}
-	if isPlayerMarket(r.Market) || r.PlayerName != "" {
-		legPlayerID := db.StringValue(leg.PlayerID)
-		if r.PlayerID != "" && legPlayerID != "" {
-			return r.PlayerID == legPlayerID
-		}
-		legTeam := db.StringValue(leg.Team)
-		if r.Team != "" && legTeam != "" && r.Team != legTeam {
-			return false
-		}
-		return normalize(r.PlayerName) == normalize(db.StringValue(leg.PlayerName))
-	}
-	return r.Team == db.StringValue(leg.Team) &&
-		r.PlayerName == db.StringValue(leg.PlayerName) &&
-		lineEqual(r.Line, leg.Line)
+	return db.SameSelection(db.SelectionKey{
+		GameID:     r.GameID,
+		MarketType: r.Market,
+		Team:       r.Team,
+		PlayerName: r.PlayerName,
+		PlayerID:   r.PlayerID,
+		Side:       r.Side,
+	}, db.LegSelection(leg))
 }
 
 // categoryFor maps an odds market to a chip category.
