@@ -114,7 +114,7 @@ v0.5 config tuning, and GCS bucket soft-delete cleanup)
 
 ### Phase 2: Tune Litestream replication and GCS bucket retention
 
-- [ ] Update `deploy/litestream.yml` with `sync-interval: 10s`, reduced compaction `levels` (`5m`, `1h`, `24h`), and
+- [x] Update `deploy/litestream.yml` with `sync-interval: 10s`, reduced compaction `levels` (`5m`, `1h`, `24h`), and
       `snapshot` retention (`24h`), and verify config parsing and restore against `litestream:0.5.18`.
 - [ ] Update `deploy/setup.sh` to run `gcloud storage buckets update "gs://$BUCKET" --clear-soft-delete` idempotently.
 - [ ] Docs: update `docs/concepts/live-updates.md`, `docs/concepts/persistence.md`, and `docs/guides/gcp-setup.md` with
