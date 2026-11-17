@@ -1175,3 +1175,61 @@ func BenchmarkDetail(b *testing.B) {
 		}
 	}
 }
+
+func TestRowMatchesLegAndBuildStayBoundAcrossLineMoves(t *testing.T) {
+	t.Parallel()
+
+	kickoff := at(t, 8, 13, 0)
+	g := game("401", kickoff)
+	roster := []db.RosterPlayer{
+		{
+			AthleteID: "mia-ollie",
+			Team:      "MIA",
+			FullName:  "Ollie Gordon II",
+			NormName:  db.NormalizePlayerName("Ollie Gordon II"),
+			Position:  "RB",
+		},
+	}
+	rows := []db.Odds{
+		odds("401", "fanduel", "RUSH_YDS", "MIA", "Ollie Gordon II", "OVER", new(73.5), -110),
+		odds("401", "fanduel", "RUSH_YDS", "MIA", "Ollie Gordon II", "UNDER", new(73.5), -110),
+		odds("401", "fanduel", "SPREAD", "BUF", "", "TEAM", new(-4.0), -110),
+		odds("401", "fanduel", "TOTAL", "", "", "OVER", new(48.5), -110),
+	}
+	mine := []db.Leg{
+		{
+			ID:         11,
+			GameID:     new("401"),
+			MarketType: "RUSH_YDS",
+			Team:       new("MIA"),
+			PlayerName: new("Ollie Gordon"),
+			Side:       new("OVER"),
+			Line:       new(72.5),
+		},
+		{
+			ID:         12,
+			GameID:     new("401"),
+			MarketType: "SPREAD",
+			Team:       new("BUF"),
+			Side:       new("TEAM"),
+			Line:       new(-3.5),
+		},
+		{
+			ID:         13,
+			GameID:     new("401"),
+			MarketType: "TOTAL",
+			Side:       new("OVER"),
+			Line:       new(47.5),
+		},
+	}
+
+	built := board.Build([]db.Game{g}, rows, roster, "fanduel", mine, kickoff.Add(-time.Hour))
+	pickedByKey := make(map[string]int64, len(built))
+	for _, r := range built {
+		pickedByKey[r.Market+"|"+r.Side] = r.Picked
+	}
+	assert.Equal(t, int64(11), pickedByKey["RUSH_YDS|OVER"])
+	assert.Equal(t, int64(0), pickedByKey["RUSH_YDS|UNDER"])
+	assert.Equal(t, int64(12), pickedByKey["SPREAD|TEAM"])
+	assert.Equal(t, int64(13), pickedByKey["TOTAL|OVER"])
+}

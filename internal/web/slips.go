@@ -2173,12 +2173,7 @@ func (h *slipHandlers) legFromForm(w http.ResponseWriter, r *http.Request, slipI
 
 // isPlayerMarket reports whether a market type targets an athlete rather than a game or team.
 func isPlayerMarket(market string) bool {
-	switch market {
-	case "PASS_YDS", "PASS_TDS", "RUSH_YDS", "RUSH_ATT", "REC_YDS", "RECEPTIONS", "ANYTIME_TD", "KICKER_PTS":
-		return true
-	default:
-		return false
-	}
+	return db.IsPlayerMarket(market)
 }
 
 // buildSelection writes the display text the docs table shows.

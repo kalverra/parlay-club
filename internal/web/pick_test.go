@@ -3085,3 +3085,120 @@ func BenchmarkPickSlate(b *testing.B) {
 	fixture, _ := newProdScalePickFixture(b)
 	benchmarkPickRequest(b, fixture, fmt.Sprintf("/slips/%d/pick/slate", fixture.slip.ID))
 }
+
+func TestPickBoardDeleteAndSwapStayBoundWhenLineMoves(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	kickoff := gameKickoff()
+	game := addGame(t, fixture, kickoff)
+	fetchedAt := kickoff.Add(-2 * time.Hour)
+	_, err := fixture.store.UpsertOdds(t.Context(), []db.Odds{
+		{
+			GameID: game.ID, Book: "fanduel", MarketType: "RUSH_YDS", Team: "MIA",
+			PlayerName: "Ollie Gordon", Side: "OVER", Line: new(72.5), Price: -110, FetchedAt: fetchedAt,
+		},
+		{
+			GameID: game.ID, Book: "fanduel", MarketType: "RUSH_YDS", Team: "MIA",
+			PlayerName: "Ollie Gordon", Side: "UNDER", Line: new(72.5), Price: -110, FetchedAt: fetchedAt,
+		},
+		{
+			GameID: game.ID, Book: "fanduel", MarketType: "TOTAL",
+			Side: "OVER", Line: new(47.5), Price: -110, FetchedAt: fetchedAt,
+		},
+		{
+			GameID: game.ID, Book: "fanduel", MarketType: "TOTAL",
+			Side: "UNDER", Line: new(47.5), Price: -110, FetchedAt: fetchedAt,
+		},
+	})
+	require.NoError(t, err)
+
+	// Pick Ollie Gordon OVER 72.5 and Game TOTAL OVER 47.5.
+	for _, form := range []url.Values{
+		{
+			"quick": {"1"}, "game_id": {game.ID}, "market_type": {"RUSH_YDS"},
+			"team": {"MIA"}, "player_name": {"Ollie Gordon"}, "side": {"OVER"},
+			"line": {"72.5"}, "odds": {"-110"},
+		},
+		{
+			"quick": {"1"}, "game_id": {game.ID}, "market_type": {"TOTAL"},
+			"side": {"OVER"}, "line": {"47.5"}, "odds": {"-110"},
+		},
+	} {
+		req := httptest.NewRequestWithContext(
+			t.Context(),
+			http.MethodPost,
+			fmt.Sprintf("/slips/%d/legs", fixture.slip.ID),
+			strings.NewReader(form.Encode()),
+		)
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("Hx-Request", "true")
+		rec := httptest.NewRecorder()
+		fixture.handler.ServeHTTP(rec, req)
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	}
+
+	legs, err := fixture.store.LegsForSlip(t.Context(), fixture.slip.ID)
+	require.NoError(t, err)
+	require.Len(t, legs, 2)
+	propLeg := legs[0]
+	totalLeg := legs[1]
+
+	// Move both lines and rename Ollie Gordon -> Ollie Gordon II.
+	movedAt := kickoff.Add(-time.Hour)
+	_, err = fixture.store.UpsertOdds(t.Context(), []db.Odds{
+		{
+			GameID: game.ID, Book: "fanduel", MarketType: "RUSH_YDS", Team: "MIA",
+			PlayerName: "Ollie Gordon II", Side: "OVER", Line: new(73.5), Price: -115, FetchedAt: movedAt,
+		},
+		{
+			GameID: game.ID, Book: "fanduel", MarketType: "RUSH_YDS", Team: "MIA",
+			PlayerName: "Ollie Gordon II", Side: "UNDER", Line: new(73.5), Price: -105, FetchedAt: movedAt,
+		},
+		{
+			GameID: game.ID, Book: "fanduel", MarketType: "TOTAL",
+			Side: "OVER", Line: new(48.5), Price: -110, FetchedAt: movedAt,
+		},
+		{
+			GameID: game.ID, Book: "fanduel", MarketType: "TOTAL",
+			Side: "UNDER", Line: new(48.5), Price: -110, FetchedAt: movedAt,
+		},
+	})
+	require.NoError(t, err)
+
+	// Deleting the prop leg from the board still locates its LineGroup via groupHoldsLeg.
+	delReq := httptest.NewRequestWithContext(
+		t.Context(), http.MethodDelete, fmt.Sprintf("/legs/%d?from=board", propLeg.ID), nil,
+	)
+	delReq.Header.Set("Hx-Request", "true")
+	delRec := httptest.NewRecorder()
+	fixture.handler.ServeHTTP(delRec, delReq)
+	require.Equal(t, http.StatusOK, delRec.Code, delRec.Body.String())
+	delBody := html.UnescapeString(delRec.Body.String())
+	assert.Contains(t, delBody, `class="pick-line-group"`)
+	assert.Contains(t, delBody, "Over 73.5")
+	assert.Contains(t, delBody, "tap to add")
+
+	// Switching TOTAL OVER 47.5 to TOTAL UNDER 48.5 refreshes only the row (sameBoardLine).
+	swapForm := url.Values{
+		"from":        {"board"},
+		"game":        {game.ID},
+		"game_id":     {game.ID},
+		"market_type": {"TOTAL"},
+		"side":        {"UNDER"},
+		"line":        {"48.5"},
+		"odds":        {"-110"},
+	}
+	swapReq := httptest.NewRequestWithContext(
+		t.Context(), http.MethodPut, fmt.Sprintf("/legs/%d", totalLeg.ID), strings.NewReader(swapForm.Encode()),
+	)
+	swapReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	swapReq.Header.Set("Hx-Request", "true")
+	swapRec := httptest.NewRecorder()
+	fixture.handler.ServeHTTP(swapRec, swapReq)
+	require.Equal(t, http.StatusOK, swapRec.Code, swapRec.Body.String())
+	assert.Equal(t, "tray-updated", swapRec.Header().Get("Hx-Trigger"))
+	swapBody := html.UnescapeString(swapRec.Body.String())
+	assert.Contains(t, swapBody, "Under 48.5")
+	assert.Contains(t, swapBody, "tap to remove")
+}

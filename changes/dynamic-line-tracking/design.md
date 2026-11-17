@@ -107,7 +107,7 @@ and grading invariants)
 
 ### Phase 1: Canonical selection identity in `db` and `board`
 
-- [ ] Add `SameSelection` in `internal/db/odds.go` (matching props by canonical player + market + side, ignoring `Line`)
+- [x] Add `SameSelection` in `internal/db/odds.go` (matching props by canonical player + market + side, ignoring `Line`)
       and update `board.Row.MatchesLeg`, `sameBoardLine`, and `groupHoldsLeg` in `internal/board/board.go` and
       `internal/web/pick.go` so picked legs stay bound when lines move, with tests.
 
