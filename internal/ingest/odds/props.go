@@ -225,9 +225,6 @@ func MergeProps(primary, secondary []Prop) []Prop {
 	if len(primary) == 0 {
 		return append([]Prop(nil), secondary...)
 	}
-	if len(secondary) == 0 {
-		return append([]Prop(nil), primary...)
-	}
 
 	eventSids := make(map[string]string)
 	for _, sec := range secondary {

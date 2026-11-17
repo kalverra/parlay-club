@@ -865,6 +865,36 @@ func TestPropsPrimaryLineSelectionEdgeCases(t *testing.T) {
 	assert.Equal(t, 140, pE.Price, "non-standard anytime TD is dropped")
 }
 
+func TestMergePropsDeduplicatesPrimaryWhenSecondaryEmpty(t *testing.T) {
+	t.Parallel()
+
+	primary := []odds.Prop{
+		{
+			Book:       "fanduel",
+			MarketType: odds.MarketRushYds,
+			Team:       "MIA",
+			PlayerName: "Ollie Gordon",
+			Side:       odds.SideOver,
+			Line:       new(73.5),
+			Price:      -135,
+		},
+		{
+			Book:       "fanduel",
+			MarketType: odds.MarketRushYds,
+			Team:       "MIA",
+			PlayerName: "Ollie Gordon",
+			Side:       odds.SideOver,
+			Line:       new(74.5),
+			Price:      -112,
+		},
+	}
+
+	merged := odds.MergeProps(primary, nil)
+	require.Len(t, merged, 1)
+	assert.Equal(t, new(74.5), merged[0].Line, "keeps primary collision closest to -110")
+	assert.Equal(t, -112, merged[0].Price)
+}
+
 // findProp returns the one merged row matching a selection, failing the test
 // when it is missing or duplicated.
 func findProp(

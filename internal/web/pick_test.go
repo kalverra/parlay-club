@@ -2848,9 +2848,14 @@ func TestPickBoardCollapsesPlayerPropRowsAndSwapsAcrossLines(t *testing.T) {
 	swapRec := httptest.NewRecorder()
 	fixture.handler.ServeHTTP(swapRec, swapReq)
 	require.Equal(t, http.StatusOK, swapRec.Code, swapRec.Body.String())
-	assert.Empty(t, swapRec.Header().Get("Hx-Refresh"),
-		"sameBoardLine should refresh only the prop's pair row, not force a full board reload")
-	assert.Contains(t, swapRec.Body.String(), `id="pick-line-`)
+	assert.Equal(t, "tray-updated", swapRec.Header().Get("Hx-Trigger"),
+		"sameBoardLine should refresh only the prop's pair row, not trigger board-updated")
+	swapBody := html.UnescapeString(swapRec.Body.String())
+	assert.Contains(t, swapBody, `id="pick-line-`)
+	assert.Contains(t, swapBody, "Over 73.5")
+	assert.Contains(t, swapBody, "tap to switch")
+	assert.Contains(t, swapBody, "Under 73.5")
+	assert.Contains(t, swapBody, "tap to remove")
 }
 
 func newProdScalePickFixture(b *testing.B) (*slipFixture, string) {
