@@ -4,8 +4,6 @@ title: Persistence
 type: concept
 summary: How one SQLite file holds every slip and every cached response, how Litestream restores and replicates it on Cloud Run, why only one process may write to it, and how the local sandbox keeps its own file and stage row.
 tags: [persistence, sqlite, litestream, gcs, backup, restore, cloud-run, single-instance, wal, sandbox]
-sources: [Dockerfile, deploy/entrypoint.sh, deploy/litestream.yml, internal/db/db.go, internal/db/migrations/0010_bug_reports.sql, internal/sandbox/state.go, internal/sandbox/scenario.go, internal/sandbox/reset.go, internal/sandbox/seed.go, cmd/server/main.go, cmd/server/sandbox.go]
-last_verified: 2026-11-13
 ---
 
 # Persistence
@@ -78,15 +76,23 @@ exec litestream replicate -config /etc/litestream.yml -exec /app/server
 The image runs as a non-root user and owns `/data`. It copies `seed/history.yaml` too, because the loader's default path
 is relative to `/app`. See [History file](../reference/history-file.md).
 
-`deploy/litestream.yml` is Litestream 0.5 syntax: a `dbs` list with one `path` and its `replica.url`, both expanded from
-the environment. The Dockerfile pins Litestream 0.5.18 in its own build stage and copies the binary into the runtime
-image, so the config and the binary always match.
+`deploy/litestream.yml` is Litestream 0.5 syntax: it sets `sync-interval: 10s`, compaction `levels` (`5m`, `1h`, `24h`), and
+`snapshot` (`interval: 24h`, `retention: 24h`), alongside a `dbs` list with one `path` and its `replica.url`, both
+expanded from the environment. The Dockerfile pins Litestream 0.5.18 in its own build stage and copies the binary into
+the runtime image, so the config and the binary always match.
 
 ## Replication and shutdown
 
-Litestream tails the WAL and ships new frames to `gs://$LITESTREAM_BUCKET/parlay.db`. Cloud Run throttles CPU between
-requests, so replication can lag until the next request or shutdown. That is fine at this traffic, but it sets the loss
-window: a write is durable on the instance disk before it reaches GCS.
+Litestream tails the WAL and ships new frames to `gs://$LITESTREAM_BUCKET/parlay.db` every `sync-interval: 10s`. That
+batching cuts GCS write churn compared to the 1-second default; an ungraceful crash can lose up to 10 seconds of writes,
+while Cloud Run's normal `SIGTERM` stop still flushes final frames before exit. Cloud Run also throttles CPU between
+requests, so replication can lag until the next request or shutdown. That is fine at this traffic, and a write is
+durable on the instance disk before it reaches GCS.
+
+Compaction runs at `levels` of `5m`, `1h`, and `24h`, and `snapshot` keeps 24-hour snapshots (`interval: 24h`,
+`retention: 24h`) for point-in-time recovery without 30-second L1 rewrites. `deploy/setup.sh` clears GCS's default 7-day
+soft-delete policy on the replica bucket (`--clear-soft-delete`) so compacted and expired LTX segments are freed
+instead of retained for a week.
 
 On SIGTERM the server ends open SSE streams, drains in-flight requests for up to 8 seconds (`http.Server.Shutdown`),
 then cancels and waits for background refreshes inside that same budget. `database.Close()` runs only after both drains,

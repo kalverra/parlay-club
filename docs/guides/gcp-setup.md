@@ -49,7 +49,7 @@ The script stops at the first failure and prints what it finished. It creates:
 | Resource             | Details                                                                                   |
 | -------------------- | ----------------------------------------------------------------------------------------- |
 | APIs                 | Cloud Run, Artifact Registry, Secret Manager, Cloud Scheduler, IAM, STS, billing budgets, GCS |
-| GCS bucket           | `gs://PROJECT_ID-parlay-litestream` in `us-central1`, for Litestream                      |
+| GCS bucket           | `gs://PROJECT_ID-parlay-litestream` in `us-central1`, for Litestream, with soft-delete cleared (`--clear-soft-delete`) |
 | Artifact Registry    | Docker repo `parlay-club` with a cleanup policy that keeps the last 3 images               |
 | Secrets              | `session-key`, `google-client-id`, `google-client-secret`, `odds-api-key`, `the-odds-api-key`, all empty; `github-token` and `prefill-token`, empty and optional |
 | Runtime account      | `parlay-runtime`, read/write on the bucket and read on all seven secrets                  |
@@ -78,8 +78,8 @@ GITHUB_REPO=you/parlay-club deploy/setup.sh PROJECT_ID BILLING_ACCOUNT
 The script prints the values you need in the next steps. Copy them.
 
 Re-run it once on an existing project when new optional resources are added (such as `github-token`, `prefill-token`, or
-the Cloud Scheduler API) or to grant `parlay-deployer` the read access the pre-flight checks need; every existing
-resource is skipped.
+the Cloud Scheduler API), to clear GCS soft-delete on an existing bucket, or to grant `parlay-deployer` the read access
+the pre-flight checks need; every existing resource is skipped and bucket settings update in place.
 
 ### 2. Create the Google OAuth client
 
@@ -270,7 +270,7 @@ The free-tier pieces this app leans on:
 
 - Cloud Run scales to zero (`--min-instances 0`) and runs at most one instance.
 - Artifact Registry keeps only the last 3 images.
-- The bucket holds the SQLite replica, which is small.
+- The bucket holds the SQLite replica, which is small, and has soft-delete cleared so compacted Litestream LTX segments are freed right away instead of billed for 7 extra days.
 - Parlay API has a 1,000-credit monthly budget and The Odds API has 500, both tracked in the app; see
   [Data refresh](../concepts/data-refresh.md).
 

@@ -4,8 +4,6 @@ title: Live updates
 type: concept
 summary: How a slip page hears about changes through one SSE stream, and how the hub, deadlines, and client reconnect keep that stream cheap.
 tags: [live, sse, hub, eventsource, deadlines, hub-topics]
-sources: [internal/live/hub.go, internal/live/stream.go, internal/refresh/live.go, internal/slips/rules.go, cmd/server/main.go, cmd/server/sandbox.go, web/static/app.js]
-last_verified: 2026-11-13
 ---
 
 # Live updates
@@ -65,6 +63,7 @@ commit; auth cookies and SSE deadlines stay on real time even while the stage cl
 
 `live.Stream.ServeSlip` serves one connection for one slip and its week.
 
+- If the slip is already `GRADED`, the handler sends `event: bye` and returns at once without opening a stream.
 - It subscribes to `slip:{id}` and `week:{weekID}` and unsubscribes when the request ends.
 - It sends `event: slip-updated` or `event: board-updated` with `data: {}`.
 - It sends a `: ping` comment every 25 seconds so proxies keep the connection open.
@@ -75,13 +74,14 @@ commit; auth cookies and SSE deadlines stay on real time even while the stage cl
 
 An open stream keeps the instance billed, so every stream ends itself.
 
-- **Live window:** when a game in the week is live or kicks off soon, the stream may live 55 minutes. The window is
+- **Live window:** when a game in the week is live or kicks off soon, the stream may live 15 minutes. The window is
   fixed from the start; events do not extend it.
-- **Otherwise:** the stream closes after 10 minutes without an event. Each `slip-updated` or `board-updated` resets that
+- **Otherwise:** the stream closes after 3 minutes without an event. Each `slip-updated` or `board-updated` resets that
   idle timer.
 
 At either deadline the server sends `event: bye` and returns. The `bye` tells the client this was planned, not a
-failure, so it waits for the tab to become visible instead of reconnecting at once.
+failure, so it pauses and waits for user interaction, window focus, or the tab to become visible instead of reconnecting
+at once.
 
 ### Shutdown
 
@@ -102,20 +102,25 @@ from a `Clock` interface, so tests can fire deadlines by hand. See [Data refresh
 
 ## Client (`web/static/app.js`)
 
-The page marks its body with `data-live-url`; the client opens one `EventSource` for it.
+For `OPEN` and `LOCKED` slips, the page marks its body with `data-live-url`; `GRADED` slips omit it. When `data-live-url`
+is present, the client opens one `EventSource`.
 
 - `slip-updated` and `board-updated` call `htmx.trigger(document.body, ...)`. Partials listen with
   `hx-trigger="slip-updated from:body"`.
-- `bye` closes the stream without retrying.
-- When the tab becomes hidden, the stream closes. When it becomes visible again, or the window gets focus, the client
-  reopens the stream and triggers both refresh events to cover anything missed.
+- `bye` closes the stream without retrying and marks a visible tab as idle-paused.
+- A 3-minute inactivity timer resets on `pointerdown`, `keydown`, `scroll`, `touchstart`, and `htmx:beforeRequest`
+  (captured so non-bubbling container scrolls count). When it fires on a visible tab, the client closes the stream and
+  pauses until the next interaction or focus.
+- When the tab becomes hidden or `pagehide` fires, the stream closes. When the tab becomes visible again, the window
+  gets focus, or the user interacts after an idle pause, the client reopens the stream and triggers both refresh events
+  to cover anything missed.
 - After every `htmx:afterSwap`, `<time>` elements are formatted in local time with `Intl.DateTimeFormat`.
 
 Closing on hide matters on iOS Safari, which drops background connections and would otherwise leave a dead stream.
 
 ## Guardrails
 
-- An open stream keeps the instance billed, so keep the deadlines and the visibility close.
+- An open stream keeps the instance billed, so keep the deadlines, idle pause, and visibility close.
 - Set the anti-buffering headers and flush every write, or Cloud Run and proxies hold events back.
 - Publish once per committed mutation. Publishing inside a transaction can tell clients about a write that rolls back.
 - Keep per-person data out of events. Send a signal and let the page fetch its own view.
