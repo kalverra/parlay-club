@@ -300,8 +300,10 @@ func Build(
 		byGame[game.ID] = game
 	}
 
+	index := newRosterIndex(roster)
 	type group struct {
 		gameID, market, team, player, side string
+		playerID, position, headshotURL    string
 		rows                               []db.Odds
 	}
 	groups := make(map[string]*group)
@@ -310,45 +312,74 @@ func Build(
 		if _, ok := byGame[row.GameID]; !ok {
 			continue
 		}
-		key := strings.Join(
-			[]string{row.GameID, row.MarketType, row.Team, row.PlayerName, row.Side}, "\x00")
+		var key, playerID, position, headshotURL string
+		if isPlayerMarket(row.MarketType) || row.PlayerName != "" {
+			playerID, position, headshotURL = matchPlayer(&index, row.PlayerName, row.Team)
+			key = strings.Join(
+				[]string{row.GameID, row.MarketType, canonicalPlayerKey(playerID, row.PlayerName, row.Team), row.Side},
+				"\x00",
+			)
+		} else {
+			key = strings.Join(
+				[]string{row.GameID, row.MarketType, row.Team, row.PlayerName, row.Side},
+				"\x00",
+			)
+		}
 		found, ok := groups[key]
 		if !ok {
 			found = &group{
-				gameID: row.GameID,
-				market: row.MarketType,
-				team:   row.Team,
-				player: row.PlayerName,
-				side:   row.Side,
+				gameID:      row.GameID,
+				market:      row.MarketType,
+				team:        row.Team,
+				player:      row.PlayerName,
+				side:        row.Side,
+				playerID:    playerID,
+				position:    position,
+				headshotURL: headshotURL,
 			}
 			groups[key] = found
 			order = append(order, key)
+		} else {
+			if found.team == "" && row.Team != "" {
+				found.team = row.Team
+			}
+			if found.player == "" && row.PlayerName != "" {
+				found.player = row.PlayerName
+			}
 		}
 		found.rows = append(found.rows, row)
 	}
 
-	index := newRosterIndex(roster)
 	rows := make([]Row, 0, len(groups))
 	for _, key := range order {
 		group := groups[key]
 		game := byGame[group.gameID]
 		line, price := selectionPrice(group.rows, homeBook)
-		playerID, position, headshotURL := matchPlayer(&index, group.player, group.team)
+		player := group.player
+		team := group.team
+		if home := homeBookRow(group.rows, homeBook); home != nil {
+			if home.PlayerName != "" {
+				player = home.PlayerName
+			}
+			if home.Team != "" {
+				team = home.Team
+			}
+		}
 		rows = append(rows, Row{
 			GameID:      group.gameID,
 			Market:      group.market,
-			Team:        group.team,
-			PlayerName:  group.player,
-			PlayerID:    playerID,
-			Position:    position,
-			HeadshotURL: headshotURL,
+			Team:        team,
+			PlayerName:  player,
+			PlayerID:    group.playerID,
+			Position:    group.position,
+			HeadshotURL: group.headshotURL,
 			Side:        group.side,
 			Line:        line,
 			Odds:        price,
 			Category:    categoryFor(group.market),
 			Window:      windowFor(game.Kickoff),
 			Kickoff:     game.Kickoff,
-			Text:        rowText(group.market, group.team, group.player, group.side, line),
+			Text:        rowText(group.market, team, player, group.side, line),
 		})
 	}
 
@@ -853,12 +884,15 @@ func lineGroups(game db.Game, rows []Row, mode Sort, signals BoardSignals) []Lin
 
 // lineKey names the line a row sits on.
 func lineKey(row Row) string {
+	if isPlayerMarket(row.Market) || row.PlayerName != "" {
+		return row.Market + "|" + canonicalPlayerKey(row.PlayerID, row.PlayerName, row.Team)
+	}
 	return LineKey(row.Market, row.Team, row.PlayerName, row.Line)
 }
 
 // LineKey names the line a selection sits on. A spread or moneyline puts both
-// teams on one line, a total keys on its number, and a team total or prop also
-// keys on its team, player, and number.
+// teams on one line, a total keys on its number, a team total keys on its team
+// and number, and a player prop keys on its market and canonical player.
 func LineKey(market, team, player string, line *float64) string {
 	switch market {
 	case "SPREAD", "ML":
@@ -866,6 +900,9 @@ func LineKey(market, team, player string, line *float64) string {
 	case "TOTAL":
 		return market + "|" + lineText(line)
 	default:
+		if isPlayerMarket(market) || player != "" {
+			return market + "|" + canonicalPlayerKey("", player, team)
+		}
 		return strings.Join([]string{market, team, player, lineText(line)}, "|")
 	}
 }
@@ -1095,10 +1132,17 @@ func playerGroups(game db.Game, rows []Row, mode Sort, signals BoardSignals) []P
 // playerKey identifies one player's card. A roster ID wins; otherwise the name
 // and team keep two players with the same name apart.
 func playerKey(row Row) string {
-	if row.PlayerID != "" {
-		return "id:" + row.PlayerID
+	return canonicalPlayerKey(row.PlayerID, row.PlayerName, row.Team)
+}
+
+// canonicalPlayerKey identifies one player across raw name spellings. A roster
+// ID wins; otherwise the normalized name and team keep two players with the
+// same name apart.
+func canonicalPlayerKey(playerID, playerName, team string) string {
+	if playerID != "" {
+		return "id:" + playerID
 	}
-	return "name:" + normalize(row.PlayerName) + "|" + row.Team
+	return "name:" + normalize(playerName) + "|" + team
 }
 
 // sortPlayers orders player cards for the sort, falling back to the player's

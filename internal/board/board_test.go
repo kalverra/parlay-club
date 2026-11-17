@@ -907,14 +907,18 @@ func TestBuildAndDetailNormalizeAccentsAndTeamTags(t *testing.T) {
 	}
 
 	built := board.Build([]db.Game{g}, rows, roster, "draftkings", nil, kickoff.Add(-time.Hour))
-	require.Len(t, built, 3)
+	require.Len(t, built, 2)
 
 	// Accent + team tag matches roster entry.
 	assert.Equal(t, "mia-1", built[0].PlayerID)
 
-	// Unmatched rows with and without (TEAM) tag and suffix fold into one player card.
+	// Unmatched rows with and without (TEAM) tag and suffix fold into one player card
+	// and one line group per market.
 	detail := board.Detail(g, built, board.Query{Category: board.CategoryRushing, Now: kickoff.Add(-time.Hour)})
 	require.Len(t, detail.Players, 2)
+	for _, player := range detail.Players {
+		assert.Len(t, player.Lines, 1)
+	}
 
 	// Accent-insensitive search finds José Alvarado via unaccented query.
 	filtered := board.Detail(
@@ -924,6 +928,122 @@ func TestBuildAndDetailNormalizeAccentsAndTeamTags(t *testing.T) {
 	)
 	require.Len(t, filtered.Players, 1)
 	assert.Equal(t, "mia-1", filtered.Players[0].PlayerID)
+}
+
+func TestBuildAndPairCollapsePlayerPropsAcrossBooksAndSpellings(t *testing.T) {
+	t.Parallel()
+
+	kickoff := at(t, 8, 13, 0)
+	g := game("401", kickoff)
+	roster := []db.RosterPlayer{
+		{AthleteID: "mia-ollie", Team: "MIA", FullName: "Ollie Gordon II", Position: "RB"},
+	}
+	rows := []db.Odds{
+		odds("401", "fanduel", "RUSH_YDS", "MIA", "Ollie Gordon", "OVER", new(72.5), -110),
+		odds("401", "fanduel", "RUSH_YDS", "MIA", "Ollie Gordon", "UNDER", new(72.5), -110),
+		odds("401", "hardrockbet", "RUSH_YDS", "MIA", "Ollie Gordon II (MIA)", "OVER", new(73.5), -115),
+		odds("401", "hardrockbet", "RUSH_YDS", "MIA", "Ollie Gordon II (MIA)", "UNDER", new(73.5), -105),
+		odds("401", "draftkings", "RUSH_YDS", "MIA", "Ollie Gordon II", "OVER", new(75.5), -110),
+		odds("401", "draftkings", "RUSH_YDS", "MIA", "Ollie Gordon II", "UNDER", new(75.5), -110),
+	}
+
+	built := board.Build([]db.Game{g}, rows, roster, "", nil, kickoff.Add(-time.Hour))
+	require.Len(t, built, 2, "all books collapse into one OVER and one UNDER row")
+
+	detail := board.Detail(g, built, board.Query{Category: board.CategoryRushing, Now: kickoff.Add(-time.Hour)})
+	require.Len(t, detail.Players, 1)
+	require.Len(t, detail.Players[0].Lines, 1, "one LineGroup per player and prop market")
+
+	lineGroup := detail.Players[0].Lines[0]
+	assert.Equal(t, "RUSH_YDS", lineGroup.Market)
+	require.Len(t, lineGroup.Options, 2)
+	assert.Equal(t, []string{"OVER", "UNDER"}, optionSides(lineGroup))
+	assert.InDelta(t, 73.5, *lineGroup.Options[0].Line, 1e-9, "median across 72.5, 73.5, 75.5")
+	assert.InDelta(t, 73.5, *lineGroup.Options[1].Line, 1e-9)
+}
+
+func TestPairOneSidedHomeBookStillPairsWithOtherBook(t *testing.T) {
+	t.Parallel()
+
+	kickoff := at(t, 8, 13, 0)
+	g := game("401", kickoff)
+	rows := []db.Odds{
+		odds("401", "prizepicks", "RUSH_YDS", "MIA", "Ollie Gordon", "OVER", new(73.5), -110),
+		odds("401", "draftkings", "RUSH_YDS", "MIA", "Ollie Gordon II", "OVER", new(75.5), -110),
+		odds("401", "draftkings", "RUSH_YDS", "MIA", "Ollie Gordon II", "UNDER", new(75.5), -110),
+	}
+
+	built := board.Build([]db.Game{g}, rows, nil, "prizepicks", nil, kickoff.Add(-time.Hour))
+	require.Len(t, built, 2)
+
+	groups := board.Pair(g, built)
+	require.Len(t, groups, 1, "OVER 73.5 and UNDER 75.5 pair into one LineGroup")
+	require.Len(t, groups[0].Options, 2)
+	assert.Equal(t, []string{"OVER", "UNDER"}, optionSides(groups[0]))
+	assert.InDelta(t, 73.5, *groups[0].Options[0].Line, 1e-9)
+	assert.InDelta(t, 75.5, *groups[0].Options[1].Line, 1e-9)
+}
+
+func TestPairByPlayerIDAcrossDifferingNamesAndTeams(t *testing.T) {
+	t.Parallel()
+
+	g := game("401", at(t, 8, 13, 0))
+	paired := board.Pair(g, []board.Row{
+		{
+			GameID:     "401",
+			Market:     "RUSH_YDS",
+			Team:       "MIA",
+			PlayerName: "Ollie Gordon",
+			PlayerID:   "mia-ollie",
+			Side:       "OVER",
+			Line:       new(73.5),
+		},
+		{
+			GameID:     "401",
+			Market:     "RUSH_YDS",
+			Team:       "",
+			PlayerName: "Ollie Gordon II",
+			PlayerID:   "mia-ollie",
+			Side:       "UNDER",
+			Line:       new(75.5),
+		},
+	})
+	require.Len(t, paired, 1)
+	require.Len(t, paired[0].Options, 2)
+	assert.Equal(t, []string{"OVER", "UNDER"}, optionSides(paired[0]))
+}
+
+func TestLineKeyCanonicalPlayerPropsAndGameLines(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(
+		t,
+		board.LineKey("RUSH_YDS", "MIA", "Ollie Gordon", new(72.5)),
+		board.LineKey("RUSH_YDS", "MIA", "Ollie Gordon II (MIA)", new(75.5)),
+		"player props ignore line value and normalize player name",
+	)
+	assert.NotEqual(
+		t,
+		board.LineKey("RUSH_YDS", "MIA", "Ollie Gordon", new(72.5)),
+		board.LineKey("REC_YDS", "MIA", "Ollie Gordon", new(72.5)),
+	)
+	assert.NotEqual(
+		t,
+		board.LineKey("TOTAL", "", "", new(47.5)),
+		board.LineKey("TOTAL", "", "", new(48.5)),
+		"game totals still key on line value",
+	)
+	assert.NotEqual(
+		t,
+		board.LineKey("TEAM_TOTAL", "BUF", "", new(24.5)),
+		board.LineKey("TEAM_TOTAL", "BUF", "", new(25.5)),
+		"team totals still key on line value",
+	)
+	assert.Equal(
+		t,
+		board.LineKey("SPREAD", "BUF", "", new(-3.5)),
+		board.LineKey("SPREAD", "MIA", "", new(3.5)),
+	)
 }
 
 func prodScaleBoardFixture(b *testing.B) ([]db.Game, []db.Odds, []db.RosterPlayer, time.Time) {

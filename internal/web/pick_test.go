@@ -2739,6 +2739,120 @@ func TestPickBoardAndDetailReturnCachedRowsWhileAsyncRefreshPublishes(t *testing
 	assert.Contains(t, rec.Body.String(), "275.5")
 }
 
+func TestPickBoardCollapsesPlayerPropRowsAndSwapsAcrossLines(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	game := addGame(t, fixture, gameKickoff())
+	fetchedAt := gameKickoff().Add(-2 * time.Hour)
+	require.NoError(t, fixture.store.UpsertRosterPlayers(t.Context(), []db.RosterPlayer{
+		{
+			AthleteID: "mia-ollie",
+			Team:      "MIA",
+			FullName:  "Ollie Gordon II",
+			NormName:  "ollie gordon",
+			Position:  "RB",
+		},
+	}))
+	_, err := fixture.store.UpsertOdds(t.Context(), []db.Odds{
+		{
+			GameID: game.ID, Book: "fanduel", MarketType: "RUSH_YDS", Team: "MIA",
+			PlayerName: "Ollie Gordon", Side: "OVER", Line: new(72.5), Price: -110, FetchedAt: fetchedAt,
+		},
+		{
+			GameID: game.ID, Book: "fanduel", MarketType: "RUSH_YDS", Team: "MIA",
+			PlayerName: "Ollie Gordon", Side: "UNDER", Line: new(72.5), Price: -110, FetchedAt: fetchedAt,
+		},
+		{
+			GameID: game.ID, Book: "hardrockbet", MarketType: "RUSH_YDS", Team: "MIA",
+			PlayerName: "Ollie Gordon II (MIA)", Side: "OVER", Line: new(73.5), Price: -115, FetchedAt: fetchedAt,
+		},
+		{
+			GameID: game.ID, Book: "hardrockbet", MarketType: "RUSH_YDS", Team: "MIA",
+			PlayerName: "Ollie Gordon II (MIA)", Side: "UNDER", Line: new(73.5), Price: -105, FetchedAt: fetchedAt,
+		},
+		{
+			GameID: game.ID, Book: "draftkings", MarketType: "RUSH_YDS", Team: "MIA",
+			PlayerName: "Ollie Gordon II", Side: "OVER", Line: new(75.5), Price: -110, FetchedAt: fetchedAt,
+		},
+		{
+			GameID: game.ID, Book: "draftkings", MarketType: "RUSH_YDS", Team: "MIA",
+			PlayerName: "Ollie Gordon II", Side: "UNDER", Line: new(75.5), Price: -110, FetchedAt: fetchedAt,
+		},
+	})
+	require.NoError(t, err)
+
+	detail := httptest.NewRecorder()
+	fixture.handler.ServeHTTP(detail, httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodGet,
+		fmt.Sprintf("/slips/%d/pick/detail?game=%s&cat=rushing", fixture.slip.ID, game.ID),
+		nil,
+	))
+	require.Equal(t, http.StatusOK, detail.Code, detail.Body.String())
+	body := html.UnescapeString(detail.Body.String())
+	assert.Equal(t, 1, strings.Count(body, `class="pick-line-group"`),
+		"all books and name spellings collapse into one pick-line-group row")
+	assert.Contains(t, body, "Over 73.5")
+	assert.Contains(t, body, "Under 73.5")
+
+	// Pick Over 73.5, then switch to Under 75.5 on the same player prop:
+	// sameBoardLine treats them as the same line so HTMX refreshes only that row.
+	createForm := url.Values{
+		"quick":       {"1"},
+		"game_id":     {game.ID},
+		"market_type": {"RUSH_YDS"},
+		"team":        {"MIA"},
+		"player_name": {"Ollie Gordon"},
+		"player_id":   {"mia-ollie"},
+		"side":        {"OVER"},
+		"line":        {"73.5"},
+		"odds":        {"-115"},
+	}
+	createReq := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodPost,
+		fmt.Sprintf("/slips/%d/legs", fixture.slip.ID),
+		strings.NewReader(createForm.Encode()),
+	)
+	createReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	createReq.Header.Set("Hx-Request", "true")
+	createRec := httptest.NewRecorder()
+	fixture.handler.ServeHTTP(createRec, createReq)
+	require.Equal(t, http.StatusOK, createRec.Code, createRec.Body.String())
+
+	legs, err := fixture.store.LegsForSlip(t.Context(), fixture.slip.ID)
+	require.NoError(t, err)
+	require.Len(t, legs, 1)
+
+	swapForm := url.Values{
+		"from":        {"board"},
+		"game":        {game.ID},
+		"game_id":     {game.ID},
+		"market_type": {"RUSH_YDS"},
+		"team":        {"MIA"},
+		"player_name": {"Ollie Gordon II (MIA)"},
+		"player_id":   {"mia-ollie"},
+		"side":        {"UNDER"},
+		"line":        {"75.5"},
+		"odds":        {"-110"},
+	}
+	swapReq := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodPut,
+		fmt.Sprintf("/legs/%d", legs[0].ID),
+		strings.NewReader(swapForm.Encode()),
+	)
+	swapReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	swapReq.Header.Set("Hx-Request", "true")
+	swapRec := httptest.NewRecorder()
+	fixture.handler.ServeHTTP(swapRec, swapReq)
+	require.Equal(t, http.StatusOK, swapRec.Code, swapRec.Body.String())
+	assert.Empty(t, swapRec.Header().Get("Hx-Refresh"),
+		"sameBoardLine should refresh only the prop's pair row, not force a full board reload")
+	assert.Contains(t, swapRec.Body.String(), `id="pick-line-`)
+}
+
 func newProdScalePickFixture(b *testing.B) (*slipFixture, string) {
 	b.Helper()
 
