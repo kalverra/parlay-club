@@ -117,5 +117,5 @@ v0.5 config tuning, and GCS bucket soft-delete cleanup)
 - [x] Update `deploy/litestream.yml` with `sync-interval: 10s`, reduced compaction `levels` (`5m`, `1h`, `24h`), and
       `snapshot` retention (`24h`), and verify config parsing and restore against `litestream:0.5.18`.
 - [x] Update `deploy/setup.sh` to run `gcloud storage buckets update "gs://$BUCKET" --clear-soft-delete` idempotently.
-- [ ] Docs: update `docs/concepts/live-updates.md`, `docs/concepts/persistence.md`, and `docs/guides/gcp-setup.md` with
+- [x] Docs: update `docs/concepts/live-updates.md`, `docs/concepts/persistence.md`, and `docs/guides/gcp-setup.md` with
       the new SSE deadlines, Litestream settings, and bucket soft-delete policy.
