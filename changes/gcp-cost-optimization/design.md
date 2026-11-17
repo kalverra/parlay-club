@@ -119,3 +119,7 @@ v0.5 config tuning, and GCS bucket soft-delete cleanup)
 - [x] Update `deploy/setup.sh` to run `gcloud storage buckets update "gs://$BUCKET" --clear-soft-delete` idempotently.
 - [x] Docs: update `docs/concepts/live-updates.md`, `docs/concepts/persistence.md`, and `docs/guides/gcp-setup.md` with
       the new SSE deadlines, Litestream settings, and bucket soft-delete policy.
+
+## Reviews
+
+- [x] Final review: agy@gemini-4-argon-high

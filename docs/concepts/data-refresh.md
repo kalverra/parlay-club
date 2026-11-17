@@ -295,7 +295,7 @@ listener never refetches a write that might roll back. A no-op rerun publishes n
 kickoff was recent, and a scheduled game whose kickoff has passed is not either.
 
 The check reads the week's games with a 5 second timeout. A read error returns false, so the stream falls back to the
-idle deadline rather than staying open on a guess. The stream itself uses a 55 minute deadline inside the live window;
+idle deadline rather than staying open on a guess. The stream itself uses a 15 minute deadline inside the live window;
 see [Live updates](live-updates.md).
 
 ## Guardrails
