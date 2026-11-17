@@ -117,7 +117,7 @@ and grading invariants)
       `SameSelection` across line moves and name variants, surface drift in `internal/web/export.go` and
       `web/templates/partials.html`, and add tests in `internal/export/export_test.go` and
       `internal/web/export_test.go`.
-- [ ] Docs: update `docs/concepts/export.md` to describe dynamic line linking and drift notes.
+- [x] Docs: update `docs/concepts/export.md` to describe dynamic line linking and drift notes.
 
 ### Phase 3: Open-slip line-drift indicator and one-tap refresh
 
