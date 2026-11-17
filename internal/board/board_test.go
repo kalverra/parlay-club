@@ -892,6 +892,40 @@ func TestBuildMatchPlayerTeamPriorityAndFallback(t *testing.T) {
 	assert.Equal(t, "other-2", byPlayer["Patrick Mahomes"].PlayerID, "falls back to another team via normalized name")
 }
 
+func TestBuildAndDetailNormalizeAccentsAndTeamTags(t *testing.T) {
+	t.Parallel()
+
+	kickoff := at(t, 8, 13, 0)
+	g := game("401", kickoff)
+	roster := []db.RosterPlayer{
+		{AthleteID: "mia-1", Team: "MIA", FullName: "José Alvarado", Position: "RB"},
+	}
+	rows := []db.Odds{
+		odds("401", "draftkings", "RUSH_YDS", "MIA", "Jose Alvarado (MIA)", "OVER", new(45.5), -110),
+		odds("401", "draftkings", "RUSH_YDS", "MIA", "Ollie Gordon II (MIA)", "OVER", new(35.5), -110),
+		odds("401", "fanduel", "RUSH_YDS", "MIA", "Ollie Gordon", "OVER", new(35.5), -105),
+	}
+
+	built := board.Build([]db.Game{g}, rows, roster, "draftkings", nil, kickoff.Add(-time.Hour))
+	require.Len(t, built, 3)
+
+	// Accent + team tag matches roster entry.
+	assert.Equal(t, "mia-1", built[0].PlayerID)
+
+	// Unmatched rows with and without (TEAM) tag and suffix fold into one player card.
+	detail := board.Detail(g, built, board.Query{Category: board.CategoryRushing, Now: kickoff.Add(-time.Hour)})
+	require.Len(t, detail.Players, 2)
+
+	// Accent-insensitive search finds José Alvarado via unaccented query.
+	filtered := board.Detail(
+		g,
+		built,
+		board.Query{Category: board.CategoryRushing, Q: "jose", Now: kickoff.Add(-time.Hour)},
+	)
+	require.Len(t, filtered.Players, 1)
+	assert.Equal(t, "mia-1", filtered.Players[0].PlayerID)
+}
+
 func prodScaleBoardFixture(b *testing.B) ([]db.Game, []db.Odds, []db.RosterPlayer, time.Time) {
 	b.Helper()
 

@@ -109,7 +109,7 @@ deduplication of existing stored rows)
 
 ### Phase 1: Unify name normalization and `(TEAM)` stripping
 
-- [ ] Add `StripPlayerTag` and accent folding to `NormalizePlayerName` in `internal/db/players.go`, and delegate
+- [x] Add `StripPlayerTag` and accent folding to `NormalizePlayerName` in `internal/db/players.go`, and delegate
       `internal/board.normalize` to it, with unit tests in `internal/db/players_test.go` and
       `internal/board/board_test.go`.
 

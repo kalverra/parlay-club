@@ -1328,44 +1328,10 @@ func categoryOrder(category Category) int {
 	return len(Categories)
 }
 
-// normalize folds accents, lowercases, and strips punctuation so a search is
-// case- and accent-insensitive.
+// normalize delegates to db.NormalizePlayerName so board matching and ingest
+// share one canonical normalizer.
 func normalize(value string) string {
-	return db.NormalizePlayerName(foldAccents(value))
-}
-
-// foldAccents maps the common Latin accented letters to their plain form.
-func foldAccents(value string) string {
-	var b strings.Builder
-	b.Grow(len(value))
-	for _, r := range value {
-		b.WriteRune(plainRune(r))
-	}
-	return b.String()
-}
-
-// plainRune is the unaccented form of a letter.
-func plainRune(r rune) rune {
-	switch r {
-	case 'á', 'à', 'â', 'ä', 'ã', 'å', 'Á', 'À', 'Â', 'Ä', 'Ã', 'Å':
-		return 'a'
-	case 'ç', 'Ç':
-		return 'c'
-	case 'é', 'è', 'ê', 'ë', 'É', 'È', 'Ê', 'Ë':
-		return 'e'
-	case 'í', 'ì', 'î', 'ï', 'Í', 'Ì', 'Î', 'Ï':
-		return 'i'
-	case 'ñ', 'Ñ':
-		return 'n'
-	case 'ó', 'ò', 'ô', 'ö', 'õ', 'Ó', 'Ò', 'Ô', 'Ö', 'Õ':
-		return 'o'
-	case 'ú', 'ù', 'û', 'ü', 'Ú', 'Ù', 'Û', 'Ü':
-		return 'u'
-	case 'ý', 'ÿ', 'Ý', 'Ÿ':
-		return 'y'
-	default:
-		return r
-	}
+	return db.NormalizePlayerName(value)
 }
 
 // titleSide turns OVER into "Over".

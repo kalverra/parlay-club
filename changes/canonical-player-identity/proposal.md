@@ -1,6 +1,6 @@
 ---
 slug: canonical-player-identity
-status: designed
+status: implementing
 created: "2026-11-16"
 accepted_by:
     - Adam Hamrick

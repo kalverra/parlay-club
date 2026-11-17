@@ -51,19 +51,56 @@ type PlayerMatch struct {
 
 const matchColumns = `odds_name, team, espn_athlete_id, manual`
 
-// NormalizePlayerName lowercases, strips '.', ”', '-', and ',', collapses
-// whitespace, and drops a trailing generational suffix (jr, sr, ii, iii, iv, v)
-// when preceded by a space.
+// StripPlayerTag removes a trailing parenthetical tag such as " (MIA)" from a
+// sportsbook player name. If the inner token is a 2-4 letter uppercase team
+// code, it is also returned as teamHint.
+func StripPlayerTag(name string) (cleaned, teamHint string) {
+	trimmed := strings.TrimSpace(name)
+	if !strings.HasSuffix(trimmed, ")") {
+		return trimmed, ""
+	}
+	open := strings.LastIndexByte(trimmed, '(')
+	if open <= 0 {
+		return trimmed, ""
+	}
+	prefix := strings.TrimSpace(trimmed[:open])
+	inner := strings.TrimSpace(trimmed[open+1 : len(trimmed)-1])
+	if prefix == "" || inner == "" {
+		return trimmed, ""
+	}
+	if isTeamTag(inner) {
+		teamHint = inner
+	}
+	return prefix, teamHint
+}
+
+func isTeamTag(s string) bool {
+	if len(s) < 2 || len(s) > 4 {
+		return false
+	}
+	for i := range len(s) {
+		if s[i] < 'A' || s[i] > 'Z' {
+			return false
+		}
+	}
+	return true
+}
+
+// NormalizePlayerName strips trailing parenthetical tags, folds common Latin
+// accents, lowercases, strips '.', ”', '-', and ',', collapses whitespace,
+// and drops a trailing generational suffix (jr, sr, ii, iii, iv, v) when
+// preceded by a space.
 func NormalizePlayerName(name string) string {
-	name = strings.ToLower(name)
+	cleaned, _ := StripPlayerTag(name)
+	cleaned = strings.ToLower(cleaned)
 	var b strings.Builder
-	b.Grow(len(name))
-	for _, r := range name {
+	b.Grow(len(cleaned))
+	for _, r := range cleaned {
 		switch r {
 		case '.', '\'', '-', ',':
 			// drop punctuation
 		default:
-			b.WriteRune(r)
+			b.WriteRune(plainRune(r))
 		}
 	}
 	fields := strings.Fields(b.String())
@@ -78,6 +115,30 @@ func NormalizePlayerName(name string) string {
 		}
 	}
 	return strings.Join(fields, " ")
+}
+
+// plainRune maps common Latin accented letters to their unaccented ASCII form.
+func plainRune(r rune) rune {
+	switch r {
+	case 'á', 'à', 'â', 'ä', 'ã', 'å', 'Á', 'À', 'Â', 'Ä', 'Ã', 'Å':
+		return 'a'
+	case 'ç', 'Ç':
+		return 'c'
+	case 'é', 'è', 'ê', 'ë', 'É', 'È', 'Ê', 'Ë':
+		return 'e'
+	case 'í', 'ì', 'î', 'ï', 'Í', 'Ì', 'Î', 'Ï':
+		return 'i'
+	case 'ñ', 'Ñ':
+		return 'n'
+	case 'ó', 'ò', 'ô', 'ö', 'õ', 'Ó', 'Ò', 'Ô', 'Ö', 'Õ':
+		return 'o'
+	case 'ú', 'ù', 'û', 'ü', 'Ú', 'Ù', 'Û', 'Ü':
+		return 'u'
+	case 'ý', 'ÿ', 'Ý', 'Ÿ':
+		return 'y'
+	default:
+		return r
+	}
 }
 
 // UpsertRosterPlayers inserts or updates players on a team's roster.
