@@ -753,6 +753,118 @@ func TestMergePropsLinkRules(t *testing.T) {
 	}
 }
 
+func TestPropsFiltersNonStandardDFSAndSelectsPrimaryLines(t *testing.T) {
+	t.Parallel()
+
+	const eventID = "401873059"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("X-Requests-Remaining", "980")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[
+			{"event_id":"401873059","bookmaker":"prizepicks","player":"Ollie Gordon","market_key":"player_rush_yds","period":"FULL","odds_type":"goblin","line":49.5,"over_price":100,"under_price":-100},
+			{"event_id":"401873059","bookmaker":"prizepicks","player":"Ollie Gordon","market_key":"player_rush_yds","period":"FULL","odds_type":"goblin","line":59.5,"over_price":100,"under_price":-100},
+			{"event_id":"401873059","bookmaker":"prizepicks","player":"Ollie Gordon","market_key":"player_rush_yds","period":"FULL","odds_type":"Standard","line":73.5,"over_price":100,"under_price":-100},
+			{"event_id":"401873059","bookmaker":"prizepicks","player":"Ollie Gordon","market_key":"player_rush_yds","period":"FULL","odds_type":"demon","line":99.5,"over_price":100,"under_price":-100},
+			{"event_id":"401873059","bookmaker":"prizepicks","player":"Ollie Gordon","market_key":"player_rush_yds","period":"FULL","odds_type":"demon","line":124.5,"over_price":100,"under_price":-100},
+			{"event_id":"401873059","bookmaker":"prizepicks","player":"Ollie Gordon","market_key":"player_rush_yds","period":"FULL","odds_type":"demon","line":152.5,"over_price":100,"under_price":-100},
+
+			{"event_id":"401873059","bookmaker":"underdog","player":"Ollie Gordon","market_key":"player_rush_yds","period":"FULL","projection_type":"goblin","line":54.5,"over_price":-110},
+			{"event_id":"401873059","bookmaker":"underdog","player":"Ollie Gordon","market_key":"player_rush_yds","period":"FULL","projection_type":"standard","line":73.5,"over_price":-110,"under_price":-110},
+			{"event_id":"401873059","bookmaker":"underdog","player":"Ollie Gordon","market_key":"player_rush_yds","period":"FULL","projection_type":"demon","line":109.5,"over_price":-110},
+
+			{"event_id":"401873059","bookmaker":"novig","player":"Ollie Gordon","market_key":"player_rush_yds","period":"FULL","line":59.5,"over_price":-260,"under_price":195},
+			{"event_id":"401873059","bookmaker":"novig","player":"Ollie Gordon","market_key":"player_rush_yds","period":"FULL","line":64.5,"over_price":-190,"under_price":145},
+			{"event_id":"401873059","bookmaker":"novig","player":"Ollie Gordon","market_key":"player_rush_yds","period":"FULL","line":69.5,"over_price":-140,"under_price":110},
+			{"event_id":"401873059","bookmaker":"novig","player":"Ollie Gordon","market_key":"player_rush_yds","period":"FULL","line":73.5,"over_price":-108,"under_price":-112},
+			{"event_id":"401873059","bookmaker":"novig","player":"Ollie Gordon","market_key":"player_rush_yds","period":"FULL","line":79.5,"over_price":140,"under_price":-175},
+			{"event_id":"401873059","bookmaker":"novig","player":"Ollie Gordon","market_key":"player_rush_yds","period":"FULL","line":89.5,"over_price":240,"under_price":-320},
+
+			{"event_id":"401873059","bookmaker":"bovada","player":"Ollie Gordon","market_key":"player_rush_yds","period":"FULL","line":55.5,"over_price":-300,"under_price":220},
+			{"event_id":"401873059","bookmaker":"bovada","player":"Ollie Gordon","market_key":"player_rush_yds","period":"FULL","line":65.5,"over_price":-165,"under_price":125},
+			{"event_id":"401873059","bookmaker":"bovada","player":"Ollie Gordon","market_key":"player_rush_yds","period":"FULL","line":75.5,"over_price":-115,"under_price":-115},
+			{"event_id":"401873059","bookmaker":"bovada","player":"Ollie Gordon","market_key":"player_rush_yds","period":"FULL","line":85.5,"over_price":135,"under_price":-175},
+			{"event_id":"401873059","bookmaker":"bovada","player":"Ollie Gordon","market_key":"player_rush_yds","period":"FULL","line":95.5,"over_price":250,"under_price":-350}
+		]`))
+	}))
+	t.Cleanup(server.Close)
+
+	props, _, err := odds.NewClient(server.URL, testAPIKey, server.Client()).Props(t.Context(), eventID)
+	require.NoError(t, err)
+	require.Len(t, props, 8, "one standard OVER + UNDER pair per book")
+
+	ppOver := findProp(t, props, "prizepicks", odds.MarketRushYds, "Ollie Gordon", odds.SideOver)
+	assert.Equal(t, new(73.5), ppOver.Line)
+	ppUnder := findProp(t, props, "prizepicks", odds.MarketRushYds, "Ollie Gordon", odds.SideUnder)
+	assert.Equal(t, new(73.5), ppUnder.Line)
+
+	udOver := findProp(t, props, "underdog", odds.MarketRushYds, "Ollie Gordon", odds.SideOver)
+	assert.Equal(t, new(73.5), udOver.Line)
+	udUnder := findProp(t, props, "underdog", odds.MarketRushYds, "Ollie Gordon", odds.SideUnder)
+	assert.Equal(t, new(73.5), udUnder.Line)
+
+	novigOver := findProp(t, props, "novig", odds.MarketRushYds, "Ollie Gordon", odds.SideOver)
+	assert.Equal(t, new(73.5), novigOver.Line)
+	assert.Equal(t, -108, novigOver.Price)
+	novigUnder := findProp(t, props, "novig", odds.MarketRushYds, "Ollie Gordon", odds.SideUnder)
+	assert.Equal(t, new(73.5), novigUnder.Line)
+	assert.Equal(t, -112, novigUnder.Price)
+
+	bovadaOver := findProp(t, props, "bovada", odds.MarketRushYds, "Ollie Gordon", odds.SideOver)
+	assert.Equal(t, new(75.5), bovadaOver.Line)
+	assert.Equal(t, -115, bovadaOver.Price)
+	bovadaUnder := findProp(t, props, "bovada", odds.MarketRushYds, "Ollie Gordon", odds.SideUnder)
+	assert.Equal(t, new(75.5), bovadaUnder.Line)
+	assert.Equal(t, -115, bovadaUnder.Price)
+}
+
+func TestPropsPrimaryLineSelectionEdgeCases(t *testing.T) {
+	t.Parallel()
+
+	const eventID = "evt-edge"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("X-Requests-Remaining", "980")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[
+			{"event_id":"evt-edge","bookmaker":"book-two-vs-one","player":"Player A","market_key":"player_rush_yds","period":"FULL","line":60.5,"over_price":-110},
+			{"event_id":"evt-edge","bookmaker":"book-two-vs-one","player":"Player A","market_key":"player_rush_yds","period":"FULL","line":72.5,"over_price":-120,"under_price":-105},
+
+			{"event_id":"evt-edge","bookmaker":"book-tiebreak","player":"Player B","market_key":"player_rush_yds","period":"FULL","line":70.5,"over_price":100,"under_price":100},
+			{"event_id":"evt-edge","bookmaker":"book-tiebreak","player":"Player B","market_key":"player_rush_yds","period":"FULL","line":73.5,"over_price":-110,"under_price":-110},
+
+			{"event_id":"evt-edge","bookmaker":"book-onesided","player":"Player C","market_key":"player_rush_yds","period":"FULL","line":50.5,"over_price":200},
+			{"event_id":"evt-edge","bookmaker":"book-onesided","player":"Player C","market_key":"player_rush_yds","period":"FULL","line":68.5,"over_price":-115},
+
+			{"event_id":"evt-edge","bookmaker":"book-split","player":"Player D","market_key":"player_rush_yds","period":"FULL","line":65.5,"over_price":-110},
+			{"event_id":"evt-edge","bookmaker":"book-split","player":"Player D","market_key":"player_rush_yds","period":"FULL","line":74.5,"over_price":-115},
+			{"event_id":"evt-edge","bookmaker":"book-split","player":"Player D","market_key":"player_rush_yds","period":"FULL","line":74.5,"under_price":-105},
+
+			{"event_id":"evt-edge","bookmaker":"book-td","player":"Player E","market_key":"player_anytime_td","period":"FULL","odds_type":"demon","line":0.5,"over_price":500},
+			{"event_id":"evt-edge","bookmaker":"book-td","player":"Player E","market_key":"player_anytime_td","period":"FULL","odds_type":"standard","line":0.5,"over_price":140}
+		]`))
+	}))
+	t.Cleanup(server.Close)
+
+	props, _, err := odds.NewClient(server.URL, testAPIKey, server.Client()).Props(t.Context(), eventID)
+	require.NoError(t, err)
+
+	pA := findProp(t, props, "book-two-vs-one", odds.MarketRushYds, "Player A", odds.SideOver)
+	assert.Equal(t, new(72.5), pA.Line, "two-sided quote beats one-sided quote")
+
+	pB := findProp(t, props, "book-tiebreak", odds.MarketRushYds, "Player B", odds.SideOver)
+	assert.Equal(t, new(73.5), pB.Line, "tie in implied-prob diff breaks toward -110")
+
+	pC := findProp(t, props, "book-onesided", odds.MarketRushYds, "Player C", odds.SideOver)
+	assert.Equal(t, new(68.5), pC.Line, "one-sided quotes pick price closest to -110")
+
+	pDOver := findProp(t, props, "book-split", odds.MarketRushYds, "Player D", odds.SideOver)
+	assert.Equal(t, new(74.5), pDOver.Line, "split over/under at same line combine into two-sided quote")
+	pDUnder := findProp(t, props, "book-split", odds.MarketRushYds, "Player D", odds.SideUnder)
+	assert.Equal(t, new(74.5), pDUnder.Line)
+
+	pE := findProp(t, props, "book-td", odds.MarketAnytimeTD, "Player E", odds.SideYES)
+	assert.Equal(t, 140, pE.Price, "non-standard anytime TD is dropped")
+}
+
 // findProp returns the one merged row matching a selection, failing the test
 // when it is missing or duplicated.
 func findProp(

@@ -96,7 +96,7 @@ grouping/pairing keys without breaking game lines)
 
 ### Phase 1: Filter non-standard lines in prop ingest
 
-- [ ] Parse `odds_type` / `projection_type` in `internal/ingest/odds/props.go`, drop non-`"standard"` DFS projections
+- [x] Parse `odds_type` / `projection_type` in `internal/ingest/odds/props.go`, drop non-`"standard"` DFS projections
       (`goblin`, `demon`), and pick the single balanced primary line when a book returns multiple unlabeled lines, with
       tests in `internal/ingest/odds/props_test.go` using prod payload shapes.
 

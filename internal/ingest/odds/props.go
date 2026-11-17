@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net/url"
 	"strings"
 )
@@ -235,15 +236,21 @@ func MergeProps(primary, secondary []Prop) []Prop {
 		}
 	}
 
-	merged := make([]Prop, len(primary), len(primary)+len(secondary))
-	copy(merged, primary)
-	index := make(map[propKey]int, len(merged))
-	for i, prim := range merged {
+	merged := make([]Prop, 0, len(primary)+len(secondary))
+	index := make(map[propKey]int, len(primary)+len(secondary))
+	for _, prim := range primary {
 		if prim.EventSid == "" {
 			prim.EventSid = eventSids[prim.Book]
 		}
-		merged[i] = prim
-		index[propKeyOf(prim)] = i
+		key := propKeyOf(prim)
+		if i, ok := index[key]; ok {
+			if betterSingleSideProp(prim, merged[i]) {
+				merged[i] = prim
+			}
+			continue
+		}
+		index[key] = len(merged)
+		merged = append(merged, prim)
 	}
 
 	for _, sec := range secondary {
@@ -312,15 +319,29 @@ func samePropLine(left, right *float64) bool {
 }
 
 // parseProps maps a /props response into rows. Rows for another event, rows
-// outside the full game, rows with an unknown market, and rows with no subject
-// or book are skipped rather than failing the whole board.
+// outside the full game, rows with an unknown market, non-standard DFS
+// projections (goblin, demon, alt), and rows with no subject or book are
+// skipped. When an unlabeled book returns multiple lines for the same player
+// and market, only the most balanced primary line is kept.
 func parseProps(eventID string, raw []propResponse) []Prop {
-	var props []Prop
+	type outputSlot struct {
+		isDirect bool
+		prop     Prop
+		groupIdx int
+	}
+
+	var slots []outputSlot
+	var groups [][]propQuote
+	groupIndex := make(map[propGroupKey]int)
+
 	for _, item := range raw {
 		if item.EventID != "" && item.EventID != eventID {
 			continue
 		}
 		if item.Period != "" && item.Period != "FULL" {
+			continue
+		}
+		if !isStandardPropType(item.OddsType, item.ProjectionType) {
 			continue
 		}
 
@@ -338,68 +359,285 @@ func parseProps(eventID string, raw []propResponse) []Prop {
 			continue
 		}
 
-		base := Prop{
-			EventID:    eventID,
-			Book:       book,
-			MarketType: marketType,
-		}
-
 		if marketType == MarketAnytimeTD {
 			if item.OverPrice == nil {
 				continue
 			}
-			base.PlayerName = subject
-			base.Side = SideYES
-			base.Price = *item.OverPrice
-			base.Link = item.OverLink
-			base.Sid = item.OverSid
-			props = append(props, base)
+			slots = append(slots, outputSlot{
+				isDirect: true,
+				prop: Prop{
+					EventID:    eventID,
+					Book:       book,
+					MarketType: marketType,
+					PlayerName: subject,
+					Side:       SideYES,
+					Price:      *item.OverPrice,
+					Link:       item.OverLink,
+					Sid:        item.OverSid,
+				},
+			})
 			continue
 		}
 
-		if item.Line == nil {
+		if item.Line == nil || (item.OverPrice == nil && item.UnderPrice == nil) {
 			continue
 		}
-		base.Line = item.Line
-		if marketType == MarketTeamTotal {
-			base.Team = subject
-		} else {
-			base.PlayerName = subject
+
+		key := propGroupKey{
+			book:       book,
+			marketType: marketType,
+			subject:    normalizePropSubject(subject),
+		}
+		idx, exists := groupIndex[key]
+		if !exists {
+			idx = len(groups)
+			groupIndex[key] = idx
+			groups = append(groups, nil)
+			slots = append(slots, outputSlot{groupIdx: idx})
 		}
 
-		if item.OverPrice != nil {
-			over := base
-			over.Side = SideOver
-			over.Price = *item.OverPrice
-			over.Link = item.OverLink
-			over.Sid = item.OverSid
-			props = append(props, over)
+		quote := propQuote{
+			eventID:    eventID,
+			book:       book,
+			marketType: marketType,
+			subject:    subject,
+			line:       *item.Line,
+			overPrice:  item.OverPrice,
+			underPrice: item.UnderPrice,
+			overLink:   item.OverLink,
+			underLink:  item.UnderLink,
+			overSid:    item.OverSid,
+			underSid:   item.UnderSid,
 		}
-		if item.UnderPrice != nil {
-			under := base
-			under.Side = SideUnder
-			under.Price = *item.UnderPrice
-			under.Link = item.UnderLink
-			under.Sid = item.UnderSid
-			props = append(props, under)
+		groups[idx] = addPropQuote(groups[idx], quote)
+	}
+
+	var props []Prop
+	for _, slot := range slots {
+		if slot.isDirect {
+			props = append(props, slot.prop)
+			continue
 		}
+		props = append(props, expandPropQuote(pickPrimaryPropQuote(groups[slot.groupIdx]))...)
 	}
 	return props
 }
 
+// propGroupKey groups quotes for the same book, market, and normalized subject
+// so multi-line ladders collapse to one primary line.
+type propGroupKey struct {
+	book       string
+	marketType string
+	subject    string
+}
+
+// propQuote holds one candidate line (with optional over and under sides) for
+// a book, market, and subject.
+type propQuote struct {
+	eventID    string
+	book       string
+	marketType string
+	subject    string
+	line       float64
+	overPrice  *int
+	underPrice *int
+	overLink   string
+	underLink  string
+	overSid    string
+	underSid   string
+}
+
+// isStandardPropType reports whether a prop quote is unlabeled or explicitly
+// tagged "standard". DFS books tag alternate projections as "goblin", "demon",
+// or "alt", which would otherwise overwrite standard lines.
+func isStandardPropType(oddsType, projectionType string) bool {
+	for _, tag := range []string{oddsType, projectionType} {
+		trimmed := strings.TrimSpace(tag)
+		if trimmed != "" && !strings.EqualFold(trimmed, "standard") {
+			return false
+		}
+	}
+	return true
+}
+
+// addPropQuote appends a quote to a group or merges it into an existing quote
+// at the same line so separate over/under items combine into one two-sided quote.
+func addPropQuote(quotes []propQuote, incoming propQuote) []propQuote {
+	for i := range quotes {
+		if quotes[i].line != incoming.line {
+			continue
+		}
+		if quotes[i].overPrice == nil && incoming.overPrice != nil {
+			quotes[i].overPrice = incoming.overPrice
+			quotes[i].overLink = incoming.overLink
+			quotes[i].overSid = incoming.overSid
+		}
+		if quotes[i].underPrice == nil && incoming.underPrice != nil {
+			quotes[i].underPrice = incoming.underPrice
+			quotes[i].underLink = incoming.underLink
+			quotes[i].underSid = incoming.underSid
+		}
+		return quotes
+	}
+	return append(quotes, incoming)
+}
+
+// pickPrimaryPropQuote selects the single most balanced primary line from a
+// book's quotes for one subject and market.
+func pickPrimaryPropQuote(quotes []propQuote) propQuote {
+	best := quotes[0]
+	for _, candidate := range quotes[1:] {
+		if betterPropQuote(candidate, best) {
+			best = candidate
+		}
+	}
+	return best
+}
+
+// betterPropQuote reports whether a is a better primary-line candidate than b:
+// two-sided quotes beat one-sided quotes; two-sided quotes minimize implied
+// probability skew (breaking ties toward -110, then smallest price spread);
+// one-sided quotes pick the price closest to -110.
+func betterPropQuote(a, b propQuote) bool {
+	aTwoSided := a.overPrice != nil && a.underPrice != nil
+	bTwoSided := b.overPrice != nil && b.underPrice != nil
+	if aTwoSided != bTwoSided {
+		return aTwoSided
+	}
+
+	if aTwoSided {
+		aDiff := math.Abs(impliedProb(*a.overPrice) - impliedProb(*a.underPrice))
+		bDiff := math.Abs(impliedProb(*b.overPrice) - impliedProb(*b.underPrice))
+		if math.Abs(aDiff-bDiff) > 1e-9 {
+			return aDiff < bDiff
+		}
+		aVigDist := absInt(*a.overPrice+110) + absInt(*a.underPrice+110)
+		bVigDist := absInt(*b.overPrice+110) + absInt(*b.underPrice+110)
+		if aVigDist != bVigDist {
+			return aVigDist < bVigDist
+		}
+		return absInt(*a.overPrice-*a.underPrice) < absInt(*b.overPrice-*b.underPrice)
+	}
+
+	return absInt(oneSidedPrice(a)+110) < absInt(oneSidedPrice(b)+110)
+}
+
+// oneSidedPrice returns the price of a one-sided propQuote.
+func oneSidedPrice(q propQuote) int {
+	if q.overPrice != nil {
+		return *q.overPrice
+	}
+	if q.underPrice != nil {
+		return *q.underPrice
+	}
+	return 0
+}
+
+// expandPropQuote turns a winning propQuote into its OVER and/or UNDER Prop rows.
+func expandPropQuote(q propQuote) []Prop {
+	line := q.line
+	base := Prop{
+		EventID:    q.eventID,
+		Book:       q.book,
+		MarketType: q.marketType,
+		Line:       &line,
+	}
+	if q.marketType == MarketTeamTotal {
+		base.Team = q.subject
+	} else {
+		base.PlayerName = q.subject
+	}
+
+	var out []Prop
+	if q.overPrice != nil {
+		over := base
+		over.Side = SideOver
+		over.Price = *q.overPrice
+		over.Link = q.overLink
+		over.Sid = q.overSid
+		out = append(out, over)
+	}
+	if q.underPrice != nil {
+		under := base
+		under.Side = SideUnder
+		under.Price = *q.underPrice
+		under.Link = q.underLink
+		under.Sid = q.underSid
+		out = append(out, under)
+	}
+	return out
+}
+
+// betterSingleSideProp breaks ties when MergeProps sees duplicate rows for the
+// same (book, market, subject, side): linked rows win, then prices closest to -110.
+func betterSingleSideProp(a, b Prop) bool {
+	if (a.Link != "") != (b.Link != "") {
+		return a.Link != ""
+	}
+	return absInt(a.Price+110) < absInt(b.Price+110)
+}
+
+// impliedProb converts American odds into raw implied probability in [0, 1].
+func impliedProb(american int) float64 {
+	if american < 0 {
+		return float64(-american) / float64(-american+100)
+	}
+	if american > 0 {
+		return 100.0 / float64(american+100)
+	}
+	return 0
+}
+
+// absInt returns |x|.
+func absInt(x int) int {
+	if x < 0 {
+		return -x
+	}
+	return x
+}
+
+// normalizePropSubject normalizes a player or team name for grouping quotes
+// within a single book's prop response (lowercased, punctuation stripped,
+// whitespace collapsed, trailing generational suffixes dropped).
+func normalizePropSubject(subject string) string {
+	lower := strings.ToLower(subject)
+	var b strings.Builder
+	b.Grow(len(lower))
+	for _, r := range lower {
+		switch r {
+		case '.', '\'', '-', ',':
+		default:
+			b.WriteRune(r)
+		}
+	}
+	fields := strings.Fields(b.String())
+	if len(fields) == 0 {
+		return ""
+	}
+	switch fields[len(fields)-1] {
+	case "jr", "sr", "ii", "iii", "iv", "v":
+		if len(fields) > 1 {
+			fields = fields[:len(fields)-1]
+		}
+	}
+	return strings.Join(fields, " ")
+}
+
 // propResponse is one flat prop quote from Parlay API's /props array.
 type propResponse struct {
-	EventID    string   `json:"event_id"`
-	Bookmaker  string   `json:"bookmaker"`
-	Player     string   `json:"player"`
-	PlayerName string   `json:"player_name"`
-	MarketKey  string   `json:"market_key"`
-	Period     string   `json:"period"`
-	Line       *float64 `json:"line"`
-	OverPrice  *int     `json:"over_price"`
-	UnderPrice *int     `json:"under_price"`
-	OverLink   string   `json:"over_link"`
-	UnderLink  string   `json:"under_link"`
-	OverSid    string   `json:"over_sid"`
-	UnderSid   string   `json:"under_sid"`
+	EventID        string   `json:"event_id"`
+	Bookmaker      string   `json:"bookmaker"`
+	Player         string   `json:"player"`
+	PlayerName     string   `json:"player_name"`
+	MarketKey      string   `json:"market_key"`
+	Period         string   `json:"period"`
+	OddsType       string   `json:"odds_type"`
+	ProjectionType string   `json:"projection_type"`
+	Line           *float64 `json:"line"`
+	OverPrice      *int     `json:"over_price"`
+	UnderPrice     *int     `json:"under_price"`
+	OverLink       string   `json:"over_link"`
+	UnderLink      string   `json:"under_link"`
+	OverSid        string   `json:"over_sid"`
+	UnderSid       string   `json:"under_sid"`
 }
