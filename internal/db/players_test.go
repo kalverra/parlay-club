@@ -618,3 +618,53 @@ func TestUpsertPlayerMatches(t *testing.T) {
 	assert.Equal(t, "3918298", byTeam["BUF"].ESPNAthleteID)
 	assert.False(t, byTeam["BUF"].Manual)
 }
+
+func TestBatchPlayerResolverOpposingTeamDisambiguation(t *testing.T) {
+	t.Parallel()
+
+	t.Run("non-manual cache match refused when untagged and multiple roster players share norm", func(t *testing.T) {
+		t.Parallel()
+
+		resolver := db.NewBatchPlayerResolver(
+			[]db.RosterPlayer{
+				{AthleteID: "1001", Team: "BUF", FullName: "Josh Allen"},
+				{AthleteID: "2002", Team: "MIA", FullName: "Josh Allen"},
+			},
+			[]db.PlayerMatch{
+				{OddsName: "josh allen", Team: "MIA", ESPNAthleteID: "2002", Manual: false},
+			},
+		)
+
+		// Tagged "(MIA)" still resolves to MIA, without writing a manual=0 match.
+		hinted := resolver.ResolveGamePlayer("g1", "Josh Allen (MIA)", "", "BUF", "MIA")
+		assert.True(t, hinted.Linked)
+		assert.Equal(t, "MIA", hinted.Team)
+		assert.Equal(t, "2002", hinted.AthleteID)
+
+		// Untagged "Josh Allen" must stay unmatched despite the non-manual MIA cache row.
+		untagged := resolver.ResolveGamePlayer("g1", "Josh Allen", "", "BUF", "MIA")
+		assert.False(t, untagged.Linked)
+		assert.Empty(t, untagged.Team)
+		assert.Empty(t, untagged.AthleteID)
+		assert.Empty(t, resolver.NewMatches(), "must not cache manual=0 when multiple roster players share norm")
+	})
+
+	t.Run("valid team hint or existing team is not overridden by single opposing candidate", func(t *testing.T) {
+		t.Parallel()
+
+		resolver := db.NewBatchPlayerResolver(
+			[]db.RosterPlayer{
+				{AthleteID: "1001", Team: "BUF", FullName: "Josh Allen"},
+			},
+			[]db.PlayerMatch{
+				{OddsName: "josh allen", Team: "BUF", ESPNAthleteID: "1001", Manual: false},
+			},
+		)
+
+		// Both cache and roster only have BUF, but existingTeam/hint is MIA.
+		res := resolver.ResolveGamePlayer("g1", "Josh Allen", "MIA", "BUF", "MIA")
+		assert.False(t, res.Linked)
+		assert.Equal(t, "MIA", res.Team)
+		assert.Empty(t, res.AthleteID)
+	})
+}

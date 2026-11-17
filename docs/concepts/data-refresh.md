@@ -237,7 +237,7 @@ game.
   merges via `odds.MergeProps` to populate DraftKings prop deep links; if Parlay API is unconfigured, errors, returns no
   props, or sits below 150 credits, it falls back to The Odds API when at least 25 credits remain
   (`TheOddsAPIFallbackFloor`). During `RunPrefill`, bulk props are Parlay-only (skipping The Odds API `EventProps`
-  enrichment/fallback). Prop players are matched against team rosters via `ResolvePlayerMatch`.
+  enrichment/fallback). Prop players are canonicalized via batch resolution against `player_matches` and `roster_players`.
 - `espn:roster:{teamID}`: Stale after 2 hours on game days (Thursday, Sunday, Monday) and 6 hours otherwise. Upserts
   team roster players into `roster_players` with normalized names. Promoted into `Kick()`, `RunPrefill()`, and
   `RunOnce()` (deduped per week team for non-`FINAL` games).

@@ -748,4 +748,13 @@ func TestMapPropsToOddsUnmatchedCasingAndCollisions(t *testing.T) {
 	// Manual override canonicalized to roster FullName.
 	assert.Equal(t, "De'Von Achane", rows[4].PlayerName)
 	assert.Equal(t, "MIA", rows[4].Team)
+
+	// A second mapPropsToOdds call must keep untagged "Josh Allen" unmatched
+	// even after "Josh Allen (MIA)" resolved on the first call.
+	rows2 := service.mapPropsToOdds(t.Context(), game, props, now)
+	require.Len(t, rows2, 5)
+	assert.Equal(t, "Josh Allen", rows2[2].PlayerName)
+	assert.Equal(t, "MIA", rows2[2].Team)
+	assert.Equal(t, "Josh Allen", rows2[3].PlayerName)
+	assert.Empty(t, rows2[3].Team)
 }
