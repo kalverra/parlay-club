@@ -167,6 +167,19 @@ The slip's **reference odds** multiply each leg's reference price: the median of
 carry for the same game, market, player, side, and line, one price per book. A leg whose members' books do not price it
 keeps its own price. The formulas are in [Odds math](../reference/odds-math.md).
 
+### Selection identity
+
+`db.SameSelection` (`internal/db/odds.go`) defines when two selections are the same pick, ignoring sportsbook, `Line`,
+price, and link:
+
+- **Player props:** Match on `GameID`, `MarketType`, and `Side`, plus ESPN `PlayerID` when both carry one, or normalized
+  player name (`db.NormalizePlayerName`) and non-empty `Team` otherwise.
+- **Game markets (`SPREAD`, `ML`, `TOTAL`, `TEAM_TOTAL`):** Match on `GameID`, `MarketType`, `Team`, and `Side`.
+
+The pick board (`board.Row.MatchesLeg`), sportsbook export matching, and open-slip vote preservation all share this
+rule. A saved leg's `Line` is never mutated automatically in the background, so locked and final slips continue grading
+against the exact line recorded on the slip.
+
 ## The pick board
 
 The hub's pick step opens `GET /slips/{id}/pick`, a focused screen with a back link to the hub and no bottom bar. It is
@@ -247,6 +260,9 @@ Game selection replaces `#pick-body`, which can reset the slate's scroll. `app.j
 element with a UTC ISO value, a neutral ET fallback from the server ("Mon 3:04 PM ET"), and the reader's local zone from
 `app.js` after each swap.
 
+`board.Row.MatchesLeg` matches each viewer leg by `db.SameSelection` (ignoring `Line`), so a picked leg stays bound
+to its board row with remove and swap controls even if the consensus or home-book line moves after picking.
+
 `board.Pair` is the one pairing rule, shared by the detail and every refreshed row. It folds rows that share a line into
 one group: a spread or moneyline keys on the market alone so both teams sit together, a game total on the market and
 number, a team total on its market, team, and number, and a player prop on its market and canonical player.
@@ -265,6 +281,11 @@ because the old line's row is still on screen and must lose its delete button. A
 picked opens "Swap which pick?" and lists the viewer's legs that are not kickoff-locked. Choosing one sends
 `PUT /legs/{old}` with the new pick's fields; a line that already holds a pick switches sides in place and needs no free
 slot.
+
+When a saved non-`OTHER` leg's `Line` or `Odds` differ from the current board row (`legDrifted`), both the board option
+(`Slip ... · now ...`) and the pick tray (`Now ...`) show a drift notice. While the slip is `OPEN` and the leg is not
+kickoff-locked (and the viewer is not locked in on the board), a one-tap **Sync line** form (`PUT /legs/{id}` with
+`from=board` or `from=tray`) updates the leg's `line`, `odds`, and regenerated `selection` text to match the board.
 
 A game that has stored lines but no prop rows offers "Load them" on its slate card and again in its open detail: "Props
 for BUF @ MIA aren't loaded yet." The button calls `GET /games/{id}/props?slip=`, which runs `SyncGameProps` for that
@@ -305,15 +326,17 @@ Members can react to each other's picks with an up or down vote. The hub shows `
 viewer's own vote, and makes the tallies tap targets while the slip is `OPEN`. The owner of a leg sees the tally only,
 and once the slip leaves `OPEN` every leg is read-only: the buttons go and the tally stays.
 
-`internal/slips.Service.Vote` takes the leg, the member, and `1`, `-1`, or `0` to clear. Only slip members vote
+`slips.Service.Vote` (`internal/slips`) takes the leg, the member, and `1`, `-1`, or `0` to clear. Only slip members vote
 (`ErrNotMember`), never on their own pick (`ErrOwnVote`), and only while the slip is `OPEN` (`ErrVotesClosed`). Kickoff
 does not close a vote, and unlocking reopens voting because it sets the slip back to `OPEN`. Voting the same value again
 changes nothing and publishes nothing. A change publishes `slip:{id}` and writes no activity entry.
 
-A changed pick loses its votes: `UpdateLeg` deletes them in the same transaction when the game, market, team, player,
-side, line, or selection changes. An odds-only edit keeps them, because it is the same pick at a new price. `DeleteLeg`
-clears them by cascade, and `RemoveMember` deletes the leaving member's votes on every leg of the slip in its own
-transaction, so the tally drops with them and rejoining starts clean. Votes are kept after the week for the Record Book.
+A changed pick loses its votes: `UpdateLeg` deletes them in the same transaction when the canonical selection changes
+(game, market, team, canonical player, or side) or when an `OTHER` pick changes. Odds-only edits and board-synced line
+or price updates on the same canonical selection (`db.SameSelection`) keep votes, because it is the same pick tracking
+market drift. `DeleteLeg` clears them by cascade, and `RemoveMember` deletes the leaving member's votes on every leg of
+the slip in its own transaction, so the tally drops with them and rejoining starts clean. Votes are kept after the week
+for the Record Book.
 
 ## Research
 
@@ -347,7 +370,7 @@ result chip on each leg opens a menu of `PENDING`, `WON`, `LOST`, `PUSH`, and `V
 `PUT /legs/{id}/result` with the upper-case result, and the refreshed panel shows the recomputed slip. Someone who is
 not on the slip sees a plain chip and cannot grade.
 
-`internal/slips.Service.SetLegResult` records the member's name in `graded_by`, writes "{name} set {selection} to
+`slips.Service.SetLegResult` (`internal/slips`) records the member's name in `graded_by`, writes "{name} set {selection} to
 {result}" to the activity feed, and publishes `slip:{id}`. Grading a leg the same way again by the same member changes
 nothing, so it writes no activity entry and publishes nothing. A later grade by any member overrides the earlier one.
 
@@ -362,7 +385,7 @@ The slip result recomputes from every leg after each change:
 hit nor a miss.
 
 `OTHER` legs and any leg on a past-week slip normally grade by hand. For `FINAL` games, the lazy `grade` refresh source
-evaluates `PENDING` legs with `internal/grader.GradeLeg` (using stored game scores for game/team markets and ESPN final
+evaluates `PENDING` legs with `grader.GradeLeg` (`internal/grader`, using stored game scores for game/team markets and ESPN final
 box scores for player props) and calls `slips.Service.AutoGradeLegs`.
 
 - **Override-safe writes:** `AutoGradeLegs` updates only legs where `result = 'PENDING'`, records `graded_by = "auto"`,
@@ -389,7 +412,7 @@ A slip's status is `OPEN`, `LOCKED`, or `GRADED`, and its result is `PENDING`, `
 
 ## Editing and locking
 
-The rules live in `internal/slips.Service`. Each method checks them, writes the change and one activity entry in one
+The rules live in `slips.Service` (`internal/slips`). Each method checks them, writes the change and one activity entry in one
 transaction, updates the slip's status, then publishes `slip:{id}`. The clock is injected through `now`, so kickoff and
 locking stay testable.
 

@@ -125,4 +125,8 @@ and grading invariants)
       votes unless the canonical selection changed, and add a line-drift indicator + refresh action in
       `internal/web/pick.go` and `web/templates/partials.html`, with tests in `internal/slips/votes_test.go` and
       `internal/web/pick_test.go`.
-- [ ] Docs: update `docs/concepts/slips.md` to document selection identity and open-slip line updates.
+- [x] Docs: update `docs/concepts/slips.md` to document selection identity and open-slip line updates.
+
+## Reviews
+
+- [x] Final review: agy@gemini-4-argon-high
