@@ -1,13 +1,8 @@
 ---
-slug: single-standard-prop-line
-status: implementing
-created: "2026-11-16"
-accepted_by:
-    - Adam Hamrick
-accepted_at: "2026-11-16T19:06:58Z"
-depends_on:
-    - canonical-player-identity
-effort: medium
+id: adr-single-standard-prop-line
+title: Show one standard line per player prop
+type: decision
+summary: Filter prop feeds to standard lines at ingest (rejecting `goblin`/`demon` tags and picking each book's primary balanced line when a book returns multiple unlabeled alternates) and pair board rows by canonical player + market + side rather than raw player name and line number.
 ---
 
 # Show one standard line per player prop
@@ -75,3 +70,37 @@ data.
 
 The `effort` rating is `medium` because it requires analyzing real provider payload shapes across bookmakers to select
 the primary line reliably and aligning ingest filtering with board pairing.
+
+## Consequences
+
+- **Easier:** Every player prop market now shows one O/U row per canonical player on the pick board instead of duplicate
+  rows from alternate lines or name variants. Consensus medians and home-book prices are no longer skewed by extreme
+  goblin or demon lines overwriting standard lines in `odds`.
+- **Harder:** Non-standard alternate lines are discarded at ingest, so downstream views cannot inspect alternate ladders
+  without re-fetching.
+- **Revisit:** If the app later adds alternate-line or milestone picking (for example, `50+` or `80+` yards), `odds`
+  will need to key by line value rather than storing one primary line per
+  `(game_id, book, market_type, team, player_name, side)`.
+
+## Alternatives considered
+
+- **Hiding duplicate rows only in the template:** Rejected because extreme goblin and demon lines would still overwrite
+  standard lines in `odds` and corrupt median lines and prices for users without a home book.
+- **Storing all alternate lines and adding a ladder picker:** Rejected because it requires schema changes to `odds`, a
+  ladder UI redesign, and more complex median and sportsbook export selection, while the product focuses on one standard
+  O/U line per player market.
+
+## Implementation notes
+
+- When `odds_type` or `projection_type` is present, ingest keeps only `"standard"` (case-insensitive) and drops
+  `"goblin"`, `"demon"`, and `"alt"`.
+- For unlabeled multi-line books (such as Novig and Bovada), ingest picks one primary line per
+  `(book, market_type, normalized_subject)` by preferring two-sided quotes over one-sided ones, minimizing
+  `|impliedProb(over) - impliedProb(under)|`, and breaking ties toward `-110`. `ANYTIME_TD` is excluded because it has
+  no line.
+- Because filtering runs at ingest, any `odds` rows stored before this change remain until the next prop ingest replaces
+  them.
+
+## Follow-ups
+
+None.

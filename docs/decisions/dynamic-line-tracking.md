@@ -1,13 +1,8 @@
 ---
-slug: dynamic-line-tracking
-status: implementing
-created: "2026-11-16"
-accepted_by:
-    - Adam Hamrick
-accepted_at: "2026-11-16T19:06:58Z"
-depends_on:
-    - canonical-player-identity
-effort: hard
+id: adr-dynamic-line-tracking
+title: Track prop selections dynamically when lines move
+type: decision
+summary: Separate selection identity (`game`, `canonical player`, `market`, `side`) from the quoted `line` and `odds`, so board matching, leg updates, and sportsbook export look up the target selection dynamically and resolve each book's current line, price, and deep-link selection ID.
 ---
 
 # Track prop selections dynamically when lines move
@@ -74,3 +69,33 @@ export) lets links and leg controls keep working without hiding line movement.
 
 The `effort` rating is `hard` because selection identity is woven through leg creation, board matching, vote-clearing
 rules, sportsbook link export, and auto-grading, requiring careful invariants around pre-kickoff vs locked/graded legs.
+
+## Consequences
+
+- **Easier:** Prop picks stay bound to their board row and sportsbook export links when lines move or books use
+  different player name spellings. Pickers can sync a drifted line on an open slip with one tap without clearing
+  existing votes.
+- **Harder:** Selection matching now spans `db.SameSelection` across `db`, `board`, `slips`, `export`, and `web`, and
+  export and pick views carry drift metadata to flag when a live book line differs from the saved slip line.
+- **Revisit:** Keeping `leg.Line` as an opt-in sync prevents silent number changes, though pickers still have to tap
+  `Sync line` if they want the saved slip line to match a moved market.
+
+## Alternatives considered
+
+- **Auto-updating `legs.line` in the background on every odds sync:** Rejected because friends' votes and agreed slip
+  numbers would shift silently without anyone noticing.
+- **Ignoring line differences silently on export:** Rejected because bettors could place a bet at a different number
+  without warning while grading still uses the saved slip line.
+
+## Implementation notes
+
+- `db.SameSelection` compares `SelectionKey` values (`LegSelection` / `OddsSelection`) rather than taking `db.Leg` and
+  `db.Odds` directly, because `db.Odds` does not store `PlayerID` while `db.Leg` and `board.Row` do.
+- `UpdateLeg` preserves `leg_votes` on non-`OTHER` markets when `db.SameSelection` matches the existing leg; changing
+  the player, team, market, side, or any `OTHER` pick still clears votes.
+- Locked and final slips never mutate `leg.Line`, so `internal/grader` always grades against the saved slip number.
+- One-tap `Sync line` works from both the pick board and the pick tray (`from=tray`).
+
+## Follow-ups
+
+None.
