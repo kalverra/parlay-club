@@ -115,7 +115,7 @@ deduplication of existing stored rows)
 
 ### Phase 2: Canonicalize prop ingest and backfill stored rows
 
-- [ ] Batch-load `roster_players` and `player_matches` once per game in `internal/refresh/research.go`
+- [x] Batch-load `roster_players` and `player_matches` once per game in `internal/refresh/research.go`
       (`mapPropsToOdds`), rewrite each row's `PlayerName` and `Team` to the canonical player (unifying unmatched casing
       per game and preferring linked rows on same-book collisions), and test with `"Ollie Gordon"` / `"Ollie Gordon II"`
       / `"Ollie Gordon II (MIA)"` fixtures.

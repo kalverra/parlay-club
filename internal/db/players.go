@@ -615,6 +615,38 @@ func (s *Store) SaveManualPlayerMatch(ctx context.Context, oddsName, team, athle
 	})
 }
 
+// UpsertPlayerMatches batch-inserts or updates player matches in one transaction.
+// Existing manual = 1 rows are never overwritten by non-manual matches.
+func (s *Store) UpsertPlayerMatches(ctx context.Context, matches []PlayerMatch) error {
+	if len(matches) == 0 {
+		return nil
+	}
+	return s.Tx(ctx, func(tx *Store) error {
+		stmt, err := tx.conn().PrepareContext(ctx, `
+			INSERT INTO player_matches (odds_name, team, espn_athlete_id, manual)
+			VALUES (?, ?, ?, ?)
+			ON CONFLICT (odds_name, team) DO UPDATE SET
+				espn_athlete_id = excluded.espn_athlete_id,
+				manual = CASE WHEN excluded.manual = 1 THEN 1 ELSE player_matches.manual END
+			WHERE player_matches.manual = 0 OR excluded.manual = 1`)
+		if err != nil {
+			return fmt.Errorf("prepare upsert player matches: %w", err)
+		}
+		defer func() { _ = stmt.Close() }()
+
+		for _, m := range matches {
+			manual := 0
+			if m.Manual {
+				manual = 1
+			}
+			if _, err := stmt.ExecContext(ctx, m.OddsName, m.Team, m.ESPNAthleteID, manual); err != nil {
+				return fmt.Errorf("upsert player match %s %s: %w", m.OddsName, m.Team, err)
+			}
+		}
+		return nil
+	})
+}
+
 // PlayerMatchesForTeams returns all player matches for the given teams.
 func (s *Store) PlayerMatchesForTeams(ctx context.Context, teams []string) ([]PlayerMatch, error) {
 	if len(teams) == 0 {

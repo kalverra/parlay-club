@@ -586,3 +586,35 @@ func TestLatestPropForPlayer(t *testing.T) {
 	assert.True(t, ok)
 	assert.InDelta(t, 42.5, *prop.Line, 0.001)
 }
+
+func TestUpsertPlayerMatches(t *testing.T) {
+	t.Parallel()
+
+	store, _ := openTestStore(t)
+
+	// Empty slice is a no-op.
+	require.NoError(t, store.UpsertPlayerMatches(t.Context(), nil))
+
+	// Seed a manual match.
+	require.NoError(t, store.SaveManualPlayerMatch(t.Context(), "Ollie Gordon II", "MIA", "5123456"))
+
+	// Batch upsert: attempts to overwrite the manual match with manual=0, plus adds a new match.
+	err := store.UpsertPlayerMatches(t.Context(), []db.PlayerMatch{
+		{OddsName: "ollie gordon", Team: "MIA", ESPNAthleteID: "9999999", Manual: false},
+		{OddsName: "josh allen", Team: "BUF", ESPNAthleteID: "3918298", Manual: false},
+	})
+	require.NoError(t, err)
+
+	matches, err := store.PlayerMatchesForTeams(t.Context(), []string{"MIA", "BUF"})
+	require.NoError(t, err)
+	require.Len(t, matches, 2)
+
+	byTeam := make(map[string]db.PlayerMatch, 2)
+	for _, m := range matches {
+		byTeam[m.Team] = m
+	}
+	assert.Equal(t, "5123456", byTeam["MIA"].ESPNAthleteID, "manual=1 match must not be overwritten")
+	assert.True(t, byTeam["MIA"].Manual)
+	assert.Equal(t, "3918298", byTeam["BUF"].ESPNAthleteID)
+	assert.False(t, byTeam["BUF"].Manual)
+}
