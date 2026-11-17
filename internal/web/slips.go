@@ -111,6 +111,7 @@ func (h *slipHandlers) Routes(mux *http.ServeMux) {
 // and Creating turns the page into the create form.
 type SlipPage struct {
 	Page
+	LiveURL  string
 	Slip     *SlipView
 	Export   ExportView
 	Creating bool
@@ -995,6 +996,19 @@ func (h *slipHandlers) events(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if slip.Status == db.SlipGraded {
+		header := w.Header()
+		header.Set("Content-Type", "text/event-stream")
+		header.Set("Cache-Control", "no-cache")
+		header.Set("Connection", "keep-alive")
+		header.Set("X-Accel-Buffering", "no")
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprint(w, "event: bye\ndata: {}\n\n")
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+		return
+	}
 	if h.deps.Stream == nil {
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
@@ -1604,10 +1618,20 @@ func (h *slipHandlers) slipPageData(ctx context.Context, slip db.Slip) (SlipPage
 	next := slips.NextStep(slip, members, legs, games, viewerID, h.deps.now())
 	return SlipPage{
 		Page:     h.page(nil, slip.Name),
+		LiveURL:  slipLiveURL(slip),
 		Slip:     view,
 		Next:     nextView(next, slip, viewerID, games),
 		Siblings: siblings,
 	}, nil
+}
+
+// slipLiveURL returns the SSE endpoint for non-graded slips and empty once
+// a slip is settled so clients do not hold open streams on finished weeks.
+func slipLiveURL(slip db.Slip) string {
+	if slip.Status == db.SlipGraded {
+		return ""
+	}
+	return fmt.Sprintf("/slips/%d/events", slip.ID)
 }
 
 // voteViews folds the stored votes into one tally per leg and the viewer's own

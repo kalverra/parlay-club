@@ -22,6 +22,7 @@ import (
 	"github.com/kalverra/parlay-club/internal/db"
 	"github.com/kalverra/parlay-club/internal/ingest/odds"
 	"github.com/kalverra/parlay-club/internal/live"
+	"github.com/kalverra/parlay-club/internal/parlay"
 	"github.com/kalverra/parlay-club/internal/refresh"
 	"github.com/kalverra/parlay-club/internal/slips"
 	webui "github.com/kalverra/parlay-club/internal/web"
@@ -223,6 +224,23 @@ func TestPickBoardShowsSearchChipsSortsAndDock(t *testing.T) {
 	assert.NotContains(t, body, "<aside", "the tray no longer sits beside the body")
 	assert.NotContains(t, body, ">Done<", "the one action lives in the tray sheet, not on the page")
 	assert.NotContains(t, body, "1.00x", "an empty slip shows no combined price")
+}
+
+func TestPickBoardOmitsLiveStreamWhenGraded(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	addGame(t, fixture, gameKickoff())
+
+	require.NoError(t, fixture.store.SetSlipStatus(t.Context(), fixture.slip.ID, db.SlipLocked))
+	locked := pickBoard(t, fixture, "")
+	require.Equal(t, http.StatusOK, locked.Code, locked.Body.String())
+	assert.Contains(t, locked.Body.String(), fmt.Sprintf(`data-live-url="/slips/%d/events"`, fixture.slip.ID))
+
+	require.NoError(t, fixture.store.SetSlipGrade(t.Context(), fixture.slip.ID, parlay.Won, db.SlipGraded))
+	graded := pickBoard(t, fixture, "")
+	require.Equal(t, http.StatusOK, graded.Code, graded.Body.String())
+	assert.NotContains(t, graded.Body.String(), "data-live-url")
 }
 
 func TestPickBoardLinksGameCardsWithHTMXAndHrefFallback(t *testing.T) {

@@ -66,7 +66,7 @@ func TestStreamSaysByeAtTheLiveDeadline(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	client := dial(t, server.URL)
-	clock.Fire(55 * time.Minute)
+	clock.Fire(15 * time.Minute)
 
 	bye := readFrame(t, client.reader)
 	assert.Equal(t, "bye", bye.event)
@@ -88,7 +88,7 @@ func TestStreamSaysByeAtTheIdleDeadline(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	client := dial(t, server.URL)
-	clock.Fire(10 * time.Minute)
+	clock.Fire(3 * time.Minute)
 
 	bye := readFrame(t, client.reader)
 	assert.Equal(t, "bye", bye.event)
