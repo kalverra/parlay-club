@@ -123,3 +123,7 @@ deduplication of existing stored rows)
       `legs.player_id`/`team`, with a migration test on colliding prod-shaped rows.
 - [x] Docs: update `docs/reference/data-sources.md` and `docs/reference/schema.md` to document canonical player
       normalization and `(TEAM)` tag stripping.
+
+## Reviews
+
+- [x] Final review: agy@gemini-4-argon-high

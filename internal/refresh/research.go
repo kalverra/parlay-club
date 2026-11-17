@@ -286,6 +286,11 @@ func (s *Service) mapPropsToOdds(ctx context.Context, game db.Game, props []odds
 		side       string
 	}
 
+	type mappedOdds struct {
+		row  db.Odds
+		pref db.OddsCandidate
+	}
+
 	mapped := make([]mappedOdds, 0, len(props))
 	indexByKey := make(map[oddsKey]int, len(props))
 
@@ -317,10 +322,19 @@ func (s *Service) mapPropsToOdds(ctx context.Context, game db.Game, props []odds
 				continue
 			}
 		} else {
-			row.PlayerName, row.Team, linked = resolver.resolve(prop.PlayerName)
+			resolved := resolver.ResolveGamePlayer(game.ID, prop.PlayerName, "", game.HomeTeam, game.AwayTeam)
+			row.PlayerName = resolved.Name
+			row.Team = resolved.Team
+			linked = resolved.Linked
 		}
 
-		cand := mappedOdds{row: row, linked: linked}
+		cand := mappedOdds{
+			row: row,
+			pref: db.OddsCandidate{
+				Linked:   linked,
+				Richness: db.OddsRichness(row),
+			},
+		}
 		key := oddsKey{
 			gameID:     row.GameID,
 			book:       row.Book,
@@ -330,7 +344,7 @@ func (s *Service) mapPropsToOdds(ctx context.Context, game db.Game, props []odds
 			side:       row.Side,
 		}
 		if idx, exists := indexByKey[key]; exists {
-			if preferMappedOdds(cand, mapped[idx]) {
+			if db.PreferOddsCandidate(cand.pref, mapped[idx].pref) {
 				mapped[idx] = cand
 			}
 			continue
@@ -339,8 +353,10 @@ func (s *Service) mapPropsToOdds(ctx context.Context, game db.Game, props []odds
 		mapped = append(mapped, cand)
 	}
 
-	if err := resolver.flush(ctx); err != nil {
-		s.logger.Warn().Err(err).Str("game_id", game.ID).Msg("upsert player matches")
+	if matches := resolver.NewMatches(); len(matches) > 0 {
+		if err := s.store.UpsertPlayerMatches(ctx, matches); err != nil {
+			s.logger.Warn().Err(err).Str("game_id", game.ID).Msg("upsert player matches")
+		}
 	}
 
 	rows := make([]db.Odds, len(mapped))
@@ -350,49 +366,7 @@ func (s *Service) mapPropsToOdds(ctx context.Context, game db.Game, props []odds
 	return rows
 }
 
-type mappedOdds struct {
-	row    db.Odds
-	linked bool
-}
-
-func preferMappedOdds(cand, existing mappedOdds) bool {
-	if cand.linked != existing.linked {
-		return cand.linked
-	}
-	return oddsRichness(cand.row) > oddsRichness(existing.row)
-}
-
-func oddsRichness(row db.Odds) int {
-	score := 0
-	if row.Link != nil {
-		score++
-	}
-	if row.Sid != nil {
-		score++
-	}
-	if row.EventSid != nil {
-		score++
-	}
-	return score
-}
-
-type playerMatchKey struct {
-	oddsName string
-	team     string
-}
-
-type batchPlayerResolver struct {
-	store             *db.Store
-	homeTeam          string
-	awayTeam          string
-	rosterByAthleteID map[string]db.RosterPlayer
-	rosterByNorm      map[string][]db.RosterPlayer
-	matchesByNorm     map[string][]db.PlayerMatch
-	unmatchedSpelling map[string]string
-	newMatches        map[playerMatchKey]db.PlayerMatch
-}
-
-func (s *Service) newBatchPlayerResolver(ctx context.Context, game db.Game) *batchPlayerResolver {
+func (s *Service) newBatchPlayerResolver(ctx context.Context, game db.Game) *db.BatchPlayerResolver {
 	var teams []string
 	if game.HomeTeam != "" {
 		teams = append(teams, game.HomeTeam)
@@ -410,150 +384,7 @@ func (s *Service) newBatchPlayerResolver(ctx context.Context, game db.Game) *bat
 		s.logger.Warn().Err(err).Str("game_id", game.ID).Msg("load player matches for prop matching")
 	}
 
-	r := &batchPlayerResolver{
-		store:             s.store,
-		homeTeam:          game.HomeTeam,
-		awayTeam:          game.AwayTeam,
-		rosterByAthleteID: make(map[string]db.RosterPlayer, len(rosterPlayers)),
-		rosterByNorm:      make(map[string][]db.RosterPlayer, len(rosterPlayers)),
-		matchesByNorm:     make(map[string][]db.PlayerMatch, len(playerMatches)),
-		unmatchedSpelling: make(map[string]string),
-		newMatches:        make(map[playerMatchKey]db.PlayerMatch),
-	}
-
-	for _, p := range rosterPlayers {
-		r.rosterByAthleteID[p.AthleteID] = p
-		norm := p.NormName
-		if norm == "" {
-			norm = db.NormalizePlayerName(p.FullName)
-		}
-		if norm != "" {
-			r.rosterByNorm[norm] = append(r.rosterByNorm[norm], p)
-		}
-	}
-	for _, m := range playerMatches {
-		norm := db.NormalizePlayerName(m.OddsName)
-		if norm != "" {
-			r.matchesByNorm[norm] = append(r.matchesByNorm[norm], m)
-		}
-	}
-	return r
-}
-
-func (r *batchPlayerResolver) resolve(rawName string) (canonicalName, team string, linked bool) {
-	cleaned, teamHint := db.StripPlayerTag(rawName)
-	validHint := teamHint != "" && (teamHint == r.homeTeam || teamHint == r.awayTeam)
-	norm := db.NormalizePlayerName(cleaned)
-	if norm == "" {
-		return cleaned, "", false
-	}
-
-	if m, ok := r.matchFromCache(norm, teamHint, validHint); ok {
-		if rp, found := r.rosterByAthleteID[m.ESPNAthleteID]; found && rp.FullName != "" {
-			return rp.FullName, m.Team, true
-		}
-		return r.unifySpelling(norm, cleaned), m.Team, true
-	}
-
-	if rp, ok := r.matchFromRoster(norm, teamHint, validHint); ok {
-		r.newMatches[playerMatchKey{oddsName: norm, team: rp.Team}] = db.PlayerMatch{
-			OddsName:      norm,
-			Team:          rp.Team,
-			ESPNAthleteID: rp.AthleteID,
-			Manual:        false,
-		}
-		return rp.FullName, rp.Team, true
-	}
-
-	if validHint {
-		team = teamHint
-	}
-	return r.unifySpelling(norm, cleaned), team, false
-}
-
-func (r *batchPlayerResolver) matchFromCache(norm, teamHint string, validHint bool) (db.PlayerMatch, bool) {
-	matches := r.matchesByNorm[norm]
-	if len(matches) == 0 {
-		return db.PlayerMatch{}, false
-	}
-
-	var manual []db.PlayerMatch
-	for _, m := range matches {
-		if m.Manual {
-			manual = append(manual, m)
-		}
-	}
-	if len(manual) > 0 {
-		return pickPlayerMatch(manual, teamHint, validHint, true)
-	}
-	return pickPlayerMatch(matches, teamHint, validHint, false)
-}
-
-func pickPlayerMatch(
-	candidates []db.PlayerMatch,
-	teamHint string,
-	validHint, allowSingleMismatch bool,
-) (db.PlayerMatch, bool) {
-	if validHint {
-		var hinted []db.PlayerMatch
-		for _, c := range candidates {
-			if c.Team == teamHint {
-				hinted = append(hinted, c)
-			}
-		}
-		if len(hinted) == 1 {
-			return hinted[0], true
-		}
-		if len(hinted) > 1 || !allowSingleMismatch {
-			return db.PlayerMatch{}, false
-		}
-	}
-	if len(candidates) == 1 {
-		return candidates[0], true
-	}
-	return db.PlayerMatch{}, false
-}
-
-func (r *batchPlayerResolver) matchFromRoster(norm, teamHint string, validHint bool) (db.RosterPlayer, bool) {
-	candidates := r.rosterByNorm[norm]
-	if len(candidates) == 0 {
-		return db.RosterPlayer{}, false
-	}
-	if validHint {
-		var hinted []db.RosterPlayer
-		for _, c := range candidates {
-			if c.Team == teamHint {
-				hinted = append(hinted, c)
-			}
-		}
-		if len(hinted) == 1 {
-			return hinted[0], true
-		}
-		return db.RosterPlayer{}, false
-	}
-	if len(candidates) == 1 {
-		return candidates[0], true
-	}
-	return db.RosterPlayer{}, false
-}
-
-func (r *batchPlayerResolver) unifySpelling(norm, cleaned string) string {
-	if existing, ok := r.unmatchedSpelling[norm]; ok {
-		return existing
-	}
-	r.unmatchedSpelling[norm] = cleaned
-	return cleaned
-}
-
-func (r *batchPlayerResolver) flush(ctx context.Context) error {
-	if len(r.newMatches) == 0 {
-		return nil
-	}
-	matches := make([]db.PlayerMatch, 0, len(r.newMatches))
-	for _, m := range r.newMatches {
-		matches = append(matches, m)
-	}
-	return r.store.UpsertPlayerMatches(ctx, matches)
+	return db.NewBatchPlayerResolver(rosterPlayers, playerMatches)
 }
 
 // syncOddsProps fetches and writes props for one game.
