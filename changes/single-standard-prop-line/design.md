@@ -106,3 +106,7 @@ grouping/pairing keys without breaking game lines)
       `(GameID, MarketType, canonicalPlayerKey)` so every player has at most one `LineGroup` per prop market, with tests
       in `internal/board/board_test.go` and `internal/web/pick_test.go`.
 - [x] Docs: update `docs/reference/data-sources.md` covering standard-line filtering and primary-line selection.
+
+## Reviews
+
+- [x] Final review: agy@gemini-4-argon-high

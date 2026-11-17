@@ -401,11 +401,24 @@ func Build(
 
 // MatchesLeg reports whether the row's selection is the leg's pick.
 func (r Row) MatchesLeg(leg db.Leg) bool {
-	return r.GameID == db.StringValue(leg.GameID) &&
-		r.Market == leg.MarketType &&
-		r.Team == db.StringValue(leg.Team) &&
+	if r.GameID != db.StringValue(leg.GameID) ||
+		r.Market != leg.MarketType ||
+		r.Side != db.StringValue(leg.Side) {
+		return false
+	}
+	if isPlayerMarket(r.Market) || r.PlayerName != "" {
+		legPlayerID := db.StringValue(leg.PlayerID)
+		if r.PlayerID != "" && legPlayerID != "" {
+			return r.PlayerID == legPlayerID
+		}
+		legTeam := db.StringValue(leg.Team)
+		if r.Team != "" && legTeam != "" && r.Team != legTeam {
+			return false
+		}
+		return normalize(r.PlayerName) == normalize(db.StringValue(leg.PlayerName))
+	}
+	return r.Team == db.StringValue(leg.Team) &&
 		r.PlayerName == db.StringValue(leg.PlayerName) &&
-		r.Side == db.StringValue(leg.Side) &&
 		lineEqual(r.Line, leg.Line)
 }
 
@@ -850,12 +863,14 @@ func rowsForGame(rows []Row, gameID string) []Row {
 	return gameRows
 }
 
-// Pair folds one game's built rows into one group per line. Rows that share a
-// market, team, player, and line share a group, so an Over and an Under on the
-// same number sit on one row. Each group's options come back in a fixed order:
-// away before home for a spread or moneyline, Over before Under for a total or
-// prop, and the single Yes of an anytime touchdown. A line with only one stored
-// side keeps one option.
+// Pair folds one game's built rows into one group per line. Spreads and
+// moneylines key on market alone, game totals key on market and number, team
+// totals key on market, team, and number, and player props key on market and
+// canonical player, so an Over and an Under for the same player prop sit on
+// one row even across differing book lines. Each group's options come back in
+// a fixed order: away before home for a spread or moneyline, Over before Under
+// for a total or prop, and the single Yes of an anytime touchdown. A line with
+// only one stored side keeps one option.
 func Pair(game db.Game, rows []Row) []LineGroup {
 	groups := make([]LineGroup, 0, len(rows))
 	index := make(map[string]int, len(rows))
