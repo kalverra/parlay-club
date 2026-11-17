@@ -4,8 +4,6 @@ title: Export
 type: concept
 summary: How a locked slip turns stored sportsbook deep links into a one-tap combined DraftKings or FanDuel link, with per-leg taps, a manual list, and copy text for every pick that has no link.
 tags: [export, sportsbook, fanduel, draftkings, deep-links, links, combined-links, locking, manual-legs, copy, sse, the-odds-api]
-sources: [internal/export/export.go, internal/web/export.go, internal/ingest/odds/lines.go, internal/refresh/sources.go, internal/db/odds.go, internal/db/migrations/0004_odds_links.sql, internal/web/slips.go, web/templates/partials.html]
-last_verified: 2026-11-11
 ---
 
 # Export
@@ -57,9 +55,25 @@ rule stays testable. Every leg lands in exactly one of `Linked` or `Manual`, so 
 A leg is linked when all of these hold:
 
 - its game has not kicked off;
-- an `odds` row matches the leg's `game_id`, `book`, `market_type`, `team`, `player_name`, and `side`;
-- the row's `line` equals the leg's line, with NULL matching only NULL;
+- an `odds` row for the book matches the leg's selection (`db.Odds.MatchesSelection` via `db.SameSelection`):
+  - player props match `game_id`, `market_type`, `side`, and canonical player (athlete `player_id` when both carry one,
+    otherwise normalized player name and `team`);
+  - game markets (`SPREAD`, `ML`, `TOTAL`, `TEAM_TOTAL`) match `game_id`, `market_type`, `team`, and `side`;
+  - `line` is ignored for matching, though an exact line match (`db.SameLine`) is preferred when multiple rows match;
 - the row has a non-empty `link`.
+
+```mermaid
+flowchart LR
+  Leg["Slip leg (saved line)"] --> Kickoff{"Game started?"}
+  Kickoff -->|yes| Started["Manual: game started"]
+  Kickoff -->|no| Match["matchOdds via SameSelection"]
+  Match -->|no row| NoLine["Manual: no line"]
+  Match -->|row without link| NoLink["Manual: no link"]
+  Match -->|row with link| Link["Linked: book's live line, price, sid, link"]
+  Link --> Drift{"SameLine(row.Line, leg.Line)?"}
+  Drift -->|yes| Clean["Standard link"]
+  Drift -->|no| Note["Link + LineMoved drift note"]
+```
 
 Everything else is manual, with one reason:
 
@@ -67,12 +81,14 @@ Everything else is manual, with one reason:
 | -------------- | ---------------------------------------------------------------------------- |
 | `no line`      | No row for the book, or a leg with no game such as a hand-typed `OTHER` leg. |
 | `no link`      | The row matches, but `link` is NULL or blank.                                |
-| `line moved`   | The row's line differs; the plan carries the book's current line.            |
 | `game started` | `now` is at or past kickoff; this check runs before the row lookup.          |
 
-The match uses the same fields as the `odds` primary key, so "the same selection" has one definition. That definition
-lives in `db.Odds.MatchesSelection`, shared with the Games tab and the slip's reference prices. Price drift alone does
-not block a link: the sportsbook shows its own price, and the person decides.
+Matching on `db.SameSelection` keeps "the same selection" consistent across the export card, the pick board, and the
+slip's reference prices, even when a book uses a player name variant (such as `"Ollie Gordon II"` for `"Ollie Gordon"`)
+or moves the line after the leg was picked. When a line moves, the linked leg carries the book's live `link`, `sid`,
+`event_sid`, `line`, and `price`, and sets `LegLink.LineMoved = true` so the card can warn the bettor without dropping
+the deep link. Price drift alone does not block a link or trigger `LineMoved`: the sportsbook shows its own price, and
+the person decides.
 
 ## Combined links
 
@@ -127,8 +143,10 @@ in arrives over `slip-updated` without a reload.
 The card shows, in order:
 
 - the prices note, "Prices may have moved since <time>", from the newest `odds.fetched_at` among the slip's games;
-- one block per book. With a `Combined` URL it is one "Open in DraftKings" or "Open in FanDuel" button. Without one, it
-  is a numbered list of per-leg taps, each labeled with the selection and the book's price.
+- one block per book. With a `Combined` URL it is one "Open in DraftKings" or "Open in FanDuel" button, followed by any
+  `LineMoved` drift callouts (`<Selection>: Book at <live> · slip <saved>`). Without a combined URL, it is a numbered
+  list of per-leg taps, each labeled with the selection, the book's price, and an inline drift note (`Book at <live> ·
+  slip <saved>`) whenever `LineMoved` is true.
 - under each book, every manual leg by selection, with a friendly note that says why it needs a hand.
 - "Copy slip as text", always shown.
 
