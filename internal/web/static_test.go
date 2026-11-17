@@ -116,6 +116,32 @@ func TestAppJSHandlesBugReportCaptureAndSubmission(t *testing.T) {
 	}
 }
 
+func TestAppJSPausesAndResumesLiveEventSource(t *testing.T) {
+	t.Parallel()
+
+	source, err := fs.ReadFile(assets.Static, "static/app.js")
+	require.NoError(t, err)
+	script := string(source)
+
+	for _, want := range []string{
+		"liveIdleTimeoutMs = 3 * 60 * 1000",
+		`"pointerdown"`,
+		`"keydown"`,
+		`"scroll"`,
+		`"touchstart"`,
+		`"htmx:beforeRequest"`,
+		`"visibilitychange"`,
+		`"focus"`,
+		`"pagehide"`,
+		"passive: true",
+		"pauseLive",
+		"resumeLive",
+		"refreshLive",
+	} {
+		assert.Contains(t, script, want)
+	}
+}
+
 func TestStaticHandlerStaysInsideStaticDir(t *testing.T) {
 	t.Parallel()
 

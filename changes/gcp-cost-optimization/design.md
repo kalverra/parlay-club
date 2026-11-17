@@ -109,7 +109,7 @@ v0.5 config tuning, and GCS bucket soft-delete cleanup)
       `SlipGraded` pages in `internal/web/slips.go`, `internal/web/pick.go`, `web/templates/slip.html`, and
       `web/templates/pick.html`, and make `/slips/{id}/events` return `event: bye` for graded slips, with tests in
       `internal/live/stream_test.go`, `internal/web/slips_test.go`, and `internal/web/pick_test.go`.
-- [ ] Add a `3m` user-inactivity pause + interaction/focus/pagehide lifecycle for `EventSource` in `web/static/app.js`
+- [x] Add a `3m` user-inactivity pause + interaction/focus/pagehide lifecycle for `EventSource` in `web/static/app.js`
       that refreshes partials on resume.
 
 ### Phase 2: Tune Litestream replication and GCS bucket retention

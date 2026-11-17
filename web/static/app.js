@@ -404,12 +404,17 @@ document.addEventListener("change", (event) => {
 
 // Live updates. The slip page marks its body with data-live-url. One
 // EventSource per page carries only signals, so the page refetches the
-// partials it shows. The server says bye at its deadline, and the tab closes
-// the stream while hidden because iOS Safari drops background connections.
+// partials it shows. The server says bye at its deadline, and the client closes
+// the stream when hidden, unloaded, or idle for 3m, then reopens and refreshes
+// on interaction, focus, or return to visibility.
 let liveURL = "";
 let liveSource = null;
 let boardUpdateTimer = null;
+let liveIdleTimer = null;
+let liveIdlePaused = false;
 const boardUpdateDebounceMs = 150;
+const liveIdleTimeoutMs = 3 * 60 * 1000;
+const liveActivityEvents = ["pointerdown", "keydown", "scroll", "touchstart", "htmx:beforeRequest"];
 
 function triggerBoardUpdated() {
   if (!window.htmx || !document.body) {
@@ -423,11 +428,26 @@ function triggerBoardUpdated() {
   }, boardUpdateDebounceMs);
 }
 
+function clearLiveIdleTimer() {
+  clearTimeout(liveIdleTimer);
+  liveIdleTimer = null;
+}
+
+function resetLiveIdleTimer() {
+  clearLiveIdleTimer();
+  if (!liveURL || document.hidden || liveIdlePaused) {
+    return;
+  }
+
+  liveIdleTimer = setTimeout(pauseLive, liveIdleTimeoutMs);
+}
+
 function openLive() {
   if (!liveURL || document.hidden || liveSource) {
     return;
   }
 
+  liveIdlePaused = false;
   liveSource = new EventSource(liveURL);
 
   liveSource.addEventListener("slip-updated", () => {
@@ -436,7 +456,7 @@ function openLive() {
 
   liveSource.addEventListener("board-updated", triggerBoardUpdated);
 
-  liveSource.addEventListener("bye", closeLive);
+  liveSource.addEventListener("bye", pauseLive);
 }
 
 function closeLive() {
@@ -448,10 +468,18 @@ function closeLive() {
   liveSource = null;
 }
 
-// A reopen may have missed events while the tab was hidden or the stream was
-// past its deadline, so refetch both partials.
+function pauseLive() {
+  clearLiveIdleTimer();
+  closeLive();
+  if (liveURL && !document.hidden) {
+    liveIdlePaused = true;
+  }
+}
+
+// A reopen may have missed events while the tab was hidden, idle-paused, or
+// past its server deadline, so refetch both partials.
 function refreshLive() {
-  if (!liveURL) {
+  if (!liveURL || !window.htmx || !document.body) {
     return;
   }
 
@@ -459,10 +487,40 @@ function refreshLive() {
   triggerBoardUpdated();
 }
 
+function resumeLive() {
+  if (!liveURL || document.hidden) {
+    return;
+  }
+
+  liveIdlePaused = false;
+  openLive();
+  refreshLive();
+  resetLiveIdleTimer();
+}
+
+function handleLiveActivity() {
+  if (!liveURL || document.hidden) {
+    return;
+  }
+
+  if (liveIdlePaused) {
+    resumeLive();
+    return;
+  }
+
+  resetLiveIdleTimer();
+}
+
 const liveRoot = document.querySelector("[data-live-url]");
 if (liveRoot) {
   liveURL = liveRoot.getAttribute("data-live-url") || "";
-  openLive();
+  if (liveURL) {
+    openLive();
+    resetLiveIdleTimer();
+    for (const eventName of liveActivityEvents) {
+      document.addEventListener(eventName, handleLiveActivity, { capture: true, passive: true });
+    }
+  }
 }
 
 // A glance page like the group list carries data-refresh-on-visible instead of
@@ -480,24 +538,30 @@ function refreshOnVisible() {
   }
 }
 
+function teardownLive() {
+  clearTimeout(boardUpdateTimer);
+  boardUpdateTimer = null;
+  clearLiveIdleTimer();
+  liveIdlePaused = false;
+  closeLive();
+}
+
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) {
-    clearTimeout(boardUpdateTimer);
-    boardUpdateTimer = null;
-    closeLive();
+    teardownLive();
     return;
   }
 
-  openLive();
-  refreshLive();
+  resumeLive();
   refreshOnVisible();
 });
 
 window.addEventListener("focus", () => {
-  openLive();
-  refreshLive();
+  resumeLive();
   refreshOnVisible();
 });
+
+window.addEventListener("pagehide", teardownLive);
 
 // Bug report modal: captures the current viewport with html2canvas (downscaled
 // to at most 1280px wide as JPEG), populates the preview and diagnostic fields,
