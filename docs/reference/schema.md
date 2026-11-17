@@ -10,7 +10,7 @@ tags: [database, sqlite, migrations, groups, archive, api, raw-responses, odds, 
 
 ## Summary
 
-One SQLite file, opened by `internal/db.Open`, holds every table the app uses. `0001_init.sql` creates the tables,
+One SQLite file, opened by `db.Open` in `internal/db`, holds every table the app uses. `0001_init.sql` creates the tables,
 including groups, their members, and `slips.group_id`. `0002_google_identity.sql` rebuilds `users` to add Google
 identity columns and drop the unique name rule. `0003_api_archive.sql` adds the raw response archive, `api_bodies` and
 `api_responses`; see [Archive](../concepts/archive.md). `0004_odds_links.sql` adds each book's deep link and selection
@@ -19,11 +19,13 @@ one model projection per game. `0007_props_research.sql` adds `roster_players` a
 `0008_leg_votes.sql` adds `leg_votes`, the up and down votes members cast on each other's legs.
 `0011_logos_portraits.sql` adds `home_logo` and `away_logo` to `games` and `headshot_url` to `roster_players`.
 `0012_nflverse_signals.sql` adds `nflverse_player_ids`, `nflverse_team_weeks`, and `nflverse_player_weeks` for nflverse
-team efficiency, player usage, and snap-count signals.
+team efficiency, player usage, and snap-count signals. `0013_canonical_players.sql` (paired with the `Migrate` backfill
+hook) refreshes `roster_players.norm_name`, deduplicates colliding `odds` rows onto canonical `player_name` and `team`
+values, and backfills missing `legs.player_id` and `legs.team` values.
 
 ## Connection settings
 
-`internal/db.Open` opens the writer handle capped at one connection (`SetMaxOpenConns(1)`) with `_txlock=immediate` and
+`db.Open` opens the writer handle capped at one connection (`SetMaxOpenConns(1)`) with `_txlock=immediate` and
 sets these pragmas on every connection:
 
 | Pragma        | Value    | Why                                               |
@@ -47,11 +49,11 @@ writer handle.
 
 ## Migrations
 
-- Files live in `internal/db/migrations/NNNN_name.sql` and are embedded in the binary.
+- Files live in `internal/db/migrations/` (named `NNNN_name.sql`) and are embedded in the binary.
 - `db.Migrate` applies every file whose number is greater than `PRAGMA user_version`, in number order.
 - Each file runs in its own transaction. The migration's statements and its `user_version` bump commit together, so a
   failed migration leaves neither behind.
-- A fresh database ends at version 12 with every table below.
+- A fresh database ends at version 13 with every table below.
 - `0001_init.sql` creates `groups`, `group_members`, and `slips.group_id`. A database created before groups existed has
   the old `slips` shape, so delete it and let the migrations rebuild.
 - `0002_google_identity.sql` rebuilds `users` in its transaction with the SQLite 12-step method and
@@ -72,7 +74,12 @@ writer handle.
 - `0011_logos_portraits.sql` adds nullable `home_logo` and `away_logo` columns to `games` and a
   `headshot_url TEXT NOT NULL DEFAULT ''` column to `roster_players`.
 - `0012_nflverse_signals.sql` creates `nflverse_player_ids`, `nflverse_team_weeks`, and `nflverse_player_weeks`.
-- Never edit an applied file. Add `0013_name.sql` and up.
+- `0013_canonical_players.sql` runs `backfillCanonicalPlayersTx` inside the migration transaction: refreshes
+  `roster_players.norm_name` (including `(TEAM)` tag stripping and accent folding), deduplicates colliding `odds` rows
+  (preferring linked rows and richer `link`/`sid`/`event_sid` metadata, deleting losers before updating winners to
+  canonical `player_name` and `team`), unifies unmatched casing per game, backfills `legs.player_id`, `legs.team`, and
+  `legs.player_name`, and upserts auto-discovered `player_matches`.
+- Never edit an applied file. Add `0014_name.sql` and up.
 - `PRAGMA user_version` on the database file is the only record of what ran.
 
 ## Tables
@@ -423,8 +430,11 @@ how to read it.
 - `slips.status` and `slips.result` stay in step with lock and leg-result changes.
 - `groups`, `group_members`, `slips`, and the rows that hang off a slip are scoped to one group. Weeks, games, odds,
   nfelo projections, nflverse signals, player matches, rosters, player game logs, and `sync_state` are global.
-- `roster_players` stores team roster athletes with `norm_name` for fast matching and `headshot_url` (`''` when
+- `roster_players` stores team roster athletes with `norm_name` (`NormalizePlayerName(full_name)`, accent-folded and
+  stripped of punctuation, trailing suffixes, and parenthetical tags) for fast matching and `headshot_url` (`''` when
   missing).
+- `odds.player_name` stores the canonical `roster_players.full_name` when matched (with trailing `(TEAM)` tags stripped)
+  or a batch-unified spelling when unmatched; `odds.team` stores the matched team or valid `(TEAM)` tag hint.
 - `games.home_logo` and `games.away_logo` store validated `https://` ESPN team logo URLs (`NULL` when missing).
 - `player_gamelogs.stats_json` stores parsed season market values as a JSON map of float arrays, ordered most recent first.
 - `player_matches` maps normalized sportsbook player names and teams to ESPN athlete IDs. A row with `manual = 1` was

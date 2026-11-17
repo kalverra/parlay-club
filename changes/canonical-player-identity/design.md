@@ -121,5 +121,5 @@ deduplication of existing stored rows)
       / `"Ollie Gordon II (MIA)"` fixtures.
 - [x] Add a schema/data backfill (migration `0013` + Go helper) to deduplicate existing `odds` and backfill
       `legs.player_id`/`team`, with a migration test on colliding prod-shaped rows.
-- [ ] Docs: update `docs/reference/data-sources.md` and `docs/reference/schema.md` to document canonical player
+- [x] Docs: update `docs/reference/data-sources.md` and `docs/reference/schema.md` to document canonical player
       normalization and `(TEAM)` tag stripping.

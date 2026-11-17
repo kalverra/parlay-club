@@ -234,8 +234,8 @@ and runs on demand when someone opens an upcoming game on an `OPEN` slip's pick 
 odds", or opens a research view. It is stale after 30 minutes on game days or within 6 hours of kickoff, and 2 hours
 otherwise (subject to a 2-minute cooldown on manual refresh), and is skipped once kickoff has passed. Before matching
 players, it syncs rosters for both teams (`espn:roster:{team}`). It checks the Parlay API 150-credit floor
-(`OddsPropsFloor`), calls `Client.Props`, maps `TEAM_TOTAL` to the game's team abbreviation, and resolves player names
-through `ResolvePlayerMatch`.
+(`OddsPropsFloor`), calls `Client.Props`, maps `TEAM_TOTAL` to the game's team abbreviation, and canonicalizes player
+names and teams via batch resolution against `player_matches` and `roster_players`.
 
 ## The Odds API (free tier: 500 credits/month)
 
@@ -357,20 +357,32 @@ missing required column or non-numeric cell is an error.
 
 ## Player matching
 
-Sportsbooks format player names differently from ESPN and from each other. Parlay API also omits the player's team on
-prop quotes. Player matching normalizes names and matches each prop to an ESPN athlete ID and team:
+Sportsbooks format player names differently from ESPN and from each other (for example, `"Ollie Gordon II"`,
+`"Ollie Gordon"`, and `"Ollie Gordon II (MIA)"`). Parlay API also omits the player's team on prop quotes. Player
+matching strips tags, normalizes names, and canonicalizes each prop to an ESPN athlete ID, canonical `FullName`, and
+team:
 
-- **Normalization (`NormalizePlayerName`):** lowercases, strips `.`, `'`, `-`, and `,`, collapses spaces, and drops a
-  trailing generational suffix (`jr`, `sr`, `ii`, `iii`, `iv`, `v`) when preceded by a space.
-- **Resolution (`ResolvePlayerMatch`):**
-  1. Normalizes the sportsbook name. If empty, returns unmatched.
-  2. Checks `player_matches` for `(norm, homeTeam)` and `(norm, awayTeam)`. If a `manual = 1` row exists, it wins
-     immediately. If exactly one unambiguous match exists, returns `(espn_athlete_id, team)`. If conflicting matches
-     exist for both teams, returns unmatched.
-  3. On a miss, queries `roster_players` for `team IN (homeTeam, awayTeam) AND norm_name = norm`.
-  4. If exactly one athlete matches across both teams, upserts
-     `player_matches(odds_name, team, espn_athlete_id, manual=0)` and returns `(athlete_id, team)`. If zero or multiple
-     athletes match, leaves `player_id` and `team` empty.
+- **Tag stripping (`StripPlayerTag`):** removes a trailing parenthetical tag such as `" (MIA)"` or `" (LAR)"` from the
+  sportsbook player name. When the inner token is 2–4 uppercase ASCII letters, it is also returned as `teamHint`.
+- **Normalization (`NormalizePlayerName`):** strips any trailing parenthetical tag via `StripPlayerTag`, folds common
+  Latin accents (`á`→`a`, `é`→`e`, `ñ`→`n`, etc.), lowercases, strips `.`, `'`, `-`, and `,`, collapses spaces, and
+  drops a trailing generational suffix (`jr`, `sr`, `ii`, `iii`, `iv`, `v`) when preceded by a space.
+- **Batch prop resolution (`mapPropsToOdds`):** preloads `roster_players` (`RosterForTeams`) and `player_matches`
+  (`PlayerMatchesForTeams`) once per game:
+  1. Strips any `(TEAM)` tag via `StripPlayerTag` and validates `teamHint` against the game's home and away teams.
+  2. Checks cached `player_matches` for the normalized name (`manual = 1` wins first, using `teamHint` to disambiguate
+     when valid).
+  3. On a cache miss, checks cached `roster_players` (disambiguating by `teamHint` when valid) and queues newly
+     discovered `player_matches(odds_name, team, espn_athlete_id, manual=0)` rows for batch upsert via
+     `UpsertPlayerMatches` (preserving existing `manual = 1` overrides).
+  4. On a match, rewrites `odds.player_name` to the canonical `roster_players.full_name` and sets `odds.team` to the
+     matched team. On a miss, preserves a valid `teamHint` and collapses unmatched casing variants within the same game
+     batch by normalized name.
+  5. Deduplicates same-book collisions on `(game_id, book, market_type, team, player_name, side)`, preferring linked
+     rows and then rows with more `link`/`sid`/`event_sid` fields.
+- **Single-row resolution (`ResolvePlayerMatch`):** normalizes the name, checks `player_matches` for `(norm, homeTeam)`
+  and `(norm, awayTeam)` (`manual = 1` wins immediately), falls back to `roster_players`, and upserts an unambiguous
+  match with `manual = 0`.
 - **Manual overrides (`SaveManualPlayerMatch`):** writes `manual = 1` in `player_matches`. Auto-matching never
   overwrites a manual match. A manual save clears conflicting auto-matches for the opponent in that matchup, and
   backfills `team` on matching `odds` rows and `team` and `player_id` on matching `legs` rows.
