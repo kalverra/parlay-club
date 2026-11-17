@@ -1,11 +1,8 @@
 ---
-slug: canonical-player-identity
-status: implementing
-created: "2026-11-16"
-accepted_by:
-    - Adam Hamrick
-accepted_at: "2026-11-16T19:06:58Z"
-effort: medium
+id: adr-canonical-player-identity
+title: Unify player identity across sportsbooks
+type: decision
+summary: Normalize and resolve player identity once during prop ingest (stripping trailing `(TEAM)` tags, normalizing punctuation/suffixes/casing, and matching against team rosters) so stored odds and board grouping share one canonical player ID, name, and team rather than raw provider strings.
 ---
 
 # Unify player identity across sportsbooks
@@ -73,3 +70,36 @@ sportsbook export broken. Canonicalizing at ingest fixes the pick board, researc
 
 The `effort` rating is `medium` because it coordinates name normalization, roster matching, prop ingest persistence, and
 board grouping across several seams without accidentally merging distinct players who share a name.
+
+## Consequences
+
+- **Easier:** Sportsbook name variants (dropped suffixes, casing differences, accents, and trailing `(TEAM)` tags)
+  resolve to one canonical athlete ID, display name, and team at ingest time, keeping the pick board, saved legs,
+  research links, and sportsbook export consistent.
+- **Easier:** Prop ingest resolves players in memory from one per-game batch load of rosters and cached matches rather
+  than issuing sequential per-row SQLite queries.
+- **Harder:** Debugging raw provider player strings requires inspecting the raw response archive rather than the `odds`
+  table, since stored rows now hold canonicalized names.
+- **Revisit:** If future providers add non-parenthetical decorations or sport-specific tags, move provider-specific
+  stripping into each ingest adapter ahead of shared normalization.
+
+## Alternatives considered
+
+- **Merge player cards only in `board.go` at render time:** Rejected because `odds.team` would stay empty on tagged
+  rows, saved `legs` would keep un-canonical book strings, and research or export lookups would remain fragmented.
+- **Pure SQL migration for existing rows:** Rejected because SQLite cannot replicate Go's accent folding, suffix
+  stripping, and `(TEAM)` tag extraction without duplicating normalization logic.
+
+## Implementation notes
+
+- `StripPlayerTag` strips any non-empty trailing parenthetical `(...)` from the cleaned name, but only returns a
+  `teamHint` when the inner token is 2–4 uppercase ASCII letters.
+- Players absent from ESPN rosters have no athlete ID; their casing is unified per game batch (and during migration)
+  rather than across separate refreshes, and they still depend on a resolved team to group onto one card.
+- When two rostered players on the opposing teams share a normalized name without a disambiguating `teamHint`,
+  auto-matching intentionally leaves the row unmatched so distinct players are not merged; `manual = 1` overrides in
+  `player_matches` remain authoritative.
+
+## Follow-ups
+
+None.
