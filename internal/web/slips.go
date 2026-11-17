@@ -862,7 +862,8 @@ func (h *slipHandlers) updateLeg(w http.ResponseWriter, r *http.Request) {
 		h.respondError(w, err)
 		return
 	}
-	if r.PostForm.Get("from") == "board" {
+	switch r.PostForm.Get("from") {
+	case "board":
 		trigger := "tray-updated"
 		if !sameBoardLine(existing, updated) {
 			// The swapped-out line is still on screen. Refresh the board so it
@@ -871,6 +872,15 @@ func (h *slipHandlers) updateLeg(w http.ResponseWriter, r *http.Request) {
 		}
 		w.Header().Set("Hx-Trigger", trigger)
 		h.renderPartial(w, "pick-line-group", h.pickPairRow(r.Context(), slip, updated, true))
+		return
+	case "tray":
+		dock, err := h.pickDockData(r.Context(), slip)
+		if err != nil {
+			h.serverError(w, err)
+			return
+		}
+		w.Header().Set("Hx-Trigger", "tray-updated, board-updated")
+		h.renderPartial(w, "pick-tray", dock)
 		return
 	}
 	w.Header().Set("Hx-Trigger", "leg-saved")

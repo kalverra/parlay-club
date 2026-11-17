@@ -121,7 +121,7 @@ and grading invariants)
 
 ### Phase 3: Open-slip line-drift indicator and one-tap refresh
 
-- [ ] Update `internal/slips/rules.go` (`pickChanged` / `UpdateLeg`) so syncing a moved line on an open slip preserves
+- [x] Update `internal/slips/rules.go` (`pickChanged` / `UpdateLeg`) so syncing a moved line on an open slip preserves
       votes unless the canonical selection changed, and add a line-drift indicator + refresh action in
       `internal/web/pick.go` and `web/templates/partials.html`, with tests in `internal/slips/votes_test.go` and
       `internal/web/pick_test.go`.

@@ -794,16 +794,26 @@ func checkKickoff(
 	return nil
 }
 
-// pickChanged reports whether an edit changed the pick itself. Odds are a
-// price, not a pick, so an odds-only edit keeps the leg's votes.
+// pickChanged reports whether an edit changed the pick itself. Odds-only edits
+// and board-synced line/price updates on the same canonical selection preserve
+// votes; changing the player, team, market, side, or custom OTHER pick clears
+// them.
 func pickChanged(before, after db.Leg) bool {
-	return !sameText(before.GameID, after.GameID) ||
-		before.MarketType != after.MarketType ||
-		before.Selection != after.Selection ||
-		!sameText(before.Team, after.Team) ||
-		!sameText(before.PlayerName, after.PlayerName) ||
-		!sameText(before.Side, after.Side) ||
-		!db.SameLine(before.Line, after.Line)
+	exactSamePick := sameText(before.GameID, after.GameID) &&
+		before.MarketType == after.MarketType &&
+		before.Selection == after.Selection &&
+		sameText(before.Team, after.Team) &&
+		sameText(before.PlayerName, after.PlayerName) &&
+		sameText(before.Side, after.Side) &&
+		db.SameLine(before.Line, after.Line)
+	if exactSamePick {
+		return false
+	}
+	if before.MarketType != "OTHER" && after.MarketType != "OTHER" &&
+		db.SameSelection(db.LegSelection(before), db.LegSelection(after)) {
+		return false
+	}
+	return true
 }
 
 // sameText compares two optional leg fields.

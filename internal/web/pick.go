@@ -166,6 +166,8 @@ type PickRowView struct {
 	AtLimit    bool
 	SwapURL    string
 	Badge      string
+	DriftNote  string
+	CanRefresh bool
 }
 
 // PickDockView is the viewer's own picks: the fixed dock's count and combined
@@ -190,6 +192,21 @@ type TrayLegView struct {
 	Odds      string
 	Grade     GradeView
 	Locked    bool
+	DriftNote string
+	Refresh   *LegRefreshView
+}
+
+// LegRefreshView carries the current board fields needed to sync a drifted leg
+// to the latest line and price with one tap.
+type LegRefreshView struct {
+	GameID     string
+	Market     string
+	Team       string
+	PlayerName string
+	PlayerID   string
+	Side       string
+	Line       string
+	Odds       int
 }
 
 // PickSwapView is the bottom sheet that swaps one leg for a new pick.
@@ -512,7 +529,7 @@ func (h *slipHandlers) pickPageData(
 	AddBoardTiming(ctx, time.Since(boardStart))
 
 	dockStart := time.Now()
-	dock, err := h.dockFrom(ctx, slip, legs, allGames, mine)
+	dock, err := h.dockFrom(ctx, slip, legs, allGames, mine, rows)
 	AddDBTiming(ctx, time.Since(dockStart))
 	if err != nil {
 		return PickPage{}, err
@@ -735,7 +752,17 @@ func (h *slipHandlers) buildPickDetail(
 		Now:      now,
 		Signals:  signals,
 	})
-	detail := pickDetailView(slip.ID, model, q, atLimit, !card.HasProps && hasRows)
+	user, _ := h.user(ctx)
+	mineByID := legMap(legsForUser(legs, user.ID))
+	detail := pickDetailView(
+		slip.ID,
+		model,
+		q,
+		atLimit,
+		!card.HasProps && hasRows,
+		slip.Status == db.SlipOpen,
+		mineByID,
+	)
 	detail.CanRefresh = slip.Status == db.SlipOpen
 	AddBoardTiming(ctx, time.Since(boardStart))
 	return detail
@@ -749,6 +776,8 @@ func pickDetailView(
 	q board.Query,
 	atLimit bool,
 	unloaded bool,
+	canRefresh bool,
+	mineByID map[int64]db.Leg,
 ) PickDetailView {
 	linkQuery := q
 	linkQuery.Category = model.Category
@@ -782,7 +811,10 @@ func pickDetailView(
 			slipID, linkQuery, "sort", string(option), option.Label(), 0, option == model.Sort))
 	}
 	for _, group := range model.Lines {
-		view.Lines = append(view.Lines, pickLineGroupView(slipID, group, atLimit, linkQuery, false))
+		view.Lines = append(
+			view.Lines,
+			pickLineGroupView(slipID, group, atLimit, linkQuery, false, canRefresh, mineByID),
+		)
 	}
 	for _, player := range model.Players {
 		card := PickPlayerView{
@@ -795,7 +827,10 @@ func pickDetailView(
 			Tags:        player.Tags,
 		}
 		for _, group := range player.Lines {
-			card.Lines = append(card.Lines, pickLineGroupView(slipID, group, atLimit, linkQuery, true))
+			card.Lines = append(
+				card.Lines,
+				pickLineGroupView(slipID, group, atLimit, linkQuery, true, canRefresh, mineByID),
+			)
 		}
 		view.Players = append(view.Players, card)
 	}
@@ -845,6 +880,8 @@ func pickLineGroupView(
 	atLimit bool,
 	q board.Query,
 	prop bool,
+	canRefresh bool,
+	mineByID map[int64]db.Leg,
 ) PickLineGroupView {
 	view := PickLineGroupView{Label: lineGroupLabel(group)}
 	if len(group.Options) > 0 {
@@ -865,7 +902,7 @@ func pickLineGroupView(
 		}
 	}
 	for _, row := range group.Options {
-		option := pickRowView(slipID, row, atLimit, q)
+		option := pickRowView(slipID, row, atLimit, q, canRefresh, mineByID[row.Picked])
 		if option.PickID == 0 && picked == 1 {
 			option.UpdateID = pickedID
 		}
@@ -1025,8 +1062,22 @@ func (h *slipHandlers) pickDockData(ctx context.Context, slip db.Slip) (PickDock
 		return PickDockView{}, err
 	}
 	games = slips.FilterGamesByScope(games, slip.SlateScope)
-	user, _ := h.user(ctx)
-	return h.dockFrom(ctx, slip, legs, games, legsForUser(legs, user.ID))
+	user, homeBook, q := h.pickViewer(ctx, board.Query{})
+	mine := legsForUser(legs, user.ID)
+
+	var boardRows []board.Row
+	if slip.Status == db.SlipOpen && len(mine) > 0 {
+		odds, err := h.deps.Store.OddsForWeek(ctx, slip.WeekID)
+		if err != nil {
+			return PickDockView{}, err
+		}
+		roster, err := h.deps.Store.RosterForTeams(ctx, weekTeams(games))
+		if err != nil {
+			return PickDockView{}, err
+		}
+		boardRows = board.Build(games, currentOdds(odds), roster, homeBook, mine, q.Now)
+	}
+	return h.dockFrom(ctx, slip, legs, games, mine, boardRows)
 }
 
 // dockFrom shapes the viewer's legs, their analyzer warnings, and the combined
@@ -1037,6 +1088,7 @@ func (h *slipHandlers) dockFrom(
 	legs []db.Leg,
 	games []db.Game,
 	mine []db.Leg,
+	boardRows []board.Row,
 ) (PickDockView, error) {
 	members, err := h.deps.Store.SlipMembers(ctx, slip.ID)
 	if err != nil {
@@ -1061,6 +1113,13 @@ func (h *slipHandlers) dockFrom(
 		}
 	}
 
+	rowByLegID := make(map[int64]board.Row, len(mine))
+	for _, row := range boardRows {
+		if row.Picked != 0 {
+			rowByLegID[row.Picked] = row
+		}
+	}
+
 	view := PickDockView{
 		SlipID: slip.ID,
 		Picked: len(mine),
@@ -1072,12 +1131,19 @@ func (h *slipHandlers) dockFrom(
 		if leg.GameID != nil && lockedGames[*leg.GameID] {
 			locked = true
 		}
-		view.Legs = append(view.Legs, TrayLegView{
+		trayLeg := TrayLegView{
 			ID:        leg.ID,
 			Selection: leg.Selection,
 			Odds:      formatOdds(leg.Odds),
 			Locked:    locked,
-		})
+		}
+		if row, ok := rowByLegID[leg.ID]; ok && legDrifted(leg, row) {
+			trayLeg.DriftNote = trayDriftNote(leg, row)
+			if !locked && slip.Status == db.SlipOpen {
+				trayLeg.Refresh = refreshViewFromRow(row)
+			}
+		}
+		view.Legs = append(view.Legs, trayLeg)
 		combinedLegs = append(combinedLegs, parlay.Leg{
 			Decimal: parlay.AmericanToDecimal(leg.Odds),
 			Result:  leg.Result,
@@ -1268,7 +1334,14 @@ func pickLineID(gameID, market, team, player string, line *float64) string {
 }
 
 // pickRowView maps a built row to the template's fields.
-func pickRowView(slipID int64, row board.Row, atLimit bool, q board.Query) PickRowView {
+func pickRowView(
+	slipID int64,
+	row board.Row,
+	atLimit bool,
+	q board.Query,
+	canRefresh bool,
+	pickedLeg db.Leg,
+) PickRowView {
 	view := PickRowView{
 		SlipID:     slipID,
 		GameID:     row.GameID,
@@ -1286,6 +1359,10 @@ func pickRowView(slipID int64, row board.Row, atLimit bool, q board.Query) PickR
 	}
 	if row.Line != nil {
 		view.Line = formatFloat(*row.Line)
+	}
+	if row.Picked != 0 && pickedLeg.ID == row.Picked && legDrifted(pickedLeg, row) {
+		view.DriftNote = boardDriftNote(pickedLeg, row)
+		view.CanRefresh = canRefresh
 	}
 	if atLimit && row.Picked == 0 {
 		view.SwapURL = swapURL(slipID, view, q)
@@ -1408,6 +1485,7 @@ func (h *slipHandlers) pickPairRow(
 	}
 	signals := h.boardSignalsForGame(ctx, slip.WeekID, game, legs, playerIDs)
 	rows = board.ApplySignals(game, rows, signals)
+	mineByID := legMap(mine)
 	for _, group := range board.Pair(game, rows) {
 		if !groupHoldsLeg(group, leg) {
 			continue
@@ -1418,9 +1496,78 @@ func (h *slipHandlers) pickPairRow(
 			len(mine) >= slip.LegsPerMember,
 			board.Query{},
 			isPlayerMarket(group.Market),
+			slip.Status == db.SlipOpen,
+			mineByID,
 		)
 	}
 	return fallback()
+}
+
+// legMap indexes a slice of legs by ID.
+func legMap(legs []db.Leg) map[int64]db.Leg {
+	out := make(map[int64]db.Leg, len(legs))
+	for _, leg := range legs {
+		out[leg.ID] = leg
+	}
+	return out
+}
+
+// legDrifted reports whether a saved leg's line or odds differ from the current
+// board row.
+func legDrifted(leg db.Leg, row board.Row) bool {
+	if leg.MarketType == "OTHER" {
+		return false
+	}
+	return !db.SameLine(leg.Line, row.Line) || leg.Odds != row.Odds
+}
+
+// boardDriftNote formats a concise drift notice for a picked board option.
+func boardDriftNote(leg db.Leg, row board.Row) string {
+	if !db.SameLine(leg.Line, row.Line) {
+		slipLine := formatExportLine(leg.MarketType, leg.Line)
+		boardLine := formatExportLine(leg.MarketType, row.Line)
+		if slipLine != "" && boardLine != "" {
+			return fmt.Sprintf("Slip %s · now %s", slipLine, boardLine)
+		}
+		return "Line moved"
+	}
+	if leg.Odds != row.Odds {
+		return fmt.Sprintf("Slip %s · now %s", formatOdds(leg.Odds), formatOdds(row.Odds))
+	}
+	return ""
+}
+
+// trayDriftNote formats a concise drift notice for a leg in the pick tray.
+func trayDriftNote(leg db.Leg, row board.Row) string {
+	if !db.SameLine(leg.Line, row.Line) {
+		boardLine := formatExportLine(leg.MarketType, row.Line)
+		if boardLine != "" {
+			return fmt.Sprintf("Now %s (%s)", boardLine, formatOdds(row.Odds))
+		}
+		return "Line moved"
+	}
+	if leg.Odds != row.Odds {
+		return "Now " + formatOdds(row.Odds)
+	}
+	return ""
+}
+
+// refreshViewFromRow builds the form payload to sync a drifted leg to row.
+func refreshViewFromRow(row board.Row) *LegRefreshView {
+	line := ""
+	if row.Line != nil {
+		line = formatFloat(*row.Line)
+	}
+	return &LegRefreshView{
+		GameID:     row.GameID,
+		Market:     row.Market,
+		Team:       row.Team,
+		PlayerName: row.PlayerName,
+		PlayerID:   row.PlayerID,
+		Side:       row.Side,
+		Line:       line,
+		Odds:       row.Odds,
+	}
 }
 
 // sameBoardLine reports whether two legs sit on the same board line group, so a
