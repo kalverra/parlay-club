@@ -42,14 +42,16 @@ type Leg struct {
 
 // LegLink is a leg the book can open from a link, with the line, price, and
 // selection ID the book quoted for the same selection. EventSid is the book's
-// own ID for the game, which some combined links need.
+// own ID for the game, which some combined links need. LineMoved is true when
+// the book's current line differs from the line stored on the slip.
 type LegLink struct {
-	Leg      Leg
-	URL      string
-	Line     *float64
-	Price    int
-	Sid      *string
-	EventSid *string
+	Leg       Leg
+	URL       string
+	Line      *float64
+	Price     int
+	Sid       *string
+	EventSid  *string
+	LineMoved bool
 }
 
 // ManualLeg is a leg the person has to add by hand. Line is the book's current
@@ -247,28 +249,28 @@ func planLeg(leg Leg, odds []db.Odds, book string, now time.Time) (LegLink, Manu
 	if !found {
 		return LegLink{}, ManualLeg{Leg: leg, Reason: ReasonNoLine}, false
 	}
-	if !db.SameLine(row.Line, leg.Line) {
-		return LegLink{}, ManualLeg{Leg: leg, Reason: ReasonLineMoved, Line: row.Line}, false
-	}
 	if row.Link == nil || strings.TrimSpace(*row.Link) == "" {
 		return LegLink{}, ManualLeg{Leg: leg, Reason: ReasonNoLink}, false
 	}
 
 	return LegLink{
-		Leg:      leg,
-		URL:      *row.Link,
-		Line:     row.Line,
-		Price:    row.Price,
-		Sid:      row.Sid,
-		EventSid: row.EventSid,
+		Leg:       leg,
+		URL:       *row.Link,
+		Line:      row.Line,
+		Price:     row.Price,
+		Sid:       row.Sid,
+		EventSid:  row.EventSid,
+		LineMoved: !db.SameLine(row.Line, leg.Line),
 	}, ManualLeg{}, true
 }
 
-// matchOdds finds the one odds row for a leg's selection and book. It uses the
-// same keys the odds table is keyed on, so the app has one definition of "the
-// same selection".
+// matchOdds finds the odds row for a leg's selection and book via
+// MatchesSelection (SameSelection), preferring an exact line match when more
+// than one row matches.
 func matchOdds(leg db.Leg, odds []db.Odds, book string) (db.Odds, bool) {
 	book = db.NormalizeBook(book)
+	var fallback db.Odds
+	var found bool
 	for _, row := range odds {
 		if db.NormalizeBook(row.Book) != book {
 			continue
@@ -276,7 +278,13 @@ func matchOdds(leg db.Leg, odds []db.Odds, book string) (db.Odds, bool) {
 		if !row.MatchesSelection(leg) {
 			continue
 		}
-		return row, true
+		if db.SameLine(row.Line, leg.Line) {
+			return row, true
+		}
+		if !found {
+			fallback = row
+			found = true
+		}
 	}
-	return db.Odds{}, false
+	return fallback, found
 }
