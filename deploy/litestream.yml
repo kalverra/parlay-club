@@ -3,6 +3,17 @@
 # `entrypoint.sh` defaults the replica URL to gs://$LITESTREAM_BUCKET/parlay.db
 # and lets LITESTREAM_REPLICA_URL override it, which local smoke tests use to
 # replicate to a file instead.
+sync-interval: 10s
+
+levels:
+  - interval: 5m
+  - interval: 1h
+  - interval: 24h
+
+snapshot:
+  interval: 24h
+  retention: 24h
+
 dbs:
   - path: ${DB_PATH}
     replica:
