@@ -205,15 +205,27 @@ objects, one row per book, player, market, and period:
 | `player`, `player_name`                                  | The subject, with `player_name` as a legacy alias              |
 | `market_key`                                             | Canonical or alias key, mapped to a market type (table below)  |
 | `period`                                                 | Keep empty or `FULL`; skip `1H`, `Q1`, and `UNKNOWN`           |
+| `odds_type`, `projection_type`                           | Keep empty or `standard` (case-insensitive); skip `goblin`, `demon`, `alt`, etc. |
 | `line`                                                   | `Prop.Line`; NULL for an anytime touchdown                     |
 | `over_price`, `under_price`                              | `Prop.Price` for the `OVER` and `UNDER` rows                   |
 | `over_link`, `under_link`                                | `Prop.Link` for each side; empty when absent                   |
 | `over_sid`, `under_sid`                                  | `Prop.Sid` for each side; empty when absent                    |
 
-`Client.Props(ctx, eventID)` returns one `Prop` per priced side. A priced `over_price` or `under_price` becomes an
-`OVER` or `UNDER` row. An anytime touchdown becomes one `YES` row with a NULL line, even when the wire sends `0.5`.
-`team_totals` sets `Team` to the full team name; every other market sets `PlayerName`. A row with no line, no price, or
-no subject or book is skipped, so unpriced DFS rows never reach `refresh`.
+`Client.Props(ctx, eventID)` filters to standard/primary lines and returns at most one `OVER` and one `UNDER` `Prop` per
+book, market, and normalized subject (or one `YES` row with a NULL line for `ANYTIME_TD`, even when the wire sends
+`0.5`). `team_totals` sets `Team` to the full team name; every other market sets `PlayerName`. A row with no line, no
+price, or no subject or book is skipped, so unpriced DFS rows never reach `refresh`.
+
+- **Standard-line filtering:** When `odds_type` or `projection_type` is non-empty, only `"standard"` (case-insensitive)
+  is accepted; tagged alternates (`"goblin"`, `"demon"`, `"alt"`, etc.) are dropped so they cannot overwrite standard
+  lines.
+- **Primary-line selection:** For markets with a line (everything except `ANYTIME_TD`), `parseProps` groups each book's
+  remaining quotes by `(book, market_type, normalizePropSubject(subject))`, merging separate over/under items at the same
+  line, and keeps the single most balanced primary line:
+  1. Two-sided quotes beat one-sided quotes.
+  2. Among two-sided quotes, minimize `|impliedProb(over) - impliedProb(under)|`, breaking ties toward `-110`
+     (`|over + 110| + |under + 110|`), then smallest `|over - under|`.
+  3. Among one-sided quotes, pick the price closest to `-110`.
 
 | Parlay API key                   | Aliases                                                          | Market       |
 | -------------------------------- | ---------------------------------------------------------------- | ------------ |
@@ -290,7 +302,9 @@ The call costs 1 credit per market returned, unlike Parlay API's flat 3-credit `
 whose `bookmakers[].markets[].outcomes[]` carry the prices. `Client.EventProps` maps them into the same `Prop` rows and
 copies `bookmakers[].sid` into `Prop.EventSid`.
 
-In `odds:props:{game}`, `odds.MergeProps` merges a Parlay API board with a per-event board from The Odds API:
+In `odds:props:{game}`, `odds.MergeProps` merges a Parlay API board with a per-event board from The Odds API,
+deduplicating any primary collisions on `(book, market_type, team, player_name, side)` (preferring linked rows, then
+prices closest to `-110`):
 
 - **Enrichment.** When Parlay API bought props and The Odds API has at least 100 credits (`TheOddsAPIEnrichFloor`),
   refresh fetches The Odds API props too. Unlinked primary rows gain DraftKings `link`, `sid`, and `event_sid` (and

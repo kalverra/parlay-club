@@ -105,4 +105,4 @@ grouping/pairing keys without breaking game lines)
 - [x] Update `internal/board/board.go` (`Build`, `Pair`, `LineKey`) to group and pair player props by
       `(GameID, MarketType, canonicalPlayerKey)` so every player has at most one `LineGroup` per prop market, with tests
       in `internal/board/board_test.go` and `internal/web/pick_test.go`.
-- [ ] Docs: update `docs/reference/data-sources.md` covering standard-line filtering and primary-line selection.
+- [x] Docs: update `docs/reference/data-sources.md` covering standard-line filtering and primary-line selection.
