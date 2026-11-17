@@ -3202,3 +3202,157 @@ func TestPickBoardDeleteAndSwapStayBoundWhenLineMoves(t *testing.T) {
 	assert.Contains(t, swapBody, "Under 48.5")
 	assert.Contains(t, swapBody, "tap to remove")
 }
+
+func TestPickBoardAndTrayShowDriftAndSyncLine(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	game := addGame(t, fixture, gameKickoff())
+	addGameOdds(t, fixture.store, game.ID)
+	sam, err := fixture.store.CreateUserWithIdentity(t.Context(), "Sam", "sam@example.com", "google-sam", "")
+	require.NoError(t, err)
+	require.NoError(t, fixture.store.AddSlipMember(t.Context(), fixture.slip.ID, sam.ID))
+
+	leg := addStoredLeg(t, fixture, db.Leg{
+		UserID:     fixture.user.ID,
+		GameID:     new(game.ID),
+		MarketType: "PASS_YDS",
+		Selection:  "Josh Allen Over 245.5 Pass Yds",
+		Team:       new("BUF"),
+		PlayerName: new("Josh Allen"),
+		Side:       new("OVER"),
+		Line:       new(245.5),
+		Odds:       -110,
+	})
+	fixture.as(sam)
+	voteForm := url.Values{"value": {"1"}}
+	voteReq := httptest.NewRequestWithContext(
+		t.Context(), http.MethodPost, fmt.Sprintf("/legs/%d/vote", leg.ID), strings.NewReader(voteForm.Encode()),
+	)
+	voteReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	voteRec := httptest.NewRecorder()
+	fixture.handler.ServeHTTP(voteRec, voteReq)
+	require.Equal(t, http.StatusOK, voteRec.Code, voteRec.Body.String())
+	fixture.as(fixture.user)
+
+	// Market moves from 245.5 (-110) to 252.5 (-115).
+	movedAt := game.Kickoff.Add(-time.Hour)
+	_, err = fixture.store.UpsertOdds(t.Context(), []db.Odds{
+		{
+			GameID: game.ID, Book: "fanduel", MarketType: "PASS_YDS", Team: "BUF",
+			PlayerName: "Josh Allen", Side: "OVER", Line: new(252.5), Price: -115, FetchedAt: movedAt,
+		},
+		{
+			GameID: game.ID, Book: "fanduel", MarketType: "PASS_YDS", Team: "BUF",
+			PlayerName: "Josh Allen", Side: "UNDER", Line: new(252.5), Price: -105, FetchedAt: movedAt,
+		},
+	})
+	require.NoError(t, err)
+
+	// Board detail shows drift notice and one-tap Sync line form.
+	detailBody := html.UnescapeString(pickDetail(t, fixture, "game="+game.ID+"&cat=passing").Body.String())
+	assert.Contains(t, detailBody, "Slip 245.5 · now 252.5")
+	assert.Contains(t, detailBody, fmt.Sprintf(`hx-put="/legs/%d"`, leg.ID))
+	assert.Contains(t, detailBody, "Sync line")
+
+	// Tray also shows drift notice and one-tap Sync line form.
+	trayReq := httptest.NewRequestWithContext(
+		t.Context(), http.MethodGet, fmt.Sprintf("/slips/%d/tray", fixture.slip.ID), nil,
+	)
+	trayRec := httptest.NewRecorder()
+	fixture.handler.ServeHTTP(trayRec, trayReq)
+	require.Equal(t, http.StatusOK, trayRec.Code)
+	trayBody := html.UnescapeString(trayRec.Body.String())
+	assert.Contains(t, trayBody, "Now 252.5 (-115)")
+	assert.Contains(t, trayBody, "Sync line")
+
+	// Tapping Sync line from the board updates the leg and clears the drift notice.
+	syncForm := url.Values{
+		"from":        {"board"},
+		"game_id":     {game.ID},
+		"market_type": {"PASS_YDS"},
+		"team":        {"BUF"},
+		"player_name": {"Josh Allen"},
+		"side":        {"OVER"},
+		"line":        {"252.5"},
+		"odds":        {"-115"},
+	}
+	syncReq := httptest.NewRequestWithContext(
+		t.Context(), http.MethodPut, fmt.Sprintf("/legs/%d", leg.ID), strings.NewReader(syncForm.Encode()),
+	)
+	syncReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	syncReq.Header.Set("Hx-Request", "true")
+	syncRec := httptest.NewRecorder()
+	fixture.handler.ServeHTTP(syncRec, syncReq)
+	require.Equal(t, http.StatusOK, syncRec.Code, syncRec.Body.String())
+	assert.Equal(t, "tray-updated", syncRec.Header().Get("Hx-Trigger"))
+	syncBody := html.UnescapeString(syncRec.Body.String())
+	assert.Contains(t, syncBody, "Over 252.5")
+	assert.NotContains(t, syncBody, "Sync line")
+	assert.NotContains(t, syncBody, "Slip 245.5")
+
+	// Stored leg updated and Sam's vote is preserved.
+	updatedLeg, err := fixture.store.LegByID(t.Context(), leg.ID)
+	require.NoError(t, err)
+	require.NotNil(t, updatedLeg.Line)
+	assert.InDelta(t, 252.5, *updatedLeg.Line, 0.001)
+	assert.Equal(t, -115, updatedLeg.Odds)
+	assert.Equal(t, "Josh Allen Over 252.5 Pass Yds", updatedLeg.Selection)
+
+	votes, err := fixture.store.VotesForSlip(t.Context(), fixture.slip.ID)
+	require.NoError(t, err)
+	require.Len(t, votes, 1, "syncing a moved line preserves votes")
+	assert.Equal(t, 1, votes[0].Value)
+}
+
+func TestPickTraySyncLineRefreshesTrayAndBoard(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	game := addGame(t, fixture, gameKickoff())
+	addGameOdds(t, fixture.store, game.ID)
+	leg := addStoredLeg(t, fixture, db.Leg{
+		UserID:     fixture.user.ID,
+		GameID:     new(game.ID),
+		MarketType: "PASS_YDS",
+		Selection:  "Josh Allen Over 245.5 Pass Yds",
+		Team:       new("BUF"),
+		PlayerName: new("Josh Allen"),
+		Side:       new("OVER"),
+		Line:       new(245.5),
+		Odds:       -110,
+	})
+
+	movedAt := game.Kickoff.Add(-time.Hour)
+	_, err := fixture.store.UpsertOdds(t.Context(), []db.Odds{
+		{
+			GameID: game.ID, Book: "fanduel", MarketType: "PASS_YDS", Team: "BUF",
+			PlayerName: "Josh Allen", Side: "OVER", Line: new(252.5), Price: -115, FetchedAt: movedAt,
+		},
+	})
+	require.NoError(t, err)
+
+	syncForm := url.Values{
+		"from":        {"tray"},
+		"game_id":     {game.ID},
+		"market_type": {"PASS_YDS"},
+		"team":        {"BUF"},
+		"player_name": {"Josh Allen"},
+		"side":        {"OVER"},
+		"line":        {"252.5"},
+		"odds":        {"-115"},
+	}
+	syncReq := httptest.NewRequestWithContext(
+		t.Context(), http.MethodPut, fmt.Sprintf("/legs/%d", leg.ID), strings.NewReader(syncForm.Encode()),
+	)
+	syncReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	syncReq.Header.Set("Hx-Request", "true")
+	syncRec := httptest.NewRecorder()
+	fixture.handler.ServeHTTP(syncRec, syncReq)
+	require.Equal(t, http.StatusOK, syncRec.Code, syncRec.Body.String())
+	assert.Equal(t, "tray-updated, board-updated", syncRec.Header().Get("Hx-Trigger"))
+	syncBody := html.UnescapeString(syncRec.Body.String())
+	assert.Contains(t, syncBody, "Josh Allen Over 252.5 Pass Yds")
+	assert.Contains(t, syncBody, "-115")
+	assert.NotContains(t, syncBody, "Sync line")
+}

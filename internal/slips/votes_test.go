@@ -211,6 +211,67 @@ func TestUpdateLegKeepsVotesWhenOnlyTheOddsChange(t *testing.T) {
 	assert.Equal(t, 1, votes[0].Value)
 }
 
+func TestUpdateLegKeepsVotesWhenBoardLineDrifts(t *testing.T) {
+	t.Parallel()
+
+	f := newFixture(t)
+	leg, err := f.store.CreateLeg(t.Context(), db.Leg{
+		SlipID:     f.slip.ID,
+		UserID:     f.ada.ID,
+		GameID:     &f.upcoming,
+		MarketType: "PASS_YDS",
+		Selection:  "Bryce Young Over 248.5 Pass Yds",
+		Team:       new("CAR"),
+		PlayerName: new("Bryce Young"),
+		Side:       new("OVER"),
+		Line:       new(248.5),
+		Odds:       -110,
+	})
+	require.NoError(t, err)
+	require.NoError(t, f.service.Vote(t.Context(), f.sam.ID, leg.ID, 1))
+	f.clearHistory(t)
+
+	synced := leg
+	synced.Line = new(254.5)
+	synced.Odds = -115
+	synced.Selection = "Bryce Young Over 254.5 Pass Yds"
+	_, err = f.service.UpdateLeg(t.Context(), f.ada.ID, synced)
+	require.NoError(t, err)
+
+	votes := votesOn(t, f)
+	require.Len(t, votes, 1, "syncing a moved line on the same canonical selection preserves votes")
+	assert.Equal(t, 1, votes[0].Value)
+}
+
+func TestUpdateLegClearsVotesWhenCanonicalSelectionChanges(t *testing.T) {
+	t.Parallel()
+
+	f := newFixture(t)
+	leg, err := f.store.CreateLeg(t.Context(), db.Leg{
+		SlipID:     f.slip.ID,
+		UserID:     f.ada.ID,
+		GameID:     &f.upcoming,
+		MarketType: "PASS_YDS",
+		Selection:  "Bryce Young Over 248.5 Pass Yds",
+		Team:       new("CAR"),
+		PlayerName: new("Bryce Young"),
+		Side:       new("OVER"),
+		Line:       new(248.5),
+		Odds:       -110,
+	})
+	require.NoError(t, err)
+	require.NoError(t, f.service.Vote(t.Context(), f.sam.ID, leg.ID, 1))
+	f.clearHistory(t)
+
+	flipped := leg
+	flipped.Side = new("UNDER")
+	flipped.Selection = "Bryce Young Under 248.5 Pass Yds"
+	_, err = f.service.UpdateLeg(t.Context(), f.ada.ID, flipped)
+	require.NoError(t, err)
+
+	assert.Empty(t, votesOn(t, f), "changing the side clears votes")
+}
+
 func TestDeleteLegCascadesItsVotes(t *testing.T) {
 	t.Parallel()
 
