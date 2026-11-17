@@ -43,12 +43,82 @@ func TestNormalizePlayerName(t *testing.T) {
 		{name: "excess whitespace and uppercase", input: "  JOSH   ALLEN  ", expected: "josh allen"},
 		{name: "blank", input: "   ", expected: ""},
 		{name: "empty", input: "", expected: ""},
+
+		// Trailing parenthetical tags
+		{name: "team tag with suffix", input: "Ollie Gordon II (MIA)", expected: "ollie gordon"},
+		{name: "team tag without suffix", input: "Ollie Gordon (MIA)", expected: "ollie gordon"},
+		{name: "team tag LAR", input: "Cooper Kupp (LAR)", expected: "cooper kupp"},
+		{name: "team tag 2 letters", input: "Drake Maye (NE)", expected: "drake maye"},
+
+		// Accents
+		{name: "accented first name", input: "José Alvarado", expected: "jose alvarado"},
+		{name: "accented spanish name", input: "Álvaro Núñez", expected: "alvaro nunez"},
+		{name: "accented with tag and suffix", input: "José Ramírez Jr. (CLE)", expected: "jose ramirez"},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			assert.Equal(t, tc.expected, db.NormalizePlayerName(tc.input))
+		})
+	}
+}
+
+func TestStripPlayerTag(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name         string
+		input        string
+		wantCleaned  string
+		wantTeamHint string
+	}{
+		{
+			name:         "3-letter team tag",
+			input:        "Ollie Gordon II (MIA)",
+			wantCleaned:  "Ollie Gordon II",
+			wantTeamHint: "MIA",
+		},
+		{name: "3-letter team tag LAR", input: "Cooper Kupp (LAR)", wantCleaned: "Cooper Kupp", wantTeamHint: "LAR"},
+		{name: "2-letter team tag", input: "Drake Maye (NE)", wantCleaned: "Drake Maye", wantTeamHint: "NE"},
+		{name: "4-letter uppercase tag", input: "Player Name (TEAM)", wantCleaned: "Player Name", wantTeamHint: "TEAM"},
+		{name: "extra whitespace", input: "  Josh Allen (BUF)  ", wantCleaned: "Josh Allen", wantTeamHint: "BUF"},
+		{
+			name:         "lowercase tag stripped without hint",
+			input:        "Ollie Gordon (mia)",
+			wantCleaned:  "Ollie Gordon",
+			wantTeamHint: "",
+		},
+		{
+			name:         "status tag stripped without hint",
+			input:        "Ollie Gordon (Out)",
+			wantCleaned:  "Ollie Gordon",
+			wantTeamHint: "",
+		},
+		{
+			name:         "single letter tag stripped without hint",
+			input:        "Ollie Gordon (A)",
+			wantCleaned:  "Ollie Gordon",
+			wantTeamHint: "",
+		},
+		{
+			name:         "5 letter tag stripped without hint",
+			input:        "Ollie Gordon (ABCDE)",
+			wantCleaned:  "Ollie Gordon",
+			wantTeamHint: "",
+		},
+		{name: "no tag", input: "Ollie Gordon II", wantCleaned: "Ollie Gordon II", wantTeamHint: ""},
+		{name: "only tag", input: "(MIA)", wantCleaned: "(MIA)", wantTeamHint: ""},
+		{name: "blank", input: "   ", wantCleaned: "", wantTeamHint: ""},
+		{name: "empty", input: "", wantCleaned: "", wantTeamHint: ""},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			cleaned, hint := db.StripPlayerTag(tc.input)
+			assert.Equal(t, tc.wantCleaned, cleaned)
+			assert.Equal(t, tc.wantTeamHint, hint)
 		})
 	}
 }
