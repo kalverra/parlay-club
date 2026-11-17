@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/kalverra/parlay-club/internal/board"
 	"github.com/kalverra/parlay-club/internal/db"
 	"github.com/kalverra/parlay-club/internal/ingest/espn"
 	"github.com/kalverra/parlay-club/internal/ingest/odds"
@@ -555,4 +556,196 @@ func TestKickRefreshesSlipLegGameLogs(t *testing.T) {
 	log, err := store.PlayerGameLog(t.Context(), "3918298")
 	require.NoError(t, err)
 	assert.Equal(t, 8, log.GamesPlayed)
+}
+
+func TestSyncPropsCanonicalizesOllieGordonVariants(t *testing.T) {
+	t.Parallel()
+
+	store := openTestStore(t)
+	t0 := novemberTime(8, 10, 0)
+	clock := &fakeClock{now: t0}
+	kickoff := novemberTime(8, 13, 0)
+	game := setupTestGame(t, store, kickoff, db.GameScheduled)
+
+	espnClient := &fakeESPNResearch{
+		rosters: map[string][]espn.RosterPlayer{
+			"2":  {{ID: "3918298", FullName: "Josh Allen", Position: "QB"}},
+			"15": {{ID: "5123456", FullName: "Ollie Gordon II", Position: "RB"}},
+		},
+	}
+
+	propsClient := &fakePropsClient{
+		events: []odds.Event{
+			{ID: "parlay-401", HomeTeam: "Buffalo Bills", AwayTeam: "Miami Dolphins", CommenceTime: kickoff},
+		},
+		eventsCredits: odds.Credits{Remaining: 200},
+		props: map[string][]odds.Prop{
+			"parlay-401": {
+				{
+					EventID:    "parlay-401",
+					Book:       "draftkings",
+					MarketType: odds.MarketRushYds,
+					PlayerName: "Ollie Gordon II",
+					Side:       odds.SideOver,
+					Line:       new(34.5),
+					Price:      -115,
+				},
+				{
+					EventID:    "parlay-401",
+					Book:       "sleeper",
+					MarketType: odds.MarketRushYds,
+					PlayerName: "Ollie Gordon",
+					Side:       odds.SideOver,
+					Line:       new(34.5),
+					Price:      -110,
+				},
+				{
+					EventID:    "parlay-401",
+					Book:       "bovada",
+					MarketType: odds.MarketRushYds,
+					PlayerName: "Ollie Gordon II",
+					Side:       odds.SideOver,
+					Line:       new(34.5),
+					Price:      -120,
+				},
+				{
+					EventID:    "parlay-401",
+					Book:       "bovada",
+					MarketType: odds.MarketRushYds,
+					PlayerName: "Ollie Gordon II (MIA)",
+					Side:       odds.SideOver,
+					Line:       new(34.5),
+					Price:      -112,
+					Link:       "https://sportsbook.bovada.lv/ollie-gordon",
+				},
+			},
+		},
+		propsCredits: odds.Credits{Remaining: 199},
+	}
+
+	service := New(Deps{
+		Store:  store,
+		ESPN:   espnClient,
+		Props:  propsClient,
+		Now:    clock.Now,
+		Logger: zerolog.Nop(),
+	})
+
+	require.NoError(t, service.SyncGameProps(t.Context(), "401"))
+
+	oddsRows, err := store.OddsForGame(t.Context(), "401")
+	require.NoError(t, err)
+	require.Len(t, oddsRows, 3, "same-book Bovada collision deduplicated to 3 books")
+
+	byBook := make(map[string]db.Odds, len(oddsRows))
+	for _, row := range oddsRows {
+		assert.Equal(t, "Ollie Gordon II", row.PlayerName)
+		assert.Equal(t, "MIA", row.Team)
+		byBook[row.Book] = row
+	}
+	assert.Equal(t, -112, byBook["bovada"].Price, "richer Bovada row with link won collision")
+	assert.Equal(t, new("https://sportsbook.bovada.lv/ollie-gordon"), byBook["bovada"].Link)
+
+	matches, err := store.PlayerMatchesForTeams(t.Context(), []string{"MIA"})
+	require.NoError(t, err)
+	require.Len(t, matches, 1)
+	assert.Equal(t, "ollie gordon", matches[0].OddsName)
+	assert.Equal(t, "5123456", matches[0].ESPNAthleteID)
+
+	roster, err := store.RosterForTeams(t.Context(), []string{"BUF", "MIA"})
+	require.NoError(t, err)
+	boardRows := board.Build([]db.Game{game}, oddsRows, roster, "draftkings", nil, t0)
+	detail := board.Detail(game, boardRows, board.Query{Category: board.CategoryRushing})
+	require.Len(t, detail.Players, 1, "all Ollie Gordon variants collapse into one player card")
+	assert.Equal(t, "5123456", detail.Players[0].PlayerID)
+	assert.Equal(t, "Ollie Gordon II", detail.Players[0].Name)
+	assert.Equal(t, "MIA", detail.Players[0].Team)
+}
+
+func TestMapPropsToOddsUnmatchedCasingAndCollisions(t *testing.T) {
+	t.Parallel()
+
+	store := openTestStore(t)
+	now := novemberTime(8, 10, 0)
+	kickoff := novemberTime(8, 13, 0)
+	game := setupTestGame(t, store, kickoff, db.GameScheduled)
+
+	require.NoError(t, store.UpsertRosterPlayers(t.Context(), []db.RosterPlayer{
+		{AthleteID: "1001", Team: "BUF", FullName: "Josh Allen", UpdatedAt: now},
+		{AthleteID: "2002", Team: "MIA", FullName: "Josh Allen", UpdatedAt: now},
+		{AthleteID: "3003", Team: "MIA", FullName: "De'Von Achane", UpdatedAt: now},
+	}))
+	// Manual override for an alias not matching roster_players directly.
+	require.NoError(t, store.SaveManualPlayerMatch(t.Context(), "Devon Achane", "MIA", "3003"))
+
+	service := New(Deps{
+		Store:  store,
+		Now:    func() time.Time { return now },
+		Logger: zerolog.Nop(),
+	})
+
+	props := []odds.Prop{
+		// Unmatched player across two books with different casing and a team tag.
+		{
+			Book:       "draftkings",
+			MarketType: odds.MarketRecYds,
+			PlayerName: "DeMario Douglas",
+			Side:       odds.SideOver,
+			Line:       new(40.5),
+			Price:      -110,
+		},
+		{
+			Book:       "bovada",
+			MarketType: odds.MarketRecYds,
+			PlayerName: "Demario Douglas (MIA)",
+			Side:       odds.SideOver,
+			Line:       new(40.5),
+			Price:      -115,
+		},
+		// Same-name opposing-team disambiguation: (MIA) resolves, untagged stays unmatched.
+		{
+			Book:       "bovada",
+			MarketType: odds.MarketPassYds,
+			PlayerName: "Josh Allen (MIA)",
+			Side:       odds.SideOver,
+			Line:       new(210.5),
+			Price:      -110,
+		},
+		{
+			Book:       "draftkings",
+			MarketType: odds.MarketPassYds,
+			PlayerName: "Josh Allen",
+			Side:       odds.SideOver,
+			Line:       new(250.5),
+			Price:      -110,
+		},
+		// Manual override resolves to canonical FullName.
+		{
+			Book:       "sleeper",
+			MarketType: odds.MarketRushYds,
+			PlayerName: "Devon Achane",
+			Side:       odds.SideOver,
+			Line:       new(65.5),
+			Price:      -115,
+		},
+	}
+
+	rows := service.mapPropsToOdds(t.Context(), game, props, now)
+	require.Len(t, rows, 5)
+
+	// Unmatched casing unified to first-seen spelling "DeMario Douglas".
+	assert.Equal(t, "DeMario Douglas", rows[0].PlayerName)
+	assert.Empty(t, rows[0].Team)
+	assert.Equal(t, "DeMario Douglas", rows[1].PlayerName)
+	assert.Equal(t, "MIA", rows[1].Team)
+
+	// Opposing-team disambiguation.
+	assert.Equal(t, "Josh Allen", rows[2].PlayerName)
+	assert.Equal(t, "MIA", rows[2].Team)
+	assert.Equal(t, "Josh Allen", rows[3].PlayerName)
+	assert.Empty(t, rows[3].Team)
+
+	// Manual override canonicalized to roster FullName.
+	assert.Equal(t, "De'Von Achane", rows[4].PlayerName)
+	assert.Equal(t, "MIA", rows[4].Team)
 }
