@@ -13,8 +13,8 @@ import (
 // updates matter most.
 const (
 	pingEvery    = 25 * time.Second
-	idleDeadline = 10 * time.Minute
-	liveDeadline = 55 * time.Minute
+	idleDeadline = 3 * time.Minute
+	liveDeadline = 15 * time.Minute
 )
 
 // IsLive reports whether weekID has a game that is live or kicks off soon. The

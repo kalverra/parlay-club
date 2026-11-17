@@ -1,5 +1,5 @@
 {{define "content"}}
-<section class="space-y-3"{{if .Slip}} data-live-url="/slips/{{.Slip.ID}}/events"{{end}}>
+<section class="space-y-3"{{if .LiveURL}} data-live-url="{{.LiveURL}}"{{end}}>
   {{if .Creating}}
     <div class="space-y-1">
       <h1 class="text-xl font-semibold">

@@ -1,7 +1,7 @@
 {{define "content"}}
 <section
   class="space-y-3 lg:flex lg:h-[calc(100dvh-3.5rem-4.5rem)] lg:min-h-0 lg:flex-col"
-  data-live-url="/slips/{{.SlipID}}/events"
+  {{if .LiveURL}}data-live-url="{{.LiveURL}}"{{end}}
 >
   <div class="flex items-center justify-between gap-3">
     <a

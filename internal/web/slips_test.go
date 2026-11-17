@@ -209,6 +209,57 @@ func TestSlipPageAdvertisesTheLiveStream(t *testing.T) {
 	assert.Contains(t, recorder.Body.String(), fmt.Sprintf(`data-live-url="/slips/%d/events"`, fixture.slip.ID))
 }
 
+func TestSlipPageOmitsLiveStreamWhenGradedAndKeepsItWhenLocked(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	require.NoError(t, fixture.store.SetSlipStatus(t.Context(), fixture.slip.ID, db.SlipLocked))
+
+	lockedRecorder := httptest.NewRecorder()
+	lockedReq := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodGet,
+		fmt.Sprintf("/slips/%d", fixture.slip.ID),
+		nil,
+	)
+	fixture.handler.ServeHTTP(lockedRecorder, lockedReq)
+	require.Equal(t, http.StatusOK, lockedRecorder.Code)
+	assert.Contains(t, lockedRecorder.Body.String(), fmt.Sprintf(`data-live-url="/slips/%d/events"`, fixture.slip.ID))
+
+	require.NoError(t, fixture.store.SetSlipGrade(t.Context(), fixture.slip.ID, parlay.Won, db.SlipGraded))
+
+	gradedRecorder := httptest.NewRecorder()
+	gradedReq := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodGet,
+		fmt.Sprintf("/slips/%d", fixture.slip.ID),
+		nil,
+	)
+	fixture.handler.ServeHTTP(gradedRecorder, gradedReq)
+	require.Equal(t, http.StatusOK, gradedRecorder.Code)
+	assert.NotContains(t, gradedRecorder.Body.String(), "data-live-url")
+}
+
+func TestSlipEventsSaysByeWhenGraded(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	require.NoError(t, fixture.store.SetSlipGrade(t.Context(), fixture.slip.ID, parlay.Won, db.SlipGraded))
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodGet,
+		fmt.Sprintf("/slips/%d/events", fixture.slip.ID),
+		nil,
+	)
+	fixture.handler.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	assert.Equal(t, "text/event-stream", recorder.Header().Get("Content-Type"))
+	assert.Equal(t, "event: bye\ndata: {}\n\n", recorder.Body.String())
+}
+
 func TestSlipPageShowsTheSlip(t *testing.T) {
 	t.Parallel()
 

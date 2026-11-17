@@ -23,6 +23,7 @@ import (
 // and the dock with its tray sheet.
 type PickPage struct {
 	Page
+	LiveURL  string
 	SlipID   int64
 	SlipName string
 	Body     PickBodyView
@@ -547,6 +548,7 @@ func (h *slipHandlers) pickPageData(
 	body.Slate.Sort = body.Sort
 	body.Slate.Detail = body.Detail != nil
 	return PickPage{
+		LiveURL:  slipLiveURL(slip),
 		SlipID:   slip.ID,
 		SlipName: slip.Name,
 		Body:     body,
