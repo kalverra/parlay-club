@@ -1,11 +1,8 @@
 ---
-slug: gcp-cost-optimization
-status: implementing
-created: "2026-11-16"
-accepted_by:
-    - Adam Hamrick
-accepted_at: "2026-11-16T19:24:38Z"
-effort: medium
+id: adr-gcp-cost-optimization
+title: Reduce Cloud Run and storage costs
+type: decision
+summary: 'Tighten live SSE stream lifetimes and client idle behavior alongside Litestream replication and GCS bucket retention settings: - Skip opening live streams on already-graded slips, shorten server idle/live stream caps (with seamless reconnect on activity or focus), and pause the browser''s stream after a few minutes of no user interaction (reconnecting and refreshing immediately when the user returns).'
 ---
 
 # Reduce Cloud Run and storage costs
@@ -81,3 +78,36 @@ instead of lowering it.
 The `effort` rating is `medium` because it coordinates client activity/visibility lifecycle, server SSE stream rules,
 Litestream replication settings, and GCS bucket policy while ensuring zero lost writes on shutdown and seamless client
 catch-up.
+
+## Consequences
+
+- **Easier:** Cloud Run scales to zero faster when tabs sit idle, hidden, or on graded slips. Litestream GCS storage and
+  write churn stay bounded now that syncs batch and deleted LTX segments are freed immediately.
+- **Harder:** An ungraceful `SIGKILL` or OOM crash can lose up to 10 seconds of SQLite writes instead of 1 second
+  (graceful `SIGTERM` shutdowns still flush before exit). Client SSE behavior now has an idle-pause state alongside tab
+  visibility and server `bye`.
+- **Revisit:** If Sunday billing still shows excess GCS operations or slow cold restores, tune `sync-interval` and
+  compaction `levels` in `deploy/litestream.yml` against production metrics.
+
+## Alternatives considered
+
+- **Replace SSE with fixed-interval polling:** Rejected because active users lose instant updates and short polling
+  still wakes Cloud Run repeatedly.
+- **Set `min-instances` on Cloud Run:** Rejected because baseline instance billing raises monthly cost instead of
+  lowering it.
+- **Raise Litestream `sync-interval` to `5m`:** Rejected because an ungraceful crash could lose several minutes of
+  picks; `10s` cuts L0 write churn while keeping the crash-loss window small.
+
+## Implementation notes
+
+- **Non-bubbling overflow scroll:** `scroll` events inside `[data-keep-scroll]` containers do not bubble to `document`,
+  so activity listeners in `web/static/app.js` use `{ capture: true, passive: true }` to reset the 3-minute idle timer.
+- **Existing production bucket:** `deploy/setup.sh` clears soft-delete idempotently, so it must be run against the live
+  GCP project for `--clear-soft-delete` to apply to the existing bucket.
+- **Doc front-matter cleanup:** `good-vibes docs lint` rejected retired `sources` and `last_verified` keys in the
+  touched docs; those keys were removed.
+
+## Follow-ups
+
+- Run `deploy/setup.sh` against the production GCP project to clear soft-delete on the live Litestream bucket, then
+  compare the next Sunday's Cloud Run and Cloud Storage usage against the ~$0.85 launch baseline.
