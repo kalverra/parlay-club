@@ -25,15 +25,31 @@ type migration struct {
 	name    string
 }
 
+// migrationHook runs inside the migration transaction right after the SQL
+// script for a version succeeds.
+type migrationHook func(context.Context, *sql.Tx) error
+
 // Migrate applies every embedded migration newer than PRAGMA user_version, in
 // number order, one transaction each. A second run changes nothing.
 func Migrate(ctx context.Context, database *sql.DB) error {
-	return migrate(ctx, database, migrations, migrationsDir)
+	return migrateWithHooks(ctx, database, migrations, migrationsDir, map[int]migrationHook{
+		13: backfillCanonicalPlayersTx,
+	})
 }
 
 // migrate is Migrate with the migration source passed in, so tests can use an
 // in-memory file system.
 func migrate(ctx context.Context, database *sql.DB, fsys fs.FS, dir string) error {
+	return migrateWithHooks(ctx, database, fsys, dir, nil)
+}
+
+func migrateWithHooks(
+	ctx context.Context,
+	database *sql.DB,
+	fsys fs.FS,
+	dir string,
+	hooks map[int]migrationHook,
+) error {
 	list, err := migrationList(fsys, dir)
 	if err != nil {
 		return err
@@ -48,7 +64,7 @@ func migrate(ctx context.Context, database *sql.DB, fsys fs.FS, dir string) erro
 		if next.version <= current {
 			continue
 		}
-		if err := apply(ctx, database, fsys, dir, next); err != nil {
+		if err := apply(ctx, database, fsys, dir, next, hooks[next.version]); err != nil {
 			return err
 		}
 		current = next.version
@@ -102,7 +118,14 @@ func userVersion(ctx context.Context, database *sql.DB) (int, error) {
 
 // apply runs one migration and records its version, committing only when both
 // succeed.
-func apply(ctx context.Context, database *sql.DB, fsys fs.FS, dir string, next migration) error {
+func apply(
+	ctx context.Context,
+	database *sql.DB,
+	fsys fs.FS,
+	dir string,
+	next migration,
+	hook migrationHook,
+) error {
 	name := path.Join(dir, next.name)
 	script, err := fs.ReadFile(fsys, name)
 	if err != nil {
@@ -117,6 +140,11 @@ func apply(ctx context.Context, database *sql.DB, fsys fs.FS, dir string, next m
 
 	if _, err := tx.ExecContext(ctx, string(script)); err != nil {
 		return fmt.Errorf("apply migration %s: %w", name, err)
+	}
+	if hook != nil {
+		if err := hook(ctx, tx); err != nil {
+			return fmt.Errorf("apply migration %s hook: %w", name, err)
+		}
 	}
 	// PRAGMA values cannot be bound; the version comes from a parsed file name.
 	if _, err := tx.ExecContext(ctx, "PRAGMA user_version = "+strconv.Itoa(next.version)); err != nil {

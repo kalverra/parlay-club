@@ -14,7 +14,7 @@ import (
 )
 
 // latestSchemaVersion is the version the last migration records.
-const latestSchemaVersion = 12
+const latestSchemaVersion = 13
 
 func TestMigrateFreshDatabase(t *testing.T) {
 	t.Parallel()
@@ -280,6 +280,155 @@ func TestMigration0011LogosPortraits(t *testing.T) {
 		"SELECT headshot_url FROM roster_players WHERE athlete_id = '3918298'").
 		Scan(&headshotURL))
 	assert.Empty(t, headshotURL)
+}
+
+func TestMigration0013CanonicalPlayers(t *testing.T) {
+	t.Parallel()
+
+	database := openTestDB(t)
+
+	// Apply migrations 0001 through 0012 manually.
+	entries, err := os.ReadDir("migrations")
+	require.NoError(t, err)
+	for _, entry := range entries {
+		if entry.Name() < "0013" && filepath.Ext(entry.Name()) == ".sql" {
+			content, err := os.ReadFile(filepath.Join("migrations", entry.Name()))
+			require.NoError(t, err)
+			_, err = database.ExecContext(t.Context(), string(content))
+			require.NoError(t, err)
+		}
+	}
+	_, err = database.ExecContext(t.Context(), "PRAGMA user_version = 12")
+	require.NoError(t, err)
+
+	// Seed prod-shaped pre-0013 rows with colliding player name variants, stale
+	// roster norm_name, and legs missing player_id/team.
+	_, err = database.ExecContext(t.Context(), `
+		INSERT INTO users (id, name, avatar_color, active) VALUES (1, 'Ada', 'sky', 1);
+		INSERT INTO groups (id, name, invite_token) VALUES (1, 'Sunday Club', 'token-1');
+		INSERT INTO weeks (id, season, season_type, week_num) VALUES (2026209, 2026, 2, 9);
+		INSERT INTO slips (id, group_id, week_id, name) VALUES (10, 1, 2026209, 'Week 9 Slip');
+		INSERT INTO games (
+			id, week_id, home_team, away_team, home_name, away_name,
+			home_espn_id, away_espn_id, kickoff_utc, status, is_indoor, updated_at
+		) VALUES (
+			'g1', 2026209, 'BUF', 'MIA', 'Buffalo Bills', 'Miami Dolphins',
+			'2', '15', '2026-11-08T18:00:00Z', 'SCHEDULED', 0, '2026-11-07T12:00:00Z'
+		);
+		INSERT INTO roster_players (
+			athlete_id, team, espn_team_id, full_name, norm_name, position, updated_at
+		) VALUES
+			('ollie-mia', 'MIA', '15', 'Ollie Gordon II', 'ollie gordon', 'RB', '2026-11-07T12:00:00Z'),
+			('jose-mia', 'MIA', '15', 'José Alvarado', 'josé alvarado', 'WR', '2026-11-07T12:00:00Z');
+
+		-- Colliding Bovada rows for Ollie Gordon: the (MIA) row has link+sid and should win.
+		INSERT INTO odds (
+			game_id, book, market_type, team, player_name, side, line, price, link, sid, fetched_at
+		) VALUES (
+			'g1', 'bovada', 'RUSH_YDS', '', 'Ollie Gordon II (MIA)', 'OVER',
+			45.5, -110, 'https://bovada.lv/1', 'sid-1', '2026-11-08T10:00:00Z'
+		);
+		INSERT INTO odds (
+			game_id, book, market_type, team, player_name, side, line, price, fetched_at
+		) VALUES
+			('g1', 'bovada', 'RUSH_YDS', 'MIA', 'Ollie Gordon II', 'OVER', 45.5, -112, '2026-11-08T09:00:00Z'),
+			('g1', 'bovada', 'RUSH_YDS', '', 'Ollie Gordon', 'OVER', 45.5, -115, '2026-11-08T08:00:00Z'),
+			('g1', 'sleeper', 'RUSH_YDS', '', 'Ollie Gordon', 'OVER', 46.5, -105, '2026-11-08T10:00:00Z'),
+			('g1', 'draftkings', 'REC_YDS', '', 'DeMario Douglas', 'OVER', 35.5, -110, '2026-11-08T10:00:00Z'),
+			('g1', 'fanduel', 'REC_YDS', '', 'Demario Douglas (MIA)', 'OVER', 35.5, -115, '2026-11-08T10:00:00Z'),
+			('g1', 'draftkings', 'ML', 'BUF', '', 'TEAM', NULL, -140, '2026-11-08T10:00:00Z');
+
+		INSERT INTO legs (id, slip_id, user_id, game_id, market_type, selection, team, player_name, side, line, odds)
+		VALUES
+			(1, 10, 1, 'g1', 'RUSH_YDS', 'Ollie Gordon II (MIA) Over 45.5', NULL, 'Ollie Gordon II (MIA)', 'OVER', 45.5, -110),
+			(2, 10, 1, 'g1', 'RUSH_YDS', 'Ollie Gordon Over 46.5', '', 'Ollie Gordon', 'OVER', 46.5, -105),
+			(3, 10, 1, NULL, 'REC_YDS', 'José Alvarado Over 25.5', NULL, 'José Alvarado', 'OVER', 25.5, -110);
+		INSERT INTO legs (id, slip_id, user_id, game_id, market_type, selection, team, side, odds)
+		VALUES (4, 10, 1, 'g1', 'ML', 'BUF ML', 'BUF', 'TEAM', -140);
+	`)
+	require.NoError(t, err)
+
+	require.NoError(t, db.Migrate(t.Context(), database))
+	assert.Equal(t, latestSchemaVersion, schemaVersion(t, database))
+
+	// Verify roster norm_name accent folding was refreshed.
+	var joseNorm string
+	require.NoError(t, database.QueryRowContext(t.Context(),
+		"SELECT norm_name FROM roster_players WHERE athlete_id = 'jose-mia'").Scan(&joseNorm))
+	assert.Equal(t, "jose alvarado", joseNorm)
+
+	// Verify odds deduplication & canonicalization.
+	var totalOdds int
+	require.NoError(t, database.QueryRowContext(t.Context(), "SELECT count(*) FROM odds").Scan(&totalOdds))
+	assert.Equal(t, 5, totalOdds, "3 colliding bovada rows must collapse to 1")
+
+	var (
+		bovadaTeam, bovadaPlayer string
+		bovadaPrice              int
+		bovadaLink               sql.NullString
+	)
+	require.NoError(t, database.QueryRowContext(t.Context(),
+		"SELECT team, player_name, price, link FROM odds WHERE book = 'bovada' AND market_type = 'RUSH_YDS'").
+		Scan(&bovadaTeam, &bovadaPlayer, &bovadaPrice, &bovadaLink))
+	assert.Equal(t, "MIA", bovadaTeam)
+	assert.Equal(t, "Ollie Gordon II", bovadaPlayer)
+	assert.Equal(t, -110, bovadaPrice, "richer row with link+sid must win")
+	assert.Equal(t, "https://bovada.lv/1", bovadaLink.String)
+
+	var sleeperTeam, sleeperPlayer string
+	require.NoError(t, database.QueryRowContext(t.Context(),
+		"SELECT team, player_name FROM odds WHERE book = 'sleeper' AND market_type = 'RUSH_YDS'").
+		Scan(&sleeperTeam, &sleeperPlayer))
+	assert.Equal(t, "MIA", sleeperTeam)
+	assert.Equal(t, "Ollie Gordon II", sleeperPlayer)
+
+	var dkPlayer, fdTeam, fdPlayer string
+	require.NoError(t, database.QueryRowContext(t.Context(),
+		"SELECT player_name FROM odds WHERE book = 'draftkings' AND market_type = 'REC_YDS'").
+		Scan(&dkPlayer))
+	require.NoError(t, database.QueryRowContext(t.Context(),
+		"SELECT team, player_name FROM odds WHERE book = 'fanduel' AND market_type = 'REC_YDS'").
+		Scan(&fdTeam, &fdPlayer))
+	assert.Equal(t, "DeMario Douglas", dkPlayer)
+	assert.Equal(t, "MIA", fdTeam)
+	assert.Equal(t, dkPlayer, fdPlayer, "unmatched casing variants must unify across books")
+
+	// Verify legs backfill.
+	type legRow struct {
+		team, playerName, playerID sql.NullString
+	}
+	readLeg := func(id int64) legRow {
+		var r legRow
+		require.NoError(t, database.QueryRowContext(t.Context(),
+			"SELECT team, player_name, player_id FROM legs WHERE id = ?", id).
+			Scan(&r.team, &r.playerName, &r.playerID))
+		return r
+	}
+
+	leg1 := readLeg(1)
+	assert.Equal(t, "MIA", leg1.team.String)
+	assert.Equal(t, "Ollie Gordon II", leg1.playerName.String)
+	assert.Equal(t, "ollie-mia", leg1.playerID.String)
+
+	leg2 := readLeg(2)
+	assert.Equal(t, "MIA", leg2.team.String)
+	assert.Equal(t, "Ollie Gordon II", leg2.playerName.String)
+	assert.Equal(t, "ollie-mia", leg2.playerID.String)
+
+	leg3 := readLeg(3)
+	assert.Equal(t, "MIA", leg3.team.String)
+	assert.Equal(t, "José Alvarado", leg3.playerName.String)
+	assert.Equal(t, "jose-mia", leg3.playerID.String)
+
+	leg4 := readLeg(4)
+	assert.Equal(t, "BUF", leg4.team.String)
+	assert.False(t, leg4.playerName.Valid)
+	assert.False(t, leg4.playerID.Valid)
+
+	// Re-running BackfillCanonicalPlayers directly must be idempotent.
+	require.NoError(t, db.BackfillCanonicalPlayers(t.Context(), database))
+	require.NoError(t, database.QueryRowContext(t.Context(), "SELECT count(*) FROM odds").Scan(&totalOdds))
+	assert.Equal(t, 5, totalOdds)
 }
 
 // schemaVersion reads PRAGMA user_version, the migration runner's record of the
