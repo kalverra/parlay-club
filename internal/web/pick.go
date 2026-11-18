@@ -1153,10 +1153,7 @@ func (h *slipHandlers) dockFrom(
 	view.Combined = fmt.Sprintf("%.2fx", combined)
 	view.CombinedAmerican = formatOdds(parlay.DecimalToAmerican(combined))
 
-	nfelo := h.nfeloForGames(ctx, games)
-	teamEPA, usageByPlayer := h.nflverseForSlip(ctx, slip.WeekID, legs)
-	gamesByID := analyzerGameMap(games, nfelo, teamEPA)
-	stats := h.playerStatsForLegs(ctx, legs, usageByPlayer)
+	gamesByID, stats := analyzer.LoadSlipSignals(ctx, h.deps.Store, now, slip.WeekID, games, legs)
 	analysis, legGrades := analyzerView(legs, gamesByID, stats, names)
 	view.Grade = analysis.Grade
 	for i := range view.Legs {
@@ -1726,26 +1723,15 @@ func (h *slipHandlers) boardSignalsForGame(
 ) board.BoardSignals {
 	slipLegs := make([]analyzer.Leg, 0, len(legs))
 	for _, leg := range legs {
-		slipLegs = append(slipLegs, analyzerLeg(leg, nil))
+		slipLegs = append(slipLegs, analyzer.LegFromDB(leg, ""))
 	}
+	teamEPA, playerUsage := analyzer.LoadGameSignals(ctx, h.deps.Store, h.deps.now(), weekID, playerIDs)
 	signals := board.BoardSignals{
+		TeamEPA:  teamEPA,
 		Injuries: parseGameInjuries(game),
 		SlipLegs: slipLegs,
 	}
-
-	week, err := h.deps.Store.WeekByID(ctx, weekID)
-	if err != nil {
-		return signals
-	}
-	teamEPA, fresh := loadFreshNFLverseTeamProfiles(ctx, h.deps.Store, h.deps.now(), week)
-	if !fresh {
-		return signals
-	}
-	signals.TeamEPA = teamEPA
-
-	if playerUsage := nflverseUsageForPlayers(
-		ctx, h.deps.Store, playerIDs, week.Season, week.SeasonType,
-	); len(playerUsage) > 0 {
+	if len(playerUsage) > 0 {
 		signals.PlayerUsage = playerUsage
 	}
 	return signals

@@ -183,6 +183,67 @@ type PlayerUsage struct {
 	AvgCarries        float64
 }
 
+// EffectiveTargetShare returns the higher of Last3TargetShare and
+// SeasonTargetShare, falling back to averaging Weeks when precomputed fields
+// are zero.
+func (u *PlayerUsage) EffectiveTargetShare() float64 {
+	best := max(u.Last3TargetShare, u.SeasonTargetShare)
+	if best > 0 || len(u.Weeks) == 0 {
+		return best
+	}
+	var sum float64
+	for _, w := range u.Weeks {
+		sum += w.TargetShare
+	}
+	return sum / float64(len(u.Weeks))
+}
+
+// EffectiveSnapAvg returns the higher of Last3SnapAvg and SeasonSnapAvg,
+// falling back to averaging Weeks when precomputed fields are zero.
+func (u *PlayerUsage) EffectiveSnapAvg() float64 {
+	return max(u.Last3SnapAvg, u.EffectiveSeasonSnapAvg())
+}
+
+// EffectiveSeasonSnapAvg returns SeasonSnapAvg, falling back to averaging
+// Weeks when precomputed fields are zero.
+func (u *PlayerUsage) EffectiveSeasonSnapAvg() float64 {
+	if u.SeasonSnapAvg > 0 || len(u.Weeks) == 0 {
+		return u.SeasonSnapAvg
+	}
+	var sum float64
+	for _, w := range u.Weeks {
+		sum += w.OffensePct
+	}
+	return sum / float64(len(u.Weeks))
+}
+
+// RecentWOPR returns Last3WOPR, falling back to averaging up to 3 most-recent
+// Weeks when precomputed fields are zero.
+func (u *PlayerUsage) RecentWOPR() float64 {
+	if u.Last3WOPR > 0 || len(u.Weeks) == 0 {
+		return u.Last3WOPR
+	}
+	n := min(len(u.Weeks), 3)
+	var sum float64
+	for _, w := range u.Weeks[:n] {
+		sum += w.WOPR
+	}
+	return sum / float64(n)
+}
+
+// AverageCarries returns AvgCarries, falling back to averaging Weeks when
+// precomputed fields are zero.
+func (u *PlayerUsage) AverageCarries() float64 {
+	if u.AvgCarries > 0 || len(u.Weeks) == 0 {
+		return u.AvgCarries
+	}
+	var sum int
+	for _, w := range u.Weeks {
+		sum += w.Carries
+	}
+	return float64(sum) / float64(len(u.Weeks))
+}
+
 // PlayerStats holds a matched player's recent games per market, most recent
 // game first, this season only, plus optional nflverse usage metrics.
 type PlayerStats struct {

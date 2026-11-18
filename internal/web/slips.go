@@ -1553,10 +1553,7 @@ func (h *slipHandlers) slipPageData(ctx context.Context, slip db.Slip) (SlipPage
 	}
 
 	open := slip.Status == db.SlipOpen
-	nfelo := h.nfeloForGames(ctx, games)
-	teamEPA, usageByPlayer := h.nflverseForSlip(ctx, slip.WeekID, legs)
-	gamesByID := analyzerGameMap(games, nfelo, teamEPA)
-	playerStats := h.playerStatsForLegs(ctx, legs, usageByPlayer)
+	gamesByID, playerStats := analyzer.LoadSlipSignals(ctx, h.deps.Store, h.deps.now(), slip.WeekID, games, legs)
 	analysis, legGrades := analyzerView(legs, gamesByID, playerStats, names)
 	media, err := h.legMedia(ctx, legs, allWeekGames)
 	if err != nil {
