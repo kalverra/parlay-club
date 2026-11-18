@@ -2,8 +2,10 @@ package db_test
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/kalverra/parlay-club/internal/db"
 )
@@ -541,4 +543,125 @@ func TestBuildLegSelection(t *testing.T) {
 			assert.Equal(t, tc.want, db.BuildLegSelection(tc.market, tc.team, tc.player, tc.side, tc.line))
 		})
 	}
+}
+
+func TestCurrentOddsKeepsBothSyncGroups(t *testing.T) {
+	t.Parallel()
+
+	t1 := time.Date(2026, 11, 7, 10, 0, 0, 0, time.UTC)
+	t2 := time.Date(2026, 11, 7, 12, 0, 0, 0, time.UTC)
+	t3 := time.Date(2026, 11, 7, 14, 0, 0, 0, time.UTC)
+
+	rows := []db.Odds{
+		// Stale game line
+		{MarketType: "ML", FetchedAt: t1},
+		// Current game line
+		{MarketType: "ML", FetchedAt: t2},
+		// Stale prop
+		{MarketType: "PASS_YDS", PlayerName: "Josh Allen", FetchedAt: t1},
+		// Current prop (newer than game line)
+		{MarketType: "PASS_YDS", PlayerName: "Josh Allen", FetchedAt: t3},
+		// Current team total prop
+		{MarketType: "TEAM_TOTAL", FetchedAt: t3},
+	}
+
+	result := db.CurrentOdds(rows)
+	require.Len(t, result, 3)
+	assert.Equal(t, t2, result[0].FetchedAt)
+	assert.Equal(t, "ML", result[0].MarketType)
+	assert.Equal(t, t3, result[1].FetchedAt)
+	assert.Equal(t, "PASS_YDS", result[1].MarketType)
+	assert.Equal(t, t3, result[2].FetchedAt)
+	assert.Equal(t, "TEAM_TOTAL", result[2].MarketType)
+}
+
+func TestCurrentOddsKeepsEachGamesNewestProps(t *testing.T) {
+	t.Parallel()
+
+	t1 := time.Date(2026, 11, 7, 10, 0, 0, 0, time.UTC)
+	t2 := time.Date(2026, 11, 7, 12, 0, 0, 0, time.UTC)
+
+	rows := []db.Odds{
+		// The first game's props were fetched earlier than the second game's.
+		{GameID: "401772001", MarketType: "PASS_YDS", PlayerName: "Josh Allen", FetchedAt: t1},
+		{GameID: "401772002", MarketType: "PASS_YDS", PlayerName: "Tua Tagovailoa", FetchedAt: t2},
+	}
+
+	result := db.CurrentOdds(rows)
+	require.Len(t, result, 2, "a newer prop sync for one game leaves another game's props alone")
+	assert.Equal(t, "Josh Allen", result[0].PlayerName)
+	assert.Equal(t, "Tua Tagovailoa", result[1].PlayerName)
+}
+
+func TestStoreOddsForGameAndWeekFilterCurrentOdds(t *testing.T) {
+	t.Parallel()
+
+	store, _ := openTestStore(t)
+	week := createTestWeek(t, store, 9)
+
+	g1 := testSlateGame(week)
+	g2 := testSlateGame(week)
+	g2.ID = "401772002"
+	g2.HomeTeam = "KC"
+	g2.AwayTeam = "LV"
+	_, err := store.UpsertGame(t.Context(), g1)
+	require.NoError(t, err)
+	_, err = store.UpsertGame(t.Context(), g2)
+	require.NoError(t, err)
+
+	t1 := time.Date(2026, time.November, 7, 10, 0, 0, 0, time.UTC)
+	t2 := time.Date(2026, time.November, 7, 12, 0, 0, 0, time.UTC)
+	t3 := time.Date(2026, time.November, 7, 14, 0, 0, 0, time.UTC)
+
+	_, err = store.UpsertOdds(t.Context(), []db.Odds{
+		// Game 1 stale & current game lines (different side so both rows stay in SQLite)
+		{GameID: g1.ID, Book: "draftkings", MarketType: "ML", Team: "BUF", Price: -150, FetchedAt: t1},
+		{GameID: g1.ID, Book: "draftkings", MarketType: "ML", Team: "MIA", Price: 130, FetchedAt: t2},
+		// Game 1 stale & current props
+		{
+			GameID:     g1.ID,
+			Book:       "draftkings",
+			MarketType: "PASS_YDS",
+			PlayerName: "Stale Player",
+			Side:       "OVER",
+			Line:       new(200.5),
+			Price:      -110,
+			FetchedAt:  t1,
+		},
+		{
+			GameID:     g1.ID,
+			Book:       "draftkings",
+			MarketType: "PASS_YDS",
+			PlayerName: "Josh Allen",
+			Side:       "OVER",
+			Line:       new(250.5),
+			Price:      -110,
+			FetchedAt:  t3,
+		},
+		// Game 2 props fetched earlier than Game 1's props
+		{
+			GameID:     g2.ID,
+			Book:       "draftkings",
+			MarketType: "PASS_YDS",
+			PlayerName: "Patrick Mahomes",
+			Side:       "OVER",
+			Line:       new(275.5),
+			Price:      -110,
+			FetchedAt:  t2,
+		},
+	})
+	require.NoError(t, err)
+
+	forGame, err := store.OddsForGame(t.Context(), g1.ID)
+	require.NoError(t, err)
+	require.Len(t, forGame, 2)
+	assert.Equal(t, "MIA", forGame[0].Team)
+	assert.Equal(t, "Josh Allen", forGame[1].PlayerName)
+
+	forWeek, err := store.OddsForWeek(t.Context(), week.ID)
+	require.NoError(t, err)
+	require.Len(t, forWeek, 3)
+	assert.Equal(t, "MIA", forWeek[0].Team)
+	assert.Equal(t, "Josh Allen", forWeek[1].PlayerName)
+	assert.Equal(t, "Patrick Mahomes", forWeek[2].PlayerName)
 }

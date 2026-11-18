@@ -2026,7 +2026,6 @@ func (h *slipHandlers) referenceOdds(
 				if err != nil {
 					return 0, err
 				}
-				rows = currentOdds(rows)
 				byGame[*leg.GameID] = rows
 			}
 			candidates = candidatePrices(rows, leg, books)

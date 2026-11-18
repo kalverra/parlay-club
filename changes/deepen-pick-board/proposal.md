@@ -1,6 +1,6 @@
 ---
 slug: deepen-pick-board
-status: designed
+status: implementing
 created: "2026-11-17"
 depends_on:
     - selection-player-identity

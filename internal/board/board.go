@@ -267,7 +267,7 @@ var eastern = tz.Eastern
 
 // IsPropRow reports whether an odds row belongs to the prop sync group.
 func IsPropRow(row db.Odds) bool {
-	return row.MarketType == "TEAM_TOTAL" || row.PlayerName != "" || isPlayerMarket(row.MarketType)
+	return db.IsPropRow(row)
 }
 
 // isPlayerMarket reports whether a market type targets an athlete rather than
