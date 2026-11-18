@@ -153,7 +153,7 @@ export, and web)
 
 Effort: easy (mechanical consolidation of selection text and market label helpers with existing test coverage)
 
-- [ ] Add `MarketLabel`, `FormatSelection`, and `BuildLegSelection` in `internal/db/odds.go` and replace the duplicate
+- [x] Add `MarketLabel`, `FormatSelection`, and `BuildLegSelection` in `internal/db/odds.go` and replace the duplicate
       implementations in `internal/board/board.go`, `internal/web/slips.go`, and `internal/web/research.go`, with unit
       tests in `internal/db/odds_test.go`.
 - [ ] Docs: update `docs/concepts/slips.md` and `docs/reference/data-sources.md` to reflect unified selection/book

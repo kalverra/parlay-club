@@ -2125,7 +2125,13 @@ func (h *slipHandlers) legFromForm(w http.ResponseWriter, r *http.Request, slipI
 
 	selection := strings.TrimSpace(r.PostForm.Get("selection"))
 	if selection == "" {
-		selection = buildSelection(market, r.PostForm, line)
+		selection = db.BuildLegSelection(
+			market,
+			r.PostForm.Get("team"),
+			r.PostForm.Get("player_name"),
+			r.PostForm.Get("side"),
+			line,
+		)
 	}
 	if selection == "" {
 		h.writeFormError(w, "Add a selection.")
@@ -2175,70 +2181,6 @@ func (h *slipHandlers) legFromForm(w http.ResponseWriter, r *http.Request, slipI
 // isPlayerMarket reports whether a market type targets an athlete rather than a game or team.
 func isPlayerMarket(market string) bool {
 	return db.IsPlayerMarket(market)
-}
-
-// buildSelection writes the display text the docs table shows.
-func buildSelection(market string, form map[string][]string, line *float64) string {
-	field := func(name string) string {
-		if values := form[name]; len(values) > 0 {
-			return strings.TrimSpace(values[0])
-		}
-		return ""
-	}
-	team := field("team")
-	player := field("player_name")
-	side := titleSide(field("side"))
-	lineText := ""
-	if line != nil {
-		lineText = formatFloat(*line)
-	}
-
-	switch market {
-	case "SPREAD":
-		if team == "" || lineText == "" {
-			return ""
-		}
-		return team + " " + signedLine(*line)
-	case "ML":
-		if team == "" {
-			return ""
-		}
-		return team + " ML"
-	case "TOTAL":
-		if side == "" || lineText == "" {
-			return ""
-		}
-		return side + " " + lineText
-	case "TEAM_TOTAL":
-		if team == "" || side == "" || lineText == "" {
-			return ""
-		}
-		return team + " Team Total " + side + " " + lineText
-	case "ANYTIME_TD":
-		if player == "" {
-			return ""
-		}
-		return player + " Anytime TD"
-	case "OTHER":
-		return ""
-	default:
-		label := marketLabels[market]
-		if player == "" || side == "" || lineText == "" {
-			return ""
-		}
-		return player + " " + side + " " + lineText + " " + label
-	}
-}
-
-// marketLabels are the stat names the selection text uses.
-var marketLabels = map[string]string{
-	"PASS_YDS":   "Pass Yds",
-	"PASS_TDS":   "Pass TDs",
-	"RUSH_YDS":   "Rush Yds",
-	"RUSH_ATT":   "Rush Att",
-	"REC_YDS":    "Rec Yds",
-	"RECEPTIONS": "Receptions",
-	"KICKER_PTS": "Kicking Pts",
 }
 
 // loadSlip parses the path id, then resolves the slip's group. A slip in
