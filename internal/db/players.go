@@ -425,120 +425,38 @@ func (s *Store) PlayerGameLogs(ctx context.Context, athleteIDs []string) (map[st
 	return result, nil
 }
 
-// ResolvePlayerMatch matches a sportsbook odds player name against home and away teams.
-//  1. Normalizes oddsName. If empty, returns unmatched.
-//  2. Checks player_matches for (norm, homeTeam) and (norm, awayTeam). If a manual = 1
-//     row exists, it wins immediately. If one unambiguous cached row exists, returns its
-//     (espn_athlete_id, team).
-//  3. On a miss, queries roster_players for team IN (homeTeam, awayTeam) AND norm_name = norm.
-//  4. If exactly one athlete matches across both teams, upserts
-//     player_matches(odds_name, team, espn_athlete_id, manual=0) and returns (athlete_id, team).
-//     If zero or multiple athletes match, leaves player_id empty.
+// ResolvePlayerMatch matches a sportsbook odds player name against home and away teams
+// using BatchPlayerResolver (honoring StripPlayerTag team hints and collision safety).
 func (s *Store) ResolvePlayerMatch(
 	ctx context.Context,
 	oddsName, homeTeam, awayTeam string,
 ) (athleteID, team string, err error) {
-	norm := NormalizePlayerName(oddsName)
-	if norm == "" {
+	cleaned, _ := StripPlayerTag(oddsName)
+	if NormalizePlayerName(cleaned) == "" {
 		return "", "", nil
 	}
 
-	rows, err := s.conn().QueryContext(ctx, `
-		SELECT team, espn_athlete_id, manual
-		FROM player_matches
-		WHERE odds_name = ? AND team IN (?, ?)`,
-		norm, homeTeam, awayTeam,
-	)
-	if err != nil {
-		return "", "", fmt.Errorf("resolve player match: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-
-	type matchRow struct {
-		team      string
-		athleteID string
-		manual    bool
-	}
-	var matches []matchRow
-	for rows.Next() {
-		var (
-			t, aid string
-			manual int
-		)
-		if err := rows.Scan(&t, &aid, &manual); err != nil {
-			return "", "", fmt.Errorf("resolve player match: %w", err)
-		}
-		matches = append(matches, matchRow{team: t, athleteID: aid, manual: manual == 1})
-	}
-	if err := rows.Err(); err != nil {
-		return "", "", fmt.Errorf("resolve player match: %w", err)
-	}
-
-	var manualMatches []matchRow
-	for _, m := range matches {
-		if m.manual {
-			manualMatches = append(manualMatches, m)
-		}
-	}
-	if len(manualMatches) == 1 {
-		return manualMatches[0].athleteID, manualMatches[0].team, nil
-	}
-	if len(manualMatches) > 1 {
-		return "", "", nil
-	}
-	if len(matches) == 1 {
-		return matches[0].athleteID, matches[0].team, nil
-	}
-	if len(matches) > 1 {
-		return "", "", nil
-	}
-
-	rosterRows, err := s.conn().QueryContext(ctx, `
-		SELECT athlete_id, team
-		FROM roster_players
-		WHERE team IN (?, ?) AND norm_name = ?`,
-		homeTeam, awayTeam, norm,
-	)
+	teams := []string{homeTeam, awayTeam}
+	rosters, err := s.RosterForTeams(ctx, teams)
 	if err != nil {
 		return "", "", fmt.Errorf("resolve player match roster: %w", err)
 	}
-	defer func() { _ = rosterRows.Close() }()
-
-	var rosterMatches []struct {
-		athleteID string
-		team      string
+	matches, err := s.PlayerMatchesForTeams(ctx, teams)
+	if err != nil {
+		return "", "", fmt.Errorf("resolve player match: %w", err)
 	}
-	for rosterRows.Next() {
-		var aid, t string
-		if err := rosterRows.Scan(&aid, &t); err != nil {
-			return "", "", fmt.Errorf("resolve player match roster: %w", err)
+
+	resolver := NewBatchPlayerResolver(rosters, matches)
+	resolved := resolver.ResolveGamePlayer("", oddsName, "", homeTeam, awayTeam)
+	if newMatches := resolver.NewMatches(); len(newMatches) > 0 {
+		if err := s.UpsertPlayerMatches(ctx, newMatches); err != nil {
+			return "", "", fmt.Errorf("resolve player match upsert: %w", err)
 		}
-		rosterMatches = append(rosterMatches, struct {
-			athleteID string
-			team      string
-		}{athleteID: aid, team: t})
 	}
-	if err := rosterRows.Err(); err != nil {
-		return "", "", fmt.Errorf("resolve player match roster: %w", err)
-	}
-
-	if len(rosterMatches) != 1 {
+	if !resolved.Linked {
 		return "", "", nil
 	}
-
-	hit := rosterMatches[0]
-	_, err = s.conn().ExecContext(ctx, `
-		INSERT INTO player_matches (odds_name, team, espn_athlete_id, manual)
-		VALUES (?, ?, ?, 0)
-		ON CONFLICT (odds_name, team) DO UPDATE SET
-			espn_athlete_id = excluded.espn_athlete_id
-		WHERE player_matches.manual = 0`,
-		norm, hit.team, hit.athleteID,
-	)
-	if err != nil {
-		return "", "", fmt.Errorf("resolve player match upsert: %w", err)
-	}
-	return hit.athleteID, hit.team, nil
+	return resolved.AthleteID, resolved.Team, nil
 }
 
 // SaveManualPlayerMatch writes manual = 1 in player_matches, removes any

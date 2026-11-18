@@ -667,4 +667,70 @@ func TestBatchPlayerResolverOpposingTeamDisambiguation(t *testing.T) {
 		assert.Equal(t, "MIA", res.Team)
 		assert.Empty(t, res.AthleteID)
 	})
+
+	t.Run("populates Position and HeadshotURL from roster and cache", func(t *testing.T) {
+		t.Parallel()
+
+		resolver := db.NewBatchPlayerResolver(
+			[]db.RosterPlayer{
+				{
+					AthleteID:   "3918298",
+					Team:        "BUF",
+					FullName:    "Josh Allen",
+					Position:    "QB",
+					HeadshotURL: "https://example.com/josh.png",
+				},
+				{
+					AthleteID:   "4429013",
+					Team:        "MIA",
+					FullName:    "De'Von Achane",
+					Position:    "RB",
+					HeadshotURL: "https://example.com/achane.png",
+				},
+			},
+			[]db.PlayerMatch{
+				{OddsName: "josh allen", Team: "BUF", ESPNAthleteID: "3918298", Manual: true},
+			},
+		)
+
+		cached := resolver.ResolveGamePlayer("g1", "Josh Allen", "", "BUF", "MIA")
+		assert.True(t, cached.Linked)
+		assert.Equal(t, "QB", cached.Position)
+		assert.Equal(t, "https://example.com/josh.png", cached.HeadshotURL)
+
+		fromRoster := resolver.ResolveGamePlayer("g1", "De'Von Achane", "", "BUF", "MIA")
+		assert.True(t, fromRoster.Linked)
+		assert.Equal(t, "RB", fromRoster.Position)
+		assert.Equal(t, "https://example.com/achane.png", fromRoster.HeadshotURL)
+	})
+}
+
+func TestResolvePlayerMatchTeamHint(t *testing.T) {
+	t.Parallel()
+
+	store, _ := openTestStore(t)
+	now := time.Date(2026, time.November, 9, 12, 0, 0, 0, time.UTC)
+
+	require.NoError(t, store.UpsertRosterPlayers(t.Context(), []db.RosterPlayer{
+		{AthleteID: "5001", Team: "BUF", ESPNTeamID: "2", FullName: "Ollie Gordon", Position: "RB", UpdatedAt: now},
+		{AthleteID: "5002", Team: "MIA", ESPNTeamID: "15", FullName: "Ollie Gordon II", Position: "RB", UpdatedAt: now},
+	}))
+
+	// Untagged name is ambiguous across BUF and MIA.
+	aid, team, err := store.ResolvePlayerMatch(t.Context(), "Ollie Gordon", "BUF", "MIA")
+	require.NoError(t, err)
+	assert.Empty(t, aid)
+	assert.Empty(t, team)
+
+	// Tagged name uses (MIA) team hint to resolve to MIA's Ollie Gordon II.
+	aid, team, err = store.ResolvePlayerMatch(t.Context(), "Ollie Gordon II (MIA)", "BUF", "MIA")
+	require.NoError(t, err)
+	assert.Equal(t, "5002", aid)
+	assert.Equal(t, "MIA", team)
+
+	// Hinted resolution must not cache manual=0, so untagged lookups remain ambiguous.
+	aid, team, err = store.ResolvePlayerMatch(t.Context(), "Ollie Gordon", "BUF", "MIA")
+	require.NoError(t, err)
+	assert.Empty(t, aid)
+	assert.Empty(t, team)
 }

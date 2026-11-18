@@ -635,6 +635,9 @@ func matchPlayer(index *rosterIndex, name, team string) (string, string, string)
 	if want == "" {
 		return "", "", ""
 	}
+	if team == "" {
+		_, team = db.StripPlayerTag(name)
+	}
 	if team != "" {
 		if player, ok := index.byTeamAndName[team+"\x00"+want]; ok {
 			return player.AthleteID, player.Position, player.HeadshotURL

@@ -414,6 +414,7 @@ func (h *researchHandlers) loadGameResearch(ctx context.Context, gameID string) 
 	// Odds and player matches
 	oddsRows, err := h.deps.Store.OddsForGame(ctx, game.ID)
 	if err == nil {
+		resolver := db.NewBatchPlayerResolver(rosterPlayers, playerMatches)
 		seenPlayers := make(map[string]bool)
 		for _, o := range oddsRows {
 			name := strings.TrimSpace(o.PlayerName)
@@ -423,28 +424,23 @@ func (h *researchHandlers) loadGameResearch(ctx context.Context, gameID string) 
 			seenPlayers[name] = true
 			view.HasProps = true
 
-			aid, team, _ := h.deps.Store.ResolvePlayerMatch(ctx, name, game.HomeTeam, game.AwayTeam)
+			resolved := resolver.ResolveGamePlayer(game.ID, name, o.Team, game.HomeTeam, game.AwayTeam)
 			mv := PropMatchView{
 				OddsName: name,
-				Team:     team,
+				Team:     resolved.Team,
 			}
-			if team == "" {
+			if mv.Team == "" {
 				mv.Team = o.Team
 			}
-			if aid != "" {
+			if resolved.Linked {
 				mv.Matched = true
-				mv.ESPNAthleteID = aid
+				mv.ESPNAthleteID = resolved.AthleteID
+				mv.AthleteName = resolved.Name
+				mv.Position = resolved.Position
+				mv.HeadshotURL = resolved.HeadshotURL
 				mv.Initials = Initials(name)
-				if rp, ok := rosterMap[aid]; ok {
-					mv.AthleteName = rp.FullName
-					mv.Position = rp.Position
-					mv.HeadshotURL = rp.HeadshotURL
-					if rp.FullName != "" {
-						mv.Initials = Initials(rp.FullName)
-					}
-					if mv.Team == "" {
-						mv.Team = rp.Team
-					}
+				if resolved.Name != "" {
+					mv.Initials = Initials(resolved.Name)
 				}
 			}
 			norm := db.NormalizePlayerName(name)
@@ -452,13 +448,18 @@ func (h *researchHandlers) loadGameResearch(ctx context.Context, gameID string) 
 				mv.Manual = m.Manual
 			} else {
 				for _, m := range playerMatches {
-					if m.OddsName == norm && (m.Team == mv.Team || m.ESPNAthleteID == aid) {
+					if m.OddsName == norm && (m.Team == mv.Team || m.ESPNAthleteID == resolved.AthleteID) {
 						mv.Manual = m.Manual
 						break
 					}
 				}
 			}
 			view.Matches = append(view.Matches, mv)
+		}
+		if newMatches := resolver.NewMatches(); len(newMatches) > 0 {
+			if err := h.deps.Store.UpsertPlayerMatches(ctx, newMatches); err != nil {
+				h.deps.Logger.Warn().Err(err).Str("game_id", gameID).Msg("upsert research player matches")
+			}
 		}
 		slices.SortFunc(view.Matches, func(a, b PropMatchView) int {
 			return strings.Compare(a.OddsName, b.OddsName)

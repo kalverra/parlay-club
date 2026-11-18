@@ -827,3 +827,88 @@ func TestResearchPlayerSurfacesNFLverseMetricsAndHTMX(t *testing.T) {
 		assert.NotContains(t, body, "Opp Rush Def")
 	})
 }
+
+func TestResearchGameResolvesTeamHintInMemory(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	game := addGame(t, fixture, gameKickoff())
+	handler := researchHandlerWithRefresher(t, fixture, fixture.user, &researchTestRefresher{})
+
+	now := time.Now().UTC()
+	require.NoError(t, fixture.store.UpsertRosterPlayers(t.Context(), []db.RosterPlayer{
+		{
+			AthleteID:   "5001",
+			Team:        "BUF",
+			ESPNTeamID:  "2",
+			FullName:    "Ollie Gordon",
+			Position:    "RB",
+			HeadshotURL: "https://example.com/buf-ollie.png",
+			UpdatedAt:   now,
+		},
+		{
+			AthleteID:   "5002",
+			Team:        "MIA",
+			ESPNTeamID:  "15",
+			FullName:    "Ollie Gordon II",
+			Position:    "RB",
+			HeadshotURL: "https://example.com/mia-ollie.png",
+			UpdatedAt:   now,
+		},
+		{
+			AthleteID:  "6001",
+			Team:       "BUF",
+			ESPNTeamID: "2",
+			FullName:   "Chris Jones",
+			Position:   "DT",
+			UpdatedAt:  now,
+		},
+		{
+			AthleteID:  "6002",
+			Team:       "MIA",
+			ESPNTeamID: "15",
+			FullName:   "Chris Jones",
+			Position:   "DT",
+			UpdatedAt:  now,
+		},
+	}))
+
+	oddsFetched := time.Date(2026, time.November, 9, 14, 0, 0, 0, time.UTC)
+	_, err := fixture.store.UpsertOdds(t.Context(), []db.Odds{
+		{
+			GameID:     game.ID,
+			Book:       "draftkings",
+			MarketType: "RUSH_YDS",
+			Team:       "",
+			PlayerName: "Ollie Gordon II (MIA)",
+			Side:       "OVER",
+			Line:       new(42.5),
+			Price:      -110,
+			FetchedAt:  oddsFetched,
+		},
+		{
+			GameID:     game.ID,
+			Book:       "draftkings",
+			MarketType: "ANYTIME_TD",
+			Team:       "",
+			PlayerName: "Chris Jones",
+			Side:       "YES",
+			Price:      +500,
+			FetchedAt:  oddsFetched,
+		},
+	})
+	require.NoError(t, err)
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/research/games/"+game.ID, nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	body := rec.Body.String()
+	assert.Contains(t, body, "Ollie Gordon II (MIA)")
+	assert.Contains(t, body, "Ollie Gordon II")
+	assert.Contains(t, body, "https://example.com/mia-ollie.png")
+	assert.Contains(t, body, "Auto")
+	assert.Contains(t, body, "Chris Jones")
+	assert.Contains(t, body, "Unmatched")
+}
