@@ -183,7 +183,7 @@ The `grade` source (`GradeSource = "grade"`) runs during each pass when a week e
 1. **Zero wasted fetches:** `due` calls `PendingLegsOnFinalGames()`. Once every leg on `FINAL` games has left `PENDING`
    (including `NEEDS_GRADING` or `VOID`), the query returns zero rows and the source is skipped.
 2. **Game-only optimization:** `syncGrade` groups pending legs by `FINAL` game. If a game has only game/team/other legs
-   (no `grader.IsPlayerMarket` legs), it grades directly from the stored `games` scores without calling ESPN.
+   (no `db.IsPlayerMarket` legs), it grades directly from the stored `games` scores without calling ESPN.
 3. **Player props and backoff:** If a `FINAL` game has at least one pending player-prop leg, `syncGrade` fetches
    `BoxScore(ctx, gameID)` through `singleflight` keyed by `SummarySource(gameID)` (`espn:summary:{gameID}`), tagging
    the request with `archive.WithKey`. A failed `BoxScore` fetch records a 5-minute in-memory backoff under
