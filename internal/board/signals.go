@@ -113,7 +113,7 @@ func isSmashMatchup(game db.Game, row Row, signals BoardSignals) bool {
 	if rank < bottomDefenseRankMin {
 		return false
 	}
-	return effectiveTargetShare(usage) >= smashTargetShareMin || avgCarries(usage) >= smashCarriesPerGame
+	return usage.EffectiveTargetShare() >= smashTargetShareMin || usage.AverageCarries() >= smashCarriesPerGame
 }
 
 // isHighVolume reports whether a player prop OVER/YES has top-quartile usage
@@ -126,10 +126,10 @@ func isHighVolume(row Row, signals BoardSignals) bool {
 	if usage == nil || len(usage.Weeks) == 0 {
 		return false
 	}
-	wopr := recentWOPR(usage)
-	targetShare := effectiveTargetShare(usage)
-	snapPct := effectiveSnapAvg(usage)
-	carries := avgCarries(usage)
+	wopr := usage.RecentWOPR()
+	targetShare := usage.EffectiveTargetShare()
+	snapPct := usage.EffectiveSnapAvg()
+	carries := usage.AverageCarries()
 
 	switch strings.ToUpper(strings.TrimSpace(row.Position)) {
 	case "WR":
@@ -160,7 +160,7 @@ func isRoleBump(row Row, signals BoardSignals) bool {
 	if !hasOutTeammate(row, signals.Injuries[row.Team]) {
 		return false
 	}
-	return maxOffensePct(usage.Weeks)-effectiveSeasonSnapAvg(usage) >= roleBumpSnapDelta
+	return maxOffensePct(usage.Weeks)-usage.EffectiveSeasonSnapAvg() >= roleBumpSnapDelta
 }
 
 func hasOutTeammate(row Row, injuries []espn.Injury) bool {
@@ -347,33 +347,6 @@ func opposingDefenseRank(game db.Game, row Row, teamEPA map[string]*analyzer.Tea
 	return rank
 }
 
-func effectiveTargetShare(usage *analyzer.PlayerUsage) float64 {
-	best := max(usage.Last3TargetShare, usage.SeasonTargetShare)
-	if best > 0 || len(usage.Weeks) == 0 {
-		return best
-	}
-	var sum float64
-	for _, w := range usage.Weeks {
-		sum += w.TargetShare
-	}
-	return sum / float64(len(usage.Weeks))
-}
-
-func effectiveSnapAvg(usage *analyzer.PlayerUsage) float64 {
-	return max(usage.Last3SnapAvg, effectiveSeasonSnapAvg(usage))
-}
-
-func effectiveSeasonSnapAvg(usage *analyzer.PlayerUsage) float64 {
-	if usage.SeasonSnapAvg > 0 || len(usage.Weeks) == 0 {
-		return usage.SeasonSnapAvg
-	}
-	var sum float64
-	for _, w := range usage.Weeks {
-		sum += w.OffensePct
-	}
-	return sum / float64(len(usage.Weeks))
-}
-
 func maxOffensePct(weeks []analyzer.PlayerWeekUsage) float64 {
 	best := 0.0
 	for _, w := range weeks {
@@ -382,27 +355,4 @@ func maxOffensePct(weeks []analyzer.PlayerWeekUsage) float64 {
 		}
 	}
 	return best
-}
-
-func recentWOPR(usage *analyzer.PlayerUsage) float64 {
-	if len(usage.Weeks) == 0 {
-		return 0
-	}
-	n := min(len(usage.Weeks), 3)
-	var sum float64
-	for _, w := range usage.Weeks[:n] {
-		sum += w.WOPR
-	}
-	return sum / float64(n)
-}
-
-func avgCarries(usage *analyzer.PlayerUsage) float64 {
-	if len(usage.Weeks) == 0 {
-		return 0
-	}
-	var sum int
-	for _, w := range usage.Weeks {
-		sum += w.Carries
-	}
-	return float64(sum) / float64(len(usage.Weeks))
 }

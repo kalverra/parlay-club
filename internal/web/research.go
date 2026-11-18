@@ -540,78 +540,22 @@ func (h *researchHandlers) populateNFLverseResearch(
 	view *PlayerResearchView,
 	activeMarket string,
 ) {
-	week, err := h.deps.Store.LatestWeek(ctx)
-	if err != nil {
-		return
+	sig := analyzer.LoadPlayerResearchSignals(
+		ctx, h.deps.Store, h.deps.now(), view.AthleteID, view.Team, view.Position, activeMarket,
+	)
+	if sig.HasUsage {
+		view.SnapPct = fmt.Sprintf("%.0f%%", sig.SnapPct*100)
+		view.TargetShare = fmt.Sprintf("%.1f%%", sig.TargetShare*100)
+		view.WOPR = fmt.Sprintf("%.2f", sig.WOPR)
 	}
-	teamEPA, fresh := loadFreshNFLverseTeamProfiles(ctx, h.deps.Store, h.deps.now(), week)
-	if !fresh {
-		return
-	}
-
-	if pWeeks := loadNFLversePlayerWeeks(
-		ctx,
-		h.deps.Store,
-		view.AthleteID,
-		week.Season,
-		week.SeasonType,
-	); len(
-		pWeeks,
-	) > 0 {
-		l3Count := min(3, len(pWeeks))
-		var snapSum, targetSum, woprSum float64
-		for _, w := range pWeeks[:l3Count] {
-			snapSum += w.OffensePct
-			targetSum += w.TargetShare
-			woprSum += w.WOPR
-		}
-		n := float64(l3Count)
-		view.SnapPct = fmt.Sprintf("%.0f%%", (snapSum/n)*100)
-		view.TargetShare = fmt.Sprintf("%.1f%%", (targetSum/n)*100)
-		view.WOPR = fmt.Sprintf("%.2f", woprSum/n)
-	}
-
-	if view.Team == "" || len(teamEPA) == 0 {
-		return
-	}
-	weekGames, err := h.deps.Store.GamesForWeek(ctx, week.ID)
-	if err != nil {
-		return
-	}
-	opp := ""
-	for _, g := range weekGames {
-		switch view.Team {
-		case g.HomeTeam:
-			opp = g.AwayTeam
-		case g.AwayTeam:
-			opp = g.HomeTeam
-		}
-		if opp != "" {
-			break
-		}
-	}
-	oppProf := teamEPA[opp]
-	if oppProf == nil {
-		return
-	}
-	market := activeMarket
-	if market == "" {
-		if strings.EqualFold(view.Position, "RB") {
-			market = "RUSH_YDS"
+	if sig.OppDefRank > 0 {
+		if sig.OppDefSplit == "rush" {
+			view.OppDefLabel = "Opp Rush Def"
 		} else {
-			market = "PASS_YDS"
+			view.OppDefLabel = "Opp Pass Def"
 		}
+		view.OppDefRank = fmt.Sprintf("#%d vs %s", sig.OppDefRank, sig.Opponent)
 	}
-	split, rank, ok := analyzer.MatchupDefenseRank(market, oppProf)
-	if !ok {
-		return
-	}
-	if split == "rush" {
-		view.OppDefLabel = "Opp Rush Def"
-	} else {
-		view.OppDefLabel = "Opp Pass Def"
-	}
-	view.OppDefRank = fmt.Sprintf("#%d vs %s", rank, opp)
 }
 
 func (h *researchHandlers) resolveMarketAndLine(

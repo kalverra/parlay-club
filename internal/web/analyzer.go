@@ -1,19 +1,15 @@
 package web
 
 import (
-	"context"
-	"encoding/json"
 	"fmt"
 	"math"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/kalverra/parlay-club/internal/analyzer"
 	"github.com/kalverra/parlay-club/internal/db"
-	"github.com/kalverra/parlay-club/internal/ingest/nflverse"
 )
 
 // AnalyzerView is the sharp-friend banner under the slip's legs.
@@ -166,25 +162,6 @@ func safeReturnPath(raw string) string {
 	return raw
 }
 
-// analyzerGameMap maps the week's games into analyzer inputs. The map is keyed
-// by the same ID the legs carry so no leg is dropped. nfelo and nflverse rows
-// are only present when the caller has already checked that they are fresh.
-func analyzerGameMap(
-	games []db.Game,
-	nfelo map[string]db.NfeloGame,
-	teamEPA map[string]*analyzer.TeamDefenseProfile,
-) map[string]analyzer.Game {
-	gamesByID := make(map[string]analyzer.Game, len(games))
-	for _, game := range games {
-		var proj *db.NfeloGame
-		if p, ok := nfelo[game.ID]; ok {
-			proj = &p
-		}
-		gamesByID[game.ID] = analyzer.GameFromDB(game, proj, teamEPA)
-	}
-	return gamesByID
-}
-
 // analyzerView shapes the analyzer's warnings and deterministic A-F grades for
 // the slip banner and each leg row.
 func analyzerView(
@@ -317,167 +294,6 @@ func formatModelSpread(spread float64) string {
 		return "+" + text
 	}
 	return text
-}
-
-// analyzerLeg carries the pick fields a rule reads.
-func analyzerLeg(leg db.Leg, names map[int64]string) analyzer.Leg {
-	return analyzer.LegFromDB(leg, names[leg.UserID])
-}
-
-// nfeloForGames reads the model rows the analyzer may use. It returns none
-// when nfelo has never synced or its last good fetch is older than 72 hours, so
-// stale data cannot shape a sentence.
-func (h *slipHandlers) nfeloForGames(
-	ctx context.Context,
-	games []db.Game,
-) map[string]db.NfeloGame {
-	state, err := h.deps.Store.SyncState(ctx, analyzer.NfeloSource)
-	if err != nil || h.deps.now().Sub(state.FetchedAt) > analyzer.NfeloFreshFor {
-		return nil
-	}
-	gameIDs := make([]string, 0, len(games))
-	for _, game := range games {
-		gameIDs = append(gameIDs, game.ID)
-	}
-	rows, err := h.deps.Store.NfeloForGames(ctx, gameIDs)
-	if err != nil {
-		return nil
-	}
-	return rows
-}
-
-// nflverseWeekForSlip loads fresh nflverse team EPA/pace profiles and player
-// usage for the slip's week. Missing or stale (> 7 days) sync state fails soft
-// by returning nil maps.
-func (h *slipHandlers) nflverseForSlip(
-	ctx context.Context,
-	weekID int64,
-	legs []db.Leg,
-) (map[string]*analyzer.TeamDefenseProfile, map[string]*analyzer.PlayerUsage) {
-	week, err := h.deps.Store.WeekByID(ctx, weekID)
-	if err != nil {
-		return nil, nil
-	}
-	teamProfiles, fresh := loadFreshNFLverseTeamProfiles(ctx, h.deps.Store, h.deps.now(), week)
-	if !fresh {
-		return nil, nil
-	}
-
-	usageByPlayer := h.nflverseUsageForLegs(ctx, legs, week.Season, week.SeasonType)
-	return teamProfiles, usageByPlayer
-}
-
-func nflverseSeasonTypes(seasonType int) []int {
-	if seasonType == nflverse.SeasonTypePostseason {
-		return []int{nflverse.SeasonTypeRegular, nflverse.SeasonTypePostseason}
-	}
-	return []int{seasonType}
-}
-
-// loadFreshNFLverseTeamProfiles returns season-to-date/L4 team EPA and pace
-// profiles when nflverse:season:{year} is present and under NFLverseFreshFor.
-func loadFreshNFLverseTeamProfiles(
-	ctx context.Context,
-	store *db.Store,
-	now time.Time,
-	week db.Week,
-) (map[string]*analyzer.TeamDefenseProfile, bool) {
-	return analyzer.LoadFreshTeamProfiles(ctx, store, now, week)
-}
-
-// loadNFLversePlayerWeeks returns weekly nflverse usage rows for an athlete,
-// merging regular-season and postseason rows during postseason so L3 and
-// season averages stay populated.
-func loadNFLversePlayerWeeks(
-	ctx context.Context,
-	store *db.Store,
-	athleteID string,
-	season, seasonType int,
-) []db.NFLversePlayerWeek {
-	rows, err := store.NFLversePlayerWeeksForPlayerTypes(
-		ctx, athleteID, season, nflverseSeasonTypes(seasonType)...,
-	)
-	if err != nil {
-		return nil
-	}
-	return rows
-}
-
-func nflverseUsageForPlayers(
-	ctx context.Context,
-	store *db.Store,
-	athleteIDs []string,
-	season, seasonType int,
-) map[string]*analyzer.PlayerUsage {
-	return analyzer.LoadPlayerUsageForIDs(ctx, store, athleteIDs, season, seasonType)
-}
-
-func (h *slipHandlers) nflverseUsageForLegs(
-	ctx context.Context,
-	legs []db.Leg,
-	season, seasonType int,
-) map[string]*analyzer.PlayerUsage {
-	seen := make(map[string]struct{}, len(legs))
-	athleteIDs := make([]string, 0, len(legs))
-	for _, leg := range legs {
-		if leg.PlayerID == nil || *leg.PlayerID == "" {
-			continue
-		}
-		id := *leg.PlayerID
-		if _, ok := seen[id]; ok {
-			continue
-		}
-		seen[id] = struct{}{}
-		athleteIDs = append(athleteIDs, id)
-	}
-	return nflverseUsageForPlayers(ctx, h.deps.Store, athleteIDs, season, seasonType)
-}
-
-// playerStatsForLegs loads player_gamelogs and optional nflverse usage for
-// every distinct matched athlete on the slip. A missing row or read error leaves
-// that player without stats.
-func (h *slipHandlers) playerStatsForLegs(
-	ctx context.Context,
-	legs []db.Leg,
-	usageByPlayer map[string]*analyzer.PlayerUsage,
-) map[string]analyzer.PlayerStats {
-	seen := make(map[string]struct{}, len(legs))
-	var athleteIDs []string
-	for _, leg := range legs {
-		if leg.PlayerID == nil || *leg.PlayerID == "" {
-			continue
-		}
-		id := *leg.PlayerID
-		if _, ok := seen[id]; !ok {
-			seen[id] = struct{}{}
-			athleteIDs = append(athleteIDs, id)
-		}
-	}
-	if len(athleteIDs) == 0 {
-		return nil
-	}
-
-	logs, err := h.deps.Store.PlayerGameLogs(ctx, athleteIDs)
-	if err != nil {
-		logs = nil
-	}
-
-	stats := make(map[string]analyzer.PlayerStats, len(athleteIDs))
-	for _, id := range athleteIDs {
-		var markets map[string][]float64
-		if log, ok := logs[id]; ok {
-			_ = json.Unmarshal([]byte(log.StatsJSON), &markets)
-		}
-		usage := usageByPlayer[id]
-		if len(markets) == 0 && usage == nil {
-			continue
-		}
-		stats[id] = analyzer.PlayerStats{
-			Games: markets,
-			Usage: usage,
-		}
-	}
-	return stats
 }
 
 // analyzerSeverity names the card's heading and the classes that color it.

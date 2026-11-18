@@ -3,8 +3,10 @@ package analyzer
 import (
 	"cmp"
 	"context"
+	"encoding/json"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/kalverra/parlay-club/internal/db"
@@ -300,4 +302,202 @@ func LegFromDB(leg db.Leg, owner string) Leg {
 		converted.Side = *leg.Side
 	}
 	return converted
+}
+
+// PlayerResearchSignals holds nflverse usage and opponent matchup rank for a
+// player research view. Zero values indicate missing or stale data.
+type PlayerResearchSignals struct {
+	HasUsage    bool
+	SnapPct     float64
+	TargetShare float64
+	WOPR        float64
+	Opponent    string
+	OppDefSplit string
+	OppDefRank  int
+}
+
+// LoadSlipSignals loads fresh nfelo projections, fresh nflverse team EPA/pace
+// profiles, nflverse player usage, and player_gamelogs for a slip's games and
+// legs. Missing or stale sources fail soft.
+func LoadSlipSignals(
+	ctx context.Context,
+	store *db.Store,
+	now time.Time,
+	weekID int64,
+	games []db.Game,
+	legs []db.Leg,
+) (map[string]Game, map[string]PlayerStats) {
+	nfelo := loadFreshNfelo(ctx, store, now, games)
+
+	var teamEPA map[string]*TeamDefenseProfile
+	var usageByPlayer map[string]*PlayerUsage
+	athleteIDs := distinctLegPlayerIDs(legs)
+
+	if week, err := store.WeekByID(ctx, weekID); err == nil {
+		if profiles, fresh := LoadFreshTeamProfiles(ctx, store, now, week); fresh {
+			teamEPA = profiles
+			usageByPlayer = LoadPlayerUsageForIDs(ctx, store, athleteIDs, week.Season, week.SeasonType)
+		}
+	}
+
+	gamesByID := make(map[string]Game, len(games))
+	for _, game := range games {
+		var proj *db.NfeloGame
+		if p, ok := nfelo[game.ID]; ok {
+			proj = &p
+		}
+		gamesByID[game.ID] = GameFromDB(game, proj, teamEPA)
+	}
+
+	if len(athleteIDs) == 0 {
+		return gamesByID, nil
+	}
+	logs, err := store.PlayerGameLogs(ctx, athleteIDs)
+	if err != nil {
+		logs = nil
+	}
+
+	stats := make(map[string]PlayerStats, len(athleteIDs))
+	for _, id := range athleteIDs {
+		var markets map[string][]float64
+		if log, ok := logs[id]; ok {
+			_ = json.Unmarshal([]byte(log.StatsJSON), &markets)
+		}
+		usage := usageByPlayer[id]
+		if len(markets) == 0 && usage == nil {
+			continue
+		}
+		stats[id] = PlayerStats{
+			Games: markets,
+			Usage: usage,
+		}
+	}
+	return gamesByID, stats
+}
+
+// LoadGameSignals loads fresh nflverse team defense profiles and player usage
+// for a single week's pick board. Missing or stale data fails soft with nil maps.
+func LoadGameSignals(
+	ctx context.Context,
+	store *db.Store,
+	now time.Time,
+	weekID int64,
+	playerIDs []string,
+) (map[string]*TeamDefenseProfile, map[string]*PlayerUsage) {
+	week, err := store.WeekByID(ctx, weekID)
+	if err != nil {
+		return nil, nil
+	}
+	teamEPA, fresh := LoadFreshTeamProfiles(ctx, store, now, week)
+	if !fresh {
+		return nil, nil
+	}
+	playerUsage := LoadPlayerUsageForIDs(ctx, store, playerIDs, week.Season, week.SeasonType)
+	return teamEPA, playerUsage
+}
+
+// LoadPlayerResearchSignals loads L3 nflverse usage and opponent defense rank
+// for the latest week when nflverse data is fresh.
+func LoadPlayerResearchSignals(
+	ctx context.Context,
+	store *db.Store,
+	now time.Time,
+	athleteID, team, position, activeMarket string,
+) PlayerResearchSignals {
+	week, err := store.LatestWeek(ctx)
+	if err != nil {
+		return PlayerResearchSignals{}
+	}
+	teamEPA, fresh := LoadFreshTeamProfiles(ctx, store, now, week)
+	if !fresh {
+		return PlayerResearchSignals{}
+	}
+
+	var res PlayerResearchSignals
+	if pWeeks, err := store.NFLversePlayerWeeksForPlayerTypes(
+		ctx, athleteID, week.Season, nflverseSeasonTypes(week.SeasonType)...,
+	); err == nil {
+		if snap, target, wopr, ok := SummarizeRecentUsage(pWeeks); ok {
+			res.HasUsage = true
+			res.SnapPct = snap
+			res.TargetShare = target
+			res.WOPR = wopr
+		}
+	}
+
+	if team == "" || len(teamEPA) == 0 {
+		return res
+	}
+	weekGames, err := store.GamesForWeek(ctx, week.ID)
+	if err != nil {
+		return res
+	}
+	opp := ""
+	for _, g := range weekGames {
+		switch team {
+		case g.HomeTeam:
+			opp = g.AwayTeam
+		case g.AwayTeam:
+			opp = g.HomeTeam
+		}
+		if opp != "" {
+			break
+		}
+	}
+	oppProf := teamEPA[opp]
+	if oppProf == nil {
+		return res
+	}
+	market := activeMarket
+	if market == "" {
+		if strings.EqualFold(position, "RB") {
+			market = "RUSH_YDS"
+		} else {
+			market = "PASS_YDS"
+		}
+	}
+	split, rank, ok := MatchupDefenseRank(market, oppProf)
+	if !ok {
+		return res
+	}
+	res.Opponent = opp
+	res.OppDefSplit = split
+	res.OppDefRank = rank
+	return res
+}
+
+func loadFreshNfelo(ctx context.Context, store *db.Store, now time.Time, games []db.Game) map[string]db.NfeloGame {
+	if len(games) == 0 {
+		return nil
+	}
+	state, err := store.SyncState(ctx, NfeloSource)
+	if err != nil || now.Sub(state.FetchedAt) > NfeloFreshFor {
+		return nil
+	}
+	gameIDs := make([]string, 0, len(games))
+	for _, game := range games {
+		gameIDs = append(gameIDs, game.ID)
+	}
+	rows, err := store.NfeloForGames(ctx, gameIDs)
+	if err != nil {
+		return nil
+	}
+	return rows
+}
+
+func distinctLegPlayerIDs(legs []db.Leg) []string {
+	seen := make(map[string]struct{}, len(legs))
+	var athleteIDs []string
+	for _, leg := range legs {
+		if leg.PlayerID == nil || *leg.PlayerID == "" {
+			continue
+		}
+		id := *leg.PlayerID
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		athleteIDs = append(athleteIDs, id)
+	}
+	return athleteIDs
 }
