@@ -164,21 +164,25 @@ missing row, a fetch older than 72 hours, or a live game leaves it off.
 `db.Store.CreateLeg` starts every leg `PENDING` and treats an odds value of 0 as -110.
 
 The slip's **reference odds** multiply each leg's reference price: the median of the prices the slip members' home books
-carry for the same game, market, player, side, and line, one price per book. A leg whose members' books do not price it
-keeps its own price. The formulas are in [Odds math](../reference/odds-math.md).
+carry for that leg via `db.MatchBookOdds` (one price per book, preferring an exact `Line` match and falling back to the
+book's current line for the same selection). A leg whose members' books do not price it keeps its own price. The formulas
+are in [Odds math](../reference/odds-math.md).
 
 ### Selection identity
 
 `db.SameSelection` (`internal/db/odds.go`) defines when two selections are the same pick, ignoring sportsbook, `Line`,
 price, and link:
 
-- **Player props:** Match on `GameID`, `MarketType`, and `Side`, plus ESPN `PlayerID` when both carry one, or normalized
-  player name (`db.NormalizePlayerName`) and non-empty `Team` otherwise.
+- **Player props (`db.SamePlayer`):** Match on `GameID`, `MarketType`, and `Side`, plus ESPN `PlayerID` when both carry
+  one, or normalized player name (`db.NormalizePlayerName`) with non-conflicting `Team` otherwise.
 - **Game markets (`SPREAD`, `ML`, `TOTAL`, `TEAM_TOTAL`):** Match on `GameID`, `MarketType`, `Team`, and `Side`.
 
-The pick board (`board.Row.MatchesLeg`), sportsbook export matching, and open-slip vote preservation all share this
-rule. A saved leg's `Line` is never mutated automatically in the background, so locked and final slips continue grading
-against the exact line recorded on the slip.
+The pick board (`board.Row.MatchesLeg`), `Fits slip` signal evaluation (`internal/board/signals.go`), sportsbook export
+matching and slip reference odds (`db.MatchBookOdds`), and open-slip vote preservation all share this rule.
+`db.SameLineGroup` pairs sides of the same line or player market on the pick board (`sameBoardLine`), and
+`db.MarketLabel`, `db.FormatSelection`, and `db.BuildLegSelection` provide the shared market labels and selection text
+formatting across the pick board, slip leg forms, and research. A saved leg's `Line` is never mutated automatically in
+the background, so locked and final slips continue grading against the exact line recorded on the slip.
 
 ## The pick board
 
@@ -345,8 +349,9 @@ or game link. It is not a bottom-bar tab.
 
 - **Game research (`GET /research/games/{id}`):** fetches ESPN summary injuries on demand, shows paired matchup logos in
   the header, and displays injuries filtered to key positions (`QB`, `RB`, `WR`, `TE`, `LT`, `OT`, `C`, `CB`, `S`) with
-  team logos on team headers and player portraits on injury rows. A player-match section lists sportsbook prop names
-  against matched ESPN roster athletes (with player portraits when matched), plus a manual match form
+  team logos on team headers and player portraits on injury rows. A player-match section resolves sportsbook prop names
+  in memory via `db.BatchPlayerResolver` against the game's preloaded rosters and `player_matches` (persisting newly
+  discovered matches), lists them against matched ESPN roster athletes with portraits, and provides a manual match form
   (`POST /research/matches`) to fix unmatched names or corrections.
 - **Player research (`GET /research/players/{espnID}`):** fetches the player's ESPN game log on demand, shows the
   player's portrait and team logo in the header, and displays last-5 hit bars (green over the line, red under), callouts
@@ -385,8 +390,9 @@ The slip result recomputes from every leg after each change:
 hit nor a miss.
 
 `OTHER` legs and any leg on a past-week slip normally grade by hand. For `FINAL` games, the lazy `grade` refresh source
-evaluates `PENDING` legs with `grader.GradeLeg` (`internal/grader`, using stored game scores for game/team markets and ESPN final
-box scores for player props) and calls `slips.Service.AutoGradeLegs`.
+evaluates `PENDING` legs with `grader.GradeLeg` (`internal/grader`, using stored game scores for game/team markets and
+ESPN final box scores for player props via `db.IsPlayerMarket`, `db.StripPlayerTag`, and `db.NormalizePlayerName`) and
+calls `slips.Service.AutoGradeLegs`.
 
 - **Override-safe writes:** `AutoGradeLegs` updates only legs where `result = 'PENDING'`, records `graded_by = "auto"`,
   writes a system activity entry (`user_id = NULL`, `"Auto-graded ..."`), recomputes the slip result and status, and

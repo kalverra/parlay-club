@@ -156,5 +156,9 @@ Effort: easy (mechanical consolidation of selection text and market label helper
 - [x] Add `MarketLabel`, `FormatSelection`, and `BuildLegSelection` in `internal/db/odds.go` and replace the duplicate
       implementations in `internal/board/board.go`, `internal/web/slips.go`, and `internal/web/research.go`, with unit
       tests in `internal/db/odds_test.go`.
-- [ ] Docs: update `docs/concepts/slips.md` and `docs/reference/data-sources.md` to reflect unified selection/book
+- [x] Docs: update `docs/concepts/slips.md` and `docs/reference/data-sources.md` to reflect unified selection/book
       matching and player resolution across grading and research.
+
+## Reviews
+
+- [x] Final review: agy@gemini-4-argon-high

@@ -381,22 +381,26 @@ team:
 - **Normalization (`NormalizePlayerName`):** strips any trailing parenthetical tag via `StripPlayerTag`, folds common
   Latin accents (`á`→`a`, `é`→`e`, `ñ`→`n`, etc.), lowercases, strips `.`, `'`, `-`, and `,`, collapses spaces, and
   drops a trailing generational suffix (`jr`, `sr`, `ii`, `iii`, `iv`, `v`) when preceded by a space.
-- **Batch prop resolution (`mapPropsToOdds`):** preloads `roster_players` (`RosterForTeams`) and `player_matches`
+- **Unified batch resolution (`db.BatchPlayerResolver`):** `internal/db/canonical_players.go` is the single player-matching
+  engine shared by prop ingest (`mapPropsToOdds`), game research (`loadGameResearch`), and single-row leg resolution
+  (`Store.ResolvePlayerMatch`). Each caller preloads `roster_players` (`RosterForTeams`) and `player_matches`
   (`PlayerMatchesForTeams`) once per game:
   1. Strips any `(TEAM)` tag via `StripPlayerTag` and validates `teamHint` against the game's home and away teams.
   2. Checks cached `player_matches` for the normalized name (`manual = 1` wins first, using `teamHint` to disambiguate
-     when valid).
+     when valid, and refusing ambiguous non-manual hits).
   3. On a cache miss, checks cached `roster_players` (disambiguating by `teamHint` when valid) and queues newly
      discovered `player_matches(odds_name, team, espn_athlete_id, manual=0)` rows for batch upsert via
-     `UpsertPlayerMatches` (preserving existing `manual = 1` overrides).
-  4. On a match, rewrites `odds.player_name` to the canonical `roster_players.full_name` and sets `odds.team` to the
-     matched team. On a miss, preserves a valid `teamHint` and collapses unmatched casing variants within the same game
-     batch by normalized name.
-  5. Deduplicates same-book collisions on `(game_id, book, market_type, team, player_name, side)`, preferring linked
-     rows and then rows with more `link`/`sid`/`event_sid` fields.
-- **Single-row resolution (`ResolvePlayerMatch`):** normalizes the name, checks `player_matches` for `(norm, homeTeam)`
-  and `(norm, awayTeam)` (`manual = 1` wins immediately), falls back to `roster_players`, and upserts an unambiguous
-  match with `manual = 0`.
+     `UpsertPlayerMatches` (preserving existing `manual = 1` overrides). `ResolvedPlayer` carries `AthleteID`,
+     `FullName`, `Team`, `Position`, and `HeadshotURL` from the matched `RosterPlayer`.
+  4. On prop ingest (`mapPropsToOdds`), rewrites `odds.player_name` to the canonical `roster_players.full_name`, sets
+     `odds.team` to the matched team, preserves a valid `teamHint` on a miss, collapses unmatched casing variants within
+     the same game batch by normalized name, and deduplicates same-book collisions on
+     `(game_id, book, market_type, team, player_name, side)` (preferring linked rows and then rows with more
+     `link`/`sid`/`event_sid` fields).
+- **Board and grading alignment:** `board.matchPlayer` (`internal/board/board.go`) extracts `teamHint` via
+  `db.StripPlayerTag` when `team` is empty. `grader.GradeLeg` (`internal/grader/grader.go`) uses `db.IsPlayerMarket`,
+  `db.StripPlayerTag`, and `db.NormalizePlayerName` so box-score grading handles `(TEAM)` tags, accents, and suffixes
+  identically to ingest and research.
 - **Manual overrides (`SaveManualPlayerMatch`):** writes `manual = 1` in `player_matches`. Auto-matching never
   overwrites a manual match. A manual save clears conflicting auto-matches for the opponent in that matchup, and
   backfills `team` on matching `odds` rows and `team` and `player_id` on matching `legs` rows.
