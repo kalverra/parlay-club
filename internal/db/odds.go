@@ -411,8 +411,46 @@ func (s *Store) UpsertOdds(ctx context.Context, rows []Odds) (bool, error) {
 	return changed, nil
 }
 
-// OddsForGame returns every stored price for one game, ordered by book, market,
-// team, player, and side so callers get a stable list.
+// IsPropRow reports whether an odds row belongs to the prop sync group.
+func IsPropRow(row Odds) bool {
+	return row.MarketType == "TEAM_TOTAL" || row.PlayerName != "" || IsPlayerMarket(row.MarketType)
+}
+
+// CurrentOdds drops rows left behind by an earlier sync. Game lines and props
+// are fetched independently and stamped with different fetch times, and props
+// are synced one game at a time, so CurrentOdds computes the newest FetchedAt
+// separately for each game's game-line rows and prop rows. Keeping the game in
+// the key means loading one game's props later does not hide another game's
+// props.
+func CurrentOdds(rows []Odds) []Odds {
+	if len(rows) == 0 {
+		return rows
+	}
+
+	type syncGroup struct {
+		gameID string
+		props  bool
+	}
+	newest := make(map[syncGroup]time.Time, len(rows))
+	for _, row := range rows {
+		group := syncGroup{row.GameID, IsPropRow(row)}
+		if row.FetchedAt.After(newest[group]) {
+			newest[group] = row.FetchedAt
+		}
+	}
+
+	current := make([]Odds, 0, len(rows))
+	for _, row := range rows {
+		group := syncGroup{row.GameID, IsPropRow(row)}
+		if !newest[group].IsZero() && row.FetchedAt.Equal(newest[group]) {
+			current = append(current, row)
+		}
+	}
+	return current
+}
+
+// OddsForGame returns the current stored prices for one game, ordered by book,
+// market, team, player, and side so callers get a stable list.
 func (s *Store) OddsForGame(ctx context.Context, gameID string) ([]Odds, error) {
 	rows, err := s.readConn().QueryContext(ctx, "SELECT"+oddsColumns+`
 		FROM odds
@@ -434,11 +472,11 @@ func (s *Store) OddsForGame(ctx context.Context, gameID string) ([]Odds, error) 
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("list odds for game %s: %w", gameID, err)
 	}
-	return odds, nil
+	return CurrentOdds(odds), nil
 }
 
-// OddsForWeek returns every stored price for one week's games, read in one
-// query so the pick board does not ask per game. Rows are ordered by game,
+// OddsForWeek returns the current stored prices for one week's games, read in
+// one query so the pick board does not ask per game. Rows are ordered by game,
 // book, market, team, player, and side so callers get a stable list.
 func (s *Store) OddsForWeek(ctx context.Context, weekID int64) ([]Odds, error) {
 	start := time.Now()
@@ -469,7 +507,7 @@ func (s *Store) OddsForWeek(ctx context.Context, weekID int64) ([]Odds, error) {
 			Int("rows", len(odds)).
 			Msg("slow sqlite odds for week")
 	}
-	return odds, nil
+	return CurrentOdds(odds), nil
 }
 
 // scanOdds reads the odds columns in oddsColumns order.

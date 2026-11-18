@@ -125,7 +125,7 @@ pick/research endpoints)
 
 Effort: easy (self-contained move of sync-group filtering into storage with direct unit tests)
 
-- [ ] Add `IsPropRow` and `CurrentOdds` in `internal/db/odds.go`, apply `CurrentOdds` inside `Store.OddsForGame` and
+- [x] Add `IsPropRow` and `CurrentOdds` in `internal/db/odds.go`, apply `CurrentOdds` inside `Store.OddsForGame` and
       `Store.OddsForWeek`, remove manual `currentOdds` calls from `internal/web`, and move
       `internal/web/current_odds_test.go` to `internal/db/odds_test.go` (plus add a stale-prop test in
       `internal/web/research_test.go`).

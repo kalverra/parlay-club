@@ -110,7 +110,6 @@ func (h *slipHandlers) exportView(ctx context.Context, slip db.Slip) (ExportView
 			if err != nil {
 				return ExportView{}, err
 			}
-			rows = currentOdds(rows)
 			oddsByGame[*leg.GameID] = rows
 			oddsRows = append(oddsRows, rows...)
 			for _, row := range rows {

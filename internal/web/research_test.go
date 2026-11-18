@@ -912,3 +912,46 @@ func TestResearchGameResolvesTeamHintInMemory(t *testing.T) {
 	assert.Contains(t, body, "Chris Jones")
 	assert.Contains(t, body, "Unmatched")
 }
+
+func TestResearchGameDropsStalePropPlayers(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	game := addGame(t, fixture, gameKickoff())
+	handler := researchHandlerWithRefresher(t, fixture, fixture.user, &researchTestRefresher{})
+
+	staleFetch := time.Date(2026, time.November, 9, 10, 0, 0, 0, time.UTC)
+	freshFetch := time.Date(2026, time.November, 9, 14, 0, 0, 0, time.UTC)
+	_, err := fixture.store.UpsertOdds(t.Context(), []db.Odds{
+		{
+			GameID:     game.ID,
+			Book:       "draftkings",
+			MarketType: "RUSH_YDS",
+			PlayerName: "Stale Runner",
+			Side:       "OVER",
+			Line:       new(30.5),
+			Price:      -110,
+			FetchedAt:  staleFetch,
+		},
+		{
+			GameID:     game.ID,
+			Book:       "draftkings",
+			MarketType: "PASS_YDS",
+			PlayerName: "Josh Allen",
+			Side:       "OVER",
+			Line:       new(250.5),
+			Price:      -110,
+			FetchedAt:  freshFetch,
+		},
+	})
+	require.NoError(t, err)
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/research/games/"+game.ID, nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	body := rec.Body.String()
+	assert.Contains(t, body, "Josh Allen")
+	assert.NotContains(t, body, "Stale Runner")
+}

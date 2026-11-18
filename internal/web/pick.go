@@ -525,7 +525,7 @@ func (h *slipHandlers) pickPageData(
 	now := q.Now
 
 	boardStart := time.Now()
-	rows := board.Build(games, currentOdds(odds), roster, homeBook, mine, now)
+	rows := board.Build(games, odds, roster, homeBook, mine, now)
 	AddBoardTiming(ctx, time.Since(boardStart))
 
 	dockStart := time.Now()
@@ -599,7 +599,7 @@ func (h *slipHandlers) pickSlateData(
 	now := q.Now
 
 	boardStart := time.Now()
-	rows := board.Build(games, currentOdds(odds), roster, homeBook, nil, now)
+	rows := board.Build(games, odds, roster, homeBook, nil, now)
 	slate, _, _, _ := buildPickSlate(slip, games, rows, roster, q, now)
 	AddBoardTiming(ctx, time.Since(boardStart))
 	return slate, nil
@@ -646,7 +646,7 @@ func (h *slipHandlers) pickDetailData(
 
 	boardStart := time.Now()
 	gameSlice := []db.Game{game}
-	rows := board.Build(gameSlice, currentOdds(odds), roster, homeBook, mine, now)
+	rows := board.Build(gameSlice, odds, roster, homeBook, mine, now)
 	openCards := board.Slates(gameSlice, rows, roster, board.Query{Window: q.Window, Now: now})
 	AddBoardTiming(ctx, time.Since(boardStart))
 	if len(openCards) == 0 {
@@ -1075,7 +1075,7 @@ func (h *slipHandlers) pickDockData(ctx context.Context, slip db.Slip) (PickDock
 		if err != nil {
 			return PickDockView{}, err
 		}
-		boardRows = board.Build(games, currentOdds(odds), roster, homeBook, mine, q.Now)
+		boardRows = board.Build(games, odds, roster, homeBook, mine, q.Now)
 	}
 	return h.dockFrom(ctx, slip, legs, games, mine, boardRows)
 }
@@ -1475,7 +1475,7 @@ func (h *slipHandlers) pickPairRow(
 	}
 	mine := legsForUser(legs, user.ID)
 	rows := board.Build(
-		[]db.Game{game}, currentOdds(odds), roster, homeBook, mine, h.deps.now())
+		[]db.Game{game}, odds, roster, homeBook, mine, h.deps.now())
 	var playerIDs []string
 	if leg.PlayerID != nil && *leg.PlayerID != "" {
 		playerIDs = []string{*leg.PlayerID}

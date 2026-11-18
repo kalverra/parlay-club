@@ -110,7 +110,6 @@ func (h *gameHandlers) props(w http.ResponseWriter, r *http.Request) {
 		h.serverError(w, err)
 		return
 	}
-	rows = currentOdds(rows)
 
 	user, hasUser := h.user(r.Context())
 	homeBook := ""
@@ -247,44 +246,6 @@ func gameLineView(row board.Row) GameLineView {
 		view.Line = formatFloat(*row.Line)
 	}
 	return view
-}
-
-// isPropRow reports whether an odds row belongs to the prop sync group.
-func isPropRow(row db.Odds) bool {
-	return board.IsPropRow(row)
-}
-
-// currentOdds drops rows left behind by an earlier sync. Game lines and props
-// are fetched independently and stamped with different fetch times, and props
-// are synced one game at a time, so currentOdds computes the newest FetchedAt
-// separately for each game's game-line rows and prop rows. Keeping the game in
-// the key means loading one game's props later does not hide another game's
-// props.
-func currentOdds(rows []db.Odds) []db.Odds {
-	if len(rows) == 0 {
-		return rows
-	}
-
-	type syncGroup struct {
-		gameID string
-		props  bool
-	}
-	newest := make(map[syncGroup]time.Time, len(rows))
-	for _, row := range rows {
-		group := syncGroup{row.GameID, isPropRow(row)}
-		if row.FetchedAt.After(newest[group]) {
-			newest[group] = row.FetchedAt
-		}
-	}
-
-	current := make([]db.Odds, 0, len(rows))
-	for _, row := range rows {
-		group := syncGroup{row.GameID, isPropRow(row)}
-		if !newest[group].IsZero() && row.FetchedAt.Equal(newest[group]) {
-			current = append(current, row)
-		}
-	}
-	return current
 }
 
 // user returns the signed-in person.
