@@ -138,7 +138,7 @@ export, and web)
       `internal/db/players.go` to delegate to `db.BatchPlayerResolver` (honoring `StripPlayerTag` team hints), and
       update `loadGameResearch` in `internal/web/research.go` and `matchPlayer` in `internal/board/board.go` to use it,
       with tests in `internal/db/players_test.go` and `internal/web/research_test.go`.
-- [ ] Replace `normalizePlayerName` and `IsPlayerMarket` in `internal/grader/grader.go` with `db.NormalizePlayerName`
+- [x] Replace `normalizePlayerName` and `IsPlayerMarket` in `internal/grader/grader.go` with `db.NormalizePlayerName`
       and `db.IsPlayerMarket`, and add accent-folded and `(TEAM)`-tagged prop grading tests in
       `internal/grader/grader_test.go`.
 

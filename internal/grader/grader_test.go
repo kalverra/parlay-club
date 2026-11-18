@@ -5,6 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/kalverra/parlay-club/internal/db"
 	"github.com/kalverra/parlay-club/internal/grader"
 	"github.com/kalverra/parlay-club/internal/ingest/espn"
 	"github.com/kalverra/parlay-club/internal/parlay"
@@ -577,6 +578,98 @@ func TestGradeLeg_PlayerProps(t *testing.T) {
 	}
 }
 
+func TestGradeLeg_PlayerNameNormalization(t *testing.T) {
+	t.Parallel()
+
+	game := grader.GameScore{
+		HomeTeam:  "BUF",
+		AwayTeam:  "MIA",
+		HomeScore: new(27),
+		AwayScore: new(20),
+		Final:     true,
+	}
+	box := &espn.BoxScore{
+		Completed: true,
+		HasStats:  true,
+		Players: []espn.PlayerBoxStats{
+			{
+				PlayerID:    "1001",
+				DisplayName: "José Ramírez",
+				TeamAbbrev:  "BUF",
+				Receiving:   espn.ReceivingStats{Receptions: 6, ReceivingYards: 78},
+			},
+			{
+				PlayerID:    "1002",
+				DisplayName: "Ollie Gordon",
+				TeamAbbrev:  "BUF",
+				Rushing:     espn.RushingStats{RushingYards: 22},
+			},
+			{
+				PlayerID:    "1003",
+				DisplayName: "Ollie Gordon II",
+				TeamAbbrev:  "MIA",
+				Rushing:     espn.RushingStats{RushingYards: 88},
+			},
+		},
+	}
+
+	tests := []struct {
+		name string
+		leg  grader.LegInput
+		want parlay.Result
+	}{
+		{
+			name: "unaccented leg matches accented box score player",
+			leg: grader.LegInput{
+				Market:     "REC_YDS",
+				PlayerName: "Jose Ramirez",
+				Team:       "BUF",
+				Side:       "OVER",
+				Line:       new(65.5),
+			},
+			want: parlay.Won,
+		},
+		{
+			name: "accented leg matches accented box score player",
+			leg: grader.LegInput{
+				Market:     "RECEPTIONS",
+				PlayerName: "José Ramírez",
+				Team:       "BUF",
+				Side:       "OVER",
+				Line:       new(5.5),
+			},
+			want: parlay.Won,
+		},
+		{
+			name: "TEAM tag strips suffix and disambiguates team when leg team is empty",
+			leg: grader.LegInput{
+				Market:     "RUSH_YDS",
+				PlayerName: "Ollie Gordon II (MIA)",
+				Side:       "OVER",
+				Line:       new(50.5),
+			},
+			want: parlay.Won,
+		},
+		{
+			name: "TEAM tag BUF selects BUF player instead of MIA namesake",
+			leg: grader.LegInput{
+				Market:     "RUSH_YDS",
+				PlayerName: "Ollie Gordon (BUF)",
+				Side:       "OVER",
+				Line:       new(50.5),
+			},
+			want: parlay.Lost,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, grader.GradeLeg(tt.leg, game, box))
+		})
+	}
+}
+
 func TestIsPlayerMarket(t *testing.T) {
 	t.Parallel()
 
@@ -585,11 +678,11 @@ func TestIsPlayerMarket(t *testing.T) {
 		"REC_YDS", "RECEPTIONS", "ANYTIME_TD", "KICKER_PTS",
 	}
 	for _, m := range playerMarkets {
-		assert.True(t, grader.IsPlayerMarket(m), m)
+		assert.True(t, db.IsPlayerMarket(m), m)
 	}
 
 	nonPlayerMarkets := []string{"SPREAD", "ML", "TOTAL", "TEAM_TOTAL", "OTHER", ""}
 	for _, m := range nonPlayerMarkets {
-		assert.False(t, grader.IsPlayerMarket(m), m)
+		assert.False(t, db.IsPlayerMarket(m), m)
 	}
 }

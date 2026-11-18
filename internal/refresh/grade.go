@@ -121,7 +121,7 @@ func (s *Service) syncGrade(ctx context.Context, now time.Time) (bool, error) {
 
 func hasPlayerProp(items []db.PendingFinalLeg) bool {
 	for _, item := range items {
-		if grader.IsPlayerMarket(item.Leg.MarketType) {
+		if db.IsPlayerMarket(item.Leg.MarketType) {
 			return true
 		}
 	}

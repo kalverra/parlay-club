@@ -6,6 +6,7 @@ import (
 	"math"
 	"strings"
 
+	"github.com/kalverra/parlay-club/internal/db"
 	"github.com/kalverra/parlay-club/internal/ingest/espn"
 	"github.com/kalverra/parlay-club/internal/parlay"
 )
@@ -31,18 +32,6 @@ type GameScore struct {
 	Final     bool
 }
 
-// IsPlayerMarket reports whether market targets an athlete's box score stats
-// rather than a game or team score.
-func IsPlayerMarket(market string) bool {
-	switch strings.ToUpper(strings.TrimSpace(market)) {
-	case "PASS_YDS", "PASS_TDS", "RUSH_YDS", "RUSH_ATT",
-		"REC_YDS", "RECEPTIONS", "ANYTIME_TD", "KICKER_PTS":
-		return true
-	default:
-		return false
-	}
-}
-
 // GradeLeg evaluates leg against a final game score and optional ESPN box
 // score. Non-final games return parlay.Pending. Missing scores, missing lines,
 // unmatched teams, unpopulated box scores (HasStats == false), and OTHER
@@ -63,12 +52,12 @@ func GradeLeg(leg LegInput, game GameScore, box *espn.BoxScore) parlay.Result {
 		return gradeTotal(leg, game)
 	case "TEAM_TOTAL":
 		return gradeTeamTotal(leg, game)
-	case "PASS_YDS", "PASS_TDS", "RUSH_YDS", "RUSH_ATT",
-		"REC_YDS", "RECEPTIONS", "ANYTIME_TD", "KICKER_PTS":
-		return gradePlayerProp(market, leg, box)
 	case "OTHER":
 		return parlay.NeedsGrading
 	default:
+		if db.IsPlayerMarket(market) {
+			return gradePlayerProp(market, leg, box)
+		}
 		return parlay.NeedsGrading
 	}
 }
@@ -145,7 +134,7 @@ func gradePlayerProp(market string, leg LegInput, box *espn.BoxScore) parlay.Res
 	}
 
 	playerID := strings.TrimSpace(leg.PlayerID)
-	normName := normalizePlayerName(leg.PlayerName)
+	normName := db.NormalizePlayerName(leg.PlayerName)
 	if playerID == "" && normName == "" {
 		return parlay.NeedsGrading
 	}
@@ -153,7 +142,11 @@ func gradePlayerProp(market string, leg LegInput, box *espn.BoxScore) parlay.Res
 		return parlay.NeedsGrading
 	}
 
-	player, found := findPlayer(box.Players, playerID, normName, leg.Team)
+	team := leg.Team
+	if strings.TrimSpace(team) == "" {
+		_, team = db.StripPlayerTag(leg.PlayerName)
+	}
+	player, found := findPlayer(box.Players, playerID, normName, team)
 	if !found {
 		return parlay.Void
 	}
@@ -261,36 +254,9 @@ func findPlayer(players []espn.PlayerBoxStats, playerID, normName, team string) 
 		if teamNorm != "" && p.TeamAbbrev != "" && !strings.EqualFold(strings.TrimSpace(p.TeamAbbrev), teamNorm) {
 			continue
 		}
-		if normalizePlayerName(p.DisplayName) == normName {
+		if db.NormalizePlayerName(p.DisplayName) == normName {
 			return p, true
 		}
 	}
 	return espn.PlayerBoxStats{}, false
-}
-
-// normalizePlayerName mirrors db.NormalizePlayerName: lowercases, strips '.',
-// ”', '-', and ',', collapses whitespace, and drops a trailing generational
-// suffix (jr, sr, ii, iii, iv, v) when preceded by a space.
-func normalizePlayerName(name string) string {
-	name = strings.ToLower(name)
-	var b strings.Builder
-	b.Grow(len(name))
-	for _, r := range name {
-		switch r {
-		case '.', '\'', '-', ',':
-		default:
-			b.WriteRune(r)
-		}
-	}
-	fields := strings.Fields(b.String())
-	if len(fields) == 0 {
-		return ""
-	}
-	switch fields[len(fields)-1] {
-	case "jr", "sr", "ii", "iii", "iv", "v":
-		if len(fields) > 1 {
-			fields = fields[:len(fields)-1]
-		}
-	}
-	return strings.Join(fields, " ")
 }
