@@ -2,10 +2,12 @@ package db
 
 // ResolvedPlayer is the canonicalized player identity for a prop or leg row.
 type ResolvedPlayer struct {
-	Name      string
-	Team      string
-	AthleteID string
-	Linked    bool
+	Name        string
+	Team        string
+	AthleteID   string
+	Position    string
+	HeadshotURL string
+	Linked      bool
 }
 
 type playerTeamKey struct {
@@ -90,17 +92,22 @@ func (r *BatchPlayerResolver) ResolvePlayer(
 	preferTeam := preferredTeam(existingTeam, teamHint, homeTeam, awayTeam, hasGame)
 
 	if m, ok := r.matchFromCache(norm, preferTeam, homeTeam, awayTeam, hasGame); ok {
-		name := ""
-		if rp, found := r.rosterByAthleteID[m.ESPNAthleteID]; found && rp.FullName != "" {
+		var name, position, headshotURL string
+		if rp, found := r.rosterByAthleteID[m.ESPNAthleteID]; found {
 			name = rp.FullName
-		} else {
+			position = rp.Position
+			headshotURL = rp.HeadshotURL
+		}
+		if name == "" {
 			name = r.unifySpelling(gameID, norm, cleaned)
 		}
 		return ResolvedPlayer{
-			Name:      name,
-			Team:      m.Team,
-			AthleteID: m.ESPNAthleteID,
-			Linked:    true,
+			Name:        name,
+			Team:        m.Team,
+			AthleteID:   m.ESPNAthleteID,
+			Position:    position,
+			HeadshotURL: headshotURL,
+			Linked:      true,
 		}
 	}
 
@@ -119,10 +126,12 @@ func (r *BatchPlayerResolver) ResolvePlayer(
 			}
 		}
 		return ResolvedPlayer{
-			Name:      rp.FullName,
-			Team:      rp.Team,
-			AthleteID: rp.AthleteID,
-			Linked:    true,
+			Name:        rp.FullName,
+			Team:        rp.Team,
+			AthleteID:   rp.AthleteID,
+			Position:    rp.Position,
+			HeadshotURL: rp.HeadshotURL,
+			Linked:      true,
 		}
 	}
 
