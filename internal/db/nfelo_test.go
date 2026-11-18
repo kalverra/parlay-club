@@ -71,3 +71,57 @@ func TestNfeloForGameReportsAMissingRow(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, ok, "a game with no projection is a normal empty read")
 }
+
+func TestNfeloForGames(t *testing.T) {
+	t.Parallel()
+
+	store, _ := openTestStore(t)
+	week := createTestWeek(t, store, 9)
+
+	g1 := testSlateGame(week)
+	g1.ID = "game-1"
+	g2 := testSlateGame(week)
+	g2.ID = "game-2"
+	g2.HomeTeam = "KC"
+	g2.AwayTeam = "LAC"
+	_, err := store.UpsertGame(t.Context(), g1)
+	require.NoError(t, err)
+	_, err = store.UpsertGame(t.Context(), g2)
+	require.NoError(t, err)
+
+	now := time.Date(2026, time.November, 7, 12, 0, 0, 0, time.UTC)
+	row1 := db.NfeloGame{
+		GameID:      g1.ID,
+		HomeSpread:  -7.5,
+		HomeWinProb: 0.72,
+		HomeQB:      "Josh Allen",
+		AwayQB:      "Tua Tagovailoa",
+		HomeQBAdj:   18.5,
+		AwayQBAdj:   -4.25,
+		UpdatedAt:   now,
+	}
+	row2 := db.NfeloGame{
+		GameID:      g2.ID,
+		HomeSpread:  -3.5,
+		HomeWinProb: 0.61,
+		HomeQB:      "Patrick Mahomes",
+		AwayQB:      "Justin Herbert",
+		HomeQBAdj:   22.0,
+		AwayQBAdj:   10.0,
+		UpdatedAt:   now,
+	}
+	_, err = store.UpsertNfeloGames(t.Context(), []db.NfeloGame{row1, row2})
+	require.NoError(t, err)
+
+	empty, err := store.NfeloForGames(t.Context(), nil)
+	require.NoError(t, err)
+	assert.Empty(t, empty)
+
+	partial, err := store.NfeloForGames(t.Context(), []string{g1.ID, "missing-game"})
+	require.NoError(t, err)
+	assert.Equal(t, map[string]db.NfeloGame{g1.ID: row1}, partial)
+
+	full, err := store.NfeloForGames(t.Context(), []string{g1.ID, g2.ID})
+	require.NoError(t, err)
+	assert.Equal(t, map[string]db.NfeloGame{g1.ID: row1, g2.ID: row2}, full)
+}

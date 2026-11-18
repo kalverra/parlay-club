@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -85,13 +86,58 @@ func (s *Store) UpsertNfeloGames(ctx context.Context, rows []NfeloGame) (bool, e
 // game has no row, which is normal before the first sync or when the CSV has no
 // matching game.
 func (s *Store) NfeloForGame(ctx context.Context, gameID string) (NfeloGame, bool, error) {
+	row := s.readConn().QueryRowContext(ctx, "SELECT"+nfeloColumns+`
+		FROM nfelo_games
+		WHERE game_id = ?`, gameID)
+	projection, err := scanNfeloGame(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return NfeloGame{}, false, nil
+	}
+	if err != nil {
+		return NfeloGame{}, false, fmt.Errorf("nfelo game %s: %w", gameID, err)
+	}
+	return projection, true, nil
+}
+
+// NfeloForGames returns nfelo projections for multiple game IDs indexed by
+// game_id. Missing games are omitted from the returned map.
+func (s *Store) NfeloForGames(ctx context.Context, gameIDs []string) (map[string]NfeloGame, error) {
+	if len(gameIDs) == 0 {
+		return map[string]NfeloGame{}, nil
+	}
+	placeholders := strings.Repeat("?,", len(gameIDs))
+	placeholders = placeholders[:len(placeholders)-1]
+	args := make([]any, len(gameIDs))
+	for i, id := range gameIDs {
+		args[i] = id
+	}
+	rows, err := s.readConn().QueryContext(ctx,
+		"SELECT"+nfeloColumns+" FROM nfelo_games WHERE game_id IN ("+placeholders+")", args...)
+	if err != nil {
+		return nil, fmt.Errorf("nfelo games: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	result := make(map[string]NfeloGame, len(gameIDs))
+	for rows.Next() {
+		projection, err := scanNfeloGame(rows)
+		if err != nil {
+			return nil, fmt.Errorf("nfelo games: %w", err)
+		}
+		result[projection.GameID] = projection
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("nfelo games: %w", err)
+	}
+	return result, nil
+}
+
+func scanNfeloGame(scanner interface{ Scan(...any) error }) (NfeloGame, error) {
 	var (
 		projection NfeloGame
 		updatedAt  string
 	)
-	err := s.readConn().QueryRowContext(ctx, "SELECT"+nfeloColumns+`
-		FROM nfelo_games
-		WHERE game_id = ?`, gameID).Scan(
+	if err := scanner.Scan(
 		&projection.GameID,
 		&projection.HomeSpread,
 		&projection.HomeWinProb,
@@ -100,18 +146,13 @@ func (s *Store) NfeloForGame(ctx context.Context, gameID string) (NfeloGame, boo
 		&projection.HomeQBAdj,
 		&projection.AwayQBAdj,
 		&updatedAt,
-	)
-	if errors.Is(err, sql.ErrNoRows) {
-		return NfeloGame{}, false, nil
+	); err != nil {
+		return NfeloGame{}, err
 	}
-	if err != nil {
-		return NfeloGame{}, false, fmt.Errorf("nfelo game %s: %w", gameID, err)
-	}
-
 	parsed, err := scanTimestamp(updatedAt)
 	if err != nil {
-		return NfeloGame{}, false, fmt.Errorf("nfelo game %s: %w", gameID, err)
+		return NfeloGame{}, err
 	}
 	projection.UpdatedAt = parsed
-	return projection, true, nil
+	return projection, nil
 }
