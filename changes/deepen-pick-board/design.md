@@ -132,7 +132,7 @@ Effort: easy (self-contained move of sync-group filtering into storage with dire
 
 ### Phase 2: Deepen `board.Build`, `board.BuildSlate`, and `board.LineGroupForLeg`
 
-- [ ] Extend `board.Row` with picked-leg drift fields (`PickedLine`, `PickedOdds`, `Drifted`, `BoardDriftNote`,
+- [x] Extend `board.Row` with picked-leg drift fields (`PickedLine`, `PickedOdds`, `Drifted`, `BoardDriftNote`,
       `TrayDriftNote`) in `board.Build`, and add `BuildSlate`, `LineGroup.HoldsLeg`, and `LineGroupForLeg` in
       `internal/board/board.go`, with unit tests in `internal/board/board_test.go`.
 - [ ] Simplify `pickPageData`, `pickSlateData`, `pickDetailData`, `buildPickSlate`, `dockFrom`, `pickRowView`, and
