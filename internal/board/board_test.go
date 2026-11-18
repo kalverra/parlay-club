@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/kalverra/parlay-club/internal/analyzer"
 	"github.com/kalverra/parlay-club/internal/board"
 	"github.com/kalverra/parlay-club/internal/db"
 )
@@ -1232,4 +1233,251 @@ func TestRowMatchesLegAndBuildStayBoundAcrossLineMoves(t *testing.T) {
 	assert.Equal(t, int64(0), pickedByKey["RUSH_YDS|UNDER"])
 	assert.Equal(t, int64(12), pickedByKey["SPREAD|TEAM"])
 	assert.Equal(t, int64(13), pickedByKey["TOTAL|OVER"])
+}
+
+func TestBuildPopulatesPickedDriftFields(t *testing.T) {
+	t.Parallel()
+
+	kickoff := at(t, 8, 13, 0)
+	g := game("401", kickoff)
+	rows := []db.Odds{
+		odds("401", "fanduel", "SPREAD", "BUF", "", "TEAM", new(-4.5), -110),
+		odds("401", "fanduel", "ML", "MIA", "", "TEAM", nil, 165),
+		odds("401", "fanduel", "TOTAL", "", "", "OVER", new(47.5), -110),
+	}
+	mine := []db.Leg{
+		{
+			ID:         1,
+			GameID:     new("401"),
+			MarketType: "SPREAD",
+			Team:       new("BUF"),
+			Side:       new("TEAM"),
+			Line:       new(-3.5),
+			Odds:       -110,
+		},
+		{
+			ID:         2,
+			GameID:     new("401"),
+			MarketType: "ML",
+			Team:       new("MIA"),
+			Side:       new("TEAM"),
+			Odds:       145,
+		},
+		{
+			ID:         3,
+			GameID:     new("401"),
+			MarketType: "TOTAL",
+			Side:       new("OVER"),
+			Line:       new(47.5),
+			Odds:       -110,
+		},
+	}
+
+	built := board.Build([]db.Game{g}, rows, nil, "fanduel", mine, kickoff.Add(-time.Hour))
+	byMarket := make(map[string]board.Row, len(built))
+	for _, r := range built {
+		byMarket[r.Market] = r
+	}
+
+	spread := byMarket["SPREAD"]
+	require.Equal(t, int64(1), spread.Picked)
+	require.NotNil(t, spread.PickedLine)
+	assert.InDelta(t, -3.5, *spread.PickedLine, 0.001)
+	assert.Equal(t, -110, spread.PickedOdds)
+	assert.True(t, spread.Drifted)
+	assert.Equal(t, "Slip -3.5 · now -4.5", spread.BoardDriftNote)
+	assert.Equal(t, "Now -4.5 (-110)", spread.TrayDriftNote)
+
+	ml := byMarket["ML"]
+	require.Equal(t, int64(2), ml.Picked)
+	assert.Nil(t, ml.PickedLine)
+	assert.Equal(t, 145, ml.PickedOdds)
+	assert.True(t, ml.Drifted)
+	assert.Equal(t, "Slip +145 · now +165", ml.BoardDriftNote)
+	assert.Equal(t, "Now +165", ml.TrayDriftNote)
+
+	total := byMarket["TOTAL"]
+	require.Equal(t, int64(3), total.Picked)
+	require.NotNil(t, total.PickedLine)
+	assert.InDelta(t, 47.5, *total.PickedLine, 0.001)
+	assert.Equal(t, -110, total.PickedOdds)
+	assert.False(t, total.Drifted)
+	assert.Empty(t, total.BoardDriftNote)
+	assert.Empty(t, total.TrayDriftNote)
+}
+
+func TestBuildSlateResolvesOpenGameUnloadedAndStates(t *testing.T) {
+	t.Parallel()
+
+	thu := at(t, 5, 20, 15)
+	sunEarly := at(t, 8, 13, 0)
+	sunLate := at(t, 8, 16, 25)
+	now := thu.Add(time.Hour) // Thursday game has started; Sunday games remain.
+
+	gThu := game("thu", thu)
+	gEarly := game("early", sunEarly)
+	gLate := db.Game{
+		ID:       "late",
+		AwayTeam: "KC",
+		HomeTeam: "DEN",
+		AwayName: "Kansas City Chiefs",
+		HomeName: "Denver Broncos",
+		Kickoff:  sunLate,
+		Status:   db.GameScheduled,
+	}
+	games := []db.Game{gThu, gEarly, gLate}
+
+	roster := []db.RosterPlayer{
+		{
+			AthleteID: "kc-mahomes",
+			Team:      "KC",
+			FullName:  "Patrick Mahomes",
+			NormName:  db.NormalizePlayerName("Patrick Mahomes"),
+			Position:  "QB",
+		},
+	}
+
+	rows := board.Build(games, []db.Odds{
+		odds("early", "fanduel", "SPREAD", "BUF", "", "TEAM", new(-3.5), -110),
+		odds("late", "fanduel", "SPREAD", "KC", "", "TEAM", new(-6.5), -110),
+		odds("late", "fanduel", "PASS_YDS", "KC", "Patrick Mahomes", "OVER", new(275.5), -110),
+	}, roster, "fanduel", nil, now)
+
+	t.Run("resolves open game, unloaded flag, and window counts", func(t *testing.T) {
+		t.Parallel()
+		slate := board.BuildSlate(games, rows, roster, board.Query{
+			GameID: "early",
+			Q:      "Mahomes",
+			Now:    now,
+		})
+		assert.Equal(t, 1, slate.Started)
+		assert.Equal(t, "early", slate.ResolvedGameID)
+		require.NotNil(t, slate.OpenGame)
+		assert.Equal(t, "early", slate.OpenGame.ID)
+		assert.True(t, slate.OpenGame.Unloaded, "game with lines and no props is unloaded")
+		assert.Equal(t, 1, slate.WindowCounts[board.WindowSundayEarly])
+		assert.Equal(t, 2, slate.WindowCounts[board.WindowSundayLate])
+		assert.False(t, slate.NoGames)
+		assert.False(t, slate.AllStarted)
+		assert.False(t, slate.NoLines)
+		assert.False(t, slate.Empty)
+		require.Len(t, slate.Cards, 1)
+		assert.Equal(t, "late", slate.Cards[0].ID)
+		assert.False(t, slate.Cards[0].Unloaded, "game with props is not unloaded")
+	})
+
+	t.Run("clears resolved game when kicked off or outside window", func(t *testing.T) {
+		t.Parallel()
+		startedSlate := board.BuildSlate(games, rows, nil, board.Query{GameID: "thu", Now: now})
+		assert.Nil(t, startedSlate.OpenGame)
+		assert.Empty(t, startedSlate.ResolvedGameID)
+
+		wrongWindow := board.BuildSlate(games, rows, nil, board.Query{
+			GameID: "early",
+			Window: board.WindowSundayLate,
+			Now:    now,
+		})
+		assert.Nil(t, wrongWindow.OpenGame)
+		assert.Empty(t, wrongWindow.ResolvedGameID)
+	})
+
+	t.Run("empty state flags", func(t *testing.T) {
+		t.Parallel()
+		noGames := board.BuildSlate(nil, nil, nil, board.Query{Now: now})
+		assert.True(t, noGames.NoGames)
+		assert.False(t, noGames.AllStarted)
+		assert.False(t, noGames.NoLines)
+		assert.False(t, noGames.Empty)
+
+		allStarted := board.BuildSlate([]db.Game{gThu}, nil, nil, board.Query{Now: now})
+		assert.True(t, allStarted.AllStarted)
+		assert.False(t, allStarted.NoLines)
+		assert.False(t, allStarted.Empty)
+
+		noLines := board.BuildSlate([]db.Game{gEarly}, nil, nil, board.Query{Now: now})
+		assert.True(t, noLines.NoLines)
+		assert.False(t, noLines.Empty)
+
+		filteredEmpty := board.BuildSlate(games, rows, nil, board.Query{Q: "nonexistent-team", Now: now})
+		assert.True(t, filteredEmpty.Empty)
+	})
+}
+
+func TestLineGroupForLegAndHoldsLeg(t *testing.T) {
+	t.Parallel()
+
+	kickoff := at(t, 8, 13, 0)
+	g := game("401", kickoff)
+	raw := []db.Odds{
+		odds("401", "fanduel", "PASS_YDS", "BUF", "Josh Allen", "OVER", new(255.5), -110),
+		odds("401", "fanduel", "PASS_YDS", "BUF", "Josh Allen", "UNDER", new(255.5), -110),
+		odds("401", "fanduel", "SPREAD", "BUF", "", "TEAM", new(-3.5), -110),
+		odds("401", "fanduel", "SPREAD", "MIA", "", "TEAM", new(3.5), -110),
+	}
+	roster := []db.RosterPlayer{
+		{
+			AthleteID: "qb1",
+			FullName:  "Josh Allen",
+			NormName:  db.NormalizePlayerName("Josh Allen"),
+			Team:      "BUF",
+			Position:  "QB",
+		},
+	}
+	pickedLeg := db.Leg{
+		ID:         42,
+		GameID:     new("401"),
+		MarketType: "PASS_YDS",
+		Team:       new("BUF"),
+		PlayerName: new("Josh Allen"),
+		PlayerID:   new("qb1"),
+		Side:       new("OVER"),
+		Line:       new(255.5),
+		Odds:       -110,
+	}
+	rows := board.Build([]db.Game{g}, raw, roster, "fanduel", []db.Leg{pickedLeg}, kickoff.Add(-time.Hour))
+	signals := board.BoardSignals{
+		TeamEPA: map[string]*analyzer.TeamDefenseProfile{
+			"MIA": {DefPassEPAAllowedRank: 30},
+		},
+		PlayerUsage: map[string]*analyzer.PlayerUsage{
+			"qb1": {
+				SeasonTargetShare: 0.25,
+				Weeks:             []analyzer.PlayerWeekUsage{{WeekNum: 1, TargetShare: 0.25}},
+			},
+		},
+	}
+
+	group, ok := board.LineGroupForLeg(g, rows, pickedLeg, signals)
+	require.True(t, ok)
+	assert.Equal(t, "PASS_YDS", group.Market)
+	require.Len(t, group.Options, 2)
+	assert.Equal(t, int64(42), group.Options[0].Picked)
+	assert.Equal(t, board.BadgeSmashMatchup, group.Options[0].Badge)
+	assert.True(t, group.HoldsLeg(pickedLeg))
+
+	// A just-deleted leg (not in mine, so Picked == 0 on rows) still matches by selection fields.
+	deletedSpread := db.Leg{
+		ID:         99,
+		GameID:     new("401"),
+		MarketType: "SPREAD",
+		Team:       new("MIA"),
+		Side:       new("TEAM"),
+		Line:       new(3.5),
+		Odds:       -110,
+	}
+	spreadGroup, ok := board.LineGroupForLeg(g, rows, deletedSpread, signals)
+	require.True(t, ok)
+	assert.Equal(t, "SPREAD", spreadGroup.Market)
+	assert.True(t, spreadGroup.HoldsLeg(deletedSpread))
+	assert.False(t, spreadGroup.HoldsLeg(pickedLeg))
+
+	missingLeg := db.Leg{
+		ID:         100,
+		GameID:     new("401"),
+		MarketType: "TOTAL",
+		Side:       new("OVER"),
+		Line:       new(47.5),
+	}
+	_, ok = board.LineGroupForLeg(g, rows, missingLeg, signals)
+	assert.False(t, ok)
 }

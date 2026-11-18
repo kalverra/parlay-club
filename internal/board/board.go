@@ -140,22 +140,27 @@ func (s Sort) Label() string {
 // Row is one selection a person can add to their slip. The fields after Text
 // are what the add-leg form posts.
 type Row struct {
-	GameID      string
-	Market      string
-	Team        string
-	PlayerName  string
-	PlayerID    string
-	Position    string
-	HeadshotURL string
-	Side        string
-	Line        *float64
-	Odds        int
-	Category    Category
-	Window      Window
-	Kickoff     time.Time
-	Text        string
-	Picked      int64
-	Badge       string
+	GameID         string
+	Market         string
+	Team           string
+	PlayerName     string
+	PlayerID       string
+	Position       string
+	HeadshotURL    string
+	Side           string
+	Line           *float64
+	Odds           int
+	Category       Category
+	Window         Window
+	Kickoff        time.Time
+	Text           string
+	Picked         int64
+	PickedLine     *float64
+	PickedOdds     int
+	Drifted        bool
+	BoardDriftNote string
+	TrayDriftNote  string
+	Badge          string
 }
 
 // GameCard is one game on the slate: the matchup, its kickoff, the game lines
@@ -172,6 +177,21 @@ type GameCard struct {
 	Lines    GameLines
 	Props    int
 	HasProps bool
+	Unloaded bool
+}
+
+// Slate is the pick board's game-card view for one week's games, along with
+// the resolved open game, kickoff-window counts, and empty-state flags.
+type Slate struct {
+	Cards          []GameCard
+	OpenGame       *GameCard
+	ResolvedGameID string
+	WindowCounts   map[Window]int
+	Started        int
+	NoGames        bool
+	AllStarted     bool
+	NoLines        bool
+	Empty          bool
 }
 
 // GameLines is a game's spread, total, and moneyline summaries. A market the
@@ -385,6 +405,16 @@ func Build(
 			}
 			if rows[i].MatchesLeg(leg) {
 				rows[i].Picked = leg.ID
+				if leg.Line != nil {
+					line := *leg.Line
+					rows[i].PickedLine = &line
+				}
+				rows[i].PickedOdds = leg.Odds
+				if legDrifted(leg, rows[i]) {
+					rows[i].Drifted = true
+					rows[i].BoardDriftNote = boardDriftNote(leg, rows[i])
+					rows[i].TrayDriftNote = trayDriftNote(leg, rows[i])
+				}
 				break
 			}
 		}
@@ -392,6 +422,63 @@ func Build(
 
 	sortRows(rows)
 	return rows
+}
+
+// legDrifted reports whether a saved leg's line or odds differ from the current
+// board row.
+func legDrifted(leg db.Leg, row Row) bool {
+	if leg.MarketType == "OTHER" {
+		return false
+	}
+	return !db.SameLine(leg.Line, row.Line) || leg.Odds != row.Odds
+}
+
+// boardDriftNote formats a concise drift notice for a picked board option.
+func boardDriftNote(leg db.Leg, row Row) string {
+	if !db.SameLine(leg.Line, row.Line) {
+		slipLine := formatDriftLine(leg.MarketType, leg.Line)
+		boardLine := formatDriftLine(leg.MarketType, row.Line)
+		if slipLine != "" && boardLine != "" {
+			return "Slip " + slipLine + " · now " + boardLine
+		}
+		return "Line moved"
+	}
+	if leg.Odds != row.Odds {
+		return "Slip " + formatOdds(leg.Odds) + " · now " + formatOdds(row.Odds)
+	}
+	return ""
+}
+
+// trayDriftNote formats a concise drift notice for a leg in the pick tray.
+func trayDriftNote(leg db.Leg, row Row) string {
+	if !db.SameLine(leg.Line, row.Line) {
+		boardLine := formatDriftLine(leg.MarketType, row.Line)
+		if boardLine != "" {
+			return "Now " + boardLine + " (" + formatOdds(row.Odds) + ")"
+		}
+		return "Line moved"
+	}
+	if leg.Odds != row.Odds {
+		return "Now " + formatOdds(row.Odds)
+	}
+	return ""
+}
+
+func formatDriftLine(marketType string, line *float64) string {
+	if line == nil {
+		return ""
+	}
+	if marketType == "SPREAD" {
+		return signedSpread(*line)
+	}
+	return formatLine(*line)
+}
+
+func formatOdds(odds int) string {
+	if odds > 0 {
+		return "+" + strconv.Itoa(odds)
+	}
+	return strconv.Itoa(odds)
 }
 
 // MatchesLeg reports whether the row's selection is the leg's pick, ignoring
@@ -664,7 +751,61 @@ func cardFor(game db.Game, rows []Row) GameCard {
 		Props:    propCount(rows),
 	}
 	card.HasProps = card.Props > 0
+	card.Unloaded = !card.HasProps && len(rows) > 0
 	return card
+}
+
+// BuildSlate assembles the slate cards, resolved open game, kickoff-window
+// counts, and empty-state flags for one week's games and built rows.
+func BuildSlate(games []db.Game, rows []Row, roster []db.RosterPlayer, q Query) Slate {
+	now := q.Now
+	if now.IsZero() {
+		now = time.Now()
+	}
+	started := StartedCount(games, now)
+
+	// The detail exists even when the current search matches only one of the
+	// open game's rows, so resolve the open game from a slate without q.Q.
+	openCards := Slates(games, rows, roster, Query{Window: q.Window, Now: now})
+	var openGame *GameCard
+	resolvedGameID := ""
+	if q.GameID != "" {
+		for i := range openCards {
+			if openCards[i].ID == q.GameID {
+				card := openCards[i]
+				openGame = &card
+				resolvedGameID = card.ID
+				break
+			}
+		}
+	}
+
+	cards := openCards
+	if q.Q != "" {
+		cards = Slates(games, rows, roster, q)
+	}
+
+	windowCounts := make(map[Window]int)
+	for _, row := range rows {
+		windowCounts[row.Window]++
+	}
+
+	noGames := len(games) == 0
+	allStarted := len(games) > 0 && started == len(games)
+	noLines := !noGames && !allStarted && len(rows) == 0
+	empty := len(cards) == 0 && !noGames && !noLines && !allStarted
+
+	return Slate{
+		Cards:          cards,
+		OpenGame:       openGame,
+		ResolvedGameID: resolvedGameID,
+		WindowCounts:   windowCounts,
+		Started:        started,
+		NoGames:        noGames,
+		AllStarted:     allStarted,
+		NoLines:        noLines,
+		Empty:          empty,
+	}
 }
 
 // Detail shapes one game's built rows into the header, tabs, and lines the open
@@ -813,6 +954,29 @@ func Pair(game db.Game, rows []Row) []LineGroup {
 		sortOptions(game, groups[i].Options)
 	}
 	return groups
+}
+
+// HoldsLeg reports whether the line group carries the leg's selection. A picked
+// option matches by ID; a just-deleted or unpicked leg matches by its fields.
+func (g LineGroup) HoldsLeg(leg db.Leg) bool {
+	for _, option := range g.Options {
+		if (leg.ID != 0 && option.Picked == leg.ID) || option.MatchesLeg(leg) {
+			return true
+		}
+	}
+	return false
+}
+
+// LineGroupForLeg applies signals to game's rows, pairs them into line groups,
+// and returns the group holding leg, if any.
+func LineGroupForLeg(game db.Game, rows []Row, leg db.Leg, signals BoardSignals) (LineGroup, bool) {
+	gameRows := ApplySignals(game, rowsForGame(rows, game.ID), signals)
+	for _, group := range Pair(game, gameRows) {
+		if group.HoldsLeg(leg) {
+			return group, true
+		}
+	}
+	return LineGroup{}, false
 }
 
 // lineGroups pairs rows into one group per line and then orders the groups for
