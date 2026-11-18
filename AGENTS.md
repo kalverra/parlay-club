@@ -32,23 +32,24 @@ passing overs are risky"). Every pick stays allowed, and the tone stays free of 
 ## good-vibes
 
 This repo uses `good-vibes` for change management. Every significant change moves through five steps, each with a skill
-in `.agents/skills/`:
+in `.agents/skills/gv-<step>/`:
 
 ### The Flow
 
-1. **Propose** (`propose`). A change starts in `changes/<slug>/proposal.md`. It explains *why* the change is worth
+1. **Propose** (`gv-propose`). A change starts in `changes/<slug>/proposal.md`. It explains *why* the change is worth
    making, sets goals and non-goals, and gives the high-level direction and why it beat the alternatives. File paths,
    schemas, and signatures belong in the design. When another change must finish first, record it in the `depends_on`
    front matter with `good-vibes propose <slug> --depends-on a,b` or by editing the list, not in prose. `check` reports
    bad entries, `status` shows the wait, and `implement` refuses to start until they are done.
 2. **Accept.** A person runs `good-vibes accept <slug> --by <names> [--in <review-url>]`. Agents leave their own
    proposals for a person to accept.
-3. **Design** (`design`). `changes/<slug>/design.md` says *how* the change works. Its `## TODO` section lists the phases
-   and tasks in order. Keep order between changes in `depends_on`, not in phases or prose.
-4. **Implement** (`implement`, `docs`). Work through the TODO phases. Update `docs/` in the same change, then write the
-   phase handoff in `changes/<slug>/handoffs/`.
-5. **Close** (`close`). Write `changes/<slug>/closeout.md`. After a person reviews it, `good-vibes done <slug>` folds it
-   into an ADR in `docs/decisions/` and deletes the change folder.
+3. **Design** (`gv-design`). `changes/<slug>/design.md` says *how* the change works. Its `## TODO` section lists the
+   phases and tasks in order. Keep order between changes in `depends_on`, not in phases or prose.
+4. **Implement** (`gv-implement`, `gv-docs`). Work through the TODO phases. Update `docs/` in the same change, then
+   write the phase handoff in `changes/<slug>/handoffs/`.
+5. **Close** (`gv-close`). Write `changes/<slug>/closeout.md`, or read the draft a run left there. Fix anything wrong,
+   and once a person agrees, remove any `draft: true` marker. Then `good-vibes done <slug>` folds it into an ADR in
+   `docs/decisions/` and deletes the change folder.
 
 ### Rules
 
@@ -56,6 +57,9 @@ in `.agents/skills/`:
 - Only the implement flow and the binary tick checkboxes in `design.md`.
 - Leave `design.md` alone while a `good-vibes implement` run is active. The worktree's copy is the truth.
 - `docs/` describes the system as it is now. A change rewrites the docs it invalidates and leaves history to the ADR.
+- `ARCHITECTURE.md` and `GLOSSARY.md` are high-level docs: read them before a change. A change that alters a module's
+  responsibility, an invariant, or a cross-cutting concern amends `architecture`; one that redefines or removes a term
+  amends `glossary`. Add a glossary term when you coin it.
 - Every doc has YAML front matter. Run `good-vibes docs lint` after writing, and `good-vibes docs index` after adding or
   renaming a doc.
 - Use `good-vibes` commands for status and ADR files. Run `good-vibes --help` for the command list.

@@ -14,18 +14,59 @@ dir = "changes"
 # Require accepted_by and accepted_at before design or implement. accepted_in is optional; when set, it must be a URL.
 require_accept = false
 
-[[implement.verify.checks]]
-name = "lint"
-run = "golangci-lint run ./... --fix"
-quick = "golangci-lint run ./path/to/pkg/... --fix"
-paths = ["**/*.go", "go.mod", ".golangci.yaml"]
-fix = true
+# Set up checks for this repo with the gv-configure skill. It inspects the
+# manifests, scripts, tools, and CI before choosing commands. Run
+# `good-vibes guide configure` for its rules.
+#
+# Keep fast checks in [implement.verify], which runs after every worker turn,
+# and slow or thorough checks in [implement.final.verify], which runs once on
+# the whole change. Every key and check field is in the config reference:
+# https://github.com/kalverra/good-vibes/blob/main/docs/reference/config.md
 
-[[implement.verify.checks]]
-name = "test"
-run = "go test ./..."
-quick = "go test ./path/to/pkg/"
-paths = ["**/*.go", "go.mod", "go.sum", "**/testdata/**"]
+# The draft close-out turn writes changes/<slug>/closeout.md after the final
+# gate. A person reviews it and deletes "draft: true" before `good-vibes done`.
+#
+# [implement.closeout]
+# draft = true
+# worker = "" # empty uses the final gate's worker
 
 [docs]
 root = "docs"
+
+# Per-turn checks: fast, deterministic, offline. Fixers run before readers.
+[[implement.verify.checks]]
+name = "generate"
+run = "go generate ./..."
+fix = true
+paths = [
+  "web/embed.go",
+  "web/tailwind/**",
+  "web/templates/**",
+  "web/static/app.css",
+  "internal/**",
+]
+
+[[implement.verify.checks]]
+name = "lint"
+run = "golangci-lint run ./... --fix"
+fix = true
+paths = ["**/*.go", "go.mod", "go.sum", ".golangci.yaml"]
+
+[[implement.verify.checks]]
+name = "test"
+run = "go test -short ./..."
+
+[[implement.verify.checks]]
+name = "actionlint"
+run = "actionlint"
+paths = [".github/**"]
+
+[[implement.verify.checks]]
+name = "deploy-blackout"
+run = "deploy/blackout_test.sh"
+paths = ["deploy/blackout.sh", "deploy/blackout_test.sh"]
+
+# Final-gate checks: thorough or slower verification across the whole change.
+[[implement.final.verify.checks]]
+name = "test-race"
+run = "go test -short -race ./..."
