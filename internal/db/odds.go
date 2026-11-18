@@ -74,10 +74,24 @@ func OddsSelection(o Odds) SelectionKey {
 	}
 }
 
+// SamePlayer reports whether two selection keys target the same athlete, using
+// ESPN PlayerID when both carry one, or normalized PlayerName with
+// non-conflicting Team otherwise.
+func SamePlayer(left, right SelectionKey) bool {
+	if left.PlayerID != "" && right.PlayerID != "" {
+		return left.PlayerID == right.PlayerID
+	}
+	if left.Team != "" && right.Team != "" && left.Team != right.Team {
+		return false
+	}
+	leftName := NormalizePlayerName(left.PlayerName)
+	rightName := NormalizePlayerName(right.PlayerName)
+	return leftName != "" && leftName == rightName
+}
+
 // SameSelection reports whether two selections represent the same pick,
-// ignoring book, line, price, and link. Player props match by ESPN PlayerID
-// when both carry one, or by normalized player name and non-empty team
-// otherwise. Game markets match on game, market, team, and side.
+// ignoring book, line, price, and link. Player props match via SamePlayer;
+// game markets match on game, market, team, and side.
 func SameSelection(left, right SelectionKey) bool {
 	if left.GameID == "" || left.GameID != right.GameID {
 		return false
@@ -86,17 +100,57 @@ func SameSelection(left, right SelectionKey) bool {
 		return false
 	}
 	if IsPlayerMarket(left.MarketType) || left.PlayerName != "" || right.PlayerName != "" {
-		if left.PlayerID != "" && right.PlayerID != "" {
-			return left.PlayerID == right.PlayerID
-		}
-		if left.Team != "" && right.Team != "" && left.Team != right.Team {
-			return false
-		}
-		leftName := NormalizePlayerName(left.PlayerName)
-		rightName := NormalizePlayerName(right.PlayerName)
-		return leftName != "" && leftName == rightName
+		return SamePlayer(left, right)
 	}
 	return left.Team == right.Team
+}
+
+// SameLineGroup reports whether two selection keys belong to the same board
+// line group: same game and market, any side/team for SPREAD/ML/TOTAL, same
+// team for TEAM_TOTAL, and SamePlayer for player markets.
+func SameLineGroup(left, right SelectionKey) bool {
+	if left.GameID == "" || left.GameID != right.GameID || left.MarketType != right.MarketType {
+		return false
+	}
+	switch left.MarketType {
+	case "SPREAD", "ML", "TOTAL":
+		return true
+	case "TEAM_TOTAL":
+		return left.Team == right.Team
+	default:
+		if IsPlayerMarket(left.MarketType) || left.PlayerName != "" || right.PlayerName != "" {
+			return SamePlayer(left, right)
+		}
+		return left.Team == right.Team
+	}
+}
+
+// MatchBookOdds finds the odds row for a leg's selection and book via
+// MatchesSelection, preferring an exact line match when more than one row
+// matches and falling back to the first matching row for that book.
+func MatchBookOdds(leg Leg, odds []Odds, book string) (Odds, bool) {
+	book = NormalizeBook(book)
+	if book == "" {
+		return Odds{}, false
+	}
+	var fallback Odds
+	var found bool
+	for _, row := range odds {
+		if NormalizeBook(row.Book) != book {
+			continue
+		}
+		if !row.MatchesSelection(leg) {
+			continue
+		}
+		if SameLine(row.Line, leg.Line) {
+			return row, true
+		}
+		if !found {
+			fallback = row
+			found = true
+		}
+	}
+	return fallback, found
 }
 
 // MatchesSelection reports whether o prices the same selection as leg, ignoring

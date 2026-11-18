@@ -245,7 +245,7 @@ func planLeg(leg Leg, odds []db.Odds, book string, now time.Time) (LegLink, Manu
 		return LegLink{}, ManualLeg{Leg: leg, Reason: ReasonGameStarted}, false
 	}
 
-	row, found := matchOdds(leg.Leg, odds, book)
+	row, found := db.MatchBookOdds(leg.Leg, odds, book)
 	if !found {
 		return LegLink{}, ManualLeg{Leg: leg, Reason: ReasonNoLine}, false
 	}
@@ -262,29 +262,4 @@ func planLeg(leg Leg, odds []db.Odds, book string, now time.Time) (LegLink, Manu
 		EventSid:  row.EventSid,
 		LineMoved: !db.SameLine(row.Line, leg.Line),
 	}, ManualLeg{}, true
-}
-
-// matchOdds finds the odds row for a leg's selection and book via
-// MatchesSelection (SameSelection), preferring an exact line match when more
-// than one row matches.
-func matchOdds(leg db.Leg, odds []db.Odds, book string) (db.Odds, bool) {
-	book = db.NormalizeBook(book)
-	var fallback db.Odds
-	var found bool
-	for _, row := range odds {
-		if db.NormalizeBook(row.Book) != book {
-			continue
-		}
-		if !row.MatchesSelection(leg) {
-			continue
-		}
-		if db.SameLine(row.Line, leg.Line) {
-			return row, true
-		}
-		if !found {
-			fallback = row
-			found = true
-		}
-	}
-	return fallback, found
 }

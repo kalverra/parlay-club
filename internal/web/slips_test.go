@@ -394,6 +394,75 @@ func TestSlipReferenceOddsUseMemberHomeBooks(t *testing.T) {
 	assert.Contains(t, body, "(-147)")
 }
 
+func TestSlipReferenceOddsIncludeMovedMemberBookLine(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	game := addGame(t, fixture, gameKickoff())
+	now := time.Now().UTC()
+	_, err := fixture.store.UpsertOdds(t.Context(), []db.Odds{
+		{
+			GameID:     game.ID,
+			Book:       "draftkings",
+			MarketType: "PASS_YDS",
+			Team:       "BUF",
+			PlayerName: "Josh Allen",
+			Side:       "OVER",
+			Line:       new(245.5),
+			Price:      -110,
+			FetchedAt:  now,
+		},
+		{
+			GameID:     game.ID,
+			Book:       "fanduel",
+			MarketType: "PASS_YDS",
+			Team:       "BUF",
+			PlayerName: "Josh Allen",
+			Side:       "OVER",
+			Line:       new(246.0),
+			Price:      -130,
+			FetchedAt:  now,
+		},
+	})
+	require.NoError(t, err)
+
+	_, err = fixture.store.SetUserHomeBook(t.Context(), fixture.user.ID, new("draftkings"))
+	require.NoError(t, err)
+	sam, err := fixture.store.CreateUserWithIdentity(
+		t.Context(), "Sam", "sam-moved@example.com", "google-sam-moved", "")
+	require.NoError(t, err)
+	require.NoError(t, fixture.store.AddSlipMember(t.Context(), fixture.slip.ID, sam.ID))
+	_, err = fixture.store.SetUserHomeBook(t.Context(), sam.ID, new("fanduel"))
+	require.NoError(t, err)
+
+	form := url.Values{
+		"game_id":     {game.ID},
+		"market_type": {"PASS_YDS"},
+		"team":        {"BUF"},
+		"player_name": {"Josh Allen"},
+		"side":        {"OVER"},
+		"line":        {"245.5"},
+		"odds":        {"-110"},
+	}
+	response := postForm(t, fixture.handler, fmt.Sprintf("/slips/%d/legs", fixture.slip.ID), form)
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodGet,
+		fmt.Sprintf("/slips/%d/payout?stake=10&boost=0", fixture.slip.ID),
+		nil,
+	)
+	fixture.handler.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	body := recorder.Body.String()
+	// Mean of -110 (1.9091) and -130 (1.7692) is ~1.839x (-119), not 1.91x.
+	assert.Contains(t, body, "1.84x")
+	assert.Contains(t, body, "(-119)")
+}
+
 // TestLegResultMenuGradesALeg covers the chip menu on a leg and the PUT behind
 // it.
 func TestLegResultMenuGradesALeg(t *testing.T) {

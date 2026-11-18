@@ -144,7 +144,7 @@ export, and web)
 
 ### Phase 2: Unify selection, line-group, and book-odds matching
 
-- [ ] Add `SamePlayer`, `SameLineGroup`, and `MatchBookOdds` in `internal/db/odds.go`, and wire them into
+- [x] Add `SamePlayer`, `SameLineGroup`, and `MatchBookOdds` in `internal/db/odds.go`, and wire them into
       `internal/board/signals.go` (`rowMatchesAnalyzerLeg`, `sameBoardPlayer`), `internal/web/pick.go`
       (`sameBoardLine`), `internal/export/export.go` (`matchOdds`), and `internal/web/slips.go` (`candidatePrices`),
       with tests in `internal/db/odds_test.go`, `internal/board/signals_test.go`, and `internal/web/slips_test.go`.

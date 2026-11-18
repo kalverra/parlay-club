@@ -277,6 +277,41 @@ func TestApplySignalsBadges(t *testing.T) {
 			},
 			want: "",
 		},
+		{
+			name: "fits slip: skips already-picked selection even after line moves by 0.5",
+			row:  buildRow("PASS_YDS", "BUF", "Josh Allen", "OVER", 256.0),
+			signals: board.BoardSignals{
+				SlipLegs: []analyzer.Leg{
+					{
+						GameID:     "g1",
+						Market:     "PASS_YDS",
+						Team:       "BUF",
+						PlayerID:   "qb1",
+						PlayerName: "Josh Allen",
+						Side:       "OVER",
+						Line:       new(255.5),
+					},
+				},
+			},
+			want: "",
+		},
+		{
+			name: "fits slip: excludes same player across name suffix variants",
+			row:  buildRow("REC_YDS", "BUF", "Ollie Gordon II", "OVER", 19.5),
+			signals: board.BoardSignals{
+				SlipLegs: []analyzer.Leg{
+					{
+						GameID:     "g1",
+						Market:     "PASS_YDS",
+						Team:       "BUF",
+						PlayerName: "Ollie Gordon",
+						Side:       "OVER",
+						Line:       new(205.5),
+					},
+				},
+			},
+			want: "",
+		},
 	}
 
 	for _, tc := range tests {

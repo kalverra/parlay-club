@@ -2056,20 +2056,14 @@ func memberBooks(members []db.SlipMember) map[string]bool {
 }
 
 // candidatePrices collects one decimal price per member home book for the
-// selection a leg picked. Rows from an older sync are already dropped.
+// selection a leg picked, preferring an exact line match and falling back to a
+// moved line for that book. Rows from an older sync are already dropped.
 func candidatePrices(rows []db.Odds, leg db.Leg, books map[string]bool) []float64 {
-	seen := make(map[string]bool, len(books))
 	prices := make([]float64, 0, len(books))
-	for _, row := range rows {
-		book := db.NormalizeBook(row.Book)
-		if !books[book] || seen[book] {
-			continue
+	for book := range books {
+		if row, ok := db.MatchBookOdds(leg, rows, book); ok {
+			prices = append(prices, parlay.AmericanToDecimal(row.Price))
 		}
-		if !row.MatchesSelection(leg) || !db.SameLine(row.Line, leg.Line) {
-			continue
-		}
-		seen[book] = true
-		prices = append(prices, parlay.AmericanToDecimal(row.Price))
 	}
 	return prices
 }

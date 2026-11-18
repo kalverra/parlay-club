@@ -1401,11 +1401,3 @@ func signedSpread(line float64) string {
 func formatLine(line float64) string {
 	return strconv.FormatFloat(line, 'g', -1, 64)
 }
-
-// lineEqual compares two optional lines exactly.
-func lineEqual(left, right *float64) bool {
-	if left == nil || right == nil {
-		return left == nil && right == nil
-	}
-	return *left == *right
-}
