@@ -3166,7 +3166,7 @@ func TestPickBoardDeleteAndSwapStayBoundWhenLineMoves(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Deleting the prop leg from the board still locates its LineGroup via groupHoldsLeg.
+	// Deleting the prop leg from the board still locates its LineGroup via board.LineGroupForLeg.
 	delReq := httptest.NewRequestWithContext(
 		t.Context(), http.MethodDelete, fmt.Sprintf("/legs/%d?from=board", propLeg.ID), nil,
 	)
