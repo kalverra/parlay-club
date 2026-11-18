@@ -12,7 +12,7 @@ tags: [analyzer, warnings, grades, banner, severity, tone, slips, weather, rules
 
 The analyzer is the sharp-friend layer on every slip. It reads the picks people made and points out where they fight each other, the weather, key numbers, price, player history, nfelo's model, or nflverse team and usage trends. It also computes deterministic `A`–`F` quality grades for each leg and for the slip as a whole. It never blocks a pick: every leg stays allowed.
 
-`internal/analyzer` is pure Go: no I/O, no clock, no network calls, and no LLM. It runs on every slip and tray render, and its output is not stored. The rule list, thresholds, and grading rubric live in [Analyzer rules](../reference/analyzer-rules.md).
+`internal/analyzer`'s rule and grading functions (`AnalyzeSlip`, `ScoreLeg`, `ScoreSlip`) are pure Go: no I/O, no clock, no network calls, and no LLM. They run on every slip and tray render, and their output is not stored. The rule list, thresholds, and grading rubric live in [Analyzer rules](../reference/analyzer-rules.md).
 
 ```mermaid
 flowchart LR
@@ -72,14 +72,14 @@ The tone rules live in `plan/analyzer.md`. Every message is checked against them
 | `games` | home and away teams, indoor flag, weather (wind, gusts, precipitation, temperature), nfelo model (spread, win probability, QB adjustments), nflverse team EPA & pace (`HomeEPA`, `AwayEPA`) |
 | `stats` | per-player ESPN game logs per market (most recent game first, this season only) and nflverse weekly snap/target/opportunity usage (`Usage`)                     |
 
-`internal/web` builds those values from the stored slip, the week's games, stored player game logs, `nfelo_games`, and `nflverse_*` tables when it renders the panel or tray. It keys the games map by the same `GameID` each leg carries, so no leg loses its game.
+`internal/analyzer` (`LoadSlipSignals`) builds `games` and `stats` from the week's games, stored player game logs, `nfelo_games`, and `nflverse_*` tables when `internal/web` renders the panel or tray (with `LoadGameSignals` and `LoadPlayerResearchSignals` serving the pick board and player research). It keys the games map by the same `GameID` each leg carries, so no leg loses its game.
 
-`stats` maps ESPN athlete IDs to season game logs across markets (`PASS_YDS`, `RUSH_YDS`, `REC_YDS`, `RECEPTIONS`, `PASS_TDS`, `RUSH_ATT`, `ANYTIME_TD`, `KICKER_PTS`) and optional `nflverse` usage weeks (`Usage`). `internal/web` loads `player_gamelogs` and `nflverse_player_weeks` for every distinct matched `PlayerID` on the slip. An unmatched player, a missing game log, or a market/usage history with fewer than 3 games leaves player-stat and usage rules quiet.
+`stats` maps ESPN athlete IDs to season game logs across markets (`PASS_YDS`, `RUSH_YDS`, `REC_YDS`, `RECEPTIONS`, `PASS_TDS`, `RUSH_ATT`, `ANYTIME_TD`, `KICKER_PTS`) and optional `nflverse` usage weeks (`Usage`). `internal/analyzer` loads `player_gamelogs` and `nflverse_player_weeks` for every distinct matched `PlayerID` on the slip. An unmatched player, a missing game log, or a market/usage history with fewer than 3 games leaves player-stat and usage rules quiet.
 
 External models and efficiency data are optional inputs, not requirements:
 
-- **nfelo**: `internal/web` attaches it only when the game is `SCHEDULED` and a successful `nfelo:projections` fetch is under 72 hours old. Otherwise the model is nil and `qb_drag` / model sentences stay quiet.
-- **nflverse**: `internal/web` attaches `HomeEPA`, `AwayEPA`, and `Usage` only when `nflverse:season:{year}` is under 7 days old. Missing or stale `nflverse` rows leave those fields nil so `tough_matchup`, `shrinking_role`, `pace_clash`, `td_spike_risk`, and EPA/usage grade factors fail soft.
+- **nfelo**: `internal/analyzer` attaches it only when the game is `SCHEDULED` and a successful `nfelo:projections` fetch is under 72 hours old. Otherwise the model is nil and `qb_drag` / model sentences stay quiet.
+- **nflverse**: `internal/analyzer` attaches `HomeEPA`, `AwayEPA`, and `Usage` only when `nflverse:season:{year}` is under 7 days old. Missing or stale `nflverse` rows leave those fields nil so `tough_matchup`, `shrinking_role`, `pace_clash`, `td_spike_risk`, and EPA/usage grade factors fail soft.
 
 The underlying rows come from [Data sources](../reference/data-sources.md) through [Data refresh](data-refresh.md).
 

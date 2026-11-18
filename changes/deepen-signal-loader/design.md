@@ -132,5 +132,9 @@ board, and web while preserving all grade and badge outputs)
 - [x] Add `LoadSlipSignals`, `LoadGameSignals`, and `LoadPlayerResearchSignals` in `internal/analyzer/signals.go`,
       update `internal/web/analyzer.go`, `internal/web/slips.go`, `internal/web/pick.go`, `internal/web/research.go`,
       and `internal/board/signals.go` to use them, and verify with tests in `internal/analyzer` and `internal/web`.
-- [ ] Docs: update `docs/concepts/analyzer.md` and `docs/reference/analyzer-rules.md` if any package-level references
+- [x] Docs: update `docs/concepts/analyzer.md` and `docs/reference/analyzer-rules.md` if any package-level references
       name where signal aggregation lives.
+
+## Reviews
+
+- [x] Final review: agy@gemini-4-argon-high
