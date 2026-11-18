@@ -1,14 +1,12 @@
 package web
 
 import (
-	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
 	"math"
 	"net/http"
 	"net/url"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -17,21 +15,6 @@ import (
 	"github.com/kalverra/parlay-club/internal/db"
 	"github.com/kalverra/parlay-club/internal/ingest/nflverse"
 )
-
-// nfeloSource is the sync_state row that records the last nfelo fetch.
-const nfeloSource = "nfelo:projections"
-
-// nfeloFreshFor is how long a successful nfelo fetch may shape a warning. The
-// file changes about every two days, and a stale model is worse than none.
-const nfeloFreshFor = 72 * time.Hour
-
-// nflverseFreshFor is how long a successful nflverse sync may shape analyzer
-// rules and grades.
-const nflverseFreshFor = 7 * 24 * time.Hour
-
-func nflverseSource(season int) string {
-	return fmt.Sprintf("nflverse:season:%d", season)
-}
 
 // AnalyzerView is the sharp-friend banner under the slip's legs.
 type AnalyzerView struct {
@@ -197,10 +180,7 @@ func analyzerGameMap(
 		if p, ok := nfelo[game.ID]; ok {
 			proj = &p
 		}
-		converted := analyzerGame(game, proj)
-		converted.HomeEPA = teamEPA[game.HomeTeam]
-		converted.AwayEPA = teamEPA[game.AwayTeam]
-		gamesByID[game.ID] = converted
+		gamesByID[game.ID] = analyzer.GameFromDB(game, proj, teamEPA)
 	}
 	return gamesByID
 }
@@ -217,7 +197,7 @@ func analyzerView(
 	legsByID := make(map[int64]db.Leg, len(legs))
 	for _, leg := range legs {
 		legsByID[leg.ID] = leg
-		input = append(input, analyzerLeg(leg, names))
+		input = append(input, analyzer.LegFromDB(leg, names[leg.UserID]))
 	}
 
 	warnings := analyzer.AnalyzeSlip(input, gamesByID, stats)
@@ -339,88 +319,29 @@ func formatModelSpread(spread float64) string {
 	return text
 }
 
-// analyzerGame carries the slice of a stored game a rule reads. nfelo data is
-// included only for a scheduled game, because a live or final game's model no
-// longer describes the game in front of the slip.
-func analyzerGame(game db.Game, projection *db.NfeloGame) analyzer.Game {
-	converted := analyzer.Game{
-		ID:     game.ID,
-		Home:   game.HomeTeam,
-		Away:   game.AwayTeam,
-		Indoor: game.Indoor,
-	}
-	if projection != nil && game.Status == db.GameScheduled {
-		converted.Nfelo = &analyzer.Nfelo{
-			HomeSpread:  projection.HomeSpread,
-			HomeWinProb: projection.HomeWinProb,
-			HomeQB:      projection.HomeQB,
-			AwayQB:      projection.AwayQB,
-			HomeQBAdj:   projection.HomeQBAdj,
-			AwayQBAdj:   projection.AwayQBAdj,
-		}
-	}
-	if game.WindMPH != nil {
-		weather := analyzer.Weather{WindMPH: *game.WindMPH}
-		if game.WindGustMPH != nil {
-			weather.GustMPH = *game.WindGustMPH
-		}
-		if game.PrecipIN != nil {
-			weather.PrecipIn = *game.PrecipIN
-		}
-		if game.TempF != nil {
-			weather.TempF = *game.TempF
-		}
-		converted.Weather = &weather
-	}
-	return converted
-}
-
 // analyzerLeg carries the pick fields a rule reads.
 func analyzerLeg(leg db.Leg, names map[int64]string) analyzer.Leg {
-	converted := analyzer.Leg{
-		ID:     leg.ID,
-		Owner:  names[leg.UserID],
-		Market: leg.MarketType,
-		Line:   leg.Line,
-		Odds:   leg.Odds,
-	}
-	if leg.GameID != nil {
-		converted.GameID = *leg.GameID
-	}
-	if leg.Team != nil {
-		converted.Team = *leg.Team
-	}
-	if leg.PlayerID != nil {
-		converted.PlayerID = *leg.PlayerID
-	}
-	if leg.PlayerName != nil {
-		converted.PlayerName = *leg.PlayerName
-	}
-	if leg.Side != nil {
-		converted.Side = *leg.Side
-	}
-	return converted
+	return analyzer.LegFromDB(leg, names[leg.UserID])
 }
 
 // nfeloForGames reads the model rows the analyzer may use. It returns none
 // when nfelo has never synced or its last good fetch is older than 72 hours, so
-// stale data cannot shape a sentence. A read error on one game just leaves that
-// game without a model.
+// stale data cannot shape a sentence.
 func (h *slipHandlers) nfeloForGames(
 	ctx context.Context,
 	games []db.Game,
 ) map[string]db.NfeloGame {
-	state, err := h.deps.Store.SyncState(ctx, nfeloSource)
-	if err != nil || h.deps.now().Sub(state.FetchedAt) > nfeloFreshFor {
+	state, err := h.deps.Store.SyncState(ctx, analyzer.NfeloSource)
+	if err != nil || h.deps.now().Sub(state.FetchedAt) > analyzer.NfeloFreshFor {
 		return nil
 	}
-	rows := make(map[string]db.NfeloGame, len(games))
+	gameIDs := make([]string, 0, len(games))
 	for _, game := range games {
-		projection, ok, err := h.deps.Store.NfeloForGame(ctx, game.ID)
-		if err != nil || !ok {
-			continue
-		}
-		rows[game.ID] = projection
+		gameIDs = append(gameIDs, game.ID)
+	}
+	rows, err := h.deps.Store.NfeloForGames(ctx, gameIDs)
+	if err != nil {
+		return nil
 	}
 	return rows
 }
@@ -454,25 +375,14 @@ func nflverseSeasonTypes(seasonType int) []int {
 }
 
 // loadFreshNFLverseTeamProfiles returns season-to-date/L4 team EPA and pace
-// profiles when nflverse:season:{year} is present and under nflverseFreshFor.
+// profiles when nflverse:season:{year} is present and under NFLverseFreshFor.
 func loadFreshNFLverseTeamProfiles(
 	ctx context.Context,
 	store *db.Store,
 	now time.Time,
 	week db.Week,
 ) (map[string]*analyzer.TeamDefenseProfile, bool) {
-	state, err := store.SyncState(ctx, nflverseSource(week.Season))
-	if err != nil || now.Sub(state.FetchedAt) > nflverseFreshFor {
-		return nil, false
-	}
-
-	teamWeeks, err := store.NFLverseTeamWeeksForSeasonTypes(
-		ctx, week.Season, nflverseSeasonTypes(week.SeasonType)...,
-	)
-	if err != nil || len(teamWeeks) == 0 {
-		return nil, true
-	}
-	return buildTeamDefenseProfiles(teamWeeks), true
+	return analyzer.LoadFreshTeamProfiles(ctx, store, now, week)
 }
 
 // loadNFLversePlayerWeeks returns weekly nflverse usage rows for an athlete,
@@ -499,23 +409,7 @@ func nflverseUsageForPlayers(
 	athleteIDs []string,
 	season, seasonType int,
 ) map[string]*analyzer.PlayerUsage {
-	if len(athleteIDs) == 0 {
-		return nil
-	}
-	byPlayer, err := store.NFLversePlayerWeeksForPlayersTypes(
-		ctx, athleteIDs, season, nflverseSeasonTypes(seasonType)...,
-	)
-	if err != nil {
-		return nil
-	}
-
-	usageByPlayer := make(map[string]*analyzer.PlayerUsage)
-	for _, id := range athleteIDs {
-		if usage := buildPlayerUsage(byPlayer[id]); usage != nil {
-			usageByPlayer[id] = usage
-		}
-	}
-	return usageByPlayer
+	return analyzer.LoadPlayerUsageForIDs(ctx, store, athleteIDs, season, seasonType)
 }
 
 func (h *slipHandlers) nflverseUsageForLegs(
@@ -537,137 +431,6 @@ func (h *slipHandlers) nflverseUsageForLegs(
 		athleteIDs = append(athleteIDs, id)
 	}
 	return nflverseUsageForPlayers(ctx, h.deps.Store, athleteIDs, season, seasonType)
-}
-
-func buildTeamDefenseProfiles(rows []db.NFLverseTeamWeek) map[string]*analyzer.TeamDefenseProfile {
-	byTeam := make(map[string][]db.NFLverseTeamWeek)
-	for _, row := range rows {
-		byTeam[row.Team] = append(byTeam[row.Team], row)
-	}
-	if len(byTeam) == 0 {
-		return nil
-	}
-
-	profiles := make(map[string]*analyzer.TeamDefenseProfile, len(byTeam))
-	teams := make([]string, 0, len(byTeam))
-	for team, weeks := range byTeam {
-		teams = append(teams, team)
-		prof := &analyzer.TeamDefenseProfile{}
-		n := float64(len(weeks))
-		for _, w := range weeks {
-			prof.OffPassEPA += w.OffPassEPA
-			prof.OffRushEPA += w.OffRushEPA
-			prof.DefPassEPAAllowed += w.DefPassEPAAllowed
-			prof.DefRushEPAAllowed += w.DefRushEPAAllowed
-			prof.PlaysPerGame += w.PlaysPerGame
-			prof.PassRate += w.PassRate
-		}
-		prof.OffPassEPA /= n
-		prof.OffRushEPA /= n
-		prof.DefPassEPAAllowed /= n
-		prof.DefRushEPAAllowed /= n
-		prof.PlaysPerGame /= n
-		prof.PassRate /= n
-
-		l4Start := max(0, len(weeks)-4)
-		l4 := weeks[l4Start:]
-		l4N := float64(len(l4))
-		for _, w := range l4 {
-			prof.L4OffPassEPA += w.OffPassEPA
-			prof.L4OffRushEPA += w.OffRushEPA
-			prof.L4DefPassEPAAllowed += w.DefPassEPAAllowed
-			prof.L4DefRushEPAAllowed += w.DefRushEPAAllowed
-			prof.L4PlaysPerGame += w.PlaysPerGame
-			prof.L4PassRate += w.PassRate
-		}
-		prof.L4OffPassEPA /= l4N
-		prof.L4OffRushEPA /= l4N
-		prof.L4DefPassEPAAllowed /= l4N
-		prof.L4DefRushEPAAllowed /= l4N
-		prof.L4PlaysPerGame /= l4N
-		prof.L4PassRate /= l4N
-
-		profiles[team] = prof
-	}
-
-	rankTeams(teams, func(t string) float64 { return profiles[t].OffPassEPA }, true, func(t string, r int) {
-		profiles[t].OffPassEPARank = r
-	})
-	rankTeams(teams, func(t string) float64 { return profiles[t].OffRushEPA }, true, func(t string, r int) {
-		profiles[t].OffRushEPARank = r
-	})
-	rankTeams(teams, func(t string) float64 { return profiles[t].DefPassEPAAllowed }, false, func(t string, r int) {
-		profiles[t].DefPassEPAAllowedRank = r
-	})
-	rankTeams(teams, func(t string) float64 { return profiles[t].DefRushEPAAllowed }, false, func(t string, r int) {
-		profiles[t].DefRushEPAAllowedRank = r
-	})
-	rankTeams(teams, func(t string) float64 { return profiles[t].PlaysPerGame }, true, func(t string, r int) {
-		profiles[t].PlaysPerGameRank = r
-	})
-	rankTeams(teams, func(t string) float64 { return profiles[t].PassRate }, true, func(t string, r int) {
-		profiles[t].PassRateRank = r
-	})
-
-	return profiles
-}
-
-func rankTeams(
-	teams []string,
-	metric func(string) float64,
-	desc bool,
-	assign func(string, int),
-) {
-	ordered := slices.Clone(teams)
-	slices.SortFunc(ordered, func(a, b string) int {
-		va, vb := metric(a), metric(b)
-		if va != vb {
-			if desc {
-				return cmp.Compare(vb, va)
-			}
-			return cmp.Compare(va, vb)
-		}
-		return cmp.Compare(a, b)
-	})
-	for i, team := range ordered {
-		assign(team, i+1)
-	}
-}
-
-func buildPlayerUsage(rows []db.NFLversePlayerWeek) *analyzer.PlayerUsage {
-	if len(rows) < 3 {
-		return nil
-	}
-	weeks := make([]analyzer.PlayerWeekUsage, 0, len(rows))
-	var seasonSnap, seasonTarget float64
-	var l3Snap, l3Target float64
-	for i, row := range rows {
-		weeks = append(weeks, analyzer.PlayerWeekUsage{
-			WeekNum:       row.WeekNum,
-			OffensePct:    row.OffensePct,
-			TargetShare:   row.TargetShare,
-			AirYardsShare: row.AirYardsShare,
-			WOPR:          row.WOPR,
-			Carries:       row.Carries,
-			Targets:       row.Targets,
-			TotalEPA:      row.TotalEPA,
-			RZOpps:        row.RZOpps,
-		})
-		seasonSnap += row.OffensePct
-		seasonTarget += row.TargetShare
-		if i < 3 {
-			l3Snap += row.OffensePct
-			l3Target += row.TargetShare
-		}
-	}
-	n := float64(len(rows))
-	return &analyzer.PlayerUsage{
-		Weeks:             weeks,
-		Last3SnapAvg:      l3Snap / 3,
-		SeasonSnapAvg:     seasonSnap / n,
-		Last3TargetShare:  l3Target / 3,
-		SeasonTargetShare: seasonTarget / n,
-	}
 }
 
 // playerStatsForLegs loads player_gamelogs and optional nflverse usage for

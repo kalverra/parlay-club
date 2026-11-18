@@ -179,6 +179,8 @@ type PlayerUsage struct {
 	SeasonSnapAvg     float64
 	Last3TargetShare  float64
 	SeasonTargetShare float64
+	Last3WOPR         float64
+	AvgCarries        float64
 }
 
 // PlayerStats holds a matched player's recent games per market, most recent
