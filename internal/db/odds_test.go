@@ -368,3 +368,177 @@ func TestMatchBookOdds(t *testing.T) {
 	_, ok = db.MatchBookOdds(leg, []db.Odds{exact}, "")
 	assert.False(t, ok)
 }
+
+func TestMarketLabel(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		market string
+		want   string
+	}{
+		{"PASS_YDS", "Pass Yds"},
+		{"PASS_TDS", "Pass TDs"},
+		{"RUSH_YDS", "Rush Yds"},
+		{"RUSH_ATT", "Rush Att"},
+		{"REC_YDS", "Rec Yds"},
+		{"RECEPTIONS", "Receptions"},
+		{"ANYTIME_TD", "Anytime TD"},
+		{"KICKER_PTS", "Kicking Pts"},
+		{"SPREAD", ""},
+		{"OTHER", ""},
+		{"", ""},
+	}
+
+	for _, tc := range cases {
+		assert.Equal(t, tc.want, db.MarketLabel(tc.market), tc.market)
+	}
+}
+
+func TestFormatSelection(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name   string
+		market string
+		team   string
+		player string
+		side   string
+		line   *float64
+		want   string
+	}{
+		{
+			name: "positive spread", market: "SPREAD", team: "MIA", line: new(3.5),
+			want: "MIA +3.5",
+		},
+		{
+			name: "negative spread", market: "SPREAD", team: "BUF", line: new(-3.5),
+			want: "BUF -3.5",
+		},
+		{
+			name: "spread without line omits line", market: "SPREAD", team: "BUF",
+			want: "BUF",
+		},
+		{
+			name: "moneyline", market: "ML", team: "BUF",
+			want: "BUF ML",
+		},
+		{
+			name: "total with line", market: "TOTAL", side: "OVER", line: new(48.5),
+			want: "Over 48.5",
+		},
+		{
+			name: "total without line", market: "TOTAL", side: "UNDER",
+			want: "Under",
+		},
+		{
+			name: "team total with line", market: "TEAM_TOTAL", team: "BUF", side: "OVER", line: new(24.5),
+			want: "BUF Team Total Over 24.5",
+		},
+		{
+			name: "team total without line", market: "TEAM_TOTAL", team: "BUF", side: "OVER",
+			want: "BUF Team Total Over",
+		},
+		{
+			name: "anytime td", market: "ANYTIME_TD", player: "Josh Allen",
+			want: "Josh Allen Anytime TD",
+		},
+		{
+			name: "player prop with line", market: "PASS_YDS", player: "Josh Allen", side: "OVER", line: new(245.5),
+			want: "Josh Allen Over 245.5 Pass Yds",
+		},
+		{
+			name: "player prop without line", market: "KICKER_PTS", player: "Tyler Bass", side: "UNDER",
+			want: "Tyler Bass Under Kicking Pts",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tc.want, db.FormatSelection(tc.market, tc.team, tc.player, tc.side, tc.line))
+		})
+	}
+}
+
+func TestBuildLegSelection(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name   string
+		market string
+		team   string
+		player string
+		side   string
+		line   *float64
+		want   string
+	}{
+		{
+			name: "valid spread", market: "SPREAD", team: " BUF ", line: new(-3.5),
+			want: "BUF -3.5",
+		},
+		{
+			name: "spread missing line rejected", market: "SPREAD", team: "BUF",
+			want: "",
+		},
+		{
+			name: "spread missing team rejected", market: "SPREAD", line: new(-3.5),
+			want: "",
+		},
+		{
+			name: "valid moneyline", market: "ML", team: "BUF",
+			want: "BUF ML",
+		},
+		{
+			name: "moneyline missing team rejected", market: "ML",
+			want: "",
+		},
+		{
+			name: "valid total", market: "TOTAL", side: "over", line: new(48.5),
+			want: "Over 48.5",
+		},
+		{
+			name: "total invalid side rejected", market: "TOTAL", side: "TEAM", line: new(48.5),
+			want: "",
+		},
+		{
+			name: "valid team total", market: "TEAM_TOTAL", team: "BUF", side: "UNDER", line: new(24.5),
+			want: "BUF Team Total Under 24.5",
+		},
+		{
+			name: "team total missing line rejected", market: "TEAM_TOTAL", team: "BUF", side: "OVER",
+			want: "",
+		},
+		{
+			name: "valid anytime td", market: "ANYTIME_TD", player: "Josh Allen",
+			want: "Josh Allen Anytime TD",
+		},
+		{
+			name: "anytime td missing player rejected", market: "ANYTIME_TD",
+			want: "",
+		},
+		{
+			name:   "other market always rejected",
+			market: "OTHER",
+			team:   "BUF",
+			player: "Josh Allen",
+			side:   "OVER",
+			line:   new(1.5),
+			want:   "",
+		},
+		{
+			name: "valid player prop", market: "PASS_YDS", player: "Josh Allen", side: "OVER", line: new(245.5),
+			want: "Josh Allen Over 245.5 Pass Yds",
+		},
+		{
+			name: "player prop missing line rejected", market: "PASS_YDS", player: "Josh Allen", side: "OVER",
+			want: "",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tc.want, db.BuildLegSelection(tc.market, tc.team, tc.player, tc.side, tc.line))
+		})
+	}
+}

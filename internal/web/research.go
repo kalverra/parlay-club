@@ -515,7 +515,10 @@ func (h *researchHandlers) loadPlayerResearch(
 	)
 
 	view.ActiveMarket = activeMarket
-	view.ActiveMarketName = marketLabel(activeMarket)
+	view.ActiveMarketName = db.MarketLabel(activeMarket)
+	if view.ActiveMarketName == "" {
+		view.ActiveMarketName = activeMarket
+	}
 	if comparisonLine != nil {
 		view.ComparisonLine = comparisonLine
 		view.HasLine = true
@@ -642,9 +645,13 @@ func buildMarketOptions(
 		if comparisonLine != nil {
 			href += fmt.Sprintf("&line=%g", *comparisonLine)
 		}
+		label := db.MarketLabel(m)
+		if label == "" {
+			label = m
+		}
 		options = append(options, MarketOptionView{
 			Market: m,
-			Label:  marketLabel(m),
+			Label:  label,
 			Active: m == activeMarket,
 			Href:   href,
 		})
@@ -753,29 +760,6 @@ func (h *researchHandlers) renderPartial(w http.ResponseWriter, name string, dat
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	_, _ = w.Write(html)
-}
-
-func marketLabel(market string) string {
-	switch market {
-	case "PASS_YDS":
-		return "Passing Yards"
-	case "PASS_TDS":
-		return "Passing Touchdowns"
-	case "RUSH_YDS":
-		return "Rushing Yards"
-	case "RUSH_ATT":
-		return "Rushing Attempts"
-	case "REC_YDS":
-		return "Receiving Yards"
-	case "RECEPTIONS":
-		return "Receptions"
-	case "ANYTIME_TD":
-		return "Anytime Touchdown"
-	case "KICKER_PTS":
-		return "Kicker Points"
-	default:
-		return market
-	}
 }
 
 func buildInjuryViews(game db.Game, rosterMap map[string]db.RosterPlayer) []TeamInjuriesView {

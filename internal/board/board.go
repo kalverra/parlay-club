@@ -374,7 +374,7 @@ func Build(
 			Category:    categoryFor(group.market),
 			Window:      windowFor(game.Kickoff),
 			Kickoff:     game.Kickoff,
-			Text:        rowText(group.market, team, player, group.side, line),
+			Text:        db.FormatSelection(group.market, team, player, group.side, line),
 		})
 	}
 
@@ -505,68 +505,6 @@ func medianLine(rows []db.Odds) *float64 {
 	}
 	median := analyzer.Median(lines)
 	return &median
-}
-
-// rowText is the full label a row shows.
-func rowText(market, team, player, side string, line *float64) string {
-	signed := ""
-	if line != nil {
-		signed = formatLine(*line)
-	}
-	switch market {
-	case "SPREAD":
-		if line == nil {
-			return team
-		}
-		return team + " " + signedSpread(*line)
-	case "ML":
-		return team + " ML"
-	case "TOTAL":
-		if line == nil {
-			return titleSide(side)
-		}
-		return titleSide(side) + " " + signed
-	case "TEAM_TOTAL":
-		text := team + " Team Total " + titleSide(side)
-		if line != nil {
-			text += " " + signed
-		}
-		return strings.TrimSpace(text)
-	case "ANYTIME_TD":
-		return player + " Anytime TD"
-	default:
-		label := marketLabel(market)
-		text := player + " " + titleSide(side)
-		if line != nil {
-			text += " " + signed
-		}
-		if label != "" {
-			text += " " + label
-		}
-		return strings.TrimSpace(text)
-	}
-}
-
-// marketLabel is the stat name a prop row's text uses.
-func marketLabel(market string) string {
-	switch market {
-	case "PASS_YDS":
-		return "Pass Yds"
-	case "PASS_TDS":
-		return "Pass TDs"
-	case "RUSH_YDS":
-		return "Rush Yds"
-	case "RUSH_ATT":
-		return "Rush Att"
-	case "REC_YDS":
-		return "Rec Yds"
-	case "RECEPTIONS":
-		return "Receptions"
-	case "KICKER_PTS":
-		return "Kicking Pts"
-	default:
-		return ""
-	}
 }
 
 type rosterEntry struct {
@@ -942,10 +880,8 @@ func marketHeading(market string) string {
 		return "Total"
 	case "TEAM_TOTAL":
 		return "Team total"
-	case "ANYTIME_TD":
-		return "Anytime TD"
 	default:
-		return marketLabel(market)
+		return db.MarketLabel(market)
 	}
 }
 
@@ -1379,14 +1315,6 @@ func categoryOrder(category Category) int {
 // share one canonical normalizer.
 func normalize(value string) string {
 	return db.NormalizePlayerName(value)
-}
-
-// titleSide turns OVER into "Over".
-func titleSide(side string) string {
-	if side == "" {
-		return ""
-	}
-	return strings.ToUpper(side[:1]) + strings.ToLower(side[1:])
 }
 
 // signedSpread prints a spread with a plus on a positive number.

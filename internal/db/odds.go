@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -49,6 +50,139 @@ func IsPlayerMarket(market string) bool {
 	default:
 		return false
 	}
+}
+
+// MarketLabel returns the short display label for a player prop market type,
+// or "" when the market has no stat label.
+func MarketLabel(market string) string {
+	switch market {
+	case "PASS_YDS":
+		return "Pass Yds"
+	case "PASS_TDS":
+		return "Pass TDs"
+	case "RUSH_YDS":
+		return "Rush Yds"
+	case "RUSH_ATT":
+		return "Rush Att"
+	case "REC_YDS":
+		return "Rec Yds"
+	case "RECEPTIONS":
+		return "Receptions"
+	case "ANYTIME_TD":
+		return "Anytime TD"
+	case "KICKER_PTS":
+		return "Kicking Pts"
+	default:
+		return ""
+	}
+}
+
+// FormatSelection formats a selection's display label for board rows and legs,
+// gracefully omitting missing lines on partial rows.
+func FormatSelection(market, team, player, side string, line *float64) string {
+	switch market {
+	case "SPREAD":
+		if line == nil {
+			return team
+		}
+		return strings.TrimSpace(team + " " + signedLine(*line))
+	case "ML":
+		return strings.TrimSpace(team + " ML")
+	case "TOTAL":
+		s := titleSide(side)
+		if line == nil {
+			return s
+		}
+		return strings.TrimSpace(s + " " + formatLine(*line))
+	case "TEAM_TOTAL":
+		text := team + " Team Total " + titleSide(side)
+		if line != nil {
+			text += " " + formatLine(*line)
+		}
+		return strings.TrimSpace(text)
+	case "ANYTIME_TD":
+		return strings.TrimSpace(player + " Anytime TD")
+	default:
+		label := MarketLabel(market)
+		text := player + " " + titleSide(side)
+		if line != nil {
+			text += " " + formatLine(*line)
+		}
+		if label != "" {
+			text += " " + label
+		}
+		return strings.TrimSpace(text)
+	}
+}
+
+// BuildLegSelection formats a leg's display text from form inputs, returning ""
+// when required fields for the market are missing or invalid.
+func BuildLegSelection(market, team, player, side string, line *float64) string {
+	team = strings.TrimSpace(team)
+	player = strings.TrimSpace(player)
+	side = strictTitleSide(side)
+
+	switch market {
+	case "SPREAD":
+		if team == "" || line == nil {
+			return ""
+		}
+	case "ML":
+		if team == "" {
+			return ""
+		}
+	case "TOTAL":
+		if side == "" || line == nil {
+			return ""
+		}
+	case "TEAM_TOTAL":
+		if team == "" || side == "" || line == nil {
+			return ""
+		}
+	case "ANYTIME_TD":
+		if player == "" {
+			return ""
+		}
+	case "OTHER":
+		return ""
+	default:
+		if player == "" || side == "" || line == nil {
+			return ""
+		}
+	}
+	return FormatSelection(market, team, player, side, line)
+}
+
+func titleSide(side string) string {
+	side = strings.TrimSpace(side)
+	if side == "" {
+		return ""
+	}
+	return strings.ToUpper(side[:1]) + strings.ToLower(side[1:])
+}
+
+func strictTitleSide(raw string) string {
+	switch strings.ToUpper(strings.TrimSpace(raw)) {
+	case "OVER":
+		return "Over"
+	case "UNDER":
+		return "Under"
+	case "YES":
+		return "Yes"
+	default:
+		return ""
+	}
+}
+
+func signedLine(line float64) string {
+	if line > 0 {
+		return "+" + formatLine(line)
+	}
+	return formatLine(line)
+}
+
+func formatLine(line float64) string {
+	return strconv.FormatFloat(line, 'f', -1, 64)
 }
 
 // LegSelection extracts the canonical selection key for a stored or draft leg.
