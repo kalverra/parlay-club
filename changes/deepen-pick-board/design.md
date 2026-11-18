@@ -135,7 +135,7 @@ Effort: easy (self-contained move of sync-group filtering into storage with dire
 - [x] Extend `board.Row` with picked-leg drift fields (`PickedLine`, `PickedOdds`, `Drifted`, `BoardDriftNote`,
       `TrayDriftNote`) in `board.Build`, and add `BuildSlate`, `LineGroup.HoldsLeg`, and `LineGroupForLeg` in
       `internal/board/board.go`, with unit tests in `internal/board/board_test.go`.
-- [ ] Simplify `pickPageData`, `pickSlateData`, `pickDetailData`, `buildPickSlate`, `dockFrom`, `pickRowView`, and
+- [x] Simplify `pickPageData`, `pickSlateData`, `pickDetailData`, `buildPickSlate`, `dockFrom`, `pickRowView`, and
       `pickPairRow` in `internal/web/pick.go` to use the deepened `board` types and functions, and verify with
       `internal/web/pick_test.go`.
 - [ ] Docs: update `docs/concepts/slips.md` if board/drift mechanics are referenced.
