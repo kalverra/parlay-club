@@ -138,4 +138,8 @@ Effort: easy (self-contained move of sync-group filtering into storage with dire
 - [x] Simplify `pickPageData`, `pickSlateData`, `pickDetailData`, `buildPickSlate`, `dockFrom`, `pickRowView`, and
       `pickPairRow` in `internal/web/pick.go` to use the deepened `board` types and functions, and verify with
       `internal/web/pick_test.go`.
-- [ ] Docs: update `docs/concepts/slips.md` if board/drift mechanics are referenced.
+- [x] Docs: update `docs/concepts/slips.md` if board/drift mechanics are referenced.
+
+## Reviews
+
+- [x] Final review: agy@gemini-4-argon-high

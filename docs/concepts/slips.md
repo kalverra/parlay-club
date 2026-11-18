@@ -196,16 +196,18 @@ page. The dock is only on this screen; the hub keeps its panel and banner.
 
 `internal/board` turns the week's stored odds into rows. It reads nothing itself. Before building rows and cards, the
 pick board filters the week's games by the active slip's `slate_scope` using `slips.FilterGamesByScope`. Games outside
-the slip's scope are omitted from the slate, window chips, and detail drilldowns. `board.Build` folds one row per
-selection, using the viewer's home book when it prices the selection and the median across every book otherwise. Rows
-from an older odds sync are dropped first, the same as the old Games board. A game that has kicked off is left out and
-counted. Each row carries its game, market, team, player, the roster athlete ID and position, side, line, price, display
-text, a category, and a kickoff window.
+the slip's scope are omitted from the slate, window chips, and detail drilldowns. `db.CurrentOdds` (applied by
+`Store.OddsForWeek` and `Store.OddsForGame`) drops rows from older odds syncs at the storage seam, then `board.Build`
+folds one row per selection, using the viewer's home book when it prices the selection and the median across every book
+otherwise. A game that has kicked off is left out and counted. Each row carries its game, market, team, player, the
+roster athlete ID and position, side, line, price, display text, a category, and a kickoff window, plus picked-leg drift
+fields (`PickedLine`, `PickedOdds`, `Drifted`, `BoardDriftNote`, `TrayDriftNote`) when bound to a viewer leg.
 
-`board.Slates` shapes those rows into one card per game still ahead. It filters by the search text and the kickoff
-window, orders cards by kickoff, and derives each card's spread, total, and moneyline from the built rows. A game with
-no stored odds still gets a card, with no lines and no props. The prop count is every row outside the lines category, so
-team totals count as props.
+`board.BuildSlate` (using `board.Slates`) shapes those rows into one card per game still ahead. It filters by the
+search text and the kickoff window, orders cards by kickoff, resolves the open game, counts rows per kickoff window,
+flags games with lines but no loaded props (`Unloaded`), and derives each card's spread, total, moneyline, and slate
+empty-state flags. A game with no stored odds still gets a card, with no lines and no props. The prop count is every row
+outside the lines category, so team totals count as props.
 
 The slate leads with one search box and the kickoff-window chips. Search is case- and accent-insensitive and matches a
 matchup, a team, a venue, or a roster player on the game. The input debounces at 250 ms and swaps the body partial, and
@@ -267,12 +269,13 @@ element with a UTC ISO value, a neutral ET fallback from the server ("Mon 3:04 P
 `board.Row.MatchesLeg` matches each viewer leg by `db.SameSelection` (ignoring `Line`), so a picked leg stays bound
 to its board row with remove and swap controls even if the consensus or home-book line moves after picking.
 
-`board.Pair` is the one pairing rule, shared by the detail and every refreshed row. It folds rows that share a line into
-one group: a spread or moneyline keys on the market alone so both teams sit together, a game total on the market and
-number, a team total on its market, team, and number, and a player prop on its market and canonical player.
-`board.LineKey` names that identity, so the row's element id and the update path agree. Options come back in a fixed
-order, never in input order: away then home on a spread or moneyline, Over then Under on a total or prop, and the single
-Yes on an anytime touchdown. A line with no stored price on one side keeps one option, and a line with both sides
+`board.Pair` is the one pairing rule, shared by the detail and every refreshed row (`board.LineGroupForLeg` applies
+`BoardSignals`, pairs the game's rows, and locates the matching `LineGroup` via `LineGroup.HoldsLeg`). It folds rows
+that share a line into one group: a spread or moneyline keys on the market alone so both teams sit together, a game total
+on the market and number, a team total on its market, team, and number, and a player prop on its market and canonical
+player. `board.LineKey` names that identity, so the row's element id and the update path agree. Options come back in a
+fixed order, never in input order: away then home on a spread or moneyline, Over then Under on a total or prop, and the
+single Yes on an anytime touchdown. A line with no stored price on one side keeps one option, and a line with both sides
 picked, which the custom form can produce, paints both and lets either be removed.
 
 Tapping a side of an unpicked line adds it with the normal add-leg route (`quick=1&from=board`), and tapping a picked
@@ -286,10 +289,11 @@ picked opens "Swap which pick?" and lists the viewer's legs that are not kickoff
 `PUT /legs/{old}` with the new pick's fields; a line that already holds a pick switches sides in place and needs no free
 slot.
 
-When a saved non-`OTHER` leg's `Line` or `Odds` differ from the current board row (`legDrifted`), both the board option
-(`Slip ... · now ...`) and the pick tray (`Now ...`) show a drift notice. While the slip is `OPEN` and the leg is not
-kickoff-locked (and the viewer is not locked in on the board), a one-tap **Sync line** form (`PUT /legs/{id}` with
-`from=board` or `from=tray`) updates the leg's `line`, `odds`, and regenerated `selection` text to match the board.
+When a saved non-`OTHER` leg's `Line` or `Odds` differ from the current board row (`board.Row.Drifted`), `board.Build`
+populates `BoardDriftNote` (`Slip ... · now ...`) and `TrayDriftNote` (`Now ...`) so both the board option and the pick
+tray show a drift notice. While the slip is `OPEN` and the leg is not kickoff-locked (and the viewer is not locked in on
+the board), a one-tap **Sync line** form (`PUT /legs/{id}` with `from=board` or `from=tray`) updates the leg's `line`,
+`odds`, and regenerated `selection` text to match the board.
 
 A game that has stored lines but no prop rows offers "Load them" on its slate card and again in its open detail: "Props
 for BUF @ MIA aren't loaded yet." The button calls `GET /games/{id}/props?slip=`, which runs `SyncGameProps` for that
