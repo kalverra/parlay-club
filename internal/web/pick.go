@@ -1571,20 +1571,7 @@ func refreshViewFromRow(row board.Row) *LegRefreshView {
 // switch needs only that row refreshed. A leg that moves to another market,
 // player, or game leaves a stale row behind, and the board needs a full refresh.
 func sameBoardLine(left, right db.Leg) bool {
-	if db.StringValue(left.GameID) != db.StringValue(right.GameID) ||
-		left.MarketType != right.MarketType {
-		return false
-	}
-	switch left.MarketType {
-	case "SPREAD", "ML", "TOTAL":
-		return true
-	default:
-		leftSel := db.LegSelection(left)
-		rightSel := db.LegSelection(right)
-		leftSel.Side = ""
-		rightSel.Side = ""
-		return db.SameSelection(leftSel, rightSel)
-	}
+	return db.SameLineGroup(db.LegSelection(left), db.LegSelection(right))
 }
 
 // groupHoldsLeg reports whether a line group carries the leg's selection. A

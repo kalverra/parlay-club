@@ -256,20 +256,34 @@ func isReceivingMarket(market string) bool {
 	return market == "REC_YDS" || market == "RECEPTIONS"
 }
 
-func sameBoardPlayer(row Row, leg analyzer.Leg) bool {
-	if row.PlayerID != "" && leg.PlayerID != "" {
-		return row.PlayerID == leg.PlayerID
+func rowSelectionKey(row Row) db.SelectionKey {
+	return db.SelectionKey{
+		GameID:     row.GameID,
+		MarketType: row.Market,
+		Team:       row.Team,
+		PlayerName: row.PlayerName,
+		PlayerID:   row.PlayerID,
+		Side:       row.Side,
 	}
-	return row.PlayerName != "" && strings.EqualFold(row.PlayerName, leg.PlayerName)
+}
+
+func analyzerLegSelectionKey(leg analyzer.Leg) db.SelectionKey {
+	return db.SelectionKey{
+		GameID:     leg.GameID,
+		MarketType: leg.Market,
+		Team:       leg.Team,
+		PlayerName: leg.PlayerName,
+		PlayerID:   leg.PlayerID,
+		Side:       leg.Side,
+	}
+}
+
+func sameBoardPlayer(row Row, leg analyzer.Leg) bool {
+	return db.SamePlayer(rowSelectionKey(row), analyzerLegSelectionKey(leg))
 }
 
 func rowMatchesAnalyzerLeg(row Row, leg analyzer.Leg) bool {
-	return row.GameID == leg.GameID &&
-		row.Market == leg.Market &&
-		row.Team == leg.Team &&
-		row.PlayerName == leg.PlayerName &&
-		row.Side == leg.Side &&
-		lineEqual(row.Line, leg.Line)
+	return db.SameSelection(rowSelectionKey(row), analyzerLegSelectionKey(leg))
 }
 
 func groupSignalScore(game db.Game, group LineGroup, signals BoardSignals) int {
