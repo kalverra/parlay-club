@@ -372,3 +372,174 @@ func TestLoadDatasetJSON(t *testing.T) {
 	_, err = eval.LoadDatasetJSON(badPath)
 	require.Error(t, err)
 }
+
+func TestLoadDatasetMultiGameSlateAndCoverageParity(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	database, err := db.Open(":memory:")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = database.Close() })
+	require.NoError(t, db.Migrate(ctx, database))
+	store := db.NewStore(database)
+	t.Cleanup(func() { _ = store.Close() })
+
+	group, user := seedGroupAndMember(t, store, "ada")
+	week3, err := store.UpsertWeek(ctx, 2025, nflverse.SeasonTypeRegular, 3)
+	require.NoError(t, err)
+
+	earlyKickoff := time.Date(2025, 9, 21, 17, 0, 0, 0, time.UTC)
+	lateKickoff := time.Date(2025, 9, 21, 20, 25, 0, 0, time.UTC)
+
+	// g1: referenced by settled leg with Odds: -110 (no archived odds needed for WithOdds).
+	// g2: referenced by settled leg with Odds: 0 (relies on metadata-only archived props check).
+	// g3: referenced by settled leg with Odds: 0 (no pre-kickoff odds, only post-kickoff odds:lines).
+	// g4: unreferenced game on the same week's slate (its archived injuries/odds must not be read).
+	games := []db.Game{
+		{
+			ID: "g1", WeekID: week3.ID, HomeTeam: "BUF", AwayTeam: "MIA",
+			HomeName: "Buffalo Bills", AwayName: "Miami Dolphins",
+			HomeESPNID: "2", AwayESPNID: "15", Kickoff: earlyKickoff, Status: db.GameFinal,
+		},
+		{
+			ID: "g2", WeekID: week3.ID, HomeTeam: "KC", AwayTeam: "LV",
+			HomeName: "Kansas City Chiefs", AwayName: "Las Vegas Raiders",
+			HomeESPNID: "12", AwayESPNID: "13", Kickoff: earlyKickoff, Status: db.GameFinal,
+		},
+		{
+			ID: "g3", WeekID: week3.ID, HomeTeam: "PHI", AwayTeam: "DAL",
+			HomeName: "Philadelphia Eagles", AwayName: "Dallas Cowboys",
+			HomeESPNID: "21", AwayESPNID: "6", Kickoff: lateKickoff, Status: db.GameFinal,
+		},
+		{
+			ID: "g4", WeekID: week3.ID, HomeTeam: "SF", AwayTeam: "SEA",
+			HomeName: "San Francisco 49ers", AwayName: "Seattle Seahawks",
+			HomeESPNID: "25", AwayESPNID: "26", Kickoff: earlyKickoff, Status: db.GameFinal,
+		},
+	}
+	for _, g := range games {
+		_, err = store.UpsertGame(ctx, g)
+		require.NoError(t, err)
+	}
+
+	// Seed overlapping summary + roster injuries for g1 to verify parity with analyzer.MergeGameInjuries.
+	g1Summary := `{"injuries":[{"team":{"id":"2","displayName":"Buffalo Bills","abbreviation":"BUF"},` +
+		`"injuries":[{"status":"Questionable","athlete":{"id":"buf-wr1","fullName":"Summary WR",` +
+		`"position":{"abbreviation":"WR"}}}]}]}`
+	g1Roster := `{"athletes":[{"items":[{"id":"buf-wr1","fullName":"Summary WR","position":{"abbreviation":"WR"},` +
+		`"injuries":[{"status":"Out"}]},{"id":"buf-qb2","fullName":"Roster Only QB",` +
+		`"position":{"abbreviation":"QB"},"injuries":[{"status":"Doubtful"}]}]}]}`
+	mustArchiveResponse(
+		t, store, "espn", db.ArchiveSummaryKey("g1"), earlyKickoff.Add(-30*time.Minute), []byte(g1Summary),
+	)
+	mustArchiveResponse(
+		t, store, "espn", db.ArchiveRosterKey("2"), earlyKickoff.Add(-30*time.Minute), []byte(g1Roster),
+	)
+
+	// Unreferenced game g4 has archived injuries and odds, which LoadDataset must skip.
+	g4Summary := `{"injuries":[{"team":{"id":"25","displayName":"San Francisco 49ers","abbreviation":"SF"},` +
+		`"injuries":[{"status":"Out","athlete":{"id":"sf-rb1","fullName":"Unreferenced RB",` +
+		`"position":{"abbreviation":"RB"}}}]}]}`
+	mustArchiveResponse(
+		t, store, "espn", db.ArchiveSummaryKey("g4"), earlyKickoff.Add(-30*time.Minute), []byte(g4Summary),
+	)
+	mustArchiveResponse(
+		t, store, "odds", db.ArchiveOddsPropsKey("g4"), earlyKickoff.Add(-30*time.Minute), []byte(`not-json`),
+	)
+
+	// g2 has Odds: 0 on its leg; metadata-only check must match pre-kickoff odds:props:g2 without parsing JSON.
+	mustArchiveResponse(
+		t, store, "odds", db.ArchiveOddsPropsKey("g2"),
+		earlyKickoff.Add(-15*time.Minute), []byte(`metadata-only-body`),
+	)
+
+	// Post-kickoff odds:lines at lateKickoff + 5m must NOT satisfy g3 (nor g1/g2).
+	mustArchiveResponse(t, store, "odds", db.ArchiveOddsLinesKey, lateKickoff.Add(5*time.Minute), []byte(`[]`))
+
+	// Create a settled slip referencing g1, g2, g3 (leaving g4 unreferenced), plus an ungraded slip referencing g4.
+	settledSlip, err := store.CreateSlip(
+		ctx, group.ID, week3.ID, nil, "Settled Multi-Game", db.SlateScopeFullWeek, 3, []int64{user.ID},
+	)
+	require.NoError(t, err)
+
+	legs := []db.Leg{
+		{
+			SlipID:     settledSlip.ID,
+			UserID:     user.ID,
+			GameID:     new("g1"),
+			MarketType: "SPREAD",
+			Selection:  "BUF -3.5",
+			Team:       new("BUF"),
+			Side:       new("TEAM"),
+			Line:       new(-3.5),
+			Odds:       -110,
+		},
+		{
+			SlipID: settledSlip.ID, UserID: user.ID, GameID: new("g2"),
+			MarketType: "SPREAD", Selection: "KC -2.5", Team: new("KC"), Side: new("TEAM"), Line: new(-2.5), Odds: 0,
+		},
+		{
+			SlipID: settledSlip.ID, UserID: user.ID, GameID: new("g3"),
+			MarketType: "SPREAD", Selection: "PHI -1.5", Team: new("PHI"), Side: new("TEAM"), Line: new(-1.5), Odds: 0,
+		},
+	}
+	for i, l := range legs {
+		created, createErr := store.CreateLeg(ctx, l)
+		require.NoError(t, createErr)
+		if i > 0 {
+			// CreateLeg defaults Odds==0 to DefaultLegOdds (-110); clear it in SQL to test archived-odds fallback.
+			_, updateErr := database.ExecContext(ctx, "UPDATE legs SET odds = 0 WHERE id = ?", created.ID)
+			require.NoError(t, updateErr)
+		}
+		require.NoError(t, store.SetLegResult(ctx, created.ID, parlay.Won, "test"))
+	}
+	require.NoError(t, store.SetSlipGrade(ctx, settledSlip.ID, parlay.Won, db.SlipGraded))
+
+	// Ungraded slip on g4 must not pull g4 into referencedGames.
+	openSlip, err := store.CreateSlip(
+		ctx, group.ID, week3.ID, nil, "Open Slip", db.SlateScopeFullWeek, 1, []int64{user.ID},
+	)
+	require.NoError(t, err)
+	_, err = store.CreateLeg(ctx, db.Leg{
+		SlipID: openSlip.ID, UserID: user.ID, GameID: new("g4"),
+		MarketType: "SPREAD", Selection: "SF -4.5", Team: new("SF"), Side: new("TEAM"), Line: new(-4.5), Odds: -110,
+	})
+	require.NoError(t, err)
+
+	ds, err := eval.LoadDataset(ctx, store, eval.ReplayFilter{})
+	require.NoError(t, err)
+	require.Len(t, ds.Weeks, 1)
+
+	w := ds.Weeks[0]
+	// Unreferenced game g4 did not load archived injuries.
+	assert.Empty(t, w.Games["g4"].Injuries)
+
+	// Injury merging on g1 matches analyzer.MergeGameInjuries identically.
+	liveGame := db.Game{
+		ID:       "g1",
+		HomeTeam: "BUF",
+		AwayTeam: "MIA",
+		InjuriesJSON: new(
+			`[{"team":{"id":"2","displayName":"Buffalo Bills","abbreviation":"BUF"},"injuries":[{"status":"Questionable","athlete":{"id":"buf-wr1","fullName":"Summary WR","position":{"abbreviation":"WR"}}}]}]`,
+		),
+	}
+	liveRosters := []db.RosterPlayer{
+		{AthleteID: "buf-wr1", Team: "BUF", FullName: "Summary WR", Position: "WR", InjuryStatus: "Out"},
+		{AthleteID: "buf-qb2", Team: "BUF", FullName: "Roster Only QB", Position: "QB", InjuryStatus: "Doubtful"},
+	}
+	expectedLive := analyzer.MergeGameInjuries(liveGame, liveRosters)
+	require.Len(t, w.Games["g1"].Injuries["BUF"], len(expectedLive["BUF"]))
+	for i, wantInj := range expectedLive["BUF"] {
+		gotInj := w.Games["g1"].Injuries["BUF"][i]
+		assert.Equal(t, wantInj.AthleteID, gotInj.AthleteID)
+		assert.Equal(t, wantInj.FullName, gotInj.FullName)
+		assert.Equal(t, wantInj.Position, gotInj.Position)
+		assert.Equal(t, wantInj.Status, gotInj.Status)
+	}
+
+	// Coverage parity: TotalLegs=3, WithInjuries=1 (g1 only), WithOdds=2 (g1 via Odds:-110, g2 via metadata-only props).
+	assert.Equal(t, eval.DataCoverage{
+		TotalLegs:    3,
+		WithInjuries: 1,
+		WithOdds:     2,
+	}, ds.Coverage)
+}
