@@ -1,12 +1,18 @@
 ---
-slug: grading-evals
-status: implementing
-created: "2026-11-23"
-accepted_by:
-    - Adam Hamrick
-accepted_at: "2026-11-23T19:23:50Z"
-complexity: medium
-risk: low
+id: adr-grading-evals
+title: Grading evals and calibration
+type: decision
+summary: '### Before ### After Version the grading rubric in Go and build an offline, leak-free historical replayer and eval runner that scores past weeks across rubric versions and compares calibration against actual leg and parlay outcomes.'
+touched:
+    - cmd/eval
+    - internal/analyzer
+    - internal/db
+    - internal/eval
+    - internal/ingest/espn
+    - internal/ingest/odds
+related:
+    - analyzer
+    - local-dev
 ---
 
 # Grading evals and calibration
@@ -71,3 +77,43 @@ Version the grading rubric in Go and build an offline, leak-free historical repl
 This beats storing grade snapshots in SQLite because comparing a new rubric against past weeks requires replay anyway, pure-Go re-scoring over a full season takes milliseconds, and skipping grade storage keeps the Litestream-replicated database smaller and results idempotent. Reconstructing overwritten inputs (odds, game logs, injuries) from pre-kickoff `api_archive` payloads prevents future-week data from leaking into historical grades.
 
 `complexity: medium` fits because the change coordinates leak-free historical input reconstruction across weekly tables and raw archived HTTP payloads, versioned rubric dispatch, and calibration reporting for both legs and multi-leg parlays. `risk: low` fits because the eval runner is strictly offline with no schema changes and no impact on live request paths, backed by deterministic replay tests.
+
+## Overview
+
+```mermaid
+flowchart LR
+  Data["DB + Live Signals"] --> LiveScorer["ScoreLeg / ScoreSlip (ActiveRubric)"]
+  LiveScorer --> UI["Rendered UI + /analyzer/guide"]
+
+  Weekly["nflverse (week_num < target) + nfelo + weather"] --> Replayer["Leak-Free Replayer (internal/eval)"]
+  Archive["api_archive (fetched_at < kickoff)"] --> Parsers["Pure Raw-JSON Parsers (espn, odds)"]
+  Parsers --> Replayer
+  Rubrics["Versioned Rubrics / --candidate-file"] --> Eval["Evaluate & Compare (internal/eval)"]
+  Replayer --> Eval
+  Outcomes["Settled Legs & Slips"] --> Eval
+  Eval --> CLI["Offline CLI (cmd/eval): Calibration & Diff Report"]
+```
+
+## Consequences
+
+- **Easier:** Testing and comparing rubric weight changes (`RubricV1` vs. built-in or JSON-file candidates) offline against historical weeks without touching live request paths or SQLite schemas.
+- **Easier:** Identifying predictive vs. noisy analyzer rules via per-factor lift over implied odds and band migration matrices before shipping weight changes.
+- **Harder:** Adding new analyzer rules or weights requires threading them through the `Rubric` struct rather than package-level constants so live scoring, `/analyzer/guide`, and offline evals stay aligned.
+- **Revisit:** Revisit per-factor sample-size thresholds or confidence bounds once multiple seasons of archived weeks accumulate, since single-season friend-group slip counts can make factor lift noisy.
+
+## Alternatives considered
+
+- **Storing grade snapshots in SQLite at lock time:** Rejected because comparing a new rubric against past weeks still requires replay, pure-Go re-scoring takes milliseconds, and skipping stored grades keeps the Litestream-replicated database smaller and results idempotent.
+- **Falling back to overwritten live tables (`player_gamelogs`, `roster_players.injury_status`, `odds`) on archive gaps:** Rejected because silent post-kickoff data leakage would artificially inflate historical calibration; the replayer fails soft and reports gaps in `DataCoverage` instead.
+- **Automated grid search or ML weight tuning:** Rejected because small weekly sample sizes would overfit quickly and violate the deterministic, human-reviewed Go grading rule.
+
+## Implementation notes
+
+- **Archive coverage limits:** Pre-archive weeks or missing pre-kickoff payloads produce partial signal coverage; `DataCoverage` surfaces those counts on every run instead of falling back to live tables.
+- **Priced-leg `Lift` alignment:** `Evaluate` aligns `Lift` denominators to decided legs with valid odds so unpriced legs do not skew `WinRate - AvgImpliedProb`.
+- **Factor attribution labels:** `Evaluate` normalizes factor attribution keys to canonical `GradeRubric()` labels so aggregate reports group rules consistently across legs.
+
+## Follow-ups
+
+- Propose and tune a `RubricV2` candidate in `internal/analyzer/rubric.go` using `cmd/eval` once sufficient archived weeks and settled slips are available.
+- Add minimum-sample warnings or confidence intervals to `internal/eval/metrics.go` factor attribution output to flag low-`N` rules during early-season runs.
