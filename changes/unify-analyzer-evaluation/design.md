@@ -123,6 +123,6 @@ scoring and warning parity) Risk: low (backed by comprehensive table-driven test
 Complexity: low (adds `SlipEvaluation` entry point and updates `web.analyzerView`) Risk: low (pure delegation verified
 by analyzer and web handler tests)
 
-- [ ] Add `SlipEvaluation`, `EvaluateSlip`, and `EvaluateSlipWithRubric` in `internal/analyzer/grade.go` (with
+- [x] Add `SlipEvaluation`, `EvaluateSlip`, and `EvaluateSlipWithRubric` in `internal/analyzer/grade.go` (with
       `ScoreSlipWithRubric` delegating to it), update `internal/web/analyzer.go` (`analyzerView`) to call `EvaluateSlip`
       once, and add tests covering single-pass warning and grade parity.

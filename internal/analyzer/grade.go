@@ -33,6 +33,13 @@ type SlipGrade struct {
 	LegGrades []LegGrade    // per-leg grades in input leg order
 }
 
+// SlipEvaluation holds both the analyzer warnings and deterministic grade from
+// a single evaluation pass over a parlay slip.
+type SlipEvaluation struct {
+	Warnings []Warning
+	Grade    SlipGrade
+}
+
 // ScoreLeg computes the deterministic A-F quality grade and factor breakdown
 // for a single leg using ActiveRubric. Legs with market OTHER, no game, or a
 // missing game are skipped (Letter == "", Score == 0).
@@ -80,6 +87,25 @@ func ScoreSlip(legs []Leg, games map[string]Game, stats map[string]PlayerStats) 
 // the graded legs' baseline, script correlations, parlay length drag, and chalk
 // drag using the supplied rubric.
 func ScoreSlipWithRubric(legs []Leg, games map[string]Game, stats map[string]PlayerStats, rubric Rubric) SlipGrade {
+	return EvaluateSlipWithRubric(legs, games, stats, rubric).Grade
+}
+
+// EvaluateSlip runs slip analysis and rubric grading in a single pass using
+// ActiveRubric.
+func EvaluateSlip(legs []Leg, games map[string]Game, stats map[string]PlayerStats) SlipEvaluation {
+	return EvaluateSlipWithRubric(legs, games, stats, ActiveRubric)
+}
+
+// EvaluateSlipWithRubric runs slip analysis once and computes per-leg and
+// overall parlay grades using the supplied rubric.
+func EvaluateSlipWithRubric(
+	legs []Leg,
+	games map[string]Game,
+	stats map[string]PlayerStats,
+	rubric Rubric,
+) SlipEvaluation {
+	warnings := AnalyzeSlip(legs, games, stats)
+
 	legGrades := make([]LegGrade, len(legs))
 	gradedSum := 0
 	gradedCount := 0
@@ -92,11 +118,13 @@ func ScoreSlipWithRubric(legs []Leg, games map[string]Game, stats map[string]Pla
 		}
 	}
 	if gradedCount == 0 {
-		return SlipGrade{LegGrades: legGrades}
+		return SlipEvaluation{
+			Warnings: warnings,
+			Grade:    SlipGrade{LegGrades: legGrades},
+		}
 	}
 
 	baseline := int(math.Round(float64(gradedSum) / float64(gradedCount)))
-	warnings := AnalyzeSlip(legs, games, stats)
 
 	var factors []GradeFactor
 	chalkCount := 0
@@ -163,12 +191,15 @@ func ScoreSlipWithRubric(legs []Leg, games map[string]Game, stats map[string]Pla
 	score = clampInt(score, 0, 100)
 	letter := letterGrade(score, rubric)
 
-	return SlipGrade{
-		Letter:    letter,
-		Score:     score,
-		Summary:   slipGradeSummary(gradedCount, factors, warnings),
-		Factors:   factors,
-		LegGrades: legGrades,
+	return SlipEvaluation{
+		Warnings: warnings,
+		Grade: SlipGrade{
+			Letter:    letter,
+			Score:     score,
+			Summary:   slipGradeSummary(gradedCount, factors, warnings),
+			Factors:   factors,
+			LegGrades: legGrades,
+		},
 	}
 }
 
