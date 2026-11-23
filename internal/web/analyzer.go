@@ -177,8 +177,9 @@ func analyzerView(
 		input = append(input, analyzer.LegFromDB(leg, names[leg.UserID]))
 	}
 
-	warnings := analyzer.AnalyzeSlip(input, gamesByID, stats)
-	slipGrade := analyzer.ScoreSlip(input, gamesByID, stats)
+	eval := analyzer.EvaluateSlip(input, gamesByID, stats)
+	warnings := eval.Warnings
+	slipGrade := eval.Grade
 
 	legGrades := make(map[int64]GradeView, len(slipGrade.LegGrades))
 	for _, lg := range slipGrade.LegGrades {

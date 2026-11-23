@@ -193,3 +193,104 @@ func TestRubricOverrideSlipFactors(t *testing.T) {
 	assert.NotEqual(t, baseSlip.Score, customSlip.Score)
 	assert.Equal(t, baseSlip, analyzer.ScoreSlip(legs, games, nil))
 }
+
+func TestEvaluateSlipParity(t *testing.T) {
+	t.Parallel()
+
+	games := map[string]analyzer.Game{
+		"buf-mia": {
+			ID:      "buf-mia",
+			Home:    "BUF",
+			Away:    "MIA",
+			Indoor:  false,
+			Weather: &analyzer.Weather{WindMPH: 22},
+			Nfelo:   &analyzer.Nfelo{HomeSpread: -8.5},
+		},
+		"kc-lv": {
+			ID:     "kc-lv",
+			Home:   "KC",
+			Away:   "LV",
+			Indoor: false,
+		},
+	}
+	stats := map[string]analyzer.PlayerStats{
+		"allen": {
+			Position: "QB",
+			Games: map[string][]float64{
+				"PASS_YDS": {250, 240, 230, 260, 245},
+			},
+		},
+		"hill": {
+			Position: "WR",
+			Games: map[string][]float64{
+				"REC_YDS": {95, 88, 102, 80, 91},
+			},
+		},
+	}
+
+	tests := []struct {
+		name string
+		legs []analyzer.Leg
+	}{
+		{
+			name: "empty slip",
+			legs: nil,
+		},
+		{
+			name: "ungradable leg with chalk warning",
+			legs: []analyzer.Leg{
+				{ID: 1, Owner: "Adam", Market: "OTHER", Team: "BUF", Odds: -600},
+			},
+		},
+		{
+			name: "multi-leg with stacks, conflicts, weather, hook, median trap, and chalk",
+			legs: []analyzer.Leg{
+				{
+					ID: 1, Owner: "Adam", GameID: "buf-mia", Market: "SPREAD",
+					Team: "BUF", Side: "TEAM", Line: new(-7.5), Odds: -110,
+				},
+				{
+					ID: 2, Owner: "Sam", GameID: "buf-mia", Market: "PASS_YDS",
+					Team: "BUF", PlayerID: "allen", PlayerName: "Josh Allen",
+					Side: "OVER", Line: new(255.5), Odds: -110,
+				},
+				{
+					ID: 3, Owner: "Ada", GameID: "buf-mia", Market: "REC_YDS",
+					Team: "MIA", PlayerID: "hill", PlayerName: "Tyreek Hill",
+					Side: "OVER", Line: new(79.5), Odds: -110,
+				},
+				{ID: 4, Owner: "Ada", GameID: "buf-mia", Market: "TOTAL", Side: "OVER", Line: new(49.5), Odds: -110},
+				{ID: 5, Owner: "Sam", GameID: "kc-lv", Market: "MONEYLINE", Team: "KC", Side: "TEAM", Odds: -550},
+				{
+					ID: 6, Owner: "Adam", GameID: "kc-lv", Market: "SPREAD",
+					Team: "LV", Side: "TEAM", Line: new(10.5), Odds: -650,
+				},
+			},
+		},
+	}
+
+	custom := analyzer.RubricV1
+	custom.Name = "custom-parity"
+	custom.StackBonus = 10
+	custom.WarnConflict = -9
+	custom.ChalkDragPerExtraLeg = -8
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			wantWarnings := analyzer.AnalyzeSlip(tc.legs, games, stats)
+			wantGrade := analyzer.ScoreSlip(tc.legs, games, stats)
+			got := analyzer.EvaluateSlip(tc.legs, games, stats)
+
+			assert.Equal(t, wantWarnings, got.Warnings)
+			assert.Equal(t, wantGrade, got.Grade)
+
+			wantCustomGrade := analyzer.ScoreSlipWithRubric(tc.legs, games, stats, custom)
+			gotCustom := analyzer.EvaluateSlipWithRubric(tc.legs, games, stats, custom)
+
+			assert.Equal(t, wantWarnings, gotCustom.Warnings)
+			assert.Equal(t, wantCustomGrade, gotCustom.Grade)
+		})
+	}
+}
