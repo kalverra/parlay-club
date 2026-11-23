@@ -442,3 +442,228 @@ func TestCompare(t *testing.T) {
 		assert.False(t, math.IsNaN(b.BrierScore))
 	}
 }
+
+func TestEvaluateWeekly(t *testing.T) {
+	t.Parallel()
+
+	games := testGame()
+	stats := testStats()
+
+	hotLeg := func(id int64, res parlay.Result) ReplayedLeg {
+		return ReplayedLeg{
+			Leg: analyzer.Leg{
+				ID:       id,
+				GameID:   "g1",
+				Market:   "REC_YDS",
+				Team:     "BUF",
+				PlayerID: "p_hot",
+				Side:     "OVER",
+				Line:     new(55.5),
+				Odds:     100,
+			},
+			Result:      res,
+			DecimalOdds: 2.0,
+		}
+	}
+	coldLeg := func(id int64, res parlay.Result) ReplayedLeg {
+		return ReplayedLeg{
+			Leg: analyzer.Leg{
+				ID:       id,
+				GameID:   "g1",
+				Market:   "REC_YDS",
+				Team:     "BUF",
+				PlayerID: "p_cold",
+				Side:     "OVER",
+				Line:     new(55.5),
+				Odds:     100,
+			},
+			Result:      res,
+			DecimalOdds: 2.0,
+		}
+	}
+
+	// Intentionally out of chronological order.
+	dataset := ReplayDataset{
+		Weeks: []ReplayedWeek{
+			{
+				Season:   2025,
+				WeekNum:  4,
+				WeekType: "REG",
+				Games:    games,
+				Stats:    stats,
+				Slips: []ReplayedSlip{
+					{
+						SlipID: 4,
+						Result: parlay.Lost,
+						Legs:   []ReplayedLeg{hotLeg(1, parlay.Lost), coldLeg(2, parlay.Lost)},
+					},
+				},
+			},
+			{
+				Season:   2025,
+				WeekNum:  1,
+				WeekType: "POST",
+				Games:    games,
+				Stats:    stats,
+				Slips: []ReplayedSlip{
+					{
+						SlipID: 3,
+						Result: parlay.Won,
+						Legs:   []ReplayedLeg{hotLeg(3, parlay.Won), hotLeg(4, parlay.Push)},
+					},
+				},
+			},
+			{
+				Season:   2024,
+				WeekNum:  18,
+				WeekType: "REG",
+				Games:    games,
+				Stats:    stats,
+				Slips: []ReplayedSlip{
+					{
+						SlipID: 1,
+						Result: parlay.Won,
+						Legs:   []ReplayedLeg{hotLeg(5, parlay.Won)},
+					},
+				},
+			},
+			{
+				Season:   2025,
+				WeekNum:  1,
+				WeekType: "REG",
+				Games:    games,
+				Stats:    stats,
+				Slips: []ReplayedSlip{
+					{
+						SlipID: 2,
+						Result: parlay.Lost,
+						Legs:   []ReplayedLeg{hotLeg(6, parlay.Won), coldLeg(7, parlay.Lost)},
+					},
+				},
+			},
+		},
+	}
+
+	report := Evaluate(dataset, analyzer.RubricV1)
+	require.Len(t, report.Weekly, 4)
+
+	// Chronological order: 2024 W18 REG, 2025 W1 REG, 2025 W4 REG, 2025 W1 POST.
+	assert.Equal(t, 2024, report.Weekly[0].Season)
+	assert.Equal(t, 18, report.Weekly[0].WeekNum)
+	assert.Equal(t, "REG", report.Weekly[0].WeekType)
+	assert.Equal(t, 1, report.Weekly[0].DecidedLegs)
+	assert.InDelta(t, 1.0, report.Weekly[0].LegWinRate, 1e-9)
+	assert.InDelta(t, 0.5, report.Weekly[0].LegLift, 1e-9)
+	assert.InDelta(t, 1.0, report.Weekly[0].LegFlatROI, 1e-9)
+
+	assert.Equal(t, 2025, report.Weekly[1].Season)
+	assert.Equal(t, 1, report.Weekly[1].WeekNum)
+	assert.Equal(t, "REG", report.Weekly[1].WeekType)
+	assert.Equal(t, 2, report.Weekly[1].DecidedLegs)
+	assert.InDelta(t, 0.5, report.Weekly[1].LegWinRate, 1e-9)
+	assert.InDelta(t, 0.0, report.Weekly[1].LegLift, 1e-9)
+	assert.InDelta(t, 0.0, report.Weekly[1].LegFlatROI, 1e-9)
+
+	assert.Equal(t, 2025, report.Weekly[2].Season)
+	assert.Equal(t, 4, report.Weekly[2].WeekNum)
+	assert.Equal(t, "REG", report.Weekly[2].WeekType)
+	assert.Equal(t, 2, report.Weekly[2].DecidedLegs)
+	assert.InDelta(t, 0.0, report.Weekly[2].LegWinRate, 1e-9)
+	assert.InDelta(t, -0.5, report.Weekly[2].LegLift, 1e-9)
+	assert.InDelta(t, -1.0, report.Weekly[2].LegFlatROI, 1e-9)
+
+	assert.Equal(t, 2025, report.Weekly[3].Season)
+	assert.Equal(t, 1, report.Weekly[3].WeekNum)
+	assert.Equal(t, "POST", report.Weekly[3].WeekType)
+	assert.Equal(t, 1, report.Weekly[3].DecidedLegs) // push excluded
+	assert.InDelta(t, 1.0, report.Weekly[3].LegWinRate, 1e-9)
+
+	// Weekly band counts must sum to overall report band counts.
+	for i, overall := range report.LegBands {
+		var total, decided, wins, losses, pushes int
+		for _, w := range report.Weekly {
+			total += w.LegBands[i].Total
+			decided += w.LegBands[i].Decided
+			wins += w.LegBands[i].Wins
+			losses += w.LegBands[i].Losses
+			pushes += w.LegBands[i].Pushes
+		}
+		assert.Equal(t, overall.Total, total)
+		assert.Equal(t, overall.Decided, decided)
+		assert.Equal(t, overall.Wins, wins)
+		assert.Equal(t, overall.Losses, losses)
+		assert.Equal(t, overall.Pushes, pushes)
+	}
+	for i, overall := range report.SlipBands {
+		var total, decided, wins, losses, pushes int
+		for _, w := range report.Weekly {
+			total += w.SlipBands[i].Total
+			decided += w.SlipBands[i].Decided
+			wins += w.SlipBands[i].Wins
+			losses += w.SlipBands[i].Losses
+			pushes += w.SlipBands[i].Pushes
+		}
+		assert.Equal(t, overall.Total, total)
+		assert.Equal(t, overall.Decided, decided)
+		assert.Equal(t, overall.Wins, wins)
+		assert.Equal(t, overall.Losses, losses)
+		assert.Equal(t, overall.Pushes, pushes)
+	}
+}
+
+func TestEvaluateAll(t *testing.T) {
+	t.Parallel()
+
+	dataset := ReplayDataset{
+		Coverage: DataCoverage{TotalLegs: 2, WithGameLogs: 2},
+		Weeks: []ReplayedWeek{
+			{
+				Season:  2025,
+				WeekNum: 4,
+				Games:   testGame(),
+				Stats:   testStats(),
+				Slips: []ReplayedSlip{
+					{
+						SlipID: 1,
+						Result: parlay.Won,
+						Legs: []ReplayedLeg{
+							{
+								Leg: analyzer.Leg{
+									ID: 1, GameID: "g1", Market: "REC_YDS",
+									Team: "BUF", PlayerID: "p_hot", Side: "OVER", Line: new(55.5), Odds: 100,
+								},
+								Result:      parlay.Won,
+								DecimalOdds: 2.0,
+							},
+							{
+								Leg: analyzer.Leg{
+									ID: 2, GameID: "g1", Market: "REC_YDS",
+									Team: "BUF", PlayerID: "p_cold", Side: "OVER", Line: new(55.5), Odds: 100,
+								},
+								Result:      parlay.Lost,
+								DecimalOdds: 2.0,
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	single := EvaluateAll(dataset, []analyzer.Rubric{analyzer.RubricV1})
+	assert.Equal(t, analyzer.ActiveRubric.Name, single.ActiveRubric)
+	assert.Equal(t, dataset.Coverage, single.Coverage)
+	require.Len(t, single.Reports, 1)
+	assert.Equal(t, "v1", single.Reports[0].RubricName)
+	assert.Empty(t, single.Diffs)
+
+	v2 := analyzer.RubricV1
+	v2.Name = "v2-test"
+	v2.HitRate = 0
+	multi := EvaluateAll(dataset, []analyzer.Rubric{analyzer.RubricV1, v2})
+	require.Len(t, multi.Reports, 2)
+	require.Len(t, multi.Diffs, 1)
+	assert.Equal(t, "v1", multi.Diffs[0].BaselineName)
+	assert.Equal(t, "v2-test", multi.Diffs[0].CandidateName)
+	assert.Equal(t, Compare(multi.Reports[0], multi.Reports[1]), multi.Diffs[0])
+}

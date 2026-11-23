@@ -3,12 +3,15 @@ package eval_test
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/kalverra/parlay-club/internal/analyzer"
 	"github.com/kalverra/parlay-club/internal/db"
 	"github.com/kalverra/parlay-club/internal/eval"
 	"github.com/kalverra/parlay-club/internal/ingest/archive"
@@ -295,4 +298,77 @@ func TestLoadDatasetFailSoftAndFilters(t *testing.T) {
 	// Verify context cancellation / clean error handling isn't needed for normal path,
 	// and verify background context works.
 	_ = context.Background()
+}
+
+func TestLoadDatasetJSON(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	want := eval.ReplayDataset{
+		Coverage: eval.DataCoverage{
+			TotalLegs:    2,
+			WithGameLogs: 1,
+			WithNfelo:    2,
+		},
+		Weeks: []eval.ReplayedWeek{
+			{
+				Season:   2025,
+				WeekNum:  3,
+				WeekType: "REG",
+				Games: map[string]analyzer.Game{
+					"g1": {ID: "g1", Home: "BUF", Away: "MIA", Indoor: true},
+				},
+				Stats: map[string]analyzer.PlayerStats{
+					"p1": {Position: "WR", Games: map[string][]float64{"REC_YDS": {70, 65, 60, 55, 50}}},
+				},
+				Slips: []eval.ReplayedSlip{
+					{
+						SlipID:       10,
+						Result:       parlay.Won,
+						CombinedOdds: 2.0,
+						Legs: []eval.ReplayedLeg{
+							{
+								Leg: analyzer.Leg{
+									ID: 1, GameID: "g1", Market: "REC_YDS",
+									Team: "BUF", PlayerID: "p1", Side: "OVER", Line: new(55.5), Odds: 100,
+								},
+								Result:      parlay.Won,
+								DecimalOdds: 2.0,
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	raw, err := json.Marshal(want)
+	require.NoError(t, err)
+	validPath := filepath.Join(dir, "dataset.json")
+	require.NoError(t, os.WriteFile(validPath, raw, 0o600))
+
+	got, err := eval.LoadDatasetJSON(validPath)
+	require.NoError(t, err)
+	assert.Equal(t, want, got)
+
+	// Missing coverage.total_legs falls back to counting legs in weeks.
+	noCovPath := filepath.Join(dir, "no_cov.json")
+	noCov := want
+	noCov.Coverage = eval.DataCoverage{}
+	rawNoCov, err := json.Marshal(noCov)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(noCovPath, rawNoCov, 0o600))
+
+	gotNoCov, err := eval.LoadDatasetJSON(noCovPath)
+	require.NoError(t, err)
+	assert.Equal(t, 1, gotNoCov.Coverage.TotalLegs)
+
+	// Error cases: missing file and invalid JSON.
+	_, err = eval.LoadDatasetJSON(filepath.Join(dir, "missing.json"))
+	require.Error(t, err)
+
+	badPath := filepath.Join(dir, "bad.json")
+	require.NoError(t, os.WriteFile(badPath, []byte("{not-json"), 0o600))
+	_, err = eval.LoadDatasetJSON(badPath)
+	require.Error(t, err)
 }

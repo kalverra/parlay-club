@@ -21,6 +21,15 @@ func TestRubricRegistry(t *testing.T) {
 
 	names := analyzer.RubricNames()
 	assert.Contains(t, names, "v1")
+
+	rubrics := analyzer.BuiltInRubrics()
+	require.Len(t, rubrics, len(names))
+	assert.Equal(t, analyzer.RubricV1, rubrics[0])
+
+	// Mutating the returned slice must not affect the registry.
+	rubrics[0].Name = "mutated"
+	fresh := analyzer.BuiltInRubrics()
+	assert.Equal(t, "v1", fresh[0].Name)
 }
 
 func TestRubricV1Equivalence(t *testing.T) {
