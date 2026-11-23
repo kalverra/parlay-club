@@ -227,7 +227,7 @@ Complexity: low (straightforward JSON struct extension, SQLite migration, and co
 
 - [x] Parse `injuries` (`status`, `date`) into `espn.RosterPlayer` in `internal/ingest/espn/roster.go` and add unit
       tests against real fixtures in `internal/ingest/espn/roster_test.go`.
-- [ ] Add migration `internal/db/migrations/0014_roster_injuries.sql`, extend `db.RosterPlayer` queries in
+- [x] Add migration `internal/db/migrations/0014_roster_injuries.sql`, extend `db.RosterPlayer` queries in
       `internal/db/players.go`, and wire `syncRoster` in `internal/refresh/research.go`, with tests in
       `internal/db/players_test.go`, `internal/db/migrate_test.go`, and `internal/refresh/research_test.go`.
 - [ ] Docs: update `docs/reference/schema.md` and `docs/reference/data-sources.md` for `roster_players.injury_status` /

@@ -140,12 +140,14 @@ func TestRosterPlayers(t *testing.T) {
 			UpdatedAt:   now,
 		},
 		{
-			AthleteID:  "4241463",
-			Team:       "BUF",
-			ESPNTeamID: "2",
-			FullName:   "James Cook",
-			Position:   "RB",
-			UpdatedAt:  now,
+			AthleteID:    "4241463",
+			Team:         "BUF",
+			ESPNTeamID:   "2",
+			FullName:     "James Cook",
+			Position:     "RB",
+			InjuryStatus: "Out",
+			InjuryDate:   "2026-11-08T15:30Z",
+			UpdatedAt:    now,
 		},
 		{
 			AthleteID:  "4361579",
@@ -186,7 +188,10 @@ func TestRosterPlayers(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, bufRoster, 2)
 	assert.Equal(t, "James Cook", bufRoster[0].FullName)
+	assert.Equal(t, "Out", bufRoster[0].InjuryStatus)
+	assert.Equal(t, "2026-11-08T15:30Z", bufRoster[0].InjuryDate)
 	assert.Equal(t, "Josh Allen", bufRoster[1].FullName)
+	assert.Empty(t, bufRoster[1].InjuryStatus)
 
 	// RosterForTeams
 	bothRosters, err := store.RosterForTeams(t.Context(), []string{"BUF", "MIA"})
@@ -197,14 +202,22 @@ func TestRosterPlayers(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, emptyRosters)
 
-	// Upsert update
+	// Upsert update and clearing injury status when player returns to healthy
 	players[0].Position = "WR" // traded or test change
 	players[0].UpdatedAt = now.Add(time.Hour)
-	require.NoError(t, store.UpsertRosterPlayers(t.Context(), []db.RosterPlayer{players[0]}))
+	players[1].InjuryStatus = ""
+	players[1].InjuryDate = ""
+	players[1].UpdatedAt = now.Add(time.Hour)
+	require.NoError(t, store.UpsertRosterPlayers(t.Context(), []db.RosterPlayer{players[0], players[1]}))
 
 	updated, err := store.RosterPlayerByID(t.Context(), "3918298")
 	require.NoError(t, err)
 	assert.Equal(t, "WR", updated.Position)
+
+	cleared, err := store.RosterPlayerByID(t.Context(), "4241463")
+	require.NoError(t, err)
+	assert.Empty(t, cleared.InjuryStatus)
+	assert.Empty(t, cleared.InjuryDate)
 }
 
 func TestPlayerGameLogs(t *testing.T) {
