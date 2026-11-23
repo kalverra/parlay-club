@@ -31,3 +31,7 @@ run = "lefthook install"
 [tasks.bench]
 description = "Run prod-scale benchmarks across board, db, and web"
 run = "go test -run='^$' -bench=. -benchmem ./internal/board ./internal/db ./internal/web"
+
+[tasks.eval-prod]
+description = "Restore a read-only Litestream snapshot and run grading evals"
+run = "./scripts/eval-prod.sh"
