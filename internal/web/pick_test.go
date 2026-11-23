@@ -3358,3 +3358,66 @@ func TestPickTraySyncLineRefreshesTrayAndBoard(t *testing.T) {
 	assert.Contains(t, syncBody, "-115")
 	assert.NotContains(t, syncBody, "Sync line")
 }
+
+func TestPickBoardRoleBumpFromRosterInjury(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 4)
+	now := gameKickoff().Add(-2 * time.Hour)
+	injuries := `[{"team":"Buffalo Bills","abbreviation":"BUF","injuries":[{"athlete_id":"999","full_name":"Curtis Samuel","position":"WR","status":"Out"}]}]`
+	game := addGame(t, fixture, gameKickoff())
+	game.InjuriesJSON = &injuries
+	_, err := fixture.store.UpsertGame(t.Context(), game)
+	require.NoError(t, err)
+
+	require.NoError(t, fixture.store.UpsertRosterPlayers(t.Context(), []db.RosterPlayer{
+		{AthleteID: "te-knox", FullName: "Dawson Knox", Team: "BUF", Position: "TE", UpdatedAt: now},
+		{
+			AthleteID: "te-kincaid", FullName: "Dalton Kincaid", Team: "BUF", Position: "TE",
+			InjuryStatus: "Out", InjuryDate: "2026-11-20T17:00Z", UpdatedAt: now,
+		},
+	}))
+
+	_, err = fixture.store.UpsertNFLverseTeamWeeks(t.Context(), []db.NFLverseTeamWeek{
+		{Season: 2026, SeasonType: 2, WeekNum: 1, Team: "BUF", OffPassEPA: 0.10, UpdatedAt: now},
+		{Season: 2026, SeasonType: 2, WeekNum: 1, Team: "MIA", OffPassEPA: 0.05, UpdatedAt: now},
+	})
+	require.NoError(t, err)
+	_, err = fixture.store.UpsertNFLversePlayerWeeks(t.Context(), []db.NFLversePlayerWeek{
+		{Season: 2026, SeasonType: 2, WeekNum: 1, ESPNID: "te-knox", Team: "BUF", OffensePct: 0.40, UpdatedAt: now},
+		{Season: 2026, SeasonType: 2, WeekNum: 2, ESPNID: "te-knox", Team: "BUF", OffensePct: 0.40, UpdatedAt: now},
+		{Season: 2026, SeasonType: 2, WeekNum: 3, ESPNID: "te-knox", Team: "BUF", OffensePct: 0.80, UpdatedAt: now},
+	})
+	require.NoError(t, err)
+	require.NoError(t, fixture.store.RecordSync(t.Context(), "nflverse:season:2026", now, nil))
+
+	_, err = fixture.store.UpsertOdds(t.Context(), []db.Odds{
+		{
+			GameID: game.ID, Book: "fanduel", MarketType: "REC_YDS", Team: "BUF",
+			PlayerName: "Dawson Knox", Side: "OVER", Line: new(21.5), Price: -110, FetchedAt: now,
+		},
+		{
+			GameID: game.ID, Book: "fanduel", MarketType: "REC_YDS", Team: "BUF",
+			PlayerName: "Dawson Knox", Side: "UNDER", Line: new(21.5), Price: -110, FetchedAt: now,
+		},
+	})
+	require.NoError(t, err)
+
+	handler := pickHandlerWithRefresher(
+		t, fixture, fixture.user, &pickTestRefresher{}, func() time.Time { return now },
+	)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodGet,
+		fmt.Sprintf("/slips/%d/pick/detail?game=%s&cat=receiving", fixture.slip.ID, game.ID),
+		nil,
+	)
+	req.Header.Set("Hx-Request", "true")
+	handler.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	body := html.UnescapeString(rec.Body.String())
+	assert.Contains(t, body, "Dawson Knox")
+	assert.Contains(t, body, "Role bump")
+}

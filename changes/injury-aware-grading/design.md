@@ -244,7 +244,7 @@ degrades gracefully when rosters are empty)
 - [x] Add `analyzer.Injury`, `Game.Injuries`, `PlayerStats.Position`, and `analyzer.MergeGameInjuries`, and populate
       them in `analyzer.LoadSlipSignals` (`internal/analyzer/signals.go`) from `games.injuries_json` + `roster_players`,
       with tests in `internal/analyzer/signals_test.go`.
-- [ ] Reuse `analyzer.MergeGameInjuries` in `web.slipHandlers.boardSignalsForGame` (`internal/web/pick.go`) and
+- [x] Reuse `analyzer.MergeGameInjuries` in `web.slipHandlers.boardSignalsForGame` (`internal/web/pick.go`) and
       `web.researchHandlers.loadGameResearch` (`internal/web/research.go`) so both the pick board's `Role bump` badge
       and Game Research see truncated roster injuries, with tests in `internal/web/pick_test.go` and
       `internal/web/research_test.go`.
