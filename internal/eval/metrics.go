@@ -98,6 +98,7 @@ type bandAccum struct {
 	losses         int
 	pushes         int
 	oddsCount      int
+	oddsWins       int
 	impliedProbSum float64
 	unitsSum       float64
 	brierSum       float64
@@ -122,6 +123,7 @@ func (a *bandAccum) add(result parlay.Result, decimalOdds float64) {
 		outcome := 0.0
 		if result == parlay.Won {
 			outcome = 1.0
+			a.oddsWins++
 		}
 		diff := implied - outcome
 		a.oddsCount++
@@ -146,7 +148,7 @@ func (a *bandAccum) stats() BandStats {
 	}
 	if a.oddsCount > 0 {
 		s.AvgImpliedProb = a.impliedProbSum / float64(a.oddsCount)
-		s.Lift = s.WinRate - s.AvgImpliedProb
+		s.Lift = float64(a.oddsWins)/float64(a.oddsCount) - s.AvgImpliedProb
 		s.FlatROI = a.unitsSum / float64(a.oddsCount)
 		s.BrierScore = a.brierSum / float64(a.oddsCount)
 	}
@@ -160,6 +162,7 @@ type factorAccum struct {
 	wins           int
 	losses         int
 	oddsCount      int
+	oddsWins       int
 	impliedProbSum float64
 	deltaSum       int
 }
@@ -174,6 +177,9 @@ func (a *factorAccum) add(result parlay.Result, decimalOdds float64, delta int) 
 	}
 	if decimalOdds > 1 {
 		a.oddsCount++
+		if result == parlay.Won {
+			a.oddsWins++
+		}
 		a.impliedProbSum += 1.0 / decimalOdds
 	}
 }
@@ -192,9 +198,21 @@ func (a *factorAccum) stats() FactorStats {
 	}
 	if a.oddsCount > 0 {
 		s.AvgImpliedProb = a.impliedProbSum / float64(a.oddsCount)
-		s.Lift = s.WinRate - s.AvgImpliedProb
+		s.Lift = float64(a.oddsWins)/float64(a.oddsCount) - s.AvgImpliedProb
 	}
 	return s
+}
+
+func rubricFactorLabels() map[string]string {
+	doc := analyzer.GradeRubric()
+	labels := make(map[string]string, len(doc.LegFactors)+len(doc.SlipFactors))
+	for _, f := range doc.LegFactors {
+		labels[f.Rule] = f.Label
+	}
+	for _, f := range doc.SlipFactors {
+		labels[f.Rule] = f.Label
+	}
+	return labels
 }
 
 // Evaluate scores every slip and leg in dataset under rubric and returns leg
@@ -204,6 +222,7 @@ func Evaluate(dataset ReplayDataset, rubric analyzer.Rubric) Report {
 	legBands := newBandAccumMap()
 	slipBands := newBandAccumMap()
 	factors := make(map[string]*factorAccum)
+	factorLabels := rubricFactorLabels()
 	var outcomes []legOutcome
 
 	for _, week := range dataset.Weeks {
@@ -239,7 +258,11 @@ func Evaluate(dataset ReplayDataset, rubric analyzer.Rubric) Report {
 				for _, f := range lg.Factors {
 					fa, ok := factors[f.Rule]
 					if !ok {
-						fa = &factorAccum{rule: f.Rule, label: f.Label}
+						label := factorLabels[f.Rule]
+						if label == "" {
+							label = f.Rule
+						}
+						fa = &factorAccum{rule: f.Rule, label: label}
 						factors[f.Rule] = fa
 					}
 					fa.add(rl.Result, dec, f.Delta)

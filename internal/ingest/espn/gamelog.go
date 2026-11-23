@@ -2,6 +2,7 @@ package espn
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"strconv"
@@ -50,6 +51,16 @@ func (c *Client) GameLog(ctx context.Context, athleteID string) (GameLog, error)
 	}
 
 	return parseGameLog(athleteID, raw), nil
+}
+
+// ParseGameLogJSON decodes raw ESPN athlete gamelog JSON into per-market stat
+// slices, most recent games first.
+func ParseGameLogJSON(raw []byte) (map[string][]float64, error) {
+	var parsed rawGamelogResponse
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		return nil, fmt.Errorf("parse gamelog json: %w", err)
+	}
+	return parseGameLog("", parsed).Markets, nil
 }
 
 type colIndices struct {

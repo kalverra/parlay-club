@@ -2,6 +2,7 @@ package espn
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"strings"
@@ -48,6 +49,20 @@ func (c *Client) Roster(ctx context.Context, espnTeamID string) ([]RosterPlayer,
 		return nil, fmt.Errorf("roster %s: %w", espnTeamID, err)
 	}
 
+	return parseRoster(raw), nil
+}
+
+// ParseRosterJSON decodes raw ESPN team roster JSON into flattened athletes,
+// skipping athletes without an ID or full name.
+func ParseRosterJSON(raw []byte) ([]RosterPlayer, error) {
+	var parsed rosterResponse
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		return nil, fmt.Errorf("parse roster json: %w", err)
+	}
+	return parseRoster(parsed), nil
+}
+
+func parseRoster(raw rosterResponse) []RosterPlayer {
 	players := make([]RosterPlayer, 0)
 	for _, group := range raw.Athletes {
 		for _, item := range group.Items {
@@ -65,7 +80,7 @@ func (c *Client) Roster(ctx context.Context, espnTeamID string) ([]RosterPlayer,
 			})
 		}
 	}
-	return players, nil
+	return players
 }
 
 func selectRosterInjury(injuries []rosterInjury) (string, string) {

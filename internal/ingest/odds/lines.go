@@ -2,6 +2,7 @@ package odds
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/url"
 )
@@ -72,6 +73,16 @@ func (c *Client) Lines(ctx context.Context) ([]Line, Credits, error) {
 		return nil, Credits{}, fmt.Errorf("lines: %w", err)
 	}
 	return lines, credits, nil
+}
+
+// ParseLinesJSON decodes raw Parlay API or Odds API game-lines JSON into
+// one row per priced selection.
+func ParseLinesJSON(raw []byte) ([]Line, error) {
+	var parsed []eventResponse
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		return nil, fmt.Errorf("parse lines json: %w", err)
+	}
+	return parseLines(parsed)
 }
 
 // parseLines maps the game-line markets of every event and book into rows.

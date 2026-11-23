@@ -231,9 +231,10 @@ func TestEvaluate(t *testing.T) {
 				assert.InDelta(t, 0.0, slipC.WinRate, 1e-9)
 				assert.InDelta(t, -1.0, slipC.FlatROI, 1e-9)
 
-				// Factor attribution: push leg must not be counted.
+				// Factor attribution: push leg must not be counted, and labels come from GradeRubric.
 				hitRate, ok := factorByRule(r.Factors, "hit_rate")
 				require.True(t, ok)
+				assert.Equal(t, "Strong L5 hit rate", hitRate.Label)
 				assert.Equal(t, 2, hitRate.Count)
 				assert.Equal(t, 2, hitRate.Wins)
 				assert.InDelta(t, 1.0, hitRate.WinRate, 1e-9)
@@ -242,6 +243,7 @@ func TestEvaluate(t *testing.T) {
 
 				medTrap, ok := factorByRule(r.Factors, "median_trap")
 				require.True(t, ok)
+				assert.Equal(t, "L5 median trap", medTrap.Label)
 				assert.Equal(t, 2, medTrap.Count)
 				assert.Equal(t, 2, medTrap.Losses)
 				assert.InDelta(t, 0.0, medTrap.WinRate, 1e-9)
@@ -249,6 +251,48 @@ func TestEvaluate(t *testing.T) {
 				assert.InDelta(t, -15.0, medTrap.AvgDelta, 1e-9)
 
 				assert.True(t, r.LegMonotonic)
+			},
+		},
+		{
+			name: "missing-odds legs do not skew Lift in band or factor stats",
+			dataset: ReplayDataset{
+				Weeks: []ReplayedWeek{
+					{
+						Season:  2025,
+						WeekNum: 4,
+						Games:   games,
+						Stats:   stats,
+						Slips: []ReplayedSlip{
+							{
+								SlipID: 1,
+								Result: parlay.Lost,
+								Legs: []ReplayedLeg{
+									hotLeg(1, 100, parlay.Won), // Band A, odds=2.0 (implied=0.5), Won
+									hotLeg(2, 0, parlay.Lost),  // Band A, missing odds, Lost
+								},
+							},
+						},
+					},
+				},
+			},
+			rubric: analyzer.RubricV1,
+			check: func(t *testing.T, r Report) {
+				t.Helper()
+				bandA, ok := bandByName(r.LegBands, "A")
+				require.True(t, ok)
+				assert.Equal(t, 2, bandA.Decided)
+				assert.Equal(t, 1, bandA.Wins)
+				assert.InDelta(t, 0.5, bandA.WinRate, 1e-9)
+				assert.InDelta(t, 0.5, bandA.AvgImpliedProb, 1e-9)
+				// Lift is computed only over the 1 leg with valid odds (1/1 - 0.5 = 0.5).
+				assert.InDelta(t, 0.5, bandA.Lift, 1e-9)
+
+				hitRate, ok := factorByRule(r.Factors, "hit_rate")
+				require.True(t, ok)
+				assert.Equal(t, 2, hitRate.Count)
+				assert.InDelta(t, 0.5, hitRate.WinRate, 1e-9)
+				assert.InDelta(t, 0.5, hitRate.AvgImpliedProb, 1e-9)
+				assert.InDelta(t, 0.5, hitRate.Lift, 1e-9)
 			},
 		},
 		{
