@@ -139,29 +139,17 @@ func run() error {
 		runtime.evalCache = evalCache
 		refresher = runtime.refresher
 		slipService = runtime.slips
+		slipService.SetOnGradeChange(evalCache.InvalidateGroup)
 		appNow = runtime.scenario.Now
 		kick = runtime.Kick
 		drain = runtime.Shutdown
 		sandboxApp = runtime.MountRoutes
 	} else {
 		loadHistory(ctx, logger, store)
-		ingestClient := newIngestClient(store)
-		refresher = refresh.New(refresh.Deps{
-			Store:         store,
-			Scoreboard:    espn.NewClient("", ingestClient),
-			Forecast:      weather.NewClient("", ingestClient),
-			Lines:         odds.NewClient("", cfg.OddsAPIKey, ingestClient),
-			FallbackLines: odds.NewClient(odds.TheOddsAPIBaseURL, cfg.TheOddsAPIKey, ingestClient),
-			Projections:   nfelo.NewClient("", ingestClient),
-			NFLverse:      nflverse.NewClient("", ingestClient),
-			Publisher:     hub,
-			Logger:        logger,
-		})
-		slipService = slips.New(store, hub, nil)
+		refresher, slipService = newProdServices(cfg, store, hub, evalCache, newIngestClient(store), logger)
 		kick = refresher.Kick
 		drain = refresher.Shutdown
 	}
-	slipService.SetOnGradeChange(evalCache.InvalidateGroup)
 
 	handlers := auth.NewHandlers(logger, store, cookies, renderer, provider, devLogin)
 	scope := groups.Scope(logger, store, auth.UserFrom, cookies)
@@ -256,6 +244,35 @@ func newIngestClient(store *db.Store) *http.Client {
 		Timeout:   ingestTimeout,
 		Transport: archive.NewTransport(http.DefaultTransport, store, nil),
 	}
+}
+
+// newProdServices constructs the shared slip service before the refresh service
+// so auto-grading and HTTP handlers share one instance and invalidate evalCache.
+func newProdServices(
+	cfg config.Config,
+	store *db.Store,
+	hub *live.Hub,
+	evalCache *eval.Cache,
+	ingestClient *http.Client,
+	logger zerolog.Logger,
+) (*refresh.Service, *slips.Service) {
+	slipService := slips.New(store, hub, nil)
+	if evalCache != nil {
+		slipService.SetOnGradeChange(evalCache.InvalidateGroup)
+	}
+	refresher := refresh.New(refresh.Deps{
+		Store:         store,
+		Scoreboard:    espn.NewClient("", ingestClient),
+		Forecast:      weather.NewClient("", ingestClient),
+		Lines:         odds.NewClient("", cfg.OddsAPIKey, ingestClient),
+		FallbackLines: odds.NewClient(odds.TheOddsAPIBaseURL, cfg.TheOddsAPIKey, ingestClient),
+		Projections:   nfelo.NewClient("", ingestClient),
+		NFLverse:      nflverse.NewClient("", ingestClient),
+		Slips:         slipService,
+		Publisher:     hub,
+		Logger:        logger,
+	})
+	return refresher, slipService
 }
 
 // newProvider builds the Google sign-in provider, or returns nil when Google is

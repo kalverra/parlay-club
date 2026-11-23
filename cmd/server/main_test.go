@@ -22,12 +22,14 @@ import (
 	"github.com/kalverra/parlay-club/internal/auth"
 	"github.com/kalverra/parlay-club/internal/config"
 	"github.com/kalverra/parlay-club/internal/db"
+	"github.com/kalverra/parlay-club/internal/eval"
 	"github.com/kalverra/parlay-club/internal/groups"
 	"github.com/kalverra/parlay-club/internal/ingest/archive"
 	"github.com/kalverra/parlay-club/internal/ingest/espn"
 	"github.com/kalverra/parlay-club/internal/ingest/odds"
 	"github.com/kalverra/parlay-club/internal/ingest/weather"
 	"github.com/kalverra/parlay-club/internal/live"
+	"github.com/kalverra/parlay-club/internal/parlay"
 	"github.com/kalverra/parlay-club/internal/refresh"
 	webui "github.com/kalverra/parlay-club/internal/web"
 	assets "github.com/kalverra/parlay-club/web"
@@ -1456,4 +1458,85 @@ func TestPprofRoutes(t *testing.T) {
 			assert.Equal(t, http.StatusNotFound, rec.Code, path)
 		}
 	})
+}
+
+type offlineRoundTripper struct{}
+
+func (offlineRoundTripper) RoundTrip(*http.Request) (*http.Response, error) {
+	return &http.Response{
+		StatusCode: http.StatusServiceUnavailable,
+		Body:       http.NoBody,
+	}, nil
+}
+
+func TestProdServicesShareSlipsInstanceAndInvalidateEvalCache(t *testing.T) {
+	t.Parallel()
+
+	database, err := db.Open(filepath.Join(t.TempDir(), "parlay.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { assert.NoError(t, database.Close()) })
+	require.NoError(t, db.Migrate(t.Context(), database))
+
+	store := db.NewStore(database)
+	t.Cleanup(func() { assert.NoError(t, store.Close()) })
+
+	evalCache := eval.NewCache()
+	ingestClient := &http.Client{Transport: offlineRoundTripper{}}
+	refresher, slipService := newProdServices(
+		config.Config{},
+		store,
+		&live.Hub{},
+		evalCache,
+		ingestClient,
+		zerolog.Nop(),
+	)
+	require.NotNil(t, slipService)
+	require.NotNil(t, refresher)
+	t.Cleanup(func() { assert.NoError(t, refresher.Shutdown(context.Background())) })
+
+	ctx := t.Context()
+	user, err := store.CreateUserWithIdentity(ctx, "Ada", "ada@example.com", "google", "google-ada")
+	require.NoError(t, err)
+	group, err := store.Create(ctx, user.ID, "Sunday Club")
+	require.NoError(t, err)
+	week, err := store.UpsertWeek(ctx, 2026, 2, 9)
+	require.NoError(t, err)
+	slip, err := store.CreateSlip(ctx, group.ID, week.ID, nil, "Week 9", db.SlateScopeFullWeek, 4, []int64{user.ID})
+	require.NoError(t, err)
+
+	game, err := store.UpsertGame(ctx, db.Game{
+		ID:        "prod-grade-test",
+		WeekID:    week.ID,
+		HomeTeam:  "BUF",
+		AwayTeam:  "KC",
+		Kickoff:   time.Date(2026, 11, 8, 18, 0, 0, 0, time.UTC),
+		Status:    db.GameFinal,
+		HomeScore: new(27),
+		AwayScore: new(20),
+	})
+	require.NoError(t, err)
+
+	leg, err := store.CreateLeg(ctx, db.Leg{
+		SlipID:     slip.ID,
+		UserID:     user.ID,
+		GameID:     &game.ID,
+		MarketType: "ML",
+		Selection:  "BUF ML",
+		Team:       new("BUF"),
+	})
+	require.NoError(t, err)
+
+	reportBefore, err := evalCache.GetOrCompute(ctx, store, group.ID, week.Season)
+	require.NoError(t, err)
+	assert.Equal(t, 0, reportBefore.Coverage.TotalLegs)
+
+	_ = refresher.RunOnce(ctx)
+
+	gotLeg, err := store.LegByID(ctx, leg.ID)
+	require.NoError(t, err)
+	assert.Equal(t, parlay.Won, gotLeg.Result)
+
+	reportAfter, err := evalCache.GetOrCompute(ctx, store, group.ID, week.Season)
+	require.NoError(t, err)
+	assert.Equal(t, 1, reportAfter.Coverage.TotalLegs)
 }

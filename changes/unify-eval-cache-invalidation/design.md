@@ -76,7 +76,7 @@ Complexity: low (narrow constructor and wiring changes across refresh, server st
 Risk: low (in-memory SQLite integration tests verify auto-grade invalidation end to end)
 
 - [x] Remove the silent `slips.New` fallback from `refresh.New` in `internal/refresh/refresh.go`, guard `s.slips == nil` in `internal/refresh/grade.go`, and update `internal/refresh` tests to pass `Deps.Slips` explicitly alongside a new end-to-end test verifying `AutoGradeLegs` invalidates `eval.Cache` via `SetOnGradeChange`.
-- [ ] Construct one shared `slips.Service` before `refresh.New` in `cmd/server/main.go` and `cmd/server/sandbox.go` and pass it into `refresh.Deps.Slips`, with a test verifying sandbox and server wiring share one instance so auto-grading invalidates `evalCache`.
+- [x] Construct one shared `slips.Service` before `refresh.New` in `cmd/server/main.go` and `cmd/server/sandbox.go` and pass it into `refresh.Deps.Slips`, with a test verifying sandbox and server wiring share one instance so auto-grading invalidates `evalCache`.
 
 ### Phase 2: Default eval cache at web construction and remove handler fallback
 
