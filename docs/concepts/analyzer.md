@@ -52,6 +52,12 @@ The clamped 0–100 score maps to A (85–100), B (73–84), C (60–72), D (48�
 
 `ScoreSlip` averages the numeric scores of all graded legs, then applies slip-level adjustments: +8 per positive stack (shootout or clock-drain), -12 per Warn script conflict (blowout passing), -20 per Danger conflict (trailing RB, total contradiction), -3 per leg beyond 3 legs, and -5 per heavy chalk leg beyond the first.
 
+### Versioned rubrics and offline evals
+
+Scoring weights, category clamps, slip adjustments, and A–F cutoffs live in `Rubric` (`internal/analyzer/rubric.go`) rather than hardcoded constants. `RubricV1` holds the baseline production weights, `ActiveRubric` selects the live rubric, and the registry functions expose built-in rubrics by name. ScoreLeg, ScoreSlip, and GradeRubric all read from `ActiveRubric`, while ScoreLegWithRubric and ScoreSlipWithRubric accept any rubric value without mutating live state.
+
+To test weight changes against settled outcomes before promoting a new rubric, the eval package replays historical weeks read-only from SQLite. To prevent post-kickoff data leakage, the replayer reads nflverse rows strictly prior to the target week and reconstructs overwritten inputs (game logs, injury statuses, and odds) only from archived API responses recorded before kickoff, failing soft and reporting coverage counts when an archive entry is missing. Evaluation computes leg and slip calibration by band, lift over implied odds, flat ROI, Brier score, and per-factor attribution; rubric comparison diffs a baseline and candidate rubric and builds the leg band migration matrix. See [Local development](../guides/local-dev.md#offline-grading-evals) for CLI usage.
+
 ## In-app grading guide
 
 `GET /analyzer/guide` renders the live rubric (`GradeRubric()`) and every active warning rule (`RuleDocs()`) directly from `internal/analyzer`, so the guide page cannot drift from the engine's thresholds. Stable anchors (`#leg-grades`, `#slip-grade`, `#suggestions`, `#rule-<id>`) let any warning card or grade breakdown link straight to its explanation, with a safe `?from=` back link to return to the slip or pick board.
