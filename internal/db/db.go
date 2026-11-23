@@ -57,6 +57,37 @@ func Open(path string) (*sql.DB, error) {
 	return database, nil
 }
 
+// OpenReadOnly opens an existing SQLite database in read-only mode
+// (mode=ro and query_only=ON). It never creates the file or directory.
+//
+// The caller owns the returned handle and must close it.
+func OpenReadOnly(path string) (*sql.DB, error) {
+	if _, err := os.Stat(path); err != nil {
+		return nil, fmt.Errorf("open sqlite read-only %s: %w", path, err)
+	}
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return nil, fmt.Errorf("resolve database path %s: %w", path, err)
+	}
+	params := url.Values{"mode": {"ro"}}
+	for _, pragma := range readPragmas {
+		params.Add("_pragma", pragma)
+	}
+	uri := url.URL{Scheme: "file", Path: absPath, RawQuery: params.Encode()}
+
+	database, err := sql.Open("sqlite", uri.String())
+	if err != nil {
+		return nil, fmt.Errorf("open sqlite read-only %s: %w", path, err)
+	}
+	database.SetMaxOpenConns(1)
+
+	if err := database.PingContext(context.Background()); err != nil {
+		_ = database.Close()
+		return nil, fmt.Errorf("open sqlite read-only %s: %w", path, err)
+	}
+	return database, nil
+}
+
 // openReadDB opens a multi-connection query_only=ON pool against an existing
 // file-backed SQLite database in WAL mode.
 func openReadDB(path string) (*sql.DB, error) {

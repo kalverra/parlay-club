@@ -1,7 +1,9 @@
 package odds
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -317,6 +319,25 @@ func samePropLine(left, right *float64) bool {
 	return *left == *right
 }
 
+// ParsePropsJSON decodes raw Parlay API (/props array) or Odds API
+// (/events/{id}/odds object) JSON into one row per priced selection.
+func ParsePropsJSON(raw []byte) ([]Prop, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) > 0 && trimmed[0] == '{' {
+		var event eventResponse
+		if err := json.Unmarshal(trimmed, &event); err != nil {
+			return nil, fmt.Errorf("parse event props json: %w", err)
+		}
+		return parseEventProps(event.ID, event), nil
+	}
+
+	var parsed []propResponse
+	if err := json.Unmarshal(trimmed, &parsed); err != nil {
+		return nil, fmt.Errorf("parse props json: %w", err)
+	}
+	return parseProps("", parsed), nil
+}
+
 // parseProps maps a /props response into rows. Rows for another event, rows
 // outside the full game, rows with an unknown market, non-standard DFS
 // projections (goblin, demon, alt), and rows with no subject or book are
@@ -334,8 +355,12 @@ func parseProps(eventID string, raw []propResponse) []Prop {
 	groupIndex := make(map[propGroupKey]int)
 
 	for _, item := range raw {
-		if item.EventID != "" && item.EventID != eventID {
+		if eventID != "" && item.EventID != "" && item.EventID != eventID {
 			continue
+		}
+		rowEventID := eventID
+		if rowEventID == "" {
+			rowEventID = item.EventID
 		}
 		if item.Period != "" && item.Period != "FULL" {
 			continue
@@ -365,7 +390,7 @@ func parseProps(eventID string, raw []propResponse) []Prop {
 			slots = append(slots, outputSlot{
 				isDirect: true,
 				prop: Prop{
-					EventID:    eventID,
+					EventID:    rowEventID,
 					Book:       book,
 					MarketType: marketType,
 					PlayerName: subject,
@@ -396,7 +421,7 @@ func parseProps(eventID string, raw []propResponse) []Prop {
 		}
 
 		quote := propQuote{
-			eventID:    eventID,
+			eventID:    rowEventID,
 			book:       book,
 			marketType: marketType,
 			subject:    subject,
