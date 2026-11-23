@@ -48,6 +48,8 @@ const (
 	weatherSourcePrefix = "weather:"
 	// oddsPropsSourcePrefix keys per-game prop lines.
 	oddsPropsSourcePrefix = "odds:props:"
+	// oddsPropsEnrichSourcePrefix keys per-game prop link enrichment from The Odds API.
+	oddsPropsEnrichSourcePrefix = "odds:props:enrich:"
 	// rosterSourcePrefix keys per-team rosters.
 	rosterSourcePrefix = "espn:roster:"
 	// gameLogSourcePrefix keys per-athlete season game logs.
@@ -66,6 +68,11 @@ func WeatherSource(gameID string) string {
 // OddsPropsSource returns the sync_state key for one game's props.
 func OddsPropsSource(gameID string) string {
 	return oddsPropsSourcePrefix + gameID
+}
+
+// OddsPropsEnrichSource returns the sync_state key for one game's prop link enrichment.
+func OddsPropsEnrichSource(gameID string) string {
+	return oddsPropsEnrichSourcePrefix + gameID
 }
 
 // RosterSource returns the sync_state key for one team's roster.
@@ -884,7 +891,20 @@ func (s *Service) SyncGameProps(ctx context.Context, gameID string) error {
 	}
 
 	now := s.now()
-	return s.refreshSync(ctx, s.oddsPropsSource(game, now), now)
+	propsRan := false
+	src := s.oddsPropsSource(game, now)
+	origRun := src.run
+	src.run = func(ctx context.Context) (bool, error) {
+		propsRan = true
+		return origRun(ctx)
+	}
+	if err := s.refreshSync(ctx, src, now); err != nil {
+		return err
+	}
+	if propsRan {
+		return nil
+	}
+	return s.refreshSync(ctx, s.oddsPropsEnrichSource(game, now, false), now)
 }
 
 // SyncGameResearch syncs injuries, rosters, and props for one game if stale.
@@ -1082,6 +1102,7 @@ func (s *Service) syncPickProps(ctx context.Context, weekID int64, gameID string
 	if !now.Before(game.Kickoff) {
 		return nil
 	}
+	propsRan := false
 	src := source{
 		key: OddsPropsSource(game.ID),
 		due: func(_ context.Context, state db.SyncState) (bool, error) {
@@ -1091,10 +1112,18 @@ func (s *Service) syncPickProps(ctx context.Context, weekID int64, gameID string
 			return oddsPropsStale(state.FetchedAt, now, game), nil
 		},
 		run: func(ctx context.Context) (bool, error) {
+			propsRan = true
 			return s.syncOddsProps(ctx, game, now)
 		},
 	}
 	err = s.refreshSync(ctx, src, now)
+	if errors.Is(err, odds.ErrNoAPIKey) {
+		return nil
+	}
+	if err != nil || propsRan {
+		return err
+	}
+	err = s.refreshSync(ctx, s.oddsPropsEnrichSource(game, now, force), now)
 	if errors.Is(err, odds.ErrNoAPIKey) {
 		return nil
 	}

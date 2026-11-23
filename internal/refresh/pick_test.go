@@ -613,3 +613,204 @@ func TestKickPickGameAsyncSingleFlightAndPublish(t *testing.T) {
 	assert.Equal(t, int32(2), props.calls.Load())
 	assert.Empty(t, publisher.seen())
 }
+
+func TestSyncGamePropsEnrichesPrefilledPropsAndEnforcesEnrichFloor(t *testing.T) {
+	t.Parallel()
+
+	store := openTestStore(t)
+	kickoff := novemberTime(8, 13, 0)
+	game := setupTestGame(t, store, kickoff, db.GameScheduled)
+
+	t0 := novemberTime(8, 9, 30)
+	clock := &fakeClock{now: t0}
+
+	// Seed Parlay-only props and odds:props:{gameID} as RunPrefill would.
+	require.NoError(t, store.Tx(t.Context(), func(tx *db.Store) error {
+		_, err := tx.UpsertOdds(t.Context(), []db.Odds{
+			{
+				GameID:     game.ID,
+				Book:       "draftkings",
+				MarketType: odds.MarketPassYds,
+				PlayerName: "Josh Allen",
+				Side:       odds.SideOver,
+				Line:       new(265.5),
+				Price:      -110,
+				FetchedAt:  t0,
+			},
+			{
+				GameID:     game.ID,
+				Book:       "espnbet",
+				MarketType: odds.MarketPassTds,
+				PlayerName: "Josh Allen",
+				Side:       odds.SideOver,
+				Line:       new(1.5),
+				Price:      -115,
+				FetchedAt:  t0,
+			},
+		})
+		if err != nil {
+			return err
+		}
+		return tx.RecordSync(t.Context(), OddsPropsSource(game.ID), t0, nil)
+	}))
+
+	props := &blockingPropsClient{}
+	fallbackProps := &fakeFallbackPropsClient{
+		events: []odds.Event{{
+			ID:           "toa-401",
+			CommenceTime: kickoff,
+			HomeTeam:     "Buffalo Bills",
+			AwayTeam:     "Miami Dolphins",
+		}},
+		eventsCredits: odds.Credits{Remaining: TheOddsAPIEnrichFloor - 1},
+		eventProps: map[string][]odds.Prop{
+			"toa-401": {{
+				EventID:    "toa-401",
+				Book:       "draftkings",
+				MarketType: odds.MarketPassYds,
+				PlayerName: "Josh Allen",
+				Side:       odds.SideOver,
+				Line:       new(265.5),
+				Price:      -110,
+				Link:       "https://sportsbook.draftkings.com/event/dk-evt-401?outcomes=dk-sid-1",
+				Sid:        "dk-sid-1",
+				EventSid:   "dk-evt-401",
+			}},
+		},
+		eventPropsCredits: odds.Credits{Remaining: TheOddsAPIEnrichFloor - 2},
+	}
+
+	svc := New(Deps{
+		Store:         store,
+		Props:         props,
+		FallbackProps: fallbackProps,
+		Now:           clock.Now,
+		Logger:        zerolog.Nop(),
+	})
+
+	// Below TheOddsAPIEnrichFloor: EventProps is skipped and no failure backoff is recorded.
+	clock.Advance(5 * time.Minute)
+	require.NoError(t, svc.SyncGameProps(t.Context(), game.ID))
+	assert.Equal(t, int32(0), props.calls.Load())
+	assert.Equal(t, 0, fallbackProps.eventPropsCalls)
+	assert.False(t, svc.paused(OddsPropsEnrichSource(game.ID), clock.Now()))
+
+	_, err := store.SyncState(t.Context(), OddsPropsEnrichSource(game.ID))
+	require.ErrorIs(t, err, db.ErrSyncStateNotFound)
+
+	// Once credits meet TheOddsAPIEnrichFloor, calling immediately (without advancing past
+	// failureBackoff) enriches existing props and stamps a unified FetchedAt.
+	fallbackProps.eventsCredits = odds.Credits{Remaining: TheOddsAPIEnrichFloor}
+	t1 := clock.Now()
+	require.NoError(t, svc.SyncGameProps(t.Context(), game.ID))
+	assert.Equal(t, int32(0), props.calls.Load())
+	assert.Equal(t, 1, fallbackProps.eventPropsCalls)
+
+	enrichState, err := store.SyncState(t.Context(), OddsPropsEnrichSource(game.ID))
+	require.NoError(t, err)
+	assert.True(t, enrichState.FetchedAt.Equal(t1))
+
+	storedOdds, err := store.OddsForGame(t.Context(), game.ID)
+	require.NoError(t, err)
+	require.Len(t, storedOdds, 2)
+	for _, row := range storedOdds {
+		assert.True(t, row.FetchedAt.Equal(t1), "all current prop rows share unified FetchedAt")
+		if row.Book == "draftkings" {
+			require.NotNil(t, row.Link)
+			assert.Equal(t, "https://sportsbook.draftkings.com/event/dk-evt-401?outcomes=dk-sid-1", *row.Link)
+		}
+	}
+
+	// Repeating SyncGameProps while fresh makes zero upstream calls.
+	require.NoError(t, svc.SyncGameProps(t.Context(), game.ID))
+	assert.Equal(t, 1, fallbackProps.eventPropsCalls)
+}
+
+func TestSyncOddsPropsRecordsEnrichFreshnessWhenFallbackBought(t *testing.T) {
+	t.Parallel()
+
+	store := openTestStore(t)
+	kickoff := novemberTime(8, 13, 0)
+	game := setupTestGame(t, store, kickoff, db.GameScheduled)
+
+	lines := &blockingLinesClient{
+		events: []odds.Event{{
+			ID:           "evt-401",
+			HomeTeam:     "Buffalo Bills",
+			AwayTeam:     "Miami Dolphins",
+			CommenceTime: kickoff,
+		}},
+		eventsCredits: odds.Credits{Remaining: 400},
+		lines: []odds.Line{{
+			EventID:    "evt-401",
+			Book:       "draftkings",
+			MarketType: odds.MarketSpread,
+			Side:       odds.SideTeam,
+			Team:       "Buffalo Bills",
+			Line:       new(-3.5),
+			Price:      -110,
+		}},
+		lineCredits: odds.Credits{Remaining: 397},
+	}
+	props := &blockingPropsClient{
+		props: map[string][]odds.Prop{
+			"evt-401": {{
+				EventID:    "evt-401",
+				Book:       "draftkings",
+				MarketType: odds.MarketPassYds,
+				PlayerName: "Josh Allen",
+				Side:       odds.SideOver,
+				Line:       new(255.5),
+				Price:      -115,
+			}},
+		},
+		propsCredits: odds.Credits{Remaining: 394},
+	}
+	fallbackProps := &fakeFallbackPropsClient{
+		events: []odds.Event{{
+			ID:           "toa-401",
+			CommenceTime: kickoff,
+			HomeTeam:     "Buffalo Bills",
+			AwayTeam:     "Miami Dolphins",
+		}},
+		eventsCredits: odds.Credits{Remaining: 250},
+		eventProps: map[string][]odds.Prop{
+			"toa-401": {{
+				EventID:    "toa-401",
+				Book:       "draftkings",
+				MarketType: odds.MarketPassYds,
+				PlayerName: "Josh Allen",
+				Side:       odds.SideOver,
+				Line:       new(255.5),
+				Price:      -115,
+				Link:       "https://sportsbook.draftkings.com/event/dk-evt-401?outcomes=dk-sid-1",
+				Sid:        "dk-sid-1",
+				EventSid:   "dk-evt-401",
+			}},
+		},
+		eventPropsCredits: odds.Credits{Remaining: 249},
+	}
+
+	clock := &fakeClock{now: novemberTime(8, 10, 0)}
+	svc := New(Deps{
+		Store:         store,
+		Lines:         lines,
+		Props:         props,
+		FallbackProps: fallbackProps,
+		Now:           clock.Now,
+		Logger:        zerolog.Nop(),
+	})
+
+	require.NoError(t, svc.SyncPickGame(t.Context(), game.WeekID, game.ID))
+	assert.Equal(t, int32(1), props.calls.Load())
+	assert.Equal(t, 1, fallbackProps.eventPropsCalls)
+
+	enrichState, err := store.SyncState(t.Context(), OddsPropsEnrichSource(game.ID))
+	require.NoError(t, err)
+	assert.True(t, enrichState.FetchedAt.Equal(clock.Now()))
+
+	// Subsequent call within freshness window does not re-run enrichment.
+	clock.Advance(5 * time.Minute)
+	require.NoError(t, svc.SyncPickGame(t.Context(), game.WeekID, game.ID))
+	assert.Equal(t, 1, fallbackProps.eventPropsCalls)
+}
