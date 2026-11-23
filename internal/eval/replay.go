@@ -81,7 +81,7 @@ func LoadDataset(ctx context.Context, store *db.Store, filter ReplayFilter) (Rep
 			gameIDs = append(gameIDs, g.ID)
 		}
 
-		athleteIDs := distinctAthleteIDs(rawLegs)
+		athleteIDs := analyzer.DistinctLegPlayerIDs(rawLegs)
 		teamEPA, usageByPlayer := loadPriorNFLverse(ctx, store, week, athleteIDs)
 
 		nfeloByGame, err := store.NfeloForGames(ctx, gameIDs)
@@ -213,28 +213,16 @@ func loadWeekSlips(
 	weekID int64,
 	groupID int64,
 ) ([]ReplayedSlip, []db.Leg, error) {
-	slipIDs, err := store.SlipIDsForWeek(ctx, weekID)
+	rows, err := store.SlipsWithLegsForWeek(ctx, weekID, groupID, db.SlipGraded)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	var slips []ReplayedSlip
 	var allLegs []db.Leg
-	for _, id := range slipIDs {
-		slip, err := store.SlipByID(ctx, id)
-		if err != nil {
-			return nil, nil, err
-		}
-		if groupID != 0 && slip.GroupID != groupID {
-			continue
-		}
-		if slip.Status != db.SlipGraded {
-			continue
-		}
-		dbLegs, err := store.LegsForSlip(ctx, slip.ID)
-		if err != nil {
-			return nil, nil, err
-		}
+	for _, row := range rows {
+		slip := row.Slip
+		dbLegs := row.Legs
 
 		replayedLegs := make([]ReplayedLeg, 0, len(dbLegs))
 		parlayLegs := make([]parlay.Leg, 0, len(dbLegs))
@@ -287,33 +275,13 @@ func isSettledResult(r parlay.Result) bool {
 	return r == parlay.Won || r == parlay.Lost || r == parlay.Push || r == parlay.Void
 }
 
-func distinctAthleteIDs(legs []db.Leg) []string {
-	seen := make(map[string]struct{}, len(legs))
-	var ids []string
-	for _, l := range legs {
-		if l.PlayerID == nil || *l.PlayerID == "" {
-			continue
-		}
-		id := *l.PlayerID
-		if _, ok := seen[id]; ok {
-			continue
-		}
-		seen[id] = struct{}{}
-		ids = append(ids, id)
-	}
-	return ids
-}
-
 func loadPriorNFLverse(
 	ctx context.Context,
 	store *db.Store,
 	week db.Week,
 	athleteIDs []string,
 ) (map[string]*analyzer.TeamDefenseProfile, map[string]*analyzer.PlayerUsage) {
-	seasonTypes := []int{week.SeasonType}
-	if week.SeasonType == nflverse.SeasonTypePostseason {
-		seasonTypes = []int{nflverse.SeasonTypeRegular, nflverse.SeasonTypePostseason}
-	}
+	seasonTypes := analyzer.NFLverseSeasonTypes(week.SeasonType)
 
 	var teamEPA map[string]*analyzer.TeamDefenseProfile
 	if rows, err := store.NFLverseTeamWeeksForSeasonTypes(ctx, week.Season, seasonTypes...); err == nil {
@@ -385,15 +353,15 @@ func loadArchivedPlayerStats(
 		}
 	}
 
-	athleteIDs := distinctAthleteIDs(legs)
+	athleteIDs := analyzer.DistinctLegPlayerIDs(legs)
 	stats := make(map[string]analyzer.PlayerStats, len(athleteIDs))
 	hasGameLog := make(map[string]bool, len(athleteIDs))
 
 	for _, id := range athleteIDs {
 		var markets map[string][]float64
 		if kickoff, ok := kickoffByAthlete[id]; ok {
-			key := "espn:gamelog:" + id
-			if raw, found := latestArchivedBodyBefore(ctx, store, key, key, kickoff); found {
+			key := db.ArchiveGameLogKey(id)
+			if raw, found := latestArchivedBodyBefore(ctx, store, key, kickoff); found {
 				if parsed, err := espn.ParseGameLogJSON(raw); err == nil && len(parsed) > 0 {
 					markets = parsed
 					hasGameLog[id] = true
@@ -427,8 +395,8 @@ func loadArchivedGameInjuries(
 
 	hasArchive := false
 	summaryByTeam := make(map[string][]espn.Injury)
-	sumKey := "espn:summary:" + game.ID
-	if raw, ok := latestArchivedBodyBefore(ctx, store, sumKey, sumKey, game.Kickoff); ok {
+	sumKey := db.ArchiveSummaryKey(game.ID)
+	if raw, ok := latestArchivedBodyBefore(ctx, store, sumKey, game.Kickoff); ok {
 		hasArchive = true
 		if injJSON, ok := extractSummaryInjuriesJSON(raw); ok {
 			if teamInjuries, err := espn.ParseInjuries(injJSON); err == nil {
@@ -456,12 +424,12 @@ func loadArchivedGameInjuries(
 		var raw []byte
 		var found bool
 		if tc.espnID != "" {
-			key := "espn:roster:" + tc.espnID
-			raw, found = latestArchivedBodyBefore(ctx, store, key, key, game.Kickoff)
+			key := db.ArchiveRosterKey(tc.espnID)
+			raw, found = latestArchivedBodyBefore(ctx, store, key, game.Kickoff)
 		}
 		if !found {
-			key := "espn:roster:" + tc.abbr
-			raw, found = latestArchivedBodyBefore(ctx, store, key, key, game.Kickoff)
+			key := db.ArchiveRosterKey(tc.abbr)
+			raw, found = latestArchivedBodyBefore(ctx, store, key, game.Kickoff)
 		}
 		if !found {
 			continue
@@ -488,30 +456,7 @@ func loadArchivedGameInjuries(
 		}
 	}
 
-	merged := make(map[string][]analyzer.Injury)
-	for _, team := range []string{game.AwayTeam, game.HomeTeam} {
-		if team == "" {
-			continue
-		}
-		combined := espn.MergeTeamInjuries(summaryByTeam[team], rosterByTeam[team])
-		if len(combined) == 0 {
-			continue
-		}
-		converted := make([]analyzer.Injury, len(combined))
-		for i, inj := range combined {
-			converted[i] = analyzer.Injury{
-				AthleteID: inj.AthleteID,
-				FullName:  inj.FullName,
-				Position:  inj.Position,
-				Status:    inj.Status,
-			}
-		}
-		merged[team] = converted
-	}
-
-	if len(merged) == 0 {
-		return nil, positions, hasArchive
-	}
+	merged := analyzer.MergeInjuryFeeds(summaryByTeam, rosterByTeam)
 	return merged, positions, hasArchive
 }
 
@@ -539,13 +484,13 @@ func hasArchivedOddsBefore(ctx context.Context, store *db.Store, gameID string, 
 	if kickoff.IsZero() {
 		return false
 	}
-	propsKey := "odds:props:" + gameID
-	if raw, ok := latestArchivedBodyBefore(ctx, store, propsKey, propsKey, kickoff); ok {
+	propsKey := db.ArchiveOddsPropsKey(gameID)
+	if raw, ok := latestArchivedBodyBefore(ctx, store, propsKey, kickoff); ok {
 		if _, err := odds.ParsePropsJSON(raw); err == nil {
 			return true
 		}
 	}
-	if raw, ok := latestArchivedBodyBefore(ctx, store, "odds:lines", "odds:lines", kickoff); ok {
+	if raw, ok := latestArchivedBodyBefore(ctx, store, db.ArchiveOddsLinesKey, kickoff); ok {
 		if _, err := odds.ParseLinesJSON(raw); err == nil {
 			return true
 		}
@@ -553,32 +498,26 @@ func hasArchivedOddsBefore(ctx context.Context, store *db.Store, gameID string, 
 	return false
 }
 
+func beforeKickoff(kickoff time.Time) time.Time {
+	if kickoff.Nanosecond() > 0 {
+		return kickoff.Truncate(time.Second)
+	}
+	return kickoff.Add(-time.Second)
+}
+
 func latestArchivedBodyBefore(
 	ctx context.Context,
 	store *db.Store,
-	keyPrefix string,
-	exactKey string,
+	key string,
 	kickoff time.Time,
 ) ([]byte, bool) {
-	responses, err := store.ListAPIResponses(ctx, db.APIResponseFilter{
-		KeyPrefix: keyPrefix,
-		Until:     kickoff,
-	})
-	if err != nil || len(responses) == 0 {
+	resp, ok, err := store.LatestAPIResponseBefore(ctx, key, beforeKickoff(kickoff))
+	if err != nil || !ok || !resp.FetchedAt.Before(kickoff) {
 		return nil, false
 	}
-	for _, r := range slices.Backward(responses) {
-		if exactKey != "" && r.Key != exactKey {
-			continue
-		}
-		if !r.FetchedAt.Before(kickoff) {
-			continue
-		}
-		body, err := store.APIResponseBody(ctx, r.BodySHA256)
-		if err != nil {
-			continue
-		}
-		return body, true
+	body, err := store.APIResponseBody(ctx, resp.BodySHA256)
+	if err != nil {
+		return nil, false
 	}
-	return nil, false
+	return body, true
 }

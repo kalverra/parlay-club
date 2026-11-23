@@ -66,7 +66,7 @@ flowchart TD
 - Export or consolidate pure helpers in `internal/analyzer/signals.go` so `internal/eval/replay.go` calls them directly
   instead of maintaining copies:
   - `DistinctLegPlayerIDs(legs []db.Leg) []string`
-  - `NFLverseSeasonTypes(seasonType int) []string`
+  - `NFLverseSeasonTypes(seasonType int) []int`
   - `MergeInjuryFeeds(summaryByTeam map[string][]espn.Injury, rosterByTeam map[string][]espn.Injury) map[string][]Injury`
     (wrapping `espn.MergeTeamInjuries` + conversion to `[]analyzer.Injury`, shared by `MergeGameInjuries` for live DB
     rows and `loadArchivedGameInjuries` for archived JSON payloads).
@@ -140,7 +140,7 @@ Complexity: medium (coordinates helper extraction in `internal/analyzer` with le
 `internal/eval`) Risk: low (deterministic in-memory SQLite replay tests verify leakage guards and identical graded
 outputs)
 
-- [ ] Export shared `DistinctLegPlayerIDs`, `NFLverseSeasonTypes`, and `MergeInjuryFeeds` in
+- [x] Export shared `DistinctLegPlayerIDs`, `NFLverseSeasonTypes`, and `MergeInjuryFeeds` in
       `internal/analyzer/signals.go`, and update `internal/eval/replay.go` to use them alongside `db.Archive*Key`,
       `LatestAPIResponseBefore`, and batched slip/leg loading.
 - [ ] Scope `eval.LoadDataset`'s per-game archive reads to games referenced by settled slips and replace full odds-body

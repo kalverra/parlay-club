@@ -656,3 +656,63 @@ func TestLoadSlipSignalsPopulatesInjuriesAndPositions(t *testing.T) {
 	require.Contains(t, stats, "waddle")
 	assert.Equal(t, "WR", stats["waddle"].Position)
 }
+
+func TestDistinctLegPlayerIDs(t *testing.T) {
+	t.Parallel()
+
+	p1 := "101"
+	p2 := "202"
+	empty := ""
+	legs := []db.Leg{
+		{PlayerID: nil},
+		{PlayerID: &empty},
+		{PlayerID: &p1},
+		{PlayerID: &p2},
+		{PlayerID: &p1},
+	}
+
+	assert.Equal(t, []string{"101", "202"}, analyzer.DistinctLegPlayerIDs(legs))
+	assert.Nil(t, analyzer.DistinctLegPlayerIDs(nil))
+}
+
+func TestNFLverseSeasonTypes(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, []int{nflverse.SeasonTypeRegular}, analyzer.NFLverseSeasonTypes(nflverse.SeasonTypeRegular))
+	assert.Equal(
+		t,
+		[]int{nflverse.SeasonTypeRegular, nflverse.SeasonTypePostseason},
+		analyzer.NFLverseSeasonTypes(nflverse.SeasonTypePostseason),
+	)
+}
+
+func TestMergeInjuryFeeds(t *testing.T) {
+	t.Parallel()
+
+	assert.Nil(t, analyzer.MergeInjuryFeeds(nil, nil))
+
+	summaryByTeam := map[string][]espn.Injury{
+		"BUF": {
+			{AthleteID: "101", FullName: "Keon Coleman", Position: "WR", Status: "Out", Detail: "Wrist"},
+		},
+	}
+	rosterByTeam := map[string][]espn.Injury{
+		"BUF": {
+			{AthleteID: "101", FullName: "Keon Coleman", Position: "WR", Status: "Questionable"},
+			{AthleteID: "102", FullName: "Dalton Kincaid", Position: "TE", Status: "Out"},
+		},
+		"MIA": {
+			{AthleteID: "201", FullName: "Tyreek Hill", Position: "WR", Status: "Questionable"},
+		},
+	}
+
+	merged := analyzer.MergeInjuryFeeds(summaryByTeam, rosterByTeam)
+	require.Len(t, merged, 2)
+	assert.Equal(t, []analyzer.Injury{
+		{AthleteID: "101", FullName: "Keon Coleman", Position: "WR", Status: "Out"},
+		{AthleteID: "102", FullName: "Dalton Kincaid", Position: "TE", Status: "Out"},
+	}, merged["BUF"])
+	assert.Equal(t, []analyzer.Injury{
+		{AthleteID: "201", FullName: "Tyreek Hill", Position: "WR", Status: "Questionable"},
+	}, merged["MIA"])
+}
