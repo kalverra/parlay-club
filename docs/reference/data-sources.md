@@ -243,7 +243,9 @@ Parlay API rows carry validated prop links and sids on FanDuel only today. `odds
 `RunPrefill` (triggered automatically on the first authenticated Sunday morning visit at or after 6:00 AM ET via
 `prefill:sunday` in `sync_state`, or via the optional `POST /internal/prefill` fallback, with 15-minute idempotency)
 and runs on demand when someone opens an upcoming game on an `OPEN` slip's pick board, taps "Load them" or "Refresh
-odds", or opens a research view. It is stale after 30 minutes on game days or within 6 hours of kickoff, and 2 hours
+odds", or opens a research view. After a Parlay-only `RunPrefill`, subsequent `SyncGameProps`, `SyncPickGame`,
+`ForcePickRefresh`, or `KickSlipExportEnrich` calls run enrichment-only via `odds:props:enrich:{game}` without
+re-calling Parlay API. `odds:props:{game}` is stale after 30 minutes on game days or within 6 hours of kickoff, and 2 hours
 otherwise (subject to a 2-minute cooldown on manual refresh), and is skipped once kickoff has passed. Before matching
 players, it syncs rosters for both teams (`espn:roster:{team}`). It checks the Parlay API 150-credit floor
 (`OddsPropsFloor`), calls `Client.Props`, maps `TEAM_TOTAL` to the game's team abbreviation, and canonicalizes player
@@ -303,12 +305,20 @@ whose `bookmakers[].markets[].outcomes[]` carry the prices. `Client.EventProps` 
 copies `bookmakers[].sid` into `Prop.EventSid`.
 
 In `odds:props:{game}`, `odds.MergeProps` merges a Parlay API board with a per-event board from The Odds API,
-deduplicating any primary collisions on `(book, market_type, team, player_name, side)` (preferring linked rows, then
-prices closest to `-110`):
+deduplicating any primary collisions on `(book, market_type, team, normalizePropSubject(player_name), side)` (matching
+punctuation and generational-suffix variants such as `"D.J. Moore"` / `"DJ Moore"` and `"Kenneth Walker III"` /
+`"Kenneth Walker"`, preferring linked rows, then prices closest to `-110`):
 
 - **Enrichment.** When Parlay API bought props and The Odds API has at least 100 credits (`TheOddsAPIEnrichFloor`),
-  refresh fetches The Odds API props too. Unlinked primary rows gain DraftKings `link`, `sid`, and `event_sid` (and
-  adopt the linked line and price if they differ). Secondary-only rows append missing books and markets.
+  refresh fetches The Odds API props too and records `odds:props:enrich:{game}` in the same transaction. Unlinked
+  primary rows gain DraftKings `link`, `sid`, and `event_sid` (and adopt the linked line and price if they differ).
+  Secondary-only rows append missing books and markets.
+- **Enrichment-only after `RunPrefill`.** When `odds:props:{game}` is already fresh from Parlay-only `RunPrefill` and
+  `odds:props:enrich:{game}` (`refresh.OddsPropsEnrichSource`) is missing, older than `odds:props:{game}`, or stale,
+  `SyncGameProps`, `SyncPickGame`, `ForcePickRefresh`, and `KickSlipExportEnrich` (triggered asynchronously when a slip
+  transitions to `LOCKED` with unlinked prop legs on upcoming games) run `enrichGameProps`. It calls The Odds API
+  `EventProps` only (never Parlay API) at or above `TheOddsAPIEnrichFloor`, merges against existing current prop rows at
+  a unified `FetchedAt`, and records both `odds:props:{game}` and `odds:props:enrich:{game}` in one transaction.
 - **Fallback.** When Parlay API is unconfigured, errors, returns no props, or sits below 150 credits, The Odds API
   serves the game's props if it has at least 25 credits (`TheOddsAPIFallbackFloor`).
 
@@ -440,6 +450,6 @@ The free tier is 500 credits a month. Its `/odds` call costs 3 credits, the same
   unconfigured, errors, or sits below its floor.
 - Routine enrichment is about 20 line calls a week × 3 = 60 credits, or about 240 a month. Enrichment pauses at 100, so
   it never spends the reserve kept for fallback.
-- Per-event props cost 1 credit per market returned, so a nine-market call costs 9. In `odds:props:{game}`, enrichment
-  runs at or above 100 credits (`refresh.TheOddsAPIEnrichFloor`) and fallback runs at or above 25 credits
-  (`refresh.TheOddsAPIFallbackFloor`).
+- Per-event props cost 1 credit per market returned, so a nine-market call costs 9. In `odds:props:{game}` and
+  `odds:props:enrich:{game}`, enrichment runs at or above 100 credits (`refresh.TheOddsAPIEnrichFloor`) and fallback runs
+  at or above 25 credits (`refresh.TheOddsAPIFallbackFloor`).

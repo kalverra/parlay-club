@@ -170,7 +170,7 @@ Risk: medium (touches metered Odds API call paths and `odds` table upserts where
 - [x] Normalize player names with `normalizePropSubject` in `odds.MergeProps` (`internal/ingest/odds/props.go`) so cross-provider enrichment matches punctuation and generational-suffix variants, with unit tests in `internal/ingest/odds/props_test.go`.
 - [x] Add `OddsPropsEnrichSource(gameID)` and `enrichGameProps` in `internal/refresh/research.go` and `internal/refresh/refresh.go` so `syncOddsProps` records enrichment freshness when The Odds API buys props, and `SyncPickGame`/`SyncGameProps` run enrichment-only when `odds:props:{gameID}` was populated by Parlay-only `RunPrefill`, merging against existing current prop rows at a unified `FetchedAt` and enforcing `TheOddsAPIEnrichFloor`, with tests in `internal/refresh/prefill_test.go` and `internal/refresh/pick_test.go`.
 - [x] Add `KickSlipExportEnrich(ctx, slipID)` to `internal/refresh` and `web.Refresher`, and invoke it from `slipHandlers.lockIn` (`internal/web/slips.go`) when a slip transitions to `LOCKED` so upcoming games with unlinked prop legs enrich in the background and push `slip-updated` over SSE, with tests in `internal/refresh/` and `internal/web/export_test.go`.
-- [ ] Docs: update `docs/concepts/data-refresh.md` and `docs/reference/data-sources.md` to document `odds:props:enrich:{gameID}`, enrichment-only refreshes after `RunPrefill`, and `KickSlipExportEnrich` on slip lock.
+- [x] Docs: update `docs/concepts/data-refresh.md` and `docs/reference/data-sources.md` to document `odds:props:enrich:{gameID}`, enrichment-only refreshes after `RunPrefill`, and `KickSlipExportEnrich` on slip lock.
 
 ### Phase 2: Multi-game DraftKings grouping and clearer manual prop guidance
 
