@@ -19,6 +19,7 @@ import (
 	"github.com/kalverra/parlay-club/internal/auth"
 	"github.com/kalverra/parlay-club/internal/config"
 	"github.com/kalverra/parlay-club/internal/db"
+	"github.com/kalverra/parlay-club/internal/eval"
 	"github.com/kalverra/parlay-club/internal/groups"
 	"github.com/kalverra/parlay-club/internal/ingest/espn"
 	"github.com/kalverra/parlay-club/internal/ingest/nfelo"
@@ -48,7 +49,10 @@ type sandboxRuntime struct {
 	cookies *auth.Cookies
 	// renderer draws the standalone controls page. The composition root sets it
 	// after construction, like cookies.
-	renderer  *webui.Renderer
+	renderer *webui.Renderer
+	// evalCache is set by the composition root after construction; stage
+	// transitions and resets invalidate it.
+	evalCache *eval.Cache
 	logger    zerolog.Logger
 	refresher *refresh.Service
 	slips     *slips.Service
@@ -175,7 +179,11 @@ func (r *sandboxRuntime) Stage(ctx context.Context, stage sandbox.Stage) (sandbo
 		return sandbox.Seed{}, fmt.Errorf("sandbox: unknown stage %q", stage)
 	}
 	if stage == sandbox.Morning {
-		return r.rebuildMorning(ctx, true)
+		seed, err := r.rebuildMorning(ctx, true)
+		if err == nil && r.evalCache != nil {
+			r.evalCache.InvalidateAll()
+		}
+		return seed, err
 	}
 
 	seed, err := r.rebuildMorning(ctx, true)
@@ -199,6 +207,9 @@ func (r *sandboxRuntime) Stage(ctx context.Context, stage sandbox.Stage) (sandbo
 	}
 
 	r.publishSeed(seed)
+	if r.evalCache != nil {
+		r.evalCache.InvalidateAll()
+	}
 	return seed, nil
 }
 
@@ -289,6 +300,9 @@ func (r *sandboxRuntime) rebuildMorning(
 
 	r.seed = seed
 	r.publishSeed(seed)
+	if r.evalCache != nil {
+		r.evalCache.InvalidateAll()
+	}
 	return seed, nil
 }
 

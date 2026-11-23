@@ -284,7 +284,7 @@ lifecycle, and builds the phone-first group-scoped `/analyzer/results` handler a
 queries over existing SQLite tables with no schema changes or external calls; group isolation, cache invalidation, and
 rendering are covered by handler and service tests)
 
-- [ ] Implement `eval.Cache` in `internal/eval/cache.go` with concurrency/invalidation tests in
+- [x] Implement `eval.Cache` in `internal/eval/cache.go` with concurrency/invalidation tests in
       `internal/eval/cache_test.go`, add `SetOnGradeChange` to `internal/slips/rules.go` (invoked on `SetLegResult` and
       `AutoGradeLegs` commits) with tests in `internal/slips/grade_test.go`, and wire both in `cmd/server/main.go` and
       `cmd/server/sandbox.go`.
