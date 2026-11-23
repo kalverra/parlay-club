@@ -143,10 +143,137 @@ func TestEvalCLI(t *testing.T) {
 		assert.Contains(t, text, "Leg Band Migrations:")
 	})
 
-	t.Run("missing db flag returns error", func(t *testing.T) {
+	t.Run("missing db and dataset flags returns error", func(t *testing.T) {
 		t.Parallel()
 		var out, errBuf bytes.Buffer
 		err := run(t.Context(), []string{"--rubric", "v1"}, &out, &errBuf)
 		require.Error(t, err)
+		assert.Contains(t, err.Error(), "--db or --dataset is required")
+	})
+
+	t.Run("db and dataset flags are mutually exclusive", func(t *testing.T) {
+		t.Parallel()
+		datasetPath := filepath.Join("..", "..", "internal", "eval", "testdata", "benchmark_dataset.json")
+		var out, errBuf bytes.Buffer
+		err := run(t.Context(), []string{"--db", dbPath, "--dataset", datasetPath}, &out, &errBuf)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "mutually exclusive")
+	})
+
+	t.Run("all cannot be combined with compare flags", func(t *testing.T) {
+		t.Parallel()
+		datasetPath := filepath.Join("..", "..", "internal", "eval", "testdata", "benchmark_dataset.json")
+		var out, errBuf bytes.Buffer
+		err := run(t.Context(), []string{"--dataset", datasetPath, "--all", "--baseline", "v1"}, &out, &errBuf)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "--all cannot be combined")
+	})
+
+	t.Run("unsupported format returns error", func(t *testing.T) {
+		t.Parallel()
+		datasetPath := filepath.Join("..", "..", "internal", "eval", "testdata", "benchmark_dataset.json")
+		var out, errBuf bytes.Buffer
+		err := run(t.Context(), []string{"--dataset", datasetPath, "--format", "xml"}, &out, &errBuf)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "unsupported --format")
+	})
+
+	t.Run("missing dataset file returns error", func(t *testing.T) {
+		t.Parallel()
+		var out, errBuf bytes.Buffer
+		err := run(t.Context(), []string{"--dataset", filepath.Join(t.TempDir(), "missing.json")}, &out, &errBuf)
+		require.Error(t, err)
+	})
+
+	t.Run("dataset single rubric markdown format", func(t *testing.T) {
+		t.Parallel()
+		datasetPath := filepath.Join("..", "..", "internal", "eval", "testdata", "benchmark_dataset.json")
+		var out, errBuf bytes.Buffer
+		err := run(t.Context(), []string{"--dataset", datasetPath, "--format", "markdown"}, &out, &errBuf)
+		require.NoError(t, err)
+
+		md := out.String()
+		assert.Contains(t, md, "## Grading Eval: v1")
+		assert.Contains(t, md, "**Data Coverage:** legs=72")
+		assert.Contains(t, md, "| Band | Total | Decided | W-L-P |")
+		assert.Contains(t, md, "#### Slip Calibration")
+		assert.Contains(t, md, "#### Top Factor Attribution")
+	})
+
+	t.Run("dataset all rubrics json format", func(t *testing.T) {
+		t.Parallel()
+		datasetPath := filepath.Join("..", "..", "internal", "eval", "testdata", "benchmark_dataset.json")
+		var out, errBuf bytes.Buffer
+		err := run(t.Context(), []string{"--dataset", datasetPath, "--all", "--format", "json"}, &out, &errBuf)
+		require.NoError(t, err)
+
+		var suite eval.SuiteReport
+		require.NoError(t, json.Unmarshal(out.Bytes(), &suite))
+		assert.Equal(t, analyzer.ActiveRubric.Name, suite.ActiveRubric)
+		assert.Equal(t, 72, suite.Coverage.TotalLegs)
+		require.Len(t, suite.Reports, len(analyzer.BuiltInRubrics()))
+		assert.Len(t, suite.Reports[0].Weekly, 4)
+	})
+
+	t.Run("dataset all rubrics text format", func(t *testing.T) {
+		t.Parallel()
+		datasetPath := filepath.Join("..", "..", "internal", "eval", "testdata", "benchmark_dataset.json")
+		var out, errBuf bytes.Buffer
+		err := run(t.Context(), []string{"--dataset", datasetPath, "--all", "--format", "text"}, &out, &errBuf)
+		require.NoError(t, err)
+
+		text := out.String()
+		assert.Contains(t, text, "Suite (active: v1)")
+		assert.Contains(t, text, "Rubric: v1")
+		assert.Contains(t, text, "Data Coverage: legs=72")
+	})
+
+	t.Run("dataset all rubrics markdown format", func(t *testing.T) {
+		t.Parallel()
+		datasetPath := filepath.Join("..", "..", "internal", "eval", "testdata", "benchmark_dataset.json")
+		var out, errBuf bytes.Buffer
+		err := run(t.Context(), []string{"--dataset", datasetPath, "--all", "--format", "markdown"}, &out, &errBuf)
+		require.NoError(t, err)
+
+		md := out.String()
+		assert.Contains(t, md, "## Grading Eval Suite (active: `v1`)")
+		assert.Contains(t, md, "### Rubric: `v1`")
+		assert.Contains(t, md, "#### Leg Calibration")
+		assert.Contains(t, md, "#### Slip Calibration")
+		assert.Contains(t, md, "#### Top Factor Attribution")
+	})
+
+	t.Run("dataset compare markdown format", func(t *testing.T) {
+		t.Parallel()
+		datasetPath := filepath.Join("..", "..", "internal", "eval", "testdata", "benchmark_dataset.json")
+		cand := analyzer.RubricV1
+		cand.Name = "v2-candidate"
+		cand.HitRate = 0
+		candBytes, err := json.Marshal(cand)
+		require.NoError(t, err)
+
+		candPath := filepath.Join(t.TempDir(), "rubric-v2.json")
+		require.NoError(t, os.WriteFile(candPath, candBytes, 0o600))
+
+		var out, errBuf bytes.Buffer
+		err = run(
+			t.Context(),
+			[]string{
+				"--dataset", datasetPath,
+				"--baseline", "v1",
+				"--candidate-file", candPath,
+				"--format", "markdown",
+			},
+			&out,
+			&errBuf,
+		)
+		require.NoError(t, err)
+
+		md := out.String()
+		assert.Contains(t, md, "## Grading Eval Comparison: `v1` -> `v2-candidate`")
+		assert.Contains(t, md, "#### Leg Calibration Diff")
+		assert.Contains(t, md, "#### Slip Calibration Diff")
+		assert.Contains(t, md, "#### Leg Band Migrations")
+		assert.Contains(t, md, "### Candidate Factor Attribution (`v2-candidate`)")
 	})
 }
