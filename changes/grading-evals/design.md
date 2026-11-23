@@ -187,7 +187,7 @@ Complexity: medium (coordinates pre-kickoff archive lookup across ESPN game logs
 Risk: low (read-only offline replay package with no production request-path changes; verified by explicit leakage tests)
 
 - [x] Expose pure raw-JSON parsers (`ParseGameLogJSON`, `ParseRosterJSON` in `internal/ingest/espn`, and `ParseLinesJSON`, `ParsePropsJSON` in `internal/ingest/odds`) reusing existing decoders, with unit tests against fixture payloads.
-- [ ] Implement `ReplayFilter`, `ReplayDataset`, `DataCoverage`, and `LoadDataset` in `internal/eval/replay.go`, plus leakage-guard and partial-archive fail-soft tests in `internal/eval/replay_test.go`.
+- [x] Implement `ReplayFilter`, `ReplayDataset`, `DataCoverage`, and `LoadDataset` in `internal/eval/replay.go`, plus leakage-guard and partial-archive fail-soft tests in `internal/eval/replay_test.go`.
 
 ### Phase 3: Calibration metrics, rubric diff, offline CLI, and docs
 
