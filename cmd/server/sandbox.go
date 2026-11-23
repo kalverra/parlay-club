@@ -95,6 +95,7 @@ func newSandboxRuntime(
 	client := &http.Client{Timeout: ingestTimeout, Transport: transport}
 
 	scenario := sandbox.NewScenario(sandbox.Morning, sandbox.MorningTime())
+	slipService := slips.New(store, hub, scenario.Now)
 	refresher := refresh.New(refresh.Deps{
 		Store:       store,
 		Scoreboard:  espn.NewClient("", client),
@@ -102,6 +103,7 @@ func newSandboxRuntime(
 		Lines:       odds.NewClient("", sandboxOddsKey, client),
 		Projections: nfelo.NewClient("", client),
 		NFLverse:    nflverse.NewClient("", client),
+		Slips:       slipService,
 		Publisher:   hub,
 		Now:         scenario.Now,
 		Logger:      logger,
@@ -118,7 +120,7 @@ func newSandboxRuntime(
 		hub:       hub,
 		logger:    logger,
 		refresher: refresher,
-		slips:     slips.New(store, hub, scenario.Now),
+		slips:     slipService,
 		scenario:  scenario,
 		transport: transport,
 		client:    client,

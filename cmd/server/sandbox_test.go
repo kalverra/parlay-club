@@ -24,6 +24,7 @@ import (
 	"github.com/kalverra/parlay-club/internal/auth"
 	"github.com/kalverra/parlay-club/internal/config"
 	"github.com/kalverra/parlay-club/internal/db"
+	"github.com/kalverra/parlay-club/internal/eval"
 	"github.com/kalverra/parlay-club/internal/groups"
 	"github.com/kalverra/parlay-club/internal/live"
 	"github.com/kalverra/parlay-club/internal/parlay"
@@ -1582,4 +1583,58 @@ func pointerInt(value *int) int {
 		return 0
 	}
 	return *value
+}
+
+func TestSandboxRuntimeSharesSlipsInstanceAndInvalidatesEvalCache(t *testing.T) {
+	t.Parallel()
+
+	_, store, runtime := openSandbox(t, &live.Hub{}, sandboxCookies())
+	evalCache := eval.NewCache()
+	runtime.evalCache = evalCache
+	runtime.slips.SetOnGradeChange(evalCache.InvalidateGroup)
+
+	ctx := t.Context()
+	seed := runtime.Seed()
+	require.NotEmpty(t, seed.People)
+
+	game, err := store.UpsertGame(ctx, db.Game{
+		ID:        "sandbox-grade-test",
+		WeekID:    seed.Week.ID,
+		HomeTeam:  "BUF",
+		AwayTeam:  "KC",
+		Kickoff:   time.Date(2026, 11, 8, 18, 0, 0, 0, time.UTC),
+		Status:    db.GameFinal,
+		HomeScore: new(27),
+		AwayScore: new(20),
+	})
+	require.NoError(t, err)
+
+	slip, err := store.CreateSlip(
+		ctx, seed.SharedGroup.ID, seed.Week.ID, nil, "Grade Cache Test",
+		db.SlateScopeFullWeek, 4, []int64{seed.People[0].User.ID},
+	)
+	require.NoError(t, err)
+
+	leg, err := store.CreateLeg(ctx, db.Leg{
+		SlipID:     slip.ID,
+		UserID:     seed.People[0].User.ID,
+		GameID:     &game.ID,
+		MarketType: "ML",
+		Selection:  "BUF ML",
+		Team:       new("BUF"),
+	})
+	require.NoError(t, err)
+
+	reportBefore, err := evalCache.GetOrCompute(ctx, store, seed.SharedGroup.ID, seed.Week.Season)
+	require.NoError(t, err)
+
+	require.NoError(t, runtime.refresher.RunOnce(ctx))
+
+	gotLeg, err := store.LegByID(ctx, leg.ID)
+	require.NoError(t, err)
+	assert.Equal(t, parlay.Won, gotLeg.Result)
+
+	reportAfter, err := evalCache.GetOrCompute(ctx, store, seed.SharedGroup.ID, seed.Week.Season)
+	require.NoError(t, err)
+	assert.Equal(t, reportBefore.Coverage.TotalLegs+1, reportAfter.Coverage.TotalLegs)
 }
