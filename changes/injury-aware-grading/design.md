@@ -225,7 +225,7 @@ flowchart TD
 Complexity: low (straightforward JSON struct extension, SQLite migration, and column plumbing across `ingest/espn`,
 `db`, and `refresh`) Risk: low (additive nullable-default columns with full unit and migration test coverage)
 
-- [ ] Parse `injuries` (`status`, `date`) into `espn.RosterPlayer` in `internal/ingest/espn/roster.go` and add unit
+- [x] Parse `injuries` (`status`, `date`) into `espn.RosterPlayer` in `internal/ingest/espn/roster.go` and add unit
       tests against real fixtures in `internal/ingest/espn/roster_test.go`.
 - [ ] Add migration `internal/db/migrations/0014_roster_injuries.sql`, extend `db.RosterPlayer` queries in
       `internal/db/players.go`, and wire `syncRoster` in `internal/refresh/research.go`, with tests in

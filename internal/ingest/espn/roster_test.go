@@ -159,3 +159,137 @@ func TestRosterError(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unexpected status 500")
 }
+
+func TestRosterInjuriesFromFixtures(t *testing.T) {
+	t.Parallel()
+
+	loadRoster := func(t *testing.T, raw []byte) map[string]espn.RosterPlayer {
+		t.Helper()
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write(raw)
+		}))
+		t.Cleanup(server.Close)
+
+		players, err := espn.NewClient(server.URL, server.Client()).Roster(t.Context(), "1")
+		require.NoError(t, err)
+
+		byID := make(map[string]espn.RosterPlayer, len(players))
+		for _, p := range players {
+			byID[p.ID] = p
+		}
+		return byID
+	}
+
+	billsRaw, err := os.ReadFile(filepath.Join("testdata", "roster.json"))
+	require.NoError(t, err)
+	bills := loadRoster(t, billsRaw)
+	assert.Empty(t, bills["3918298"].InjuryStatus) // Josh Allen (healthy)
+	assert.Empty(t, bills["3918298"].InjuryDate)
+	assert.Equal(t, "Out", bills["4242433"].InjuryStatus) // Joshua Palmer
+	assert.Equal(t, "2026-11-07T18:51Z", bills["4242433"].InjuryDate)
+	assert.Equal(t, "Questionable", bills["3051324"].InjuryStatus) // Dion Dawkins
+	assert.Equal(t, "2026-11-08T02:01Z", bills["3051324"].InjuryDate)
+	assert.Equal(t, "Injured Reserve", bills["4685347"].InjuryStatus) // Zane Durant
+	assert.Equal(t, "2026-09-08T20:42Z", bills["4685347"].InjuryDate)
+
+	bengalsRaw, err := os.ReadFile(filepath.Join("testdata", "roster_bengals.json"))
+	require.NoError(t, err)
+	bengals := loadRoster(t, bengalsRaw)
+	assert.Equal(t, "Out", bengals["4819215"].InjuryStatus) // Josh Kattus
+	assert.Equal(t, "2026-10-27T23:24Z", bengals["4819215"].InjuryDate)
+	assert.Equal(t, "Questionable", bengals["4401811"].InjuryStatus) // Kyle Dugger
+	assert.Equal(t, "2026-11-10T15:44Z", bengals["4401811"].InjuryDate)
+	assert.Equal(t, "Injured Reserve", bengals["4368003"].InjuryStatus) // Andrei Iosivas
+	assert.Equal(t, "2026-11-09T19:43Z", bengals["4368003"].InjuryDate)
+
+	falconsRaw, err := os.ReadFile(filepath.Join("testdata", "roster_falcons.json"))
+	require.NoError(t, err)
+	falcons := loadRoster(t, falconsRaw)
+	assert.Equal(t, "Doubtful", falcons["4870612"].InjuryStatus) // Zachariah Branch
+	assert.Equal(t, "2026-11-10T15:44Z", falcons["4870612"].InjuryDate)
+	assert.Equal(t, "Out", falcons["4243457"].InjuryStatus) // DeAngelo Malone
+	assert.Equal(t, "2026-08-04T22:34Z", falcons["4243457"].InjuryDate)
+	assert.Equal(t, "Injured Reserve", falcons["4241474"].InjuryStatus) // Brian Robinson Jr.
+	assert.Equal(t, "2026-11-07T21:13Z", falcons["4241474"].InjuryDate)
+}
+
+func TestRosterInjuryPriority(t *testing.T) {
+	t.Parallel()
+
+	fixture := `{
+		"athletes": [
+			{
+				"items": [
+					{
+						"id": "1",
+						"fullName": "Out Beats Questionable",
+						"position": {"abbreviation": "WR"},
+						"injuries": [
+							{"status": "Questionable", "date": "2026-11-01T10:00Z"},
+							{"status": "Out", "date": "2026-11-02T10:00Z"}
+						]
+					},
+					{
+						"id": "2",
+						"fullName": "Doubtful Beats Questionable",
+						"position": {"abbreviation": "TE"},
+						"injuries": [
+							{"status": "Questionable", "date": "2026-11-01T10:00Z"},
+							{"status": "Doubtful", "date": "2026-11-02T10:00Z"}
+						]
+					},
+					{
+						"id": "3",
+						"fullName": "Questionable Beats IR",
+						"position": {"abbreviation": "RB"},
+						"injuries": [
+							{"status": "Injured Reserve", "date": "2026-09-01T10:00Z"},
+							{"status": "Questionable", "date": "2026-11-02T10:00Z"}
+						]
+					},
+					{
+						"id": "4",
+						"fullName": "IR Beats Unknown",
+						"position": {"abbreviation": "QB"},
+						"injuries": [
+							{"status": "Day-to-Day", "date": "2026-11-01T10:00Z"},
+							{"status": "Injured Reserve", "date": "2026-09-01T10:00Z"}
+						]
+					},
+					{
+						"id": "5",
+						"fullName": "Skips Empty Status",
+						"position": {"abbreviation": "WR"},
+						"injuries": [
+							{"status": "", "date": "2026-11-01T10:00Z"},
+							{"status": "Day-to-Day", "date": "2026-11-02T10:00Z"}
+						]
+					}
+				]
+			}
+		]
+	}`
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(fixture))
+	}))
+	t.Cleanup(server.Close)
+
+	players, err := espn.NewClient(server.URL, server.Client()).Roster(t.Context(), "1")
+	require.NoError(t, err)
+	require.Len(t, players, 5)
+
+	assert.Equal(t, "Out", players[0].InjuryStatus)
+	assert.Equal(t, "2026-11-02T10:00Z", players[0].InjuryDate)
+	assert.Equal(t, "Doubtful", players[1].InjuryStatus)
+	assert.Equal(t, "2026-11-02T10:00Z", players[1].InjuryDate)
+	assert.Equal(t, "Questionable", players[2].InjuryStatus)
+	assert.Equal(t, "2026-11-02T10:00Z", players[2].InjuryDate)
+	assert.Equal(t, "Injured Reserve", players[3].InjuryStatus)
+	assert.Equal(t, "2026-09-01T10:00Z", players[3].InjuryDate)
+	assert.Equal(t, "Day-to-Day", players[4].InjuryStatus)
+	assert.Equal(t, "2026-11-02T10:00Z", players[4].InjuryDate)
+}
