@@ -112,6 +112,26 @@ func (s *Store) GroupByID(ctx context.Context, id int64) (Group, error) {
 	return group, nil
 }
 
+// GroupByName returns the oldest group with name (case-insensitive). A missing
+// row wraps ErrGroupNotFound.
+func (s *Store) GroupByName(ctx context.Context, name string) (Group, error) {
+	var group Group
+	err := s.readConn().QueryRowContext(ctx, `
+		SELECT id, name, invite_token
+		FROM groups
+		WHERE name = ? COLLATE NOCASE
+		ORDER BY id
+		LIMIT 1`, strings.TrimSpace(name)).
+		Scan(&group.ID, &group.Name, &group.InviteToken)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Group{}, fmt.Errorf("group %q: %w", name, ErrGroupNotFound)
+	}
+	if err != nil {
+		return Group{}, fmt.Errorf("group %q: %w", name, err)
+	}
+	return group, nil
+}
+
 // ForUser returns the groups userID belongs to, oldest membership first. A
 // user with no groups gets an empty slice, not nil.
 func (s *Store) ForUser(ctx context.Context, userID int64) ([]Group, error) {

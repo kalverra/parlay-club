@@ -216,13 +216,13 @@ func run() error {
 // still come up. With no group yet there is nowhere to put the slips, so it
 // waits for a later boot.
 func loadHistory(ctx context.Context, logger zerolog.Logger, store *db.Store) {
-	group, err := store.FirstGroup(ctx)
+	group, err := seed.TargetGroup(ctx, store, seed.DefaultPath)
 	if errors.Is(err, db.ErrGroupNotFound) {
-		logger.Info().Msg("history: no group yet, skipping " + seed.DefaultPath)
+		logger.Info().Msg("history: target group not found yet, skipping " + seed.DefaultPath)
 		return
 	}
 	if err != nil {
-		logger.Error().Err(err).Msg("history: read first group")
+		logger.Error().Err(err).Msg("history: resolve target group")
 		return
 	}
 

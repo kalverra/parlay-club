@@ -35,8 +35,10 @@ type Report struct {
 }
 
 // historyFile is the decoded YAML. A file with no slips is valid and changes
-// nothing.
+// nothing. Group optionally names the target group; when omitted, boot falls
+// back to the first group.
 type historyFile struct {
+	Group string     `yaml:"group"`
 	Slips []fileSlip `yaml:"slips"`
 }
 
@@ -106,6 +108,19 @@ func Load(ctx context.Context, store *db.Store, groupID int64, path string) (Rep
 		report.Slips++
 	}
 	return report, nil
+}
+
+// TargetGroup returns the group named in path, or the oldest group when path
+// leaves group blank. A missing group wraps db.ErrGroupNotFound.
+func TargetGroup(ctx context.Context, store *db.Store, path string) (db.Group, error) {
+	history, err := read(path)
+	if err != nil {
+		return db.Group{}, err
+	}
+	if name := strings.TrimSpace(history.Group); name != "" {
+		return store.GroupByName(ctx, name)
+	}
+	return store.FirstGroup(ctx)
 }
 
 // read decodes path. A comments-only file is the same as an empty one.
