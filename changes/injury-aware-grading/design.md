@@ -239,7 +239,7 @@ Complexity: medium (coordinates injury merging across `ingest/espn`, `analyzer`,
 package boundaries and zero duplicate entries) Risk: low (additive merge that preserves existing summary injuries and
 degrades gracefully when rosters are empty)
 
-- [ ] Add `espn.IsKeyInjuryPosition` and `espn.MergeTeamInjuries` in `internal/ingest/espn/summary.go` with unit tests
+- [x] Add `espn.IsKeyInjuryPosition` and `espn.MergeTeamInjuries` in `internal/ingest/espn/summary.go` with unit tests
       in `internal/ingest/espn/summary_test.go`.
 - [ ] Add `analyzer.Injury`, `Game.Injuries`, `PlayerStats.Position`, and `analyzer.MergeGameInjuries`, and populate
       them in `analyzer.LoadSlipSignals` (`internal/analyzer/signals.go`) from `games.injuries_json` + `roster_players`,

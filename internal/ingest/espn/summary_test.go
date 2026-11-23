@@ -268,3 +268,57 @@ func TestParseInjuriesMediaNormalization(t *testing.T) {
 
 	assert.Empty(t, teams[1].LogoURL)
 }
+
+func TestIsKeyInjuryPosition(t *testing.T) {
+	t.Parallel()
+
+	for _, pos := range []string{"QB", "RB", "WR", "TE", "LT", "OT", "C", "CB", "S", " wr ", "te"} {
+		assert.True(t, espn.IsKeyInjuryPosition(pos), "expected %q to be a key injury position", pos)
+	}
+
+	for _, pos := range []string{"", "LB", "G", "RG", "DE", "DT", "PK", "P", "LS"} {
+		assert.False(t, espn.IsKeyInjuryPosition(pos), "expected %q not to be a key injury position", pos)
+	}
+}
+
+func TestMergeTeamInjuries(t *testing.T) {
+	t.Parallel()
+
+	summary := []espn.Injury{
+		{AthleteID: "1", FullName: "Josh Allen", Position: "QB", Status: "Questionable", Detail: "Hand (Full)"},
+		{AthleteID: "2", FullName: "Keon Coleman", Position: "WR", Status: "Out", Detail: "Wrist"},
+		{AthleteID: "3", FullName: "Curtis Samuel", Position: "WR", Status: "Questionable", Detail: "Shoulder"},
+		{AthleteID: "4", FullName: "Dion Dawkins", Position: "LT", Status: "Questionable", Detail: "Ankle"},
+		{AthleteID: "5", FullName: "Taron Johnson", Position: "CB", Status: "Out", Detail: "Knee"},
+	}
+	extra := []espn.Injury{
+		// Matches by AthleteID even with different name formatting -> skipped; summary Detail kept.
+		{AthleteID: "2", FullName: "K. Coleman", Position: "WR", Status: "Out"},
+		// Matches by case-insensitive FullName with missing AthleteID -> skipped.
+		{AthleteID: "", FullName: "  taron johnson ", Position: "CB", Status: "Out"},
+		// Non-key positions -> filtered out.
+		{AthleteID: "90", FullName: "Matt Milano", Position: "LB", Status: "Out"},
+		{AthleteID: "91", FullName: "Connor McGovern", Position: "G", Status: "Questionable"},
+		// 6th key-position player truncated from summary -> appended.
+		{AthleteID: "6", FullName: "Dalton Kincaid", Position: "TE", Status: "Out"},
+		// Duplicate of Kincaid in extra -> skipped.
+		{AthleteID: "6", FullName: "Dalton Kincaid", Position: "TE", Status: "Out"},
+	}
+
+	merged := espn.MergeTeamInjuries(summary, extra)
+	require.Len(t, merged, 6)
+	assert.Equal(t, summary, merged[:5])
+	assert.Equal(t, espn.Injury{
+		AthleteID: "6",
+		FullName:  "Dalton Kincaid",
+		Position:  "TE",
+		Status:    "Out",
+	}, merged[5])
+
+	assert.Empty(t, espn.MergeTeamInjuries(nil, nil))
+	assert.Equal(t, []espn.Injury{{AthleteID: "6", FullName: "Dalton Kincaid", Position: "TE", Status: "Out"}},
+		espn.MergeTeamInjuries(nil, []espn.Injury{
+			{AthleteID: "90", FullName: "Matt Milano", Position: "LB", Status: "Out"},
+			{AthleteID: "6", FullName: "Dalton Kincaid", Position: "TE", Status: "Out"},
+		}))
+}
