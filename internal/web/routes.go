@@ -90,6 +90,10 @@ func New(
 // NewWithDeps returns the app's routes: the tab pages, the slip screen, and
 // /static. Handlers stay thin; rules live in internal/slips.
 func NewWithDeps(deps Dependencies) http.Handler {
+	if deps.EvalCache == nil {
+		deps.EvalCache = eval.NewCache()
+	}
+
 	mux := http.NewServeMux()
 	mux.Handle("GET /static/{path...}", StaticHandler())
 

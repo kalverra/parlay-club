@@ -83,4 +83,8 @@ Risk: low (in-memory SQLite integration tests verify auto-grade invalidation end
 Complexity: low (single-package cleanup in `internal/web` removing one duplicate branch)
 Risk: low (covered directly by `internal/web/eval_results_test.go`)
 
-- [ ] Default `deps.EvalCache = eval.NewCache()` when nil in `internal/web` constructor and remove the duplicate `eval.LoadDataset` / `eval.EvaluateAll` fallback branch in `internal/web/eval_results.go`, verifying nil-cache construction in `internal/web/eval_results_test.go`.
+- [x] Default `deps.EvalCache = eval.NewCache()` when nil in `internal/web` constructor and remove the duplicate `eval.LoadDataset` / `eval.EvaluateAll` fallback branch in `internal/web/eval_results.go`, verifying nil-cache construction in `internal/web/eval_results_test.go`.
+
+## Reviews
+
+- [x] Final review: agy@gemini-4-neon-low
