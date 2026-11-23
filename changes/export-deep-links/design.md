@@ -178,5 +178,5 @@ Complexity: low (pure data-shaping changes in `internal/export`, view mapping in
 Risk: low (pure logic and UI rendering with full unit and handler test coverage and zero external API calls)
 
 - [x] Extend `export.BookPlan` in `internal/export/export.go` with `LinkGroup` per-event grouping, `MultiGameNote` for multi-game DraftKings slips, and synced-prop awareness on `ReasonNoLine` manual legs, with unit tests in `internal/export/export_test.go`.
-- [ ] Update `internal/web/export.go` and `web/templates/partials.html` (`slip-export`) to render DraftKings' single-game explanation, per-game combined taps when a multi-game slip has 2+ legs in one game, and clearer unquoted-prop manual notes, with tests in `internal/web/export_test.go`.
+- [x] Update `internal/web/export.go` and `web/templates/partials.html` (`slip-export`) to render DraftKings' single-game explanation, per-game combined taps when a multi-game slip has 2+ legs in one game, and clearer unquoted-prop manual notes, with tests in `internal/web/export_test.go`.
 - [ ] Docs: update `docs/concepts/export.md` to document multi-game DraftKings per-game grouping, the single-game note, and the unquoted-prop manual note.
