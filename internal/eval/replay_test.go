@@ -154,7 +154,16 @@ func TestLoadDatasetLeakageGuard(t *testing.T) {
 	mustArchiveResponse(t, store, "odds", "odds:lines", kickoff.Add(-30*time.Minute), []byte(`[]`))
 
 	// Create and grade a slip in Week 4.
-	slip, err := store.CreateSlip(ctx, group.ID, week4.ID, nil, "Week 4 Slip", db.SlateScopeFullWeek, 2, []int64{user.ID})
+	slip, err := store.CreateSlip(
+		ctx,
+		group.ID,
+		week4.ID,
+		nil,
+		"Week 4 Slip",
+		db.SlateScopeFullWeek,
+		2,
+		[]int64{user.ID},
+	)
 	require.NoError(t, err)
 	leg, err := store.CreateLeg(ctx, db.Leg{
 		SlipID:     slip.ID,
