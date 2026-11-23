@@ -696,3 +696,171 @@ func TestRunPrefillIgnoresMissingOddsAPIKeyAndMarksSundayDone(t *testing.T) {
 	service.wait()
 	assert.Zero(t, linesClient.lineCalls, "Kick after RunPrefill on Sunday does not re-run odds:lines")
 }
+
+func TestRunPrefillThenPickEnrichment(t *testing.T) {
+	t.Parallel()
+
+	store := openTestStore(t)
+	t0 := novemberTime(8, 9, 30)
+	clock := &fakeClock{now: t0}
+	upcomingKickoff := novemberTime(8, 13, 0)
+	pastKickoff := novemberTime(8, 8, 30)
+
+	board := prefillBoard(upcomingKickoff, pastKickoff)
+	linesClient := &fakeLines{
+		events: []odds.Event{{
+			ID:           "evt-401",
+			CommenceTime: upcomingKickoff,
+			HomeTeam:     "Buffalo Bills",
+			AwayTeam:     "Miami Dolphins",
+		}},
+		eventsCredits: odds.Credits{Remaining: 400},
+		lines: []odds.Line{{
+			EventID:    "evt-401",
+			Book:       "draftkings",
+			MarketType: odds.MarketML,
+			Team:       "Buffalo Bills",
+			Side:       odds.SideTeam,
+			Price:      -150,
+		}},
+		lineCredits: odds.Credits{Remaining: 397},
+	}
+	propsClient := &fakePropsClient{
+		props: map[string][]odds.Prop{
+			"evt-401": {
+				{
+					EventID:    "evt-401",
+					Book:       "draftkings",
+					MarketType: odds.MarketPassYds,
+					PlayerName: "Josh Allen",
+					Side:       odds.SideOver,
+					Line:       new(265.5),
+					Price:      -110,
+				},
+				{
+					EventID:    "evt-401",
+					Book:       "espnbet",
+					MarketType: odds.MarketPassTds,
+					PlayerName: "Josh Allen",
+					Side:       odds.SideOver,
+					Line:       new(1.5),
+					Price:      -115,
+				},
+			},
+		},
+		propsCredits: odds.Credits{Remaining: 394},
+	}
+	fallbackProps := &fakeFallbackPropsClient{
+		events: []odds.Event{{
+			ID:           "toa-401",
+			CommenceTime: upcomingKickoff,
+			HomeTeam:     "Buffalo Bills",
+			AwayTeam:     "Miami Dolphins",
+		}},
+		eventsCredits: odds.Credits{Remaining: 250},
+		eventProps: map[string][]odds.Prop{
+			"toa-401": {
+				{
+					EventID:    "toa-401",
+					Book:       "draftkings",
+					MarketType: odds.MarketPassYds,
+					PlayerName: "Josh Allen",
+					Side:       odds.SideOver,
+					Line:       new(265.5),
+					Price:      -110,
+					Link:       "https://sportsbook.draftkings.com/event/dk-evt-401?outcomes=dk-sid-1",
+					Sid:        "dk-sid-1",
+					EventSid:   "dk-evt-401",
+				},
+				{
+					EventID:    "toa-401",
+					Book:       "fanduel",
+					MarketType: odds.MarketRushAtt,
+					PlayerName: "Josh Allen",
+					Side:       odds.SideOver,
+					Line:       new(6.5),
+					Price:      -120,
+					Link:       "https://sportsbook.fanduel.com/addToBetslip?marketId=1&selectionId=2",
+					Sid:        "fd-sid-1",
+					EventSid:   "fd-evt-401",
+				},
+			},
+		},
+		eventPropsCredits: odds.Credits{Remaining: 249},
+	}
+
+	service := New(Deps{
+		Store:         store,
+		Scoreboard:    &countingScoreboard{board: board},
+		Forecast:      fakeForecast{},
+		Lines:         linesClient,
+		Props:         propsClient,
+		FallbackProps: fallbackProps,
+		Now:           clock.Now,
+		Logger:        zerolog.Nop(),
+	})
+
+	report, err := service.RunPrefill(t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, 1, report.PropsSynced)
+	assert.Equal(t, 1, propsClient.propsCalls)
+	assert.Equal(t, 0, fallbackProps.eventPropsCalls, "RunPrefill must remain Parlay-only")
+
+	_, err = store.SyncState(t.Context(), OddsPropsSource("401"))
+	require.NoError(t, err)
+	_, err = store.SyncState(t.Context(), OddsPropsEnrichSource("401"))
+	require.ErrorIs(t, err, db.ErrSyncStateNotFound)
+
+	// 5 minutes later, SyncPickGame sees fresh odds:props:401 so it skips Parlay API
+	// and runs enrichment-only via The Odds API.
+	clock.Advance(5 * time.Minute)
+	t1 := clock.Now()
+	require.NoError(t, service.SyncPickGame(t.Context(), report.WeekID, "401"))
+
+	assert.Equal(t, 1, propsClient.propsCalls, "Parlay API Props() must not be called again")
+	assert.Equal(t, 1, fallbackProps.eventPropsCalls, "The Odds API EventProps() must run once")
+
+	enrichState, err := store.SyncState(t.Context(), OddsPropsEnrichSource("401"))
+	require.NoError(t, err)
+	assert.True(t, enrichState.FetchedAt.Equal(t1))
+
+	propsState, err := store.SyncState(t.Context(), OddsPropsSource("401"))
+	require.NoError(t, err)
+	assert.True(t, propsState.FetchedAt.Equal(t1))
+
+	storedOdds, err := store.OddsForGame(t.Context(), "401")
+	require.NoError(t, err)
+
+	var dkPass, parlayOnly, fdRush *db.Odds
+	for i := range storedOdds {
+		row := &storedOdds[i]
+		switch {
+		case row.Book == "draftkings" && row.MarketType == odds.MarketPassYds:
+			dkPass = row
+		case row.Book == "espnbet" && row.MarketType == odds.MarketPassTds:
+			parlayOnly = row
+		case row.Book == "fanduel" && row.MarketType == odds.MarketRushAtt:
+			fdRush = row
+		}
+	}
+	require.NotNil(t, dkPass, "DraftKings PASS_YDS row should exist")
+	require.NotNil(t, dkPass.Link)
+	assert.Equal(t, "https://sportsbook.draftkings.com/event/dk-evt-401?outcomes=dk-sid-1", *dkPass.Link)
+	require.NotNil(t, dkPass.Sid)
+	assert.Equal(t, "dk-sid-1", *dkPass.Sid)
+	require.NotNil(t, dkPass.EventSid)
+	assert.Equal(t, "dk-evt-401", *dkPass.EventSid)
+	assert.True(t, dkPass.FetchedAt.Equal(t1))
+
+	require.NotNil(t, parlayOnly, "Parlay-only prop row must remain visible under CurrentOdds")
+	assert.True(t, parlayOnly.FetchedAt.Equal(t1), "Parlay-only row must be stamped at unified FetchedAt")
+
+	require.NotNil(t, fdRush, "TOA-only FanDuel RUSH_ATT row should be added")
+	require.NotNil(t, fdRush.Link)
+	assert.True(t, fdRush.FetchedAt.Equal(t1))
+
+	// Repeating SyncPickGame immediately makes zero upstream prop calls.
+	require.NoError(t, service.SyncPickGame(t.Context(), report.WeekID, "401"))
+	assert.Equal(t, 1, propsClient.propsCalls)
+	assert.Equal(t, 1, fallbackProps.eventPropsCalls)
+}

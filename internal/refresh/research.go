@@ -162,6 +162,37 @@ func (s *Service) oddsPropsSource(game db.Game, now time.Time) source {
 	}
 }
 
+// oddsPropsEnrichSource enriches one game's existing props with The Odds API
+// deep links when odds:props:{gameID} is already fresh (for example, after
+// Parlay-only RunPrefill) and enrichment has not run for that sync yet.
+func (s *Service) oddsPropsEnrichSource(game db.Game, now time.Time, force bool) source {
+	return source{
+		key: OddsPropsEnrichSource(game.ID),
+		due: func(ctx context.Context, state db.SyncState) (bool, error) {
+			if !now.Before(game.Kickoff) || s.fallbackProps == nil {
+				return false, nil
+			}
+			propsState, err := s.store.SyncState(ctx, OddsPropsSource(game.ID))
+			if errors.Is(err, db.ErrSyncStateNotFound) {
+				return false, nil
+			}
+			if err != nil {
+				return false, err
+			}
+			if state.FetchedAt.IsZero() || state.FetchedAt.Before(propsState.FetchedAt) {
+				return true, nil
+			}
+			if force {
+				return pickCooldownStale(state.FetchedAt, now), nil
+			}
+			return oddsPropsStale(state.FetchedAt, now, game), nil
+		},
+		run: func(ctx context.Context) (bool, error) {
+			return s.enrichGameProps(ctx, game, now)
+		},
+	}
+}
+
 // propsFetch is one provider's prop fetch result.
 type propsFetch struct {
 	props    []odds.Prop
@@ -458,7 +489,7 @@ func (s *Service) syncOddsProps(ctx context.Context, game db.Game, now time.Time
 
 	// 5. Convert to db.Odds rows and write.
 	rows := s.mapPropsToOdds(ctx, game, finalProps, now)
-	changed, err := s.writeOddsProps(ctx, game, rows, now)
+	changed, err := s.writeOddsProps(ctx, game, rows, now, fallback.bought)
 	s.logger.Info().
 		Float64("duration_ms", durationMS(time.Since(start))).
 		Str("game_id", game.ID).
@@ -469,8 +500,64 @@ func (s *Service) syncOddsProps(ctx context.Context, game db.Game, now time.Time
 	return changed, err
 }
 
+// enrichGameProps fetches per-event props from The Odds API only (never Parlay
+// API), merges them into the game's existing current prop rows at a unified
+// FetchedAt, and records both odds:props:{gameID} and odds:props:enrich:{gameID}.
+func (s *Service) enrichGameProps(ctx context.Context, game db.Game, now time.Time) (bool, error) {
+	if !now.Before(game.Kickoff) || s.fallbackProps == nil {
+		return false, nil
+	}
+	start := time.Now()
+
+	fallback := s.fetchFallbackProps(ctx, game, TheOddsAPIEnrichFloor, now)
+	if fallback.disabled {
+		return false, nil
+	}
+	if fallback.err != nil {
+		return false, fallback.err
+	}
+	if !fallback.bought {
+		return false, nil
+	}
+
+	existingOdds, err := s.store.OddsForGame(ctx, game.ID)
+	if err != nil {
+		return false, fmt.Errorf("load existing props for %s: %w", game.ID, err)
+	}
+	var existingProps []db.Odds
+	for _, row := range existingOdds {
+		if db.IsPropRow(row) {
+			existingProps = append(existingProps, row)
+		}
+	}
+
+	enrichedRows := s.mapPropsToOdds(ctx, game, fallback.props, now)
+	merged := mergeOdds(existingProps, enrichedRows)
+	for i := range merged {
+		merged[i].FetchedAt = now
+	}
+
+	changed, err := s.writeOddsProps(ctx, game, merged, now, true)
+	s.logger.Info().
+		Float64("duration_ms", durationMS(time.Since(start))).
+		Str("game_id", game.ID).
+		Int("rows", len(merged)).
+		Bool("changed", changed).
+		Err(err).
+		Msg("refresh enrich game props")
+	return changed, err
+}
+
 // writeOddsProps writes prop rows and records the game's props sync state.
-func (s *Service) writeOddsProps(ctx context.Context, game db.Game, rows []db.Odds, now time.Time) (bool, error) {
+// When enriched is true, it also records OddsPropsEnrichSource(game.ID) in the
+// same transaction.
+func (s *Service) writeOddsProps(
+	ctx context.Context,
+	game db.Game,
+	rows []db.Odds,
+	now time.Time,
+	enriched bool,
+) (bool, error) {
 	changed := false
 	err := s.store.Tx(ctx, func(tx *db.Store) error {
 		if len(rows) > 0 {
@@ -480,7 +567,13 @@ func (s *Service) writeOddsProps(ctx context.Context, game db.Game, rows []db.Od
 			}
 			changed = rowsChanged
 		}
-		return tx.RecordSync(ctx, OddsPropsSource(game.ID), now, nil)
+		if err := tx.RecordSync(ctx, OddsPropsSource(game.ID), now, nil); err != nil {
+			return err
+		}
+		if enriched {
+			return tx.RecordSync(ctx, OddsPropsEnrichSource(game.ID), now, nil)
+		}
+		return nil
 	})
 	if err != nil {
 		return changed, err
@@ -528,7 +621,7 @@ func (s *Service) prefillProps(
 							return false, primary.err
 						}
 						rows := s.mapPropsToOdds(ctx, game, primary.props, now)
-						changed, err := s.writeOddsProps(ctx, game, rows, now)
+						changed, err := s.writeOddsProps(ctx, game, rows, now, false)
 						if err != nil {
 							return false, err
 						}
