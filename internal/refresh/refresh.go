@@ -1105,7 +1105,7 @@ func (s *Service) syncSlipExportEnrich(ctx context.Context, slipID int64) error 
 	seen := make(map[string]bool)
 	var toEnrich []db.Game
 	for _, leg := range legs {
-		if leg.GameID == nil || *leg.GameID == "" || !isPropLeg(leg) {
+		if leg.GameID == nil || *leg.GameID == "" || !db.IsPropLeg(leg) {
 			continue
 		}
 		gameID := *leg.GameID
@@ -1138,11 +1138,6 @@ func (s *Service) syncSlipExportEnrich(ctx context.Context, slipID int64) error 
 		}
 	}
 	return errors.Join(errs...)
-}
-
-func isPropLeg(leg db.Leg) bool {
-	return leg.MarketType == "TEAM_TOTAL" || db.IsPlayerMarket(leg.MarketType) ||
-		(leg.PlayerName != nil && *leg.PlayerName != "")
 }
 
 func legNeedsExportEnrich(leg db.Leg, oddsRows []db.Odds) bool {

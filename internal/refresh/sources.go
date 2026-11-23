@@ -392,7 +392,7 @@ func oddsRowKey(row db.Odds) oddsKey {
 		book:       row.Book,
 		marketType: row.MarketType,
 		team:       row.Team,
-		playerName: row.PlayerName,
+		playerName: db.NormalizePlayerName(row.PlayerName),
 		side:       row.Side,
 	}
 }

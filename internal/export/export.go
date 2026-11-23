@@ -337,10 +337,6 @@ func propsSyncedByGame(odds []db.Odds) map[string]bool {
 	return synced
 }
 
-func isPropLeg(leg Leg) bool {
-	return leg.MarketType == "TEAM_TOTAL" || db.IsPlayerMarket(leg.MarketType) || trimmedPtr(leg.PlayerName) != ""
-}
-
 // planLeg links one leg or returns the manual entry that explains why it cannot
 // be linked. The kickoff check comes first: a started game cannot be linked
 // even when its stored row still has a link.
@@ -363,7 +359,7 @@ func planLeg(
 		return LegLink{}, ManualLeg{
 			Leg:         leg,
 			Reason:      ReasonNoLine,
-			PropsSynced: isPropLeg(leg) && propsSynced[*leg.GameID],
+			PropsSynced: db.IsPropLeg(leg.Leg) && propsSynced[*leg.GameID],
 		}, false
 	}
 	if row.Link == nil || strings.TrimSpace(*row.Link) == "" {

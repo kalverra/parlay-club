@@ -416,6 +416,12 @@ func IsPropRow(row Odds) bool {
 	return row.MarketType == "TEAM_TOTAL" || row.PlayerName != "" || IsPlayerMarket(row.MarketType)
 }
 
+// IsPropLeg reports whether a slip leg belongs to the prop sync group.
+func IsPropLeg(leg Leg) bool {
+	return leg.MarketType == "TEAM_TOTAL" || IsPlayerMarket(leg.MarketType) ||
+		(leg.PlayerName != nil && strings.TrimSpace(*leg.PlayerName) != "")
+}
+
 // CurrentOdds drops rows left behind by an earlier sync. Game lines and props
 // are fetched independently and stamped with different fetch times, and props
 // are synced one game at a time, so CurrentOdds computes the newest FetchedAt
