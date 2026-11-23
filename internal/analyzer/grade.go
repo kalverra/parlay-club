@@ -68,7 +68,7 @@ func ScoreLeg(leg Leg, games map[string]Game, stats map[string]PlayerStats) LegG
 	}
 
 	var factors []GradeFactor
-	factors = append(factors, scoreFormAndUsage(leg, stats)...)
+	factors = append(factors, scoreFormAndUsage(leg, game, stats)...)
 	factors = append(factors, scoreMatchupAndEnv(leg, game)...)
 	factors = append(factors, scoreLineAndPrice(leg, game)...)
 
@@ -173,7 +173,7 @@ func ScoreSlip(legs []Leg, games map[string]Game, stats map[string]PlayerStats) 
 	}
 }
 
-func scoreFormAndUsage(leg Leg, stats map[string]PlayerStats) []GradeFactor {
+func scoreFormAndUsage(leg Leg, game Game, stats map[string]PlayerStats) []GradeFactor {
 	if leg.PlayerID == "" || len(stats) == 0 {
 		return nil
 	}
@@ -182,16 +182,30 @@ func scoreFormAndUsage(leg Leg, stats map[string]PlayerStats) []GradeFactor {
 		return nil
 	}
 
+	outTeammate, hasOutTeammate := outSamePositionTeammate(leg, game, ps.Position)
+
 	var candidates []GradeFactor
 	if isYardageMarket(leg.Market) && leg.Side == sideOver && leg.Line != nil {
 		if games := ps.Games[leg.Market]; len(games) >= 3 {
 			median := Median(games[:min(5, len(games))])
 			if *leg.Line > median {
+				delta := -15
+				detail := fmt.Sprintf("Line %s sits above last-5 median of %s.", number(*leg.Line), number(median))
+				if hasOutTeammate {
+					delta = -5
+					detail = fmt.Sprintf(
+						"Line %s sits above last-5 median of %s, softened with %s teammate %s Out.",
+						number(*leg.Line),
+						number(median),
+						strings.ToUpper(strings.TrimSpace(ps.Position)),
+						outTeammate.FullName,
+					)
+				}
 				candidates = append(candidates, GradeFactor{
 					Rule:   ruleMedianTrap,
 					Label:  "L5 median trap",
-					Delta:  -15,
-					Detail: fmt.Sprintf("Line %s sits above last-5 median of %s.", number(*leg.Line), number(median)),
+					Delta:  delta,
+					Detail: detail,
 				})
 			}
 		}
@@ -219,6 +233,20 @@ func scoreFormAndUsage(leg Leg, stats map[string]PlayerStats) []GradeFactor {
 		}
 	}
 
+	if hasOutTeammate {
+		candidates = append(candidates, GradeFactor{
+			Rule:  "teammate_out_bump",
+			Label: "Teammate out (role bump)",
+			Delta: 5,
+			Detail: fmt.Sprintf(
+				"%s %s %s is Out, opening extra volume.",
+				leg.Team,
+				strings.ToUpper(strings.TrimSpace(ps.Position)),
+				outTeammate.FullName,
+			),
+		})
+	}
+
 	if reason, hit := shrinkingRoleHit(leg, ps); hit {
 		candidates = append(candidates, GradeFactor{
 			Rule:   ruleShrinkingRole,
@@ -229,6 +257,53 @@ func scoreFormAndUsage(leg Leg, stats map[string]PlayerStats) []GradeFactor {
 	}
 
 	return clampCategoryFactors(candidates, formUsageMin, formUsageMax)
+}
+
+func outSamePositionTeammate(leg Leg, game Game, position string) (Injury, bool) {
+	if leg.Team == "" || !isEligibleTeammateOutLeg(leg) {
+		return Injury{}, false
+	}
+	pos := strings.ToUpper(strings.TrimSpace(position))
+	if !isSkillVolumePosition(pos) {
+		return Injury{}, false
+	}
+	for _, inj := range game.Injuries[leg.Team] {
+		if !strings.EqualFold(strings.TrimSpace(inj.Status), "Out") {
+			continue
+		}
+		if !strings.EqualFold(strings.TrimSpace(inj.Position), pos) {
+			continue
+		}
+		if leg.PlayerID != "" && inj.AthleteID != "" && inj.AthleteID == leg.PlayerID {
+			continue
+		}
+		if leg.PlayerName != "" && inj.FullName != "" &&
+			strings.EqualFold(strings.TrimSpace(inj.FullName), strings.TrimSpace(leg.PlayerName)) {
+			continue
+		}
+		return inj, true
+	}
+	return Injury{}, false
+}
+
+func isSkillVolumePosition(pos string) bool {
+	switch pos {
+	case "WR", "TE", "RB":
+		return true
+	default:
+		return false
+	}
+}
+
+func isEligibleTeammateOutLeg(leg Leg) bool {
+	switch leg.Market {
+	case marketRecYds, marketReceptions, marketRushYds, marketRushAtt:
+		return leg.Side == sideOver
+	case marketAnytimeTD:
+		return leg.Side == sideYes
+	default:
+		return false
+	}
 }
 
 func scoreMatchupAndEnv(leg Leg, game Game) []GradeFactor {

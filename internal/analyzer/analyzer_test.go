@@ -1682,3 +1682,145 @@ func TestMedianTrap(t *testing.T) {
 		})
 	}
 }
+
+func TestScoreLegTeammateOut(t *testing.T) {
+	t.Parallel()
+
+	knoxLeg := withPlayerID(
+		leg(1, "Adam", "buf-mia", "REC_YDS", "BUF", "Dawson Knox", "OVER", new(21.0), -110),
+		"knox",
+	)
+	knoxStats := map[string]analyzer.PlayerStats{
+		"knox": {
+			Position: "TE",
+			Games: map[string][]float64{
+				"REC_YDS": {5, 7, 12, 0, 14}, // median = 7
+			},
+		},
+	}
+
+	gamesWithInjuries := func(injuries []analyzer.Injury) map[string]analyzer.Game {
+		return map[string]analyzer.Game{
+			"buf-mia": {
+				ID:       "buf-mia",
+				Home:     "MIA",
+				Away:     "BUF",
+				Injuries: map[string][]analyzer.Injury{"BUF": injuries},
+			},
+		}
+	}
+
+	t.Run("no injuries gives full L5 median trap", func(t *testing.T) {
+		t.Parallel()
+		got := analyzer.ScoreLeg(knoxLeg, games(), knoxStats)
+		assert.Equal(t, 60, got.Score)
+		assert.Equal(t, "C", got.Letter)
+		require.Len(t, got.Factors, 1)
+		assert.Equal(t, "median_trap", got.Factors[0].Rule)
+		assert.Equal(t, -15, got.Factors[0].Delta)
+	})
+
+	t.Run("same-position teammate Out softens median trap and awards role bump", func(t *testing.T) {
+		t.Parallel()
+		gs := gamesWithInjuries([]analyzer.Injury{
+			{AthleteID: "kincaid", FullName: "Dalton Kincaid", Position: "TE", Status: "Out"},
+		})
+		got := analyzer.ScoreLeg(knoxLeg, gs, knoxStats)
+		assert.Equal(t, 75, got.Score)
+		assert.Equal(t, "B", got.Letter)
+		require.Len(t, got.Factors, 2)
+		assert.Equal(t, "median_trap", got.Factors[0].Rule)
+		assert.Equal(t, -5, got.Factors[0].Delta)
+		assert.Contains(t, got.Factors[0].Detail, "Dalton Kincaid")
+		assert.Equal(t, "teammate_out_bump", got.Factors[1].Rule)
+		assert.Equal(t, 5, got.Factors[1].Delta)
+		assert.Contains(t, got.Factors[1].Detail, "BUF TE Dalton Kincaid is Out")
+	})
+
+	t.Run("Questionable, Doubtful, and Injured Reserve do not trigger bump", func(t *testing.T) {
+		t.Parallel()
+		for _, status := range []string{"Questionable", "Doubtful", "Injured Reserve"} {
+			gs := gamesWithInjuries([]analyzer.Injury{
+				{AthleteID: "kincaid", FullName: "Dalton Kincaid", Position: "TE", Status: status},
+			})
+			got := analyzer.ScoreLeg(knoxLeg, gs, knoxStats)
+			assert.Equal(t, 60, got.Score, "status %s should not soften trap", status)
+			require.Len(t, got.Factors, 1)
+			assert.Equal(t, "median_trap", got.Factors[0].Rule)
+			assert.Equal(t, -15, got.Factors[0].Delta)
+		}
+	})
+
+	t.Run("different position Out does not trigger bump", func(t *testing.T) {
+		t.Parallel()
+		gs := gamesWithInjuries([]analyzer.Injury{
+			{AthleteID: "coleman", FullName: "Keon Coleman", Position: "WR", Status: "Out"},
+		})
+		got := analyzer.ScoreLeg(knoxLeg, gs, knoxStats)
+		assert.Equal(t, 60, got.Score)
+		require.Len(t, got.Factors, 1)
+		assert.Equal(t, -15, got.Factors[0].Delta)
+	})
+
+	t.Run("picked player themselves Out does not self-trigger", func(t *testing.T) {
+		t.Parallel()
+		gs := gamesWithInjuries([]analyzer.Injury{
+			{AthleteID: "knox", FullName: "Dawson Knox", Position: "TE", Status: "Out"},
+		})
+		got := analyzer.ScoreLeg(knoxLeg, gs, knoxStats)
+		assert.Equal(t, 60, got.Score)
+		require.Len(t, got.Factors, 1)
+		assert.Equal(t, -15, got.Factors[0].Delta)
+	})
+
+	t.Run("QB prop with backup QB Out does not trigger bump", func(t *testing.T) {
+		t.Parallel()
+		allenLeg := withPlayerID(
+			leg(2, "Adam", "buf-mia", "PASS_YDS", "BUF", "Josh Allen", "OVER", new(255.5), -110),
+			"allen",
+		)
+		allenStats := map[string]analyzer.PlayerStats{
+			"allen": {
+				Position: "QB",
+				Games:    map[string][]float64{"PASS_YDS": {260, 270, 280}},
+			},
+		}
+		gs := gamesWithInjuries([]analyzer.Injury{
+			{AthleteID: "trubisky", FullName: "Mitch Trubisky", Position: "QB", Status: "Out"},
+		})
+		got := analyzer.ScoreLeg(allenLeg, gs, allenStats)
+		assert.Equal(t, 75, got.Score)
+		assert.Empty(t, got.Factors)
+	})
+
+	t.Run("Under prop does not trigger teammate_out_bump", func(t *testing.T) {
+		t.Parallel()
+		underLeg := withPlayerID(
+			leg(3, "Adam", "buf-mia", "REC_YDS", "BUF", "Dawson Knox", "UNDER", new(21.0), -110),
+			"knox",
+		)
+		gs := gamesWithInjuries([]analyzer.Injury{
+			{AthleteID: "kincaid", FullName: "Dalton Kincaid", Position: "TE", Status: "Out"},
+		})
+		got := analyzer.ScoreLeg(underLeg, gs, knoxStats)
+		assert.Equal(t, 85, got.Score)
+		require.Len(t, got.Factors, 1)
+		assert.Equal(t, "hit_rate", got.Factors[0].Rule)
+	})
+
+	t.Run("Anytime TD Yes awards teammate_out_bump without median trap", func(t *testing.T) {
+		t.Parallel()
+		tdLeg := withPlayerID(
+			leg(4, "Adam", "buf-mia", "ANYTIME_TD", "BUF", "Dawson Knox", "YES", nil, +220),
+			"knox",
+		)
+		gs := gamesWithInjuries([]analyzer.Injury{
+			{AthleteID: "kincaid", FullName: "Dalton Kincaid", Position: "TE", Status: "Out"},
+		})
+		got := analyzer.ScoreLeg(tdLeg, gs, knoxStats)
+		assert.Equal(t, 80, got.Score)
+		require.Len(t, got.Factors, 1)
+		assert.Equal(t, "teammate_out_bump", got.Factors[0].Rule)
+		assert.Equal(t, 5, got.Factors[0].Delta)
+	})
+}

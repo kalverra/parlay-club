@@ -255,7 +255,7 @@ Complexity: medium (adds position-scoped teammate-out softening and role-bump sc
 category clamping, rubric docs, and existing grades intact) Risk: low (pure deterministic Go rules with comprehensive
 unit tests covering edge cases and the Knox/Kincaid regression scenario)
 
-- [ ] Update `scoreFormAndUsage` in `internal/analyzer/grade.go` to soften `L5 median trap` from `-15` to `-5` and award
+- [x] Update `scoreFormAndUsage` in `internal/analyzer/grade.go` to soften `L5 median trap` from `-15` to `-5` and award
       `teammate_out_bump` (`+5`) when a same-team, same-position (`WR`/`TE`/`RB`) teammate is `Out` on an Over/Anytime
       TD prop, and update `GradeRubric()` in `internal/analyzer/docs.go`, with unit tests in
       `internal/analyzer/analyzer_test.go` and `internal/analyzer/nflverse_grade_test.go`.

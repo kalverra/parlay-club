@@ -238,8 +238,15 @@ func GradeRubric() RubricDoc {
 				Rule:        ruleMedianTrap,
 				Category:    "Form & Usage",
 				Label:       "L5 median trap",
-				Delta:       "-15",
-				Description: "Yardage Over line sits above the player's last-5 game median.",
+				Delta:       "-15 (-5 w/ teammate Out)",
+				Description: "Yardage Over line sits above the player's last-5 game median; softened to -5 when a same-position teammate is Out.",
+			},
+			{
+				Rule:        "teammate_out_bump",
+				Category:    "Form & Usage",
+				Label:       "Teammate out (role bump)",
+				Delta:       "+5",
+				Description: "Same-team, same-position (WR, TE, RB) teammate is Out on an Over or Anytime TD prop.",
 			},
 			{
 				Rule:        ruleShrinkingRole,
