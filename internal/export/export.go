@@ -56,20 +56,37 @@ type LegLink struct {
 
 // ManualLeg is a leg the person has to add by hand. Line is the book's current
 // line when it has one, so a moved line can be shown beside the agreed one.
+// PropsSynced is true when Reason is ReasonNoLine for a prop leg and the game
+// already has stored prop rows for other markets or books.
 type ManualLeg struct {
-	Leg    Leg
-	Reason Reason
-	Line   *float64
+	Leg         Leg
+	Reason      Reason
+	Line        *float64
+	PropsSynced bool
+}
+
+// LinkGroup is one game's worth of linked legs at a book whose combined URL
+// is scoped to a single event (DraftKings). Combined is set when 2+ legs in
+// the group share an EventSid and each carries a Sid.
+type LinkGroup struct {
+	GameID   string
+	EventSid string
+	Combined string
+	Legs     []LegLink
 }
 
 // BookPlan is one book's export of a locked slip. Every leg is in exactly one
 // of Linked or Manual. Combined is set only when the book has a verified format
-// for one URL that holds several selections.
+// for one URL that holds several selections. Groups and MultiGameNote are set
+// when a book's combined URL is scoped to a single event and the linked legs
+// span multiple games.
 type BookPlan struct {
-	Book     string
-	Linked   []LegLink
-	Manual   []ManualLeg
-	Combined string
+	Book          string
+	Linked        []LegLink
+	Manual        []ManualLeg
+	Combined      string
+	Groups        []LinkGroup
+	MultiGameNote bool
 }
 
 // Combiner builds one sportsbook URL for several linked legs. A book with no
@@ -77,6 +94,14 @@ type BookPlan struct {
 // Combined empty and the panel shows one tap per leg.
 type Combiner interface {
 	Combine(linked []LegLink) (url string, ok bool)
+}
+
+// groupCombiner is an optional interface for a Combiner whose combined URL is
+// scoped to a single event. When Combine cannot build one URL for the whole
+// slip, CombineGroups groups linked legs per event so multi-leg games can
+// still combine.
+type groupCombiner interface {
+	CombineGroups(linked []LegLink) (groups []LinkGroup, multiGame bool)
 }
 
 // combiners holds each book's verified Combiner, keyed by book. Both formats
@@ -110,8 +135,9 @@ func PlanWithCombiner(
 		return plan
 	}
 
+	propsSynced := propsSyncedByGame(odds)
 	for _, leg := range legs {
-		linked, manual, ok := planLeg(leg, odds, book, now)
+		linked, manual, ok := planLeg(leg, odds, book, now, propsSynced)
 		if ok {
 			plan.Linked = append(plan.Linked, linked)
 			continue
@@ -122,6 +148,8 @@ func PlanWithCombiner(
 	if combiner != nil && len(plan.Linked) > 0 {
 		if combined, ok := combiner.Combine(plan.Linked); ok {
 			plan.Combined = combined
+		} else if gc, ok := combiner.(groupCombiner); ok {
+			plan.Groups, plan.MultiGameNote = gc.CombineGroups(plan.Linked)
 		}
 	}
 	return plan
@@ -151,30 +179,95 @@ func (draftKingsCombiner) Combine(linked []LegLink) (string, bool) {
 	}
 	sids := make([]string, 0, len(linked))
 	for _, leg := range linked {
-		if leg.Sid == nil || strings.TrimSpace(*leg.Sid) == "" {
+		sid := trimmedPtr(leg.Sid)
+		if sid == "" {
 			return "", false
 		}
-		sids = append(sids, url.QueryEscape(strings.TrimSpace(*leg.Sid)))
+		sids = append(sids, url.QueryEscape(sid))
 	}
 	return draftKingsEvent + url.PathEscape(eventSid) + "?outcomes=" + strings.Join(sids, ","), true
+}
+
+// CombineGroups groups linked DraftKings legs by event when they span multiple
+// games. Single-game or single-leg slips return nil, false.
+func (c draftKingsCombiner) CombineGroups(linked []LegLink) ([]LinkGroup, bool) {
+	if len(linked) < 2 || !spansMultipleGames(linked) {
+		return nil, false
+	}
+
+	var groups []LinkGroup
+	indexByKey := make(map[string]int, len(linked))
+	for _, leg := range linked {
+		gameID := legGameID(leg)
+		eventSid := trimmedPtr(leg.EventSid)
+		key := "game:" + gameID
+		if eventSid != "" {
+			key = "event:" + eventSid
+		}
+		idx, seen := indexByKey[key]
+		if !seen {
+			idx = len(groups)
+			indexByKey[key] = idx
+			groups = append(groups, LinkGroup{
+				GameID:   gameID,
+				EventSid: eventSid,
+			})
+		}
+		groups[idx].Legs = append(groups[idx].Legs, leg)
+	}
+
+	for i := range groups {
+		if combined, ok := c.Combine(groups[i].Legs); ok {
+			groups[i].Combined = combined
+		}
+	}
+	return groups, true
+}
+
+func spansMultipleGames(linked []LegLink) bool {
+	games := make(map[string]struct{}, len(linked))
+	events := make(map[string]struct{}, len(linked))
+	for _, leg := range linked {
+		if id := legGameID(leg); id != "" {
+			games[id] = struct{}{}
+		}
+		if eventSid := trimmedPtr(leg.EventSid); eventSid != "" {
+			events[eventSid] = struct{}{}
+		}
+	}
+	return len(games) > 1 || len(events) > 1
 }
 
 // sharedEventSid returns the one event ID every linked leg belongs to. A slip
 // that spans events cannot use the event-page form, so it keeps per-leg taps.
 func sharedEventSid(linked []LegLink) (string, bool) {
-	if len(linked) == 0 || linked[0].EventSid == nil {
+	if len(linked) == 0 {
 		return "", false
 	}
-	eventSid := strings.TrimSpace(*linked[0].EventSid)
+	eventSid := trimmedPtr(linked[0].EventSid)
 	if eventSid == "" {
 		return "", false
 	}
 	for _, leg := range linked[1:] {
-		if leg.EventSid == nil || strings.TrimSpace(*leg.EventSid) != eventSid {
+		if trimmedPtr(leg.EventSid) != eventSid {
 			return "", false
 		}
 	}
 	return eventSid, true
+}
+
+func trimmedPtr(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return strings.TrimSpace(*s)
+}
+
+func legGameID(leg LegLink) string {
+	if leg.Leg.GameID == nil {
+		return ""
+	}
+	return strings.TrimSpace(*leg.Leg.GameID)
 }
 
 // fanDuelBetslip is the endpoint the phone check confirmed. FanDuel names each
@@ -234,10 +327,30 @@ func fanDuelMarketID(link string) (string, bool) {
 	return marketID, true
 }
 
+func propsSyncedByGame(odds []db.Odds) map[string]bool {
+	synced := make(map[string]bool)
+	for _, row := range odds {
+		if db.IsPropRow(row) {
+			synced[row.GameID] = true
+		}
+	}
+	return synced
+}
+
+func isPropLeg(leg Leg) bool {
+	return leg.MarketType == "TEAM_TOTAL" || db.IsPlayerMarket(leg.MarketType) || trimmedPtr(leg.PlayerName) != ""
+}
+
 // planLeg links one leg or returns the manual entry that explains why it cannot
 // be linked. The kickoff check comes first: a started game cannot be linked
 // even when its stored row still has a link.
-func planLeg(leg Leg, odds []db.Odds, book string, now time.Time) (LegLink, ManualLeg, bool) {
+func planLeg(
+	leg Leg,
+	odds []db.Odds,
+	book string,
+	now time.Time,
+	propsSynced map[string]bool,
+) (LegLink, ManualLeg, bool) {
 	if leg.GameID == nil {
 		return LegLink{}, ManualLeg{Leg: leg, Reason: ReasonNoLine}, false
 	}
@@ -247,7 +360,11 @@ func planLeg(leg Leg, odds []db.Odds, book string, now time.Time) (LegLink, Manu
 
 	row, found := db.MatchBookOdds(leg.Leg, odds, book)
 	if !found {
-		return LegLink{}, ManualLeg{Leg: leg, Reason: ReasonNoLine}, false
+		return LegLink{}, ManualLeg{
+			Leg:         leg,
+			Reason:      ReasonNoLine,
+			PropsSynced: isPropLeg(leg) && propsSynced[*leg.GameID],
+		}, false
 	}
 	if row.Link == nil || strings.TrimSpace(*row.Link) == "" {
 		return LegLink{}, ManualLeg{Leg: leg, Reason: ReasonNoLink}, false

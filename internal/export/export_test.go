@@ -865,3 +865,241 @@ func TestPlanOnlyCoversALockedSlip(t *testing.T) {
 		})
 	}
 }
+
+func makeGameLeg(
+	id int64,
+	gameID string,
+	kickoff *time.Time,
+	market, team, player, side string,
+	point *float64,
+) export.Leg {
+	leg := makeLeg(id, kickoff, market, team, player, side, point)
+	leg.GameID = field(gameID)
+	return leg
+}
+
+// TestPlanDraftKingsMultiGameGrouping checks single-game vs multi-game
+// DraftKings grouping, Combined URLs per event, and MultiGameNote.
+func TestPlanDraftKingsMultiGameGrouping(t *testing.T) {
+	t.Parallel()
+
+	dkRow := func(game, market, team, player, side string, point *float64, sid, eventSid string) db.Odds {
+		o := row(game, export.DraftKings, market, team, player, side, point, -110,
+			"https://sportsbook.draftkings.com/event/"+eventSid+"?outcomes="+sid, sid)
+		if eventSid != "" {
+			o.EventSid = new(eventSid)
+		}
+		return o
+	}
+
+	t.Run("single-game 2-leg slip keeps Combined and leaves MultiGameNote false", func(t *testing.T) {
+		t.Parallel()
+
+		legs := []export.Leg{
+			makeGameLeg(1, "game-a", &upcoming, "SPREAD", "BUF", "", "TEAM", new(-3.5)),
+			makeGameLeg(2, "game-a", &upcoming, "TOTAL", "", "", "OVER", new(47.5)),
+		}
+		odds := []db.Odds{
+			dkRow("game-a", "SPREAD", "BUF", "", "TEAM", new(-3.5), "sid-a1", "evt-a"),
+			dkRow("game-a", "TOTAL", "", "", "OVER", new(47.5), "sid-a2", "evt-a"),
+		}
+
+		plan := export.Plan(lockedSlip(), legs, odds, export.DraftKings, testNow)
+		assert.Equal(t, "https://sportsbook.draftkings.com/event/evt-a?outcomes=sid-a1,sid-a2", plan.Combined)
+		assert.False(t, plan.MultiGameNote)
+		assert.Empty(t, plan.Groups)
+	})
+
+	t.Run("multi-game 4-leg slip groups by event and combines 2-leg game", func(t *testing.T) {
+		t.Parallel()
+
+		legs := []export.Leg{
+			makeGameLeg(1, "game-a", &upcoming, "SPREAD", "BUF", "", "TEAM", new(-3.5)),
+			makeGameLeg(2, "game-a", &upcoming, "PASS_YDS", "BUF", "Josh Allen", "OVER", new(245.5)),
+			makeGameLeg(3, "game-b", &upcoming, "ML", "KC", "", "TEAM", nil),
+			makeGameLeg(4, "game-c", &upcoming, "TOTAL", "", "", "UNDER", new(44.5)),
+		}
+		odds := []db.Odds{
+			dkRow("game-a", "SPREAD", "BUF", "", "TEAM", new(-3.5), "sid-a1", "evt-a"),
+			dkRow("game-a", "PASS_YDS", "BUF", "Josh Allen", "OVER", new(245.5), "0QA#allen", "evt-a"),
+			dkRow("game-b", "ML", "KC", "", "TEAM", nil, "sid-b1", "evt-b"),
+			dkRow("game-c", "TOTAL", "", "", "UNDER", new(44.5), "sid-c1", "evt-c"),
+		}
+
+		plan := export.Plan(lockedSlip(), legs, odds, export.DraftKings, testNow)
+		assert.Empty(t, plan.Combined)
+		assert.True(t, plan.MultiGameNote)
+		require.Len(t, plan.Groups, 3)
+
+		assert.Equal(t, "game-a", plan.Groups[0].GameID)
+		assert.Equal(t, "evt-a", plan.Groups[0].EventSid)
+		assert.Equal(t,
+			"https://sportsbook.draftkings.com/event/evt-a?outcomes=sid-a1,0QA%23allen",
+			plan.Groups[0].Combined)
+		assert.Len(t, plan.Groups[0].Legs, 2)
+
+		assert.Equal(t, "game-b", plan.Groups[1].GameID)
+		assert.Equal(t, "evt-b", plan.Groups[1].EventSid)
+		assert.Empty(t, plan.Groups[1].Combined)
+		assert.Len(t, plan.Groups[1].Legs, 1)
+
+		assert.Equal(t, "game-c", plan.Groups[2].GameID)
+		assert.Equal(t, "evt-c", plan.Groups[2].EventSid)
+		assert.Empty(t, plan.Groups[2].Combined)
+		assert.Len(t, plan.Groups[2].Legs, 1)
+	})
+
+	t.Run("interleaved legs preserve first-appearance group order", func(t *testing.T) {
+		t.Parallel()
+
+		legs := []export.Leg{
+			makeGameLeg(1, "game-a", &upcoming, "SPREAD", "BUF", "", "TEAM", new(-3.5)),
+			makeGameLeg(2, "game-b", &upcoming, "ML", "KC", "", "TEAM", nil),
+			makeGameLeg(3, "game-a", &upcoming, "TOTAL", "", "", "OVER", new(47.5)),
+		}
+		odds := []db.Odds{
+			dkRow("game-a", "SPREAD", "BUF", "", "TEAM", new(-3.5), "sid-a1", "evt-a"),
+			dkRow("game-b", "ML", "KC", "", "TEAM", nil, "sid-b1", "evt-b"),
+			dkRow("game-a", "TOTAL", "", "", "OVER", new(47.5), "sid-a2", "evt-a"),
+		}
+
+		plan := export.Plan(lockedSlip(), legs, odds, export.DraftKings, testNow)
+		assert.True(t, plan.MultiGameNote)
+		require.Len(t, plan.Groups, 2)
+		assert.Equal(t, "game-a", plan.Groups[0].GameID)
+		assert.Equal(t, "https://sportsbook.draftkings.com/event/evt-a?outcomes=sid-a1,sid-a2", plan.Groups[0].Combined)
+		assert.Equal(t, "game-b", plan.Groups[1].GameID)
+		assert.Empty(t, plan.Groups[1].Combined)
+	})
+
+	t.Run("four distinct games keeps MultiGameNote true with no combined group URLs", func(t *testing.T) {
+		t.Parallel()
+
+		legs := []export.Leg{
+			makeGameLeg(1, "game-1", &upcoming, "ML", "BUF", "", "TEAM", nil),
+			makeGameLeg(2, "game-2", &upcoming, "ML", "KC", "", "TEAM", nil),
+			makeGameLeg(3, "game-3", &upcoming, "ML", "BAL", "", "TEAM", nil),
+			makeGameLeg(4, "game-4", &upcoming, "ML", "SF", "", "TEAM", nil),
+		}
+		odds := []db.Odds{
+			dkRow("game-1", "ML", "BUF", "", "TEAM", nil, "sid-1", "evt-1"),
+			dkRow("game-2", "ML", "KC", "", "TEAM", nil, "sid-2", "evt-2"),
+			dkRow("game-3", "ML", "BAL", "", "TEAM", nil, "sid-3", "evt-3"),
+			dkRow("game-4", "ML", "SF", "", "TEAM", nil, "sid-4", "evt-4"),
+		}
+
+		plan := export.Plan(lockedSlip(), legs, odds, export.DraftKings, testNow)
+		assert.Empty(t, plan.Combined)
+		assert.True(t, plan.MultiGameNote)
+		require.Len(t, plan.Groups, 4)
+		for _, g := range plan.Groups {
+			assert.Empty(t, g.Combined)
+			assert.Len(t, g.Legs, 1)
+		}
+	})
+
+	t.Run("missing sid in one multi-game group leaves only that group uncombined", func(t *testing.T) {
+		t.Parallel()
+
+		legs := []export.Leg{
+			makeGameLeg(1, "game-a", &upcoming, "SPREAD", "BUF", "", "TEAM", new(-3.5)),
+			makeGameLeg(2, "game-a", &upcoming, "TOTAL", "", "", "OVER", new(47.5)),
+			makeGameLeg(3, "game-b", &upcoming, "ML", "KC", "", "TEAM", nil),
+			makeGameLeg(4, "game-b", &upcoming, "TOTAL", "", "", "UNDER", new(49.5)),
+		}
+		odds := []db.Odds{
+			dkRow("game-a", "SPREAD", "BUF", "", "TEAM", new(-3.5), "sid-a1", "evt-a"),
+			dkRow("game-a", "TOTAL", "", "", "OVER", new(47.5), "", "evt-a"),
+			dkRow("game-b", "ML", "KC", "", "TEAM", nil, "sid-b1", "evt-b"),
+			dkRow("game-b", "TOTAL", "", "", "UNDER", new(49.5), "sid-b2", "evt-b"),
+		}
+
+		plan := export.Plan(lockedSlip(), legs, odds, export.DraftKings, testNow)
+		assert.True(t, plan.MultiGameNote)
+		require.Len(t, plan.Groups, 2)
+		assert.Empty(t, plan.Groups[0].Combined)
+		assert.Equal(t, "https://sportsbook.draftkings.com/event/evt-b?outcomes=sid-b1,sid-b2", plan.Groups[1].Combined)
+	})
+
+	t.Run("single-game slip missing sid does not set MultiGameNote or Groups", func(t *testing.T) {
+		t.Parallel()
+
+		legs := []export.Leg{
+			makeGameLeg(1, "game-a", &upcoming, "SPREAD", "BUF", "", "TEAM", new(-3.5)),
+			makeGameLeg(2, "game-a", &upcoming, "TOTAL", "", "", "OVER", new(47.5)),
+		}
+		odds := []db.Odds{
+			dkRow("game-a", "SPREAD", "BUF", "", "TEAM", new(-3.5), "sid-a1", "evt-a"),
+			dkRow("game-a", "TOTAL", "", "", "OVER", new(47.5), "", "evt-a"),
+		}
+
+		plan := export.Plan(lockedSlip(), legs, odds, export.DraftKings, testNow)
+		assert.Empty(t, plan.Combined)
+		assert.False(t, plan.MultiGameNote)
+		assert.Empty(t, plan.Groups)
+	})
+}
+
+// TestPlanManualPropsSynced checks that ReasonNoLine distinguishes an unquoted
+// prop on a game with synced props from an unsynced game or non-prop market.
+func TestPlanManualPropsSynced(t *testing.T) {
+	t.Parallel()
+
+	propLeg := makeGameLeg(1, "game-1", &upcoming, "RUSH_ATT", "BUF", "James Cook", "OVER", new(14.5))
+	teamTotalLeg := makeGameLeg(2, "game-1", &upcoming, "TEAM_TOTAL", "BUF", "", "OVER", new(24.5))
+	spreadLeg := makeGameLeg(3, "game-1", &upcoming, "SPREAD", "BUF", "", "TEAM", new(-3.5))
+
+	dkPropRow := row("game-1", export.DraftKings, "PASS_YDS", "BUF", "Josh Allen", "OVER", new(245.5), -110,
+		"https://dk/p", "sid")
+	fdGameLineRow := row("game-1", export.FanDuel, "ML", "BUF", "", "TEAM", nil, -110, "https://fd/ml", "sid")
+	otherGamePropRow := row("game-2", export.DraftKings, "PASS_YDS", "KC", "Patrick Mahomes", "OVER", new(265.5), -110,
+		"https://dk/p2", "sid")
+
+	tests := map[string]struct {
+		leg      export.Leg
+		odds     []db.Odds
+		wantSync bool
+	}{
+		"player prop when game has other prop rows": {
+			leg:      propLeg,
+			odds:     []db.Odds{dkPropRow},
+			wantSync: true,
+		},
+		"team total prop when game has other prop rows": {
+			leg:      teamTotalLeg,
+			odds:     []db.Odds{dkPropRow},
+			wantSync: true,
+		},
+		"player prop when game has only game-line rows": {
+			leg:      propLeg,
+			odds:     []db.Odds{fdGameLineRow},
+			wantSync: false,
+		},
+		"player prop when only another game has prop rows": {
+			leg:      propLeg,
+			odds:     []db.Odds{otherGamePropRow},
+			wantSync: false,
+		},
+		"player prop when no odds exist": {
+			leg:      propLeg,
+			wantSync: false,
+		},
+		"game-line spread when game has prop rows": {
+			leg:      spreadLeg,
+			odds:     []db.Odds{dkPropRow},
+			wantSync: false,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			plan := export.Plan(lockedSlip(), []export.Leg{tc.leg}, tc.odds, export.FanDuel, testNow)
+			require.Empty(t, plan.Linked)
+			require.Len(t, plan.Manual, 1)
+			assert.Equal(t, export.ReasonNoLine, plan.Manual[0].Reason)
+			assert.Equal(t, tc.wantSync, plan.Manual[0].PropsSynced)
+		})
+	}
+}
