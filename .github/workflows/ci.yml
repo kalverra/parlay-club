@@ -38,6 +38,13 @@ jobs:
       - name: Test
         run: go test -short -race ./...
 
+      - name: Grading eval benchmark summary
+        run: |
+          go run ./cmd/eval \
+            --dataset internal/eval/testdata/benchmark_dataset.json \
+            --all \
+            --format markdown >> "$GITHUB_STEP_SUMMARY"
+
       # Guards a deploy gate, so it runs on every push rather than only on the
       # machine that touches deploy/.
       - name: Test the deploy blackout

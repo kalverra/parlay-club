@@ -300,7 +300,7 @@ Complexity: low (wires the existing `cmd/eval` CLI into GitHub Actions and a sma
 living docs) Risk: low (CI runs strictly offline on the committed fixture, verified by `actionlint`, and the local
 script only restores to a temp file under `data/`)
 
-- [ ] Add the offline benchmark eval summary step to `.github/workflows/ci.yml` (publishing to `$GITHUB_STEP_SUMMARY`)
+- [x] Add the offline benchmark eval summary step to `.github/workflows/ci.yml` (publishing to `$GITHUB_STEP_SUMMARY`)
       and verify with `actionlint`, leaving `lefthook.yml` `pre-push` unchanged.
 - [ ] Add `scripts/eval-prod.sh` and `[tasks.eval-prod]` in `mise.toml` for one-command read-only Litestream snapshot
       restore and rubric comparison with automatic temp-file cleanup.
