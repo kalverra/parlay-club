@@ -52,6 +52,17 @@ const (
 	ruleTDSpikeRisk        = "td_spike_risk"
 )
 
+// Grade factor rule IDs are stable across releases.
+const (
+	ruleHitRate          = "hit_rate"
+	ruleRisingUsage      = "rising_usage"
+	ruleTeammateOutBump  = "teammate_out_bump"
+	ruleFavorableMatchup = "favorable_matchup"
+	ruleNfeloCushion     = "nfelo_cushion"
+	ruleParlayDrag       = "parlay_drag"
+	ruleChalkDrag        = "chalk_drag"
+)
+
 // Thresholds from plan/analyzer.md and nflverse signal rules.
 const (
 	blowoutSpread  = -7.0
@@ -303,15 +314,11 @@ func fakeWeather(a *analysis) []Warning {
 		seen[leg.GameID] = true
 
 		game, ok := a.games[leg.GameID]
-		if !ok || game.Indoor || game.Weather == nil {
+		if !ok {
 			continue
 		}
-		weather := *game.Weather
-		if weather.PrecipIn <= 0 || weather.PrecipIn >= fakeWeatherPrecipMax || weather.WindMPH >= fakeWeatherWindMax {
-			continue
-		}
-		unders := a.inGame(leg.GameID, func(leg Leg) bool {
-			return leg.Market == marketTotal && leg.Side == sideUnder
+		unders := a.inGame(leg.GameID, func(l Leg) bool {
+			return isFakeWeatherLeg(l, game)
 		})
 		if len(unders) == 0 {
 			continue
@@ -330,10 +337,7 @@ func fakeWeather(a *analysis) []Warning {
 func hook(a *analysis) []Warning {
 	var warnings []Warning
 	for _, leg := range a.legs {
-		if leg.Market != marketSpread || leg.Line == nil {
-			continue
-		}
-		landing, buyTo, moneyline, ok := hookPoint(*leg.Line)
+		landing, buyTo, moneyline, ok := evalSpreadHook(leg)
 		if !ok {
 			continue
 		}
@@ -371,12 +375,10 @@ func totalKeyNumber(a *analysis) []Warning {
 func chalk(a *analysis) []Warning {
 	var warnings []Warning
 	for _, leg := range a.legs {
-		if leg.Odds > chalkOdds {
+		if !isChalkLeg(leg) {
 			continue
 		}
-		odds := float64(-leg.Odds)
-		multiplier := 1 + 100/odds
-		bust := 1 - odds/(odds+100)
+		multiplier, bust := chalkPayoutAndBust(leg.Odds)
 		message := fmt.Sprintf(
 			"This %d leg only bumps the payout %s× but still busts the slip about %d%% of the time.",
 			leg.Odds, multiplierText(multiplier), int(math.Round(bust*100)))
@@ -523,22 +525,8 @@ func medianTrap(a *analysis) []Warning {
 	}
 	var warnings []Warning
 	for _, leg := range a.legs {
-		if !isYardageMarket(leg.Market) || leg.Side != sideOver || leg.Line == nil || leg.PlayerID == "" {
-			continue
-		}
-		playerStats, ok := a.stats[leg.PlayerID]
-		if !ok || playerStats.Games == nil {
-			continue
-		}
-		games := playerStats.Games[leg.Market]
-		if len(games) < 3 {
-			continue
-		}
-
-		l5Len := min(5, len(games))
-		l5 := games[:l5Len]
-		median := Median(l5)
-		if *leg.Line <= median {
+		median, games, hit := evalMedianTrap(leg, a.stats)
+		if !hit {
 			continue
 		}
 
@@ -880,6 +868,76 @@ func windText(weather Weather) string {
 		return number(weather.WindMPH) + " mph winds"
 	}
 	return "gusts to " + number(weather.GustMPH) + " mph"
+}
+
+// evalWindHazard reports whether leg is exposed to outdoor wind or gusts in
+// game and returns the matching warning severity.
+func evalWindHazard(leg Leg, game Game) (Severity, bool) {
+	if game.Indoor || game.Weather == nil || !windHit(leg) {
+		return Info, false
+	}
+	return windLevel(*game.Weather)
+}
+
+// isFakeWeatherLeg reports whether leg is a game-total Under in an outdoor
+// game with light rain and calm wind.
+func isFakeWeatherLeg(leg Leg, game Game) bool {
+	if game.Indoor || game.Weather == nil {
+		return false
+	}
+	if leg.Market != marketTotal || leg.Side != sideUnder {
+		return false
+	}
+	w := *game.Weather
+	return w.PrecipIn > 0 && w.PrecipIn < fakeWeatherPrecipMax && w.WindMPH < fakeWeatherWindMax
+}
+
+// evalSpreadHook reports whether leg is a spread sitting on a key NFL hook
+// half-point, returning the landing number, buy-to line, and whether the
+// moneyline is a sensible alternative.
+func evalSpreadHook(leg Leg) (landing, buyTo string, moneyline, ok bool) {
+	if leg.Market != marketSpread || leg.Line == nil {
+		return "", "", false, false
+	}
+	return hookPoint(*leg.Line)
+}
+
+// isChalkLeg reports whether leg carries heavy-favorite odds at or below
+// chalkOdds.
+func isChalkLeg(leg Leg) bool {
+	return leg.Odds <= chalkOdds
+}
+
+// chalkPayoutAndBust returns the parlay payout multiplier and implied upset
+// probability for negative American favorite odds.
+func chalkPayoutAndBust(odds int) (multiplier, bust float64) {
+	fav := float64(-odds)
+	multiplier = 1 + 100/fav
+	bust = 1 - fav/(fav+100)
+	return multiplier, bust
+}
+
+// evalMedianTrap reports whether leg is a yardage Over whose line sits above
+// the player's last-5 game median (requiring at least 3 games), returning the
+// median and full-sample games slice.
+func evalMedianTrap(leg Leg, stats map[string]PlayerStats) (median float64, games []float64, hit bool) {
+	if !isYardageMarket(leg.Market) || leg.Side != sideOver ||
+		leg.Line == nil || leg.PlayerID == "" || len(stats) == 0 {
+		return 0, nil, false
+	}
+	ps, ok := stats[leg.PlayerID]
+	if !ok || ps.Games == nil {
+		return 0, nil, false
+	}
+	games = ps.Games[leg.Market]
+	if len(games) < 3 {
+		return 0, nil, false
+	}
+	median = Median(games[:min(5, len(games))])
+	if *leg.Line <= median {
+		return 0, nil, false
+	}
+	return median, games, true
 }
 
 // hookPoint maps a spread on the hook to the number it would land on, the

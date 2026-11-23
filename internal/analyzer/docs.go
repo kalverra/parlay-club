@@ -232,14 +232,14 @@ func GradeRubric() RubricDoc {
 		},
 		LegFactors: []FactorDoc{
 			{
-				Rule:        "hit_rate",
+				Rule:        ruleHitRate,
 				Category:    "Form & Usage",
 				Label:       "Strong L5 hit rate",
 				Delta:       formatSignedDelta(r.HitRate),
 				Description: "Cleared the line in at least 4 of the last 5 games.",
 			},
 			{
-				Rule:        "rising_usage",
+				Rule:        ruleRisingUsage,
 				Category:    "Form & Usage",
 				Label:       "Rising usage",
 				Delta:       formatSignedDelta(r.RisingUsage),
@@ -260,7 +260,7 @@ func GradeRubric() RubricDoc {
 				),
 			},
 			{
-				Rule:        "teammate_out_bump",
+				Rule:        ruleTeammateOutBump,
 				Category:    "Form & Usage",
 				Label:       "Teammate out (role bump)",
 				Delta:       formatSignedDelta(r.TeammateOutBump),
@@ -274,7 +274,7 @@ func GradeRubric() RubricDoc {
 				Description: "Last-2-game snap share (-15 pp) or target share (-8 pp) dropped below season average.",
 			},
 			{
-				Rule:        "favorable_matchup",
+				Rule:        ruleFavorableMatchup,
 				Category:    "Matchup & Environment",
 				Label:       "Weak opposing defense",
 				Delta:       formatSignedDelta(r.FavorableMatchup),
@@ -313,7 +313,7 @@ func GradeRubric() RubricDoc {
 				Description: "Light rain without wind gives a game total Under no real scoring brake.",
 			},
 			{
-				Rule:        "nfelo_cushion",
+				Rule:        ruleNfeloCushion,
 				Category:    "Line & Price",
 				Label:       "nfelo spread cushion",
 				Delta:       formatSignedDelta(r.NfeloCushion),
@@ -389,14 +389,14 @@ func GradeRubric() RubricDoc {
 				Description: "Game Total Under paired with 2+ point-scoring Overs or Anytime TDs.",
 			},
 			{
-				Rule:        "parlay_drag",
+				Rule:        ruleParlayDrag,
 				Category:    "Slip Correlation & Drag",
 				Label:       "Parlay length drag",
 				Delta:       formatSignedDelta(r.ParlayDragPerLeg) + " / leg",
 				Description: fmt.Sprintf("Applied for every leg beyond %d legs.", r.ParlayDragFreeLegs),
 			},
 			{
-				Rule:        "chalk_drag",
+				Rule:        ruleChalkDrag,
 				Category:    "Slip Correlation & Drag",
 				Label:       "Extra chalk drag",
 				Delta:       formatSignedDelta(r.ChalkDragPerExtraLeg) + " / leg",
