@@ -131,7 +131,7 @@ func ScoreSlipWithRubric(legs []Leg, games map[string]Game, stats map[string]Pla
 	if len(legs) > rubric.ParlayDragFreeLegs {
 		extra := len(legs) - rubric.ParlayDragFreeLegs
 		factors = append(factors, GradeFactor{
-			Rule:  "parlay_drag",
+			Rule:  ruleParlayDrag,
 			Label: fmt.Sprintf("%d-leg parlay drag", len(legs)),
 			Delta: rubric.ParlayDragPerLeg * extra,
 			Detail: fmt.Sprintf(
@@ -145,7 +145,7 @@ func ScoreSlipWithRubric(legs []Leg, games map[string]Game, stats map[string]Pla
 	if chalkCount > 1 {
 		extra := chalkCount - 1
 		factors = append(factors, GradeFactor{
-			Rule:  "chalk_drag",
+			Rule:  ruleChalkDrag,
 			Label: fmt.Sprintf("%d chalk legs", chalkCount),
 			Delta: rubric.ChalkDragPerExtraLeg * extra,
 			Detail: fmt.Sprintf(
@@ -184,35 +184,30 @@ func scoreFormAndUsage(leg Leg, game Game, stats map[string]PlayerStats, rubric 
 	outTeammate, hasOutTeammate := outSamePositionTeammate(leg, game, ps.Position)
 
 	var candidates []GradeFactor
-	if isYardageMarket(leg.Market) && leg.Side == sideOver && leg.Line != nil {
-		if games := ps.Games[leg.Market]; len(games) >= 3 {
-			median := Median(games[:min(5, len(games))])
-			if *leg.Line > median {
-				delta := rubric.MedianTrap
-				detail := fmt.Sprintf("Line %s sits above last-5 median of %s.", number(*leg.Line), number(median))
-				if hasOutTeammate {
-					delta = rubric.MedianTrapSoftened
-					detail = fmt.Sprintf(
-						"Line %s sits above last-5 median of %s, softened with %s teammate %s Out.",
-						number(*leg.Line),
-						number(median),
-						strings.ToUpper(strings.TrimSpace(ps.Position)),
-						outTeammate.FullName,
-					)
-				}
-				candidates = append(candidates, GradeFactor{
-					Rule:   ruleMedianTrap,
-					Label:  "L5 median trap",
-					Delta:  delta,
-					Detail: detail,
-				})
-			}
+	if median, _, hit := evalMedianTrap(leg, stats); hit {
+		delta := rubric.MedianTrap
+		detail := fmt.Sprintf("Line %s sits above last-5 median of %s.", number(*leg.Line), number(median))
+		if hasOutTeammate {
+			delta = rubric.MedianTrapSoftened
+			detail = fmt.Sprintf(
+				"Line %s sits above last-5 median of %s, softened with %s teammate %s Out.",
+				number(*leg.Line),
+				number(median),
+				strings.ToUpper(strings.TrimSpace(ps.Position)),
+				outTeammate.FullName,
+			)
 		}
+		candidates = append(candidates, GradeFactor{
+			Rule:   ruleMedianTrap,
+			Label:  "L5 median trap",
+			Delta:  delta,
+			Detail: detail,
+		})
 	}
 
 	if hits, total, ok := l5HitRate(leg, ps); ok && hits >= 4 {
 		candidates = append(candidates, GradeFactor{
-			Rule:   "hit_rate",
+			Rule:   ruleHitRate,
 			Label:  fmt.Sprintf("Strong L5 hit rate (%d/%d)", hits, total),
 			Delta:  rubric.HitRate,
 			Detail: fmt.Sprintf("Cleared this mark in %d of the last %d games.", hits, total),
@@ -224,7 +219,7 @@ func scoreFormAndUsage(leg Leg, game Game, stats map[string]PlayerStats, rubric 
 		targetGain := ps.Usage.Last3TargetShare - ps.Usage.SeasonTargetShare
 		if snapGain >= risingSnapGain-floatEps || targetGain >= risingTargetShareGain-floatEps {
 			candidates = append(candidates, GradeFactor{
-				Rule:   "rising_usage",
+				Rule:   ruleRisingUsage,
 				Label:  "Rising usage",
 				Delta:  rubric.RisingUsage,
 				Detail: "Last-3-game snap or target share is trending above season average.",
@@ -234,7 +229,7 @@ func scoreFormAndUsage(leg Leg, game Game, stats map[string]PlayerStats, rubric 
 
 	if hasOutTeammate {
 		candidates = append(candidates, GradeFactor{
-			Rule:  "teammate_out_bump",
+			Rule:  ruleTeammateOutBump,
 			Label: "Teammate out (role bump)",
 			Delta: rubric.TeammateOutBump,
 			Detail: fmt.Sprintf(
@@ -310,7 +305,7 @@ func scoreMatchupAndEnv(leg Leg, game Game, rubric Rubric) []GradeFactor {
 
 	if split, rank, hit := favorableMatchupHit(leg, game); hit {
 		candidates = append(candidates, GradeFactor{
-			Rule:   "favorable_matchup",
+			Rule:   ruleFavorableMatchup,
 			Label:  fmt.Sprintf("Weak %s defense (#%d)", split, rank),
 			Delta:  rubric.FavorableMatchup,
 			Detail: fmt.Sprintf("Opposing %s defense ranks #%d in EPA allowed.", split, rank),
@@ -324,36 +319,29 @@ func scoreMatchupAndEnv(leg Leg, game Game, rubric Rubric) []GradeFactor {
 		})
 	}
 
-	if !game.Indoor && game.Weather != nil {
-		if windHit(leg) {
-			if sev, windy := windLevel(*game.Weather); windy {
-				delta := rubric.WindWarn
-				if sev == Danger {
-					delta = rubric.WindDanger
-				}
-				candidates = append(candidates, GradeFactor{
-					Rule:  ruleWind,
-					Label: "Wind headwind",
-					Delta: delta,
-					Detail: fmt.Sprintf(
-						"%s in %s hurts passing and kicking overs.",
-						windText(*game.Weather),
-						game.Home,
-					),
-				})
-			}
+	if sev, windy := evalWindHazard(leg, game); windy {
+		delta := rubric.WindWarn
+		if sev == Danger {
+			delta = rubric.WindDanger
 		}
-		if leg.Market == marketTotal && leg.Side == sideUnder &&
-			game.Weather.PrecipIn > 0 &&
-			game.Weather.PrecipIn < fakeWeatherPrecipMax &&
-			game.Weather.WindMPH < fakeWeatherWindMax {
-			candidates = append(candidates, GradeFactor{
-				Rule:   ruleFakeWeather,
-				Label:  "Light rain myth",
-				Delta:  rubric.FakeWeather,
-				Detail: "Light rain without wind does not lower NFL scoring.",
-			})
-		}
+		candidates = append(candidates, GradeFactor{
+			Rule:  ruleWind,
+			Label: "Wind headwind",
+			Delta: delta,
+			Detail: fmt.Sprintf(
+				"%s in %s hurts passing and kicking overs.",
+				windText(*game.Weather),
+				game.Home,
+			),
+		})
+	}
+	if isFakeWeatherLeg(leg, game) {
+		candidates = append(candidates, GradeFactor{
+			Rule:   ruleFakeWeather,
+			Label:  "Light rain myth",
+			Delta:  rubric.FakeWeather,
+			Detail: "Light rain without wind does not lower NFL scoring.",
+		})
 	}
 
 	if team, _, adj, ok := qbDragTeam(game, leg.Team); ok && adj <= qbDragElo && qbDragHit(leg, team) {
@@ -377,7 +365,7 @@ func scoreLineAndPrice(leg Leg, game Game, rubric Rubric) []GradeFactor {
 		if hasModel {
 			cushion = *leg.Line - model
 		}
-		if _, _, _, onHook := hookPoint(*leg.Line); onHook {
+		if _, _, _, onHook := evalSpreadHook(leg); onHook {
 			delta := rubric.Hook
 			detail := selection(leg) + " sits on a key NFL hook number."
 			if hasModel && cushion >= 2 {
@@ -397,7 +385,7 @@ func scoreLineAndPrice(leg Leg, game Game, rubric Rubric) []GradeFactor {
 		}
 		if hasModel && cushion >= 2 {
 			candidates = append(candidates, GradeFactor{
-				Rule:  "nfelo_cushion",
+				Rule:  ruleNfeloCushion,
 				Label: "nfelo spread cushion",
 				Delta: rubric.NfeloCushion,
 				Detail: fmt.Sprintf(
@@ -420,7 +408,7 @@ func scoreLineAndPrice(leg Leg, game Game, rubric Rubric) []GradeFactor {
 		}
 	}
 
-	if leg.Odds <= chalkOdds {
+	if isChalkLeg(leg) {
 		delta := chalkPenalty(leg.Odds, rubric)
 		candidates = append(candidates, GradeFactor{
 			Rule:   ruleChalk,

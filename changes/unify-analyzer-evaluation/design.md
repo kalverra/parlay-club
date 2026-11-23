@@ -111,7 +111,7 @@ flowchart LR
 Complexity: medium (extracts shared predicates across `rules.go`, `grade.go`, and `docs.go` while maintaining exact
 scoring and warning parity) Risk: low (backed by comprehensive table-driven tests in `internal/analyzer`)
 
-- [ ] Define constants for all grade factor rule IDs in `internal/analyzer`, extract shared single-leg predicates
+- [x] Define constants for all grade factor rule IDs in `internal/analyzer`, extract shared single-leg predicates
       (`medianTrap`, weather hazard, spread hook, heavy chalk) used by both `rules.go` and `grade.go`, and verify exact
       parity against existing analyzer tests.
 - [ ] Add `GradeRubricFor(r Rubric) GradeRubricDoc` in `internal/analyzer/docs.go` with `GradeRubric()` delegating to
