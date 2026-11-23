@@ -261,3 +261,7 @@ unit tests covering edge cases and the Knox/Kincaid regression scenario)
       `internal/analyzer/analyzer_test.go` and `internal/analyzer/nflverse_grade_test.go`.
 - [x] Docs: update `docs/concepts/analyzer.md` and `docs/reference/analyzer-rules.md` to document the roster+summary
       injury merge and the teammate-out `ScoreLeg` adjustments.
+
+## Reviews
+
+- [x] Final review: agy@gemini-4-neon-medium

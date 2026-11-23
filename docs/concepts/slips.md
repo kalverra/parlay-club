@@ -254,8 +254,9 @@ per player card in priority order):
 - **Fits slip:** line or prop that pairs positively with an existing leg on the open slip (such as a receiver `OVER` with
   that team's QB passing yards `OVER`, or an opposing receiver or same-team RB `OVER` with a `-7.0` or larger favorite
   spread).
-- **Role bump:** player `OVER`/`YES` prop where a same-position teammate is marked `Out` in `games.injuries_json` and
-  the player posted >= 15 percentage points higher `OffensePct` in a prior game this season.
+- **Role bump:** player `OVER`/`YES` prop where a same-position teammate is marked `Out` in the merged game injury list
+  (`games.injuries_json` plus key-position `roster_players` injuries via `analyzer.MergeGameInjuries`) and the player
+  posted >= 15 percentage points higher `OffensePct` in a prior game this season.
 - **High volume:** player `OVER`/`YES` prop with top-quartile `WOPR`, `TargetShare`, `OffensePct`, or carries for their
   position.
 
@@ -351,9 +352,11 @@ for the Record Book.
 The Research page (`GET /research`) offers game injury reports and player hit bars. It opens from a player, prop, leg,
 or game link. It is not a bottom-bar tab.
 
-- **Game research (`GET /research/games/{id}`):** fetches ESPN summary injuries on demand, shows paired matchup logos in
-  the header, and displays injuries filtered to key positions (`QB`, `RB`, `WR`, `TE`, `LT`, `OT`, `C`, `CB`, `S`) with
-  team logos on team headers and player portraits on injury rows. A player-match section resolves sportsbook prop names
+- **Game research (`GET /research/games/{id}`):** fetches ESPN summary injuries on demand, merges them with key-position
+  injuries from `roster_players` via `analyzer.MergeGameInjuries` so players truncated past ESPN's 5-per-team summary
+  cap still appear, shows paired matchup logos in the header, and displays injuries filtered to key positions (`QB`,
+  `RB`, `WR`, `TE`, `LT`, `OT`, `C`, `CB`, `S`) with team logos on team headers and player portraits on injury rows. A
+  player-match section resolves sportsbook prop names
   in memory via `db.BatchPlayerResolver` against the game's preloaded rosters and `player_matches` (persisting newly
   discovered matches), lists them against matched ESPN roster athletes with portraits, and provides a manual match form
   (`POST /research/matches`) to fix unmatched names or corrections.
