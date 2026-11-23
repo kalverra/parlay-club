@@ -2143,7 +2143,18 @@ func TestPickBoardWiresSignalsBadgesSortAndHTMXSwaps(t *testing.T) {
 
 	seedBoardSignals := func(t *testing.T, fixture *slipFixture, syncedAt time.Time) db.Game {
 		t.Helper()
-		injuries := `[{"team":"Buffalo Bills","abbreviation":"BUF","injuries":[{"athlete_id":"999","full_name":"Curtis Samuel","position":"WR","status":"Out"}]}]`
+		injuries := `[
+		{
+			"team": {"id": "2", "displayName": "Buffalo Bills", "abbreviation": "BUF"},
+			"injuries": [
+				{
+					"status": "Out",
+					"athlete": {"id": "999", "fullName": "Curtis Samuel", "position": {"abbreviation": "WR"}},
+					"details": {"type": "Foot"}
+				}
+			]
+		}
+	]`
 		game := addGame(t, fixture, gameKickoff())
 		game.InjuriesJSON = &injuries
 		_, err := fixture.store.UpsertGame(t.Context(), game)
@@ -3364,7 +3375,18 @@ func TestPickBoardRoleBumpFromRosterInjury(t *testing.T) {
 
 	fixture := newSlipFixture(t, 4)
 	now := gameKickoff().Add(-2 * time.Hour)
-	injuries := `[{"team":"Buffalo Bills","abbreviation":"BUF","injuries":[{"athlete_id":"999","full_name":"Curtis Samuel","position":"WR","status":"Out"}]}]`
+	injuries := `[
+		{
+			"team": {"id": "2", "displayName": "Buffalo Bills", "abbreviation": "BUF"},
+			"injuries": [
+				{
+					"status": "Out",
+					"athlete": {"id": "999", "fullName": "Curtis Samuel", "position": {"abbreviation": "WR"}},
+					"details": {"type": "Foot"}
+				}
+			]
+		}
+	]`
 	game := addGame(t, fixture, gameKickoff())
 	game.InjuriesJSON = &injuries
 	_, err := fixture.store.UpsertGame(t.Context(), game)
