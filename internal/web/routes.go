@@ -9,6 +9,7 @@ import (
 
 	"github.com/kalverra/parlay-club/internal/bugs"
 	"github.com/kalverra/parlay-club/internal/db"
+	"github.com/kalverra/parlay-club/internal/eval"
 	"github.com/kalverra/parlay-club/internal/live"
 	"github.com/kalverra/parlay-club/internal/slips"
 )
@@ -56,6 +57,7 @@ type Dependencies struct {
 	Bugs       *bugs.Service
 	Stream     *live.Stream
 	Refresh    Refresher
+	EvalCache  *eval.Cache
 	// Now supplies the app's clock. A nil Now uses time.Now; the sandbox passes
 	// its scenario clock so pickers, exports, and freshness agree with refresh.
 	Now func() time.Time

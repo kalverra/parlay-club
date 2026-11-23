@@ -11,19 +11,20 @@ import (
 // pageFiles maps a page name to the template file that defines its content.
 // The shell and the auth screens share the layout, so they share this map.
 var pageFiles = map[string]string{
-	"home":           "templates/home.html",
-	"week":           "templates/week.html",
-	"slip":           "templates/slip.html",
-	"pick":           "templates/pick.html",
-	"research":       "templates/research.html",
-	"record":         "templates/record.html",
-	"login":          "templates/login.html",
-	"dev-login":      "templates/dev-login.html",
-	"join":           "templates/join.html",
-	"groups":         "templates/groups.html",
-	"profile":        "templates/profile.html",
-	"sandbox":        "templates/sandbox.html",
-	"analyzer-guide": "templates/analyzer_guide.html",
+	"home":             "templates/home.html",
+	"week":             "templates/week.html",
+	"slip":             "templates/slip.html",
+	"pick":             "templates/pick.html",
+	"research":         "templates/research.html",
+	"record":           "templates/record.html",
+	"login":            "templates/login.html",
+	"dev-login":        "templates/dev-login.html",
+	"join":             "templates/join.html",
+	"groups":           "templates/groups.html",
+	"profile":          "templates/profile.html",
+	"sandbox":          "templates/sandbox.html",
+	"analyzer-guide":   "templates/analyzer_guide.html",
+	"analyzer-results": "templates/analyzer_results.html",
 }
 
 // partialsFile holds the fragments HTMX swaps into a page. Each fragment is a
