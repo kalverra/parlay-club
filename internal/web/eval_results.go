@@ -192,19 +192,7 @@ func (h *slipHandlers) evalResults(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var suite eval.SuiteReport
-	if h.deps.EvalCache != nil {
-		suite, err = h.deps.EvalCache.GetOrCompute(ctx, h.deps.Store, group.ID, selectedSeason)
-	} else {
-		var dataset eval.ReplayDataset
-		dataset, err = eval.LoadDataset(ctx, h.deps.Store, eval.ReplayFilter{
-			GroupID: group.ID,
-			Season:  selectedSeason,
-		})
-		if err == nil {
-			suite = eval.EvaluateAll(dataset, analyzer.BuiltInRubrics())
-		}
-	}
+	suite, err := h.deps.EvalCache.GetOrCompute(ctx, h.deps.Store, group.ID, selectedSeason)
 	if err != nil {
 		h.serverError(w, err)
 		return

@@ -336,3 +336,53 @@ func TestEvalResultsCacheInvalidatesAfterSettlement(t *testing.T) {
 	assert.Contains(t, body2, "0-1-0")
 	assert.NotContains(t, body2, "1-0-0")
 }
+
+func TestEvalResultsDefaultsNilEvalCache(t *testing.T) {
+	t.Parallel()
+
+	f := newEvalResultsFixture(t)
+	ctx := t.Context()
+
+	renderer, err := webui.NewRenderer(assets.Templates, false)
+	require.NoError(t, err)
+
+	handler := webui.NewWithDeps(webui.Dependencies{
+		Logger:   zerolog.Nop(),
+		Renderer: renderer,
+		UserFrom: func(context.Context) (db.User, bool) {
+			return f.user, true
+		},
+		GroupsFrom: func(context.Context) []webui.GroupOption {
+			return []webui.GroupOption{{ID: f.group.ID, Name: f.group.Name, Current: true}}
+		},
+		GroupFrom: func(context.Context) (db.Group, bool) {
+			return f.group, true
+		},
+		Store: f.store,
+		Slips: f.service,
+	})
+
+	slip, err := f.store.CreateSlip(
+		ctx,
+		f.group.ID,
+		f.week2026.ID,
+		nil,
+		"Week 1",
+		db.SlateScopeFullWeek,
+		1,
+		[]int64{f.user.ID},
+	)
+	require.NoError(t, err)
+	leg, err := f.store.CreateLeg(
+		ctx,
+		db.Leg{SlipID: slip.ID, UserID: f.user.ID, MarketType: "ML", Selection: "BUF ML", Odds: -110},
+	)
+	require.NoError(t, err)
+	require.NoError(t, f.store.SetLegResult(ctx, leg.ID, parlay.Won, f.user.Name))
+	require.NoError(t, f.store.SetSlipGrade(ctx, slip.ID, parlay.Won, db.SlipGraded))
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequestWithContext(ctx, http.MethodGet, "/analyzer/results?season=2026", nil))
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Body.String(), "1-0-0")
+}
