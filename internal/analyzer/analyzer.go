@@ -44,18 +44,27 @@ type Leg struct {
 	Odds       int // American
 }
 
+// Injury is one player's injury status on a game's team injury list.
+type Injury struct {
+	AthleteID string
+	FullName  string
+	Position  string
+	Status    string
+}
+
 // Game is the slice of a game the analyzer needs: the two teams, whether it is
-// indoors, the forecast when there is one, nfelo's model when it is fresh, and
-// optional nflverse team EPA/pace profiles.
+// indoors, the forecast when there is one, nfelo's model when it is fresh,
+// optional nflverse team EPA/pace profiles, and team injury lists.
 type Game struct {
-	ID      string
-	Home    string
-	Away    string
-	Indoor  bool
-	Weather *Weather            // nil when unknown
-	Nfelo   *Nfelo              // nil when unknown or stale
-	HomeEPA *TeamDefenseProfile // nil when unknown or stale (> 7 days)
-	AwayEPA *TeamDefenseProfile // nil when unknown or stale (> 7 days)
+	ID       string
+	Home     string
+	Away     string
+	Indoor   bool
+	Weather  *Weather            // nil when unknown
+	Nfelo    *Nfelo              // nil when unknown or stale
+	HomeEPA  *TeamDefenseProfile // nil when unknown or stale (> 7 days)
+	AwayEPA  *TeamDefenseProfile // nil when unknown or stale (> 7 days)
+	Injuries map[string][]Injury // keyed by team abbreviation (e.g. "BUF")
 }
 
 // TeamDefenseProfile holds one team's season-to-date and last-4-week
@@ -244,11 +253,12 @@ func (u *PlayerUsage) AverageCarries() float64 {
 	return float64(sum) / float64(len(u.Weeks))
 }
 
-// PlayerStats holds a matched player's recent games per market, most recent
-// game first, this season only, plus optional nflverse usage metrics.
+// PlayerStats holds a matched player's position, recent games per market,
+// most recent game first, this season only, plus optional nflverse usage metrics.
 type PlayerStats struct {
-	Games map[string][]float64
-	Usage *PlayerUsage
+	Position string // ESPN position abbreviation (e.g. "TE", "WR", "RB")
+	Games    map[string][]float64
+	Usage    *PlayerUsage
 }
 
 // AnalyzeSlip runs every rule over the slip and returns the warnings sorted by

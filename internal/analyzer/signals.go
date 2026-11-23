@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/kalverra/parlay-club/internal/db"
+	"github.com/kalverra/parlay-club/internal/ingest/espn"
 	"github.com/kalverra/parlay-club/internal/ingest/nflverse"
 )
 
@@ -316,9 +317,70 @@ type PlayerResearchSignals struct {
 	OppDefRank  int
 }
 
+// MergeGameInjuries combines a game's stored summary injuries with key-position
+// roster injuries for its home and away teams, keeping summary entries primary.
+func MergeGameInjuries(game db.Game, rosters []db.RosterPlayer) map[string][]espn.Injury {
+	summaryByTeam := make(map[string][]espn.Injury)
+	if game.InjuriesJSON != nil && *game.InjuriesJSON != "" {
+		if teamInjuries, err := espn.ParseInjuries(*game.InjuriesJSON); err == nil {
+			for _, ti := range teamInjuries {
+				if ti.Abbreviation != "" && len(ti.Injuries) > 0 {
+					summaryByTeam[ti.Abbreviation] = ti.Injuries
+				}
+			}
+		}
+	}
+
+	rosterByTeam := make(map[string][]espn.Injury, 2)
+	for _, p := range rosters {
+		if p.Team != game.HomeTeam && p.Team != game.AwayTeam {
+			continue
+		}
+		if strings.TrimSpace(p.InjuryStatus) == "" || !espn.IsKeyInjuryPosition(p.Position) {
+			continue
+		}
+		rosterByTeam[p.Team] = append(rosterByTeam[p.Team], espn.Injury{
+			AthleteID:   p.AthleteID,
+			FullName:    p.FullName,
+			Position:    p.Position,
+			HeadshotURL: p.HeadshotURL,
+			Status:      p.InjuryStatus,
+		})
+	}
+
+	teams := make([]string, 0, 2+len(summaryByTeam))
+	seen := make(map[string]struct{}, 2+len(summaryByTeam))
+	for _, team := range []string{game.AwayTeam, game.HomeTeam} {
+		if team == "" {
+			continue
+		}
+		if _, ok := seen[team]; !ok {
+			seen[team] = struct{}{}
+			teams = append(teams, team)
+		}
+	}
+	for team := range summaryByTeam {
+		if _, ok := seen[team]; !ok {
+			seen[team] = struct{}{}
+			teams = append(teams, team)
+		}
+	}
+
+	merged := make(map[string][]espn.Injury, len(teams))
+	for _, team := range teams {
+		if combined := espn.MergeTeamInjuries(summaryByTeam[team], rosterByTeam[team]); len(combined) > 0 {
+			merged[team] = combined
+		}
+	}
+	if len(merged) == 0 {
+		return nil
+	}
+	return merged
+}
+
 // LoadSlipSignals loads fresh nfelo projections, fresh nflverse team EPA/pace
-// profiles, nflverse player usage, and player_gamelogs for a slip's games and
-// legs. Missing or stale sources fail soft.
+// profiles, nflverse player usage, merged team injuries, roster positions, and
+// player_gamelogs for a slip's games and legs. Missing or stale sources fail soft.
 func LoadSlipSignals(
 	ctx context.Context,
 	store *db.Store,
@@ -340,13 +402,28 @@ func LoadSlipSignals(
 		}
 	}
 
+	var rosters []db.RosterPlayer
+	if teams := distinctGameTeams(games); len(teams) > 0 {
+		if loaded, err := store.RosterForTeams(ctx, teams); err == nil {
+			rosters = loaded
+		}
+	}
+	positionByID := make(map[string]string, len(rosters))
+	for _, p := range rosters {
+		if p.Position != "" {
+			positionByID[p.AthleteID] = p.Position
+		}
+	}
+
 	gamesByID := make(map[string]Game, len(games))
 	for _, game := range games {
 		var proj *db.NfeloGame
 		if p, ok := nfelo[game.ID]; ok {
 			proj = &p
 		}
-		gamesByID[game.ID] = GameFromDB(game, proj, teamEPA)
+		converted := GameFromDB(game, proj, teamEPA)
+		converted.Injuries = toAnalyzerInjuries(MergeGameInjuries(game, rosters))
+		gamesByID[game.ID] = converted
 	}
 
 	if len(athleteIDs) == 0 {
@@ -364,12 +441,14 @@ func LoadSlipSignals(
 			_ = json.Unmarshal([]byte(log.StatsJSON), &markets)
 		}
 		usage := usageByPlayer[id]
-		if len(markets) == 0 && usage == nil {
+		pos := positionByID[id]
+		if len(markets) == 0 && usage == nil && pos == "" {
 			continue
 		}
 		stats[id] = PlayerStats{
-			Games: markets,
-			Usage: usage,
+			Position: pos,
+			Games:    markets,
+			Usage:    usage,
 		}
 	}
 	return gamesByID, stats
@@ -500,4 +579,48 @@ func distinctLegPlayerIDs(legs []db.Leg) []string {
 		athleteIDs = append(athleteIDs, id)
 	}
 	return athleteIDs
+}
+
+func distinctGameTeams(games []db.Game) []string {
+	seen := make(map[string]struct{}, len(games)*2)
+	teams := make([]string, 0, len(games)*2)
+	for _, g := range games {
+		for _, team := range []string{g.HomeTeam, g.AwayTeam} {
+			if team == "" {
+				continue
+			}
+			if _, ok := seen[team]; ok {
+				continue
+			}
+			seen[team] = struct{}{}
+			teams = append(teams, team)
+		}
+	}
+	return teams
+}
+
+func toAnalyzerInjuries(byTeam map[string][]espn.Injury) map[string][]Injury {
+	if len(byTeam) == 0 {
+		return nil
+	}
+	out := make(map[string][]Injury, len(byTeam))
+	for team, list := range byTeam {
+		if len(list) == 0 {
+			continue
+		}
+		converted := make([]Injury, len(list))
+		for i, inj := range list {
+			converted[i] = Injury{
+				AthleteID: inj.AthleteID,
+				FullName:  inj.FullName,
+				Position:  inj.Position,
+				Status:    inj.Status,
+			}
+		}
+		out[team] = converted
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }

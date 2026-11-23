@@ -11,6 +11,7 @@ import (
 
 	"github.com/kalverra/parlay-club/internal/analyzer"
 	"github.com/kalverra/parlay-club/internal/db"
+	"github.com/kalverra/parlay-club/internal/ingest/espn"
 	"github.com/kalverra/parlay-club/internal/ingest/nflverse"
 )
 
@@ -486,4 +487,172 @@ func TestPlayerUsageAccessorFallbacks(t *testing.T) {
 	assert.InDelta(t, 0.75, precomputed.EffectiveSeasonSnapAvg(), 1e-9)
 	assert.InDelta(t, 0.58, precomputed.RecentWOPR(), 1e-9)
 	assert.InDelta(t, 15.5, precomputed.AverageCarries(), 1e-9)
+}
+
+func TestMergeGameInjuries(t *testing.T) {
+	t.Parallel()
+
+	assert.Nil(t, analyzer.MergeGameInjuries(db.Game{HomeTeam: "BUF", AwayTeam: "MIA"}, nil))
+
+	summaryJSON := `[{
+		"team": {"id": "2", "displayName": "Buffalo Bills", "abbreviation": "BUF"},
+		"injuries": [
+			{
+				"status": "Out",
+				"athlete": {"id": "101", "fullName": "Keon Coleman", "position": {"abbreviation": "WR"}},
+				"details": {"type": "Wrist", "detail": "Out"}
+			},
+			{
+				"status": "Questionable",
+				"athlete": {"id": "102", "fullName": "James Cook", "position": {"abbreviation": "RB"}},
+				"details": {"type": "Toe", "detail": "Questionable"}
+			},
+			{
+				"status": "Out",
+				"athlete": {"id": "103", "fullName": "Dion Dawkins", "position": {"abbreviation": "LT"}},
+				"details": {"type": "Knee", "detail": "Out"}
+			},
+			{
+				"status": "Out",
+				"athlete": {"id": "104", "fullName": "Taron Johnson", "position": {"abbreviation": "CB"}},
+				"details": {"type": "Forearm", "detail": "Out"}
+			},
+			{
+				"status": "Out",
+				"athlete": {"id": "105", "fullName": "Taylor Rapp", "position": {"abbreviation": "S"}},
+				"details": {"type": "Concussion", "detail": "Out"}
+			}
+		]
+	}]`
+
+	game := db.Game{
+		ID:           "g1",
+		HomeTeam:     "BUF",
+		AwayTeam:     "MIA",
+		InjuriesJSON: &summaryJSON,
+	}
+	rosters := []db.RosterPlayer{
+		// Duplicate of summary player: summary Detail should be preserved.
+		{AthleteID: "101", Team: "BUF", FullName: "Keon Coleman", Position: "WR", InjuryStatus: "Out"},
+		// 6th key-position Out player truncated from summary: must be appended.
+		{AthleteID: "106", Team: "BUF", FullName: "Dalton Kincaid", Position: "TE", InjuryStatus: "Out"},
+		// Non-key position: must be filtered out.
+		{AthleteID: "107", Team: "BUF", FullName: "Matt Milano", Position: "LB", InjuryStatus: "Out"},
+		// Healthy key-position player: must be filtered out.
+		{AthleteID: "108", Team: "BUF", FullName: "Dawson Knox", Position: "TE", InjuryStatus: ""},
+		// Away team roster-only injury.
+		{AthleteID: "201", Team: "MIA", FullName: "Tyreek Hill", Position: "WR", InjuryStatus: "Questionable"},
+		// Unrelated team: must be ignored.
+		{AthleteID: "301", Team: "KC", FullName: "Travis Kelce", Position: "TE", InjuryStatus: "Out"},
+	}
+
+	merged := analyzer.MergeGameInjuries(game, rosters)
+	require.Len(t, merged, 2)
+
+	buf := merged["BUF"]
+	require.Len(t, buf, 6)
+	assert.Equal(t, espn.Injury{
+		AthleteID: "101",
+		FullName:  "Keon Coleman",
+		Position:  "WR",
+		Status:    "Out",
+		Detail:    "Wrist (Out)",
+	}, buf[0])
+	assert.Equal(t, espn.Injury{
+		AthleteID: "106",
+		FullName:  "Dalton Kincaid",
+		Position:  "TE",
+		Status:    "Out",
+	}, buf[5])
+
+	mia := merged["MIA"]
+	require.Len(t, mia, 1)
+	assert.Equal(t, "Tyreek Hill", mia[0].FullName)
+	assert.Equal(t, "Questionable", mia[0].Status)
+}
+
+func TestLoadSlipSignalsPopulatesInjuriesAndPositions(t *testing.T) {
+	t.Parallel()
+
+	store := openSignalTestStore(t)
+	now := time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC)
+
+	week, err := store.UpsertWeek(t.Context(), 2026, nflverse.SeasonTypeRegular, 6)
+	require.NoError(t, err)
+
+	summaryJSON := `[{
+		"team": {"id": "2", "displayName": "Buffalo Bills", "abbreviation": "BUF"},
+		"injuries": [{
+			"status": "Out",
+			"athlete": {"id": "101", "fullName": "Keon Coleman", "position": {"abbreviation": "WR"}},
+			"details": {"type": "Wrist", "detail": "Out"}
+		}]
+	}]`
+	game, err := store.UpsertGame(t.Context(), db.Game{
+		ID:       "g1",
+		WeekID:   week.ID,
+		HomeTeam: "BUF",
+		AwayTeam: "MIA",
+		Kickoff:  now.Add(48 * time.Hour),
+		Status:   db.GameScheduled,
+	})
+	require.NoError(t, err)
+	game.InjuriesJSON = &summaryJSON
+
+	require.NoError(t, store.UpsertRosterPlayers(t.Context(), []db.RosterPlayer{
+		{
+			AthleteID: "knox", Team: "BUF", ESPNTeamID: "2",
+			FullName: "Dawson Knox", NormName: "dawson knox", Position: "TE",
+			UpdatedAt: now,
+		},
+		{
+			AthleteID: "kincaid", Team: "BUF", ESPNTeamID: "2",
+			FullName: "Dalton Kincaid", NormName: "dalton kincaid", Position: "TE",
+			InjuryStatus: "Out", InjuryDate: "2026-10-14", UpdatedAt: now,
+		},
+		{
+			AthleteID: "waddle", Team: "MIA", ESPNTeamID: "15",
+			FullName: "Jaylen Waddle", NormName: "jaylen waddle", Position: "WR",
+			UpdatedAt: now,
+		},
+	}))
+
+	require.NoError(t, store.UpsertPlayerGameLog(t.Context(), db.PlayerGameLog{
+		AthleteID:   "knox",
+		GamesPlayed: 3,
+		StatsJSON:   `{"REC_YDS":[12,7,4]}`,
+		UpdatedAt:   now,
+	}))
+
+	gameID := "g1"
+	knoxID := "knox"
+	waddleID := "waddle"
+	legs := []db.Leg{
+		{ID: 1, GameID: &gameID, PlayerID: &knoxID, MarketType: "REC_YDS"},
+		{ID: 2, GameID: &gameID, PlayerID: &waddleID, MarketType: "REC_YDS"},
+	}
+
+	gamesByID, stats := analyzer.LoadSlipSignals(t.Context(), store, now, week.ID, []db.Game{game}, legs)
+
+	bufInjuries := gamesByID["g1"].Injuries["BUF"]
+	require.Len(t, bufInjuries, 2)
+	assert.Equal(t, analyzer.Injury{
+		AthleteID: "101",
+		FullName:  "Keon Coleman",
+		Position:  "WR",
+		Status:    "Out",
+	}, bufInjuries[0])
+	assert.Equal(t, analyzer.Injury{
+		AthleteID: "kincaid",
+		FullName:  "Dalton Kincaid",
+		Position:  "TE",
+		Status:    "Out",
+	}, bufInjuries[1])
+
+	require.Contains(t, stats, "knox")
+	assert.Equal(t, "TE", stats["knox"].Position)
+	assert.Equal(t, []float64{12, 7, 4}, stats["knox"].Games["REC_YDS"])
+
+	require.Contains(t, stats, "waddle")
+	assert.Equal(t, "WR", stats["waddle"].Position)
 }
