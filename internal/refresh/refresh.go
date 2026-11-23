@@ -304,10 +304,6 @@ func New(deps Deps) *Service {
 			boxScore = bc
 		}
 	}
-	slipsSvc := deps.Slips
-	if slipsSvc == nil && deps.Store != nil {
-		slipsSvc = slips.New(deps.Store, deps.Publisher, now)
-	}
 	props := deps.Props
 	if props == nil {
 		if pc, ok := deps.Lines.(PropsClient); ok {
@@ -333,7 +329,7 @@ func New(deps Deps) *Service {
 		fallbackProps: fallbackProps,
 		projections:   deps.Projections,
 		nflverse:      deps.NFLverse,
-		slips:         slipsSvc,
+		slips:         deps.Slips,
 		publisher:     deps.Publisher,
 		now:           now,
 		logger:        deps.Logger,

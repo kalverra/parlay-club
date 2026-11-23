@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kalverra/parlay-club/internal/db"
+	"github.com/kalverra/parlay-club/internal/eval"
 	"github.com/kalverra/parlay-club/internal/ingest/espn"
 	"github.com/kalverra/parlay-club/internal/parlay"
 	"github.com/kalverra/parlay-club/internal/slips"
@@ -92,11 +93,13 @@ func TestGradeSourceGameOnlyOptimization(t *testing.T) {
 		},
 	}
 	pub := &fakePublisher{}
+	nowFn := func() time.Time { return now }
 	svc := New(Deps{
 		Store:     store,
 		BoxScore:  box,
+		Slips:     slips.New(store, pub, nowFn),
 		Publisher: pub,
-		Now:       func() time.Time { return now },
+		Now:       nowFn,
 		Logger:    zerolog.Nop(),
 	})
 
@@ -173,10 +176,12 @@ func TestGradeSourcePlayerPropsAndZeroWasteReruns(t *testing.T) {
 			}, nil
 		},
 	}
+	nowFn := func() time.Time { return now }
 	svc := New(Deps{
 		Store:    store,
 		BoxScore: box,
-		Now:      func() time.Time { return now },
+		Slips:    slips.New(store, nil, nowFn),
+		Now:      nowFn,
 		Logger:   zerolog.Nop(),
 	})
 
@@ -342,10 +347,12 @@ func TestGradeSourceBoxScoreErrorBackoff(t *testing.T) {
 	}
 
 	clock := now
+	clockFn := func() time.Time { return clock }
 	svc := New(Deps{
 		Store:    store,
 		BoxScore: box,
-		Now:      func() time.Time { return clock },
+		Slips:    slips.New(store, nil, clockFn),
+		Now:      clockFn,
 		Logger:   zerolog.Nop(),
 	})
 
@@ -375,4 +382,86 @@ func TestGradeSourceBoxScoreErrorBackoff(t *testing.T) {
 	gotProp, err = store.LegByID(t.Context(), propLeg.ID)
 	require.NoError(t, err)
 	assert.Equal(t, parlay.Won, gotProp.Result)
+}
+
+func TestGradeSourceNilSlipsGuard(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 11, 8, 21, 0, 0, 0, time.UTC)
+	store := openTestStore(t)
+	ada, week, slip := seedGradeFixture(t, store)
+
+	game := storedGame(week.ID, now.Add(-4*time.Hour))
+	game.Status = db.GameFinal
+	game.HomeScore = new(27)
+	game.AwayScore = new(20)
+	game, err := store.UpsertGame(t.Context(), game)
+	require.NoError(t, err)
+
+	leg, err := store.CreateLeg(t.Context(), db.Leg{
+		SlipID: slip.ID, UserID: ada.ID, GameID: &game.ID,
+		MarketType: "ML", Selection: "BUF ML", Team: new("BUF"),
+	})
+	require.NoError(t, err)
+
+	svc := New(Deps{
+		Store:  store,
+		Now:    func() time.Time { return now },
+		Logger: zerolog.Nop(),
+	})
+
+	require.NoError(t, svc.RunOnce(t.Context()))
+
+	gotLeg, err := store.LegByID(t.Context(), leg.ID)
+	require.NoError(t, err)
+	assert.Equal(t, parlay.Pending, gotLeg.Result)
+}
+
+func TestGradeSourceInvalidatesEvalCache(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 11, 8, 21, 0, 0, 0, time.UTC)
+	store := openTestStore(t)
+	ada, week, slip := seedGradeFixture(t, store)
+
+	game := storedGame(week.ID, now.Add(-4*time.Hour))
+	game.Status = db.GameFinal
+	game.HomeScore = new(27)
+	game.AwayScore = new(20)
+	game, err := store.UpsertGame(t.Context(), game)
+	require.NoError(t, err)
+
+	leg, err := store.CreateLeg(t.Context(), db.Leg{
+		SlipID: slip.ID, UserID: ada.ID, GameID: &game.ID,
+		MarketType: "ML", Selection: "BUF ML", Team: new("BUF"),
+	})
+	require.NoError(t, err)
+
+	evalCache := eval.NewCache()
+	nowFn := func() time.Time { return now }
+	slipsSvc := slips.New(store, nil, nowFn)
+	slipsSvc.SetOnGradeChange(evalCache.InvalidateGroup)
+
+	// Warm the eval cache before auto-grading runs; the pending leg is excluded.
+	reportBefore, err := evalCache.GetOrCompute(t.Context(), store, slip.GroupID, week.Season)
+	require.NoError(t, err)
+	assert.Equal(t, 0, reportBefore.Coverage.TotalLegs)
+
+	svc := New(Deps{
+		Store:  store,
+		Slips:  slipsSvc,
+		Now:    nowFn,
+		Logger: zerolog.Nop(),
+	})
+
+	require.NoError(t, svc.RunOnce(t.Context()))
+
+	gotLeg, err := store.LegByID(t.Context(), leg.ID)
+	require.NoError(t, err)
+	assert.Equal(t, parlay.Won, gotLeg.Result)
+
+	// AutoGradeLegs must have invalidated evalCache so the settled leg appears.
+	reportAfter, err := evalCache.GetOrCompute(t.Context(), store, slip.GroupID, week.Season)
+	require.NoError(t, err)
+	assert.Equal(t, 1, reportAfter.Coverage.TotalLegs)
 }
