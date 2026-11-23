@@ -35,7 +35,7 @@ const (
 	// ScoreboardSource is the current week's slate, scores, and status.
 	ScoreboardSource = "espn:scoreboard"
 	// OddsLinesSource is the week's game lines.
-	OddsLinesSource = "odds:lines"
+	OddsLinesSource = db.ArchiveOddsLinesKey
 	// TheOddsAPISource is The Odds API's event list, lines, and props. Its
 	// "odds:" prefix makes the archive label its responses as odds.
 	TheOddsAPISource = "odds:theoddsapi"
@@ -47,16 +47,8 @@ const (
 	SundayPrefillSource = "prefill:sunday"
 	// weatherSourcePrefix keys per-game forecasts.
 	weatherSourcePrefix = "weather:"
-	// oddsPropsSourcePrefix keys per-game prop lines.
-	oddsPropsSourcePrefix = "odds:props:"
 	// oddsPropsEnrichSourcePrefix keys per-game prop link enrichment from The Odds API.
 	oddsPropsEnrichSourcePrefix = "odds:props:enrich:"
-	// rosterSourcePrefix keys per-team rosters.
-	rosterSourcePrefix = "espn:roster:"
-	// gameLogSourcePrefix keys per-athlete season game logs.
-	gameLogSourcePrefix = "espn:gamelog:"
-	// summarySourcePrefix keys per-game ESPN summaries and injury lists.
-	summarySourcePrefix = "espn:summary:"
 	// nflverseSourcePrefix keys per-season nflverse efficiency and usage syncs.
 	nflverseSourcePrefix = "nflverse:season:"
 )
@@ -68,7 +60,7 @@ func WeatherSource(gameID string) string {
 
 // OddsPropsSource returns the sync_state key for one game's props.
 func OddsPropsSource(gameID string) string {
-	return oddsPropsSourcePrefix + gameID
+	return db.ArchiveOddsPropsKey(gameID)
 }
 
 // OddsPropsEnrichSource returns the sync_state key for one game's prop link enrichment.
@@ -78,17 +70,17 @@ func OddsPropsEnrichSource(gameID string) string {
 
 // RosterSource returns the sync_state key for one team's roster.
 func RosterSource(teamID string) string {
-	return rosterSourcePrefix + teamID
+	return db.ArchiveRosterKey(teamID)
 }
 
 // GameLogSource returns the sync_state key for one athlete's game log.
 func GameLogSource(athleteID string) string {
-	return gameLogSourcePrefix + athleteID
+	return db.ArchiveGameLogKey(athleteID)
 }
 
 // SummarySource returns the sync_state key for one game's summary.
 func SummarySource(gameID string) string {
-	return summarySourcePrefix + gameID
+	return db.ArchiveSummaryKey(gameID)
 }
 
 // NFLverseSource returns the sync_state key for one season's nflverse sync.

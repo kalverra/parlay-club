@@ -316,3 +316,55 @@ func TestListAPIResponsesFiltersByKeyAndTime(t *testing.T) {
 	assert.Equal(t, 500, *line.CreditsRemaining)
 	assert.Equal(t, 2, *line.CreditsUsed)
 }
+
+func TestLatestAPIResponseBefore(t *testing.T) {
+	t.Parallel()
+
+	store, _ := openTestStore(t)
+	base := time.Date(2026, time.November, 8, 12, 0, 0, 0, time.UTC)
+
+	save := func(key string, status int, fetchedAt time.Time, body string) {
+		t.Helper()
+		require.NoError(t, store.SaveAPIResponse(t.Context(), archive.Record{
+			Source:    "espn",
+			Key:       key,
+			Method:    http.MethodGet,
+			URL:       "https://example.com/" + key,
+			Status:    status,
+			FetchedAt: fetchedAt,
+			Body:      []byte(body),
+		}))
+	}
+
+	key := db.ArchiveSummaryKey("401")
+	save(key, http.StatusOK, base.Add(-2*time.Hour), `{"v":1}`)
+	save(key, http.StatusCreated, base.Add(-1*time.Hour), `{"v":2}`)
+	save(key, http.StatusOK, base.Add(-1*time.Hour), `{"v":3}`) // same timestamp, higher id
+	save(key, http.StatusOK, base.Add(time.Minute), `{"v":4}`)  // after cutoff
+	save(db.ArchiveSummaryKey("402"), http.StatusOK, base, `{"other":true}`)
+
+	got, ok, err := store.LatestAPIResponseBefore(t.Context(), key, base)
+	require.NoError(t, err)
+	require.True(t, ok)
+	body, err := store.APIResponseBody(t.Context(), got.BodySHA256)
+	require.NoError(t, err)
+	assert.Equal(t, `{"v":3}`, string(body))
+
+	// Exact boundary match on a 2xx row.
+	got, ok, err = store.LatestAPIResponseBefore(t.Context(), key, base.Add(-2*time.Hour))
+	require.NoError(t, err)
+	require.True(t, ok)
+	body, err = store.APIResponseBody(t.Context(), got.BodySHA256)
+	require.NoError(t, err)
+	assert.Equal(t, `{"v":1}`, string(body))
+
+	// Cutoff before any 2xx row returns ok=false.
+	_, ok, err = store.LatestAPIResponseBefore(t.Context(), key, base.Add(-3*time.Hour))
+	require.NoError(t, err)
+	assert.False(t, ok)
+
+	// Missing key returns ok=false.
+	_, ok, err = store.LatestAPIResponseBefore(t.Context(), db.ArchiveSummaryKey("missing"), base)
+	require.NoError(t, err)
+	assert.False(t, ok)
+}

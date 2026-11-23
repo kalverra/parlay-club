@@ -503,3 +503,13 @@ func TestSyncOddsReturnsErrNoAPIKeyWhenEveryProviderIsDisabled(t *testing.T) {
 	_, err = service.syncOdds(t.Context(), []db.Game{game}, now)
 	require.ErrorIs(t, err, odds.ErrNoAPIKey)
 }
+
+func TestSourceKeysMatchArchiveKeys(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, db.ArchiveOddsLinesKey, OddsLinesSource)
+	assert.Equal(t, db.ArchiveOddsPropsKey("401"), OddsPropsSource("401"))
+	assert.Equal(t, db.ArchiveRosterKey("2"), RosterSource("2"))
+	assert.Equal(t, db.ArchiveGameLogKey("3139477"), GameLogSource("3139477"))
+	assert.Equal(t, db.ArchiveSummaryKey("401"), SummarySource("401"))
+}

@@ -127,7 +127,7 @@ flowchart LR
 Complexity: low (focused SQL queries and key constants in `internal/db` with direct unit tests) Risk: low (additive
 storage methods; existing queries unchanged)
 
-- [ ] Add canonical archive key builders (`ArchiveOddsLinesKey`, `ArchiveOddsPropsKey`, `ArchiveRosterKey`,
+- [x] Add canonical archive key builders (`ArchiveOddsLinesKey`, `ArchiveOddsPropsKey`, `ArchiveRosterKey`,
       `ArchiveGameLogKey`, `ArchiveSummaryKey`) and `LatestAPIResponseBefore` in `internal/db`, wire
       `internal/refresh/refresh.go` source key helpers to use them, and add unit tests verifying 2xx/cutoff selection
       and key parity.
