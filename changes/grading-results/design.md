@@ -302,7 +302,7 @@ script only restores to a temp file under `data/`)
 
 - [x] Add the offline benchmark eval summary step to `.github/workflows/ci.yml` (publishing to `$GITHUB_STEP_SUMMARY`)
       and verify with `actionlint`, leaving `lefthook.yml` `pre-push` unchanged.
-- [ ] Add `scripts/eval-prod.sh` and `[tasks.eval-prod]` in `mise.toml` for one-command read-only Litestream snapshot
+- [x] Add `scripts/eval-prod.sh` and `[tasks.eval-prod]` in `mise.toml` for one-command read-only Litestream snapshot
       restore and rubric comparison with automatic temp-file cleanup.
 - [ ] Docs: update `docs/concepts/analyzer.md`, `docs/reference/routes.md`, and `docs/guides/local-dev.md` to document
       `GET /analyzer/results`, in-memory eval caching, the CI benchmark summary, and `mise run eval-prod`, then run
