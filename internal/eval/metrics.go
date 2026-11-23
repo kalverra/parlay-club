@@ -40,6 +40,19 @@ type FactorStats struct {
 	AvgDelta       float64 `json:"avg_delta"`
 }
 
+// WeekSummary holds per-week calibration and overall leg performance.
+type WeekSummary struct {
+	Season      int         `json:"season"`
+	WeekNum     int         `json:"week_num"`
+	WeekType    string      `json:"week_type,omitempty"`
+	LegBands    []BandStats `json:"leg_bands"`
+	SlipBands   []BandStats `json:"slip_bands"`
+	DecidedLegs int         `json:"decided_legs"`
+	LegWinRate  float64     `json:"leg_win_rate"`
+	LegLift     float64     `json:"leg_lift"`
+	LegFlatROI  float64     `json:"leg_flat_roi"`
+}
+
 // Report summarizes calibration, factor attribution, and monotonicity for one
 // rubric evaluated on a ReplayDataset.
 type Report struct {
@@ -47,11 +60,21 @@ type Report struct {
 	Coverage         DataCoverage  `json:"coverage"`
 	LegBands         []BandStats   `json:"leg_bands"`
 	SlipBands        []BandStats   `json:"slip_bands"`
+	Weekly           []WeekSummary `json:"weekly"`
 	Factors          []FactorStats `json:"factors"`
 	LegMonotonic     bool          `json:"leg_monotonic"`
 	LegMonotonicWin  bool          `json:"leg_monotonic_win"`
 	LegMonotonicLift bool          `json:"leg_monotonic_lift"`
 	legOutcomes      []legOutcome
+}
+
+// SuiteReport holds evaluation reports for a suite of rubrics and pairwise
+// comparisons against the first rubric.
+type SuiteReport struct {
+	ActiveRubric string       `json:"active_rubric"`
+	Coverage     DataCoverage `json:"coverage"`
+	Reports      []Report     `json:"reports"`
+	Diffs        []DiffReport `json:"diffs"`
 }
 
 // BandDiff records the metric delta from baseline to candidate for one band.
@@ -216,16 +239,21 @@ func rubricFactorLabels() map[string]string {
 }
 
 // Evaluate scores every slip and leg in dataset under rubric and returns leg
-// and slip calibration by band, lift over implied odds, flat ROI, per-factor
-// attribution, and monotonicity checks.
+// and slip calibration by band, weekly progression, lift over implied odds,
+// flat ROI, per-factor attribution, and monotonicity checks.
 func Evaluate(dataset ReplayDataset, rubric analyzer.Rubric) Report {
 	legBands := newBandAccumMap()
 	slipBands := newBandAccumMap()
 	factors := make(map[string]*factorAccum)
 	factorLabels := rubricFactorLabels()
 	var outcomes []legOutcome
+	weekly := make([]WeekSummary, 0, len(dataset.Weeks))
 
 	for _, week := range dataset.Weeks {
+		weekLegBands := newBandAccumMap()
+		weekSlipBands := newBandAccumMap()
+		weekOverallLegs := &bandAccum{band: "all"}
+
 		for _, slip := range week.Slips {
 			analyzerLegs := make([]analyzer.Leg, len(slip.Legs))
 			for i, rl := range slip.Legs {
@@ -234,7 +262,9 @@ func Evaluate(dataset ReplayDataset, rubric analyzer.Rubric) Report {
 
 			slipGrade := analyzer.ScoreSlipWithRubric(analyzerLegs, week.Games, week.Stats, rubric)
 			slipBand := normalizeBand(slipGrade.Letter)
-			slipBands[slipBand].add(slip.Result, slipDecimalOdds(slip))
+			slipDec := slipDecimalOdds(slip)
+			slipBands[slipBand].add(slip.Result, slipDec)
+			weekSlipBands[slipBand].add(slip.Result, slipDec)
 
 			for i, rl := range slip.Legs {
 				var lg analyzer.LegGrade
@@ -244,6 +274,8 @@ func Evaluate(dataset ReplayDataset, rubric analyzer.Rubric) Report {
 				band := normalizeBand(lg.Letter)
 				dec := legDecimalOdds(rl)
 				legBands[band].add(rl.Result, dec)
+				weekLegBands[band].add(rl.Result, dec)
+				weekOverallLegs.add(rl.Result, dec)
 
 				decided := rl.Result == parlay.Won || rl.Result == parlay.Lost
 				outcomes = append(outcomes, legOutcome{
@@ -269,7 +301,30 @@ func Evaluate(dataset ReplayDataset, rubric analyzer.Rubric) Report {
 				}
 			}
 		}
+
+		overall := weekOverallLegs.stats()
+		weekly = append(weekly, WeekSummary{
+			Season:      week.Season,
+			WeekNum:     week.WeekNum,
+			WeekType:    week.WeekType,
+			LegBands:    finalizeBandStats(weekLegBands),
+			SlipBands:   finalizeBandStats(weekSlipBands),
+			DecidedLegs: overall.Decided,
+			LegWinRate:  overall.WinRate,
+			LegLift:     overall.Lift,
+			LegFlatROI:  overall.FlatROI,
+		})
 	}
+
+	slices.SortFunc(weekly, func(a, b WeekSummary) int {
+		if c := cmp.Compare(a.Season, b.Season); c != 0 {
+			return c
+		}
+		if c := cmp.Compare(weekTypeRank(a.WeekType), weekTypeRank(b.WeekType)); c != 0 {
+			return c
+		}
+		return cmp.Compare(a.WeekNum, b.WeekNum)
+	})
 
 	legBandStats := finalizeBandStats(legBands)
 	slipBandStats := finalizeBandStats(slipBands)
@@ -291,12 +346,42 @@ func Evaluate(dataset ReplayDataset, rubric analyzer.Rubric) Report {
 		Coverage:         dataset.Coverage,
 		LegBands:         legBandStats,
 		SlipBands:        slipBandStats,
+		Weekly:           weekly,
 		Factors:          factorStats,
 		LegMonotonic:     monoWin && monoLift,
 		LegMonotonicWin:  monoWin,
 		LegMonotonicLift: monoLift,
 		legOutcomes:      outcomes,
 	}
+}
+
+// EvaluateAll evaluates every rubric in rubrics against dataset and compares
+// each subsequent rubric against the first.
+func EvaluateAll(dataset ReplayDataset, rubrics []analyzer.Rubric) SuiteReport {
+	reports := make([]Report, 0, len(rubrics))
+	for _, r := range rubrics {
+		reports = append(reports, Evaluate(dataset, r))
+	}
+	diffs := make([]DiffReport, 0)
+	if len(reports) > 1 {
+		diffs = make([]DiffReport, 0, len(reports)-1)
+		for _, cand := range reports[1:] {
+			diffs = append(diffs, Compare(reports[0], cand))
+		}
+	}
+	return SuiteReport{
+		ActiveRubric: analyzer.ActiveRubric.Name,
+		Coverage:     dataset.Coverage,
+		Reports:      reports,
+		Diffs:        diffs,
+	}
+}
+
+func weekTypeRank(weekType string) int {
+	if weekType == "POST" {
+		return 1
+	}
+	return 0
 }
 
 // Compare computes per-band calibration deltas and the leg band migration

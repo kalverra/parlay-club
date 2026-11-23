@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"slices"
 	"strings"
 	"time"
@@ -17,6 +18,27 @@ import (
 	"github.com/kalverra/parlay-club/internal/ingest/odds"
 	"github.com/kalverra/parlay-club/internal/parlay"
 )
+
+// LoadDatasetJSON reads a JSON-encoded ReplayDataset from path.
+func LoadDatasetJSON(path string) (ReplayDataset, error) {
+	// #nosec G304 -- caller-supplied replay dataset JSON path.
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return ReplayDataset{}, fmt.Errorf("read dataset %s: %w", path, err)
+	}
+	var dataset ReplayDataset
+	if err := json.Unmarshal(raw, &dataset); err != nil {
+		return ReplayDataset{}, fmt.Errorf("decode dataset %s: %w", path, err)
+	}
+	if dataset.Coverage.TotalLegs == 0 {
+		for _, w := range dataset.Weeks {
+			for _, s := range w.Slips {
+				dataset.Coverage.TotalLegs += len(s.Legs)
+			}
+		}
+	}
+	return dataset, nil
+}
 
 // ReplayFilter narrows which weeks and slips LoadDataset replays.
 type ReplayFilter struct {

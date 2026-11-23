@@ -123,3 +123,10 @@ func RubricNames() []string {
 	}
 	return names
 }
+
+// BuiltInRubrics returns a copy of all built-in rubrics in registry order.
+func BuiltInRubrics() []Rubric {
+	out := make([]Rubric, len(builtinRubrics))
+	copy(out, builtinRubrics)
+	return out
+}
