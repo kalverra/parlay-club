@@ -1,0 +1,3112 @@
+{
+  "weeks": [
+    {
+      "season": 2025,
+      "week_num": 1,
+      "week_type": "REG",
+      "games": {
+        "w1_g1": {
+          "ID": "w1_g1",
+          "Home": "BUF",
+          "Away": "MIA",
+          "Indoor": true,
+          "Weather": null,
+          "Nfelo": {
+            "HomeSpread": -5.5,
+            "HomeWinProb": 0.68,
+            "HomeQB": "QB_BUF",
+            "AwayQB": "QB_MIA",
+            "HomeQBAdj": 0,
+            "AwayQBAdj": 0
+          },
+          "HomeEPA": {
+            "OffPassEPA": 0.04,
+            "OffRushEPA": 0,
+            "DefPassEPAAllowed": 0.01,
+            "DefRushEPAAllowed": 0.01,
+            "PlaysPerGame": 64,
+            "PassRate": 0.58,
+            "L4OffPassEPA": 0,
+            "L4OffRushEPA": 0,
+            "L4DefPassEPAAllowed": 0,
+            "L4DefRushEPAAllowed": 0,
+            "L4PlaysPerGame": 0,
+            "L4PassRate": 0,
+            "OffPassEPARank": 16,
+            "OffRushEPARank": 16,
+            "DefPassEPAAllowedRank": 16,
+            "DefRushEPAAllowedRank": 16,
+            "PlaysPerGameRank": 0,
+            "PassRateRank": 0
+          },
+          "AwayEPA": {
+            "OffPassEPA": 0.18,
+            "OffRushEPA": 0.06,
+            "DefPassEPAAllowed": 0.22,
+            "DefRushEPAAllowed": 0.16,
+            "PlaysPerGame": 67,
+            "PassRate": 0.62,
+            "L4OffPassEPA": 0,
+            "L4OffRushEPA": 0,
+            "L4DefPassEPAAllowed": 0,
+            "L4DefRushEPAAllowed": 0,
+            "L4PlaysPerGame": 0,
+            "L4PassRate": 0,
+            "OffPassEPARank": 4,
+            "OffRushEPARank": 6,
+            "DefPassEPAAllowedRank": 30,
+            "DefRushEPAAllowedRank": 29,
+            "PlaysPerGameRank": 0,
+            "PassRateRank": 0
+          },
+          "Injuries": {
+            "BUF": [
+              {
+                "AthleteID": "p_wr_out",
+                "FullName": "Sammy Reserve",
+                "Position": "WR",
+                "Status": "Out"
+              }
+            ]
+          }
+        },
+        "w1_g2": {
+          "ID": "w1_g2",
+          "Home": "CHI",
+          "Away": "DET",
+          "Indoor": false,
+          "Weather": {
+            "WindMPH": 22,
+            "GustMPH": 32,
+            "PrecipIn": 0,
+            "TempF": 44
+          },
+          "Nfelo": {
+            "HomeSpread": -3,
+            "HomeWinProb": 0.58,
+            "HomeQB": "QB_CHI",
+            "AwayQB": "QB_DET",
+            "HomeQBAdj": 0,
+            "AwayQBAdj": -35
+          },
+          "HomeEPA": {
+            "OffPassEPA": 0.1,
+            "OffRushEPA": 0.02,
+            "DefPassEPAAllowed": -0.15,
+            "DefRushEPAAllowed": -0.1,
+            "PlaysPerGame": 62,
+            "PassRate": 0.56,
+            "L4OffPassEPA": 0,
+            "L4OffRushEPA": 0,
+            "L4DefPassEPAAllowed": 0,
+            "L4DefRushEPAAllowed": 0,
+            "L4PlaysPerGame": 0,
+            "L4PassRate": 0,
+            "OffPassEPARank": 10,
+            "OffRushEPARank": 12,
+            "DefPassEPAAllowedRank": 3,
+            "DefRushEPAAllowedRank": 4,
+            "PlaysPerGameRank": 0,
+            "PassRateRank": 0
+          },
+          "AwayEPA": {
+            "OffPassEPA": 0.04,
+            "OffRushEPA": 0,
+            "DefPassEPAAllowed": 0.01,
+            "DefRushEPAAllowed": 0.01,
+            "PlaysPerGame": 64,
+            "PassRate": 0.58,
+            "L4OffPassEPA": 0,
+            "L4OffRushEPA": 0,
+            "L4DefPassEPAAllowed": 0,
+            "L4DefRushEPAAllowed": 0,
+            "L4PlaysPerGame": 0,
+            "L4PassRate": 0,
+            "OffPassEPARank": 16,
+            "OffRushEPARank": 16,
+            "DefPassEPAAllowedRank": 16,
+            "DefRushEPAAllowedRank": 16,
+            "PlaysPerGameRank": 0,
+            "PassRateRank": 0
+          },
+          "Injuries": null
+        },
+        "w1_g3": {
+          "ID": "w1_g3",
+          "Home": "SEA",
+          "Away": "LAR",
+          "Indoor": false,
+          "Weather": {
+            "WindMPH": 5,
+            "GustMPH": 8,
+            "PrecipIn": 0.05,
+            "TempF": 52
+          },
+          "Nfelo": {
+            "HomeSpread": -1.5,
+            "HomeWinProb": 0.54,
+            "HomeQB": "QB_SEA",
+            "AwayQB": "QB_LAR",
+            "HomeQBAdj": 0,
+            "AwayQBAdj": 0
+          },
+          "HomeEPA": {
+            "OffPassEPA": 0.04,
+            "OffRushEPA": 0,
+            "DefPassEPAAllowed": 0.01,
+            "DefRushEPAAllowed": 0.01,
+            "PlaysPerGame": 64,
+            "PassRate": 0.58,
+            "L4OffPassEPA": 0,
+            "L4OffRushEPA": 0,
+            "L4DefPassEPAAllowed": 0,
+            "L4DefRushEPAAllowed": 0,
+            "L4PlaysPerGame": 0,
+            "L4PassRate": 0,
+            "OffPassEPARank": 16,
+            "OffRushEPARank": 16,
+            "DefPassEPAAllowedRank": 16,
+            "DefRushEPAAllowedRank": 16,
+            "PlaysPerGameRank": 0,
+            "PassRateRank": 0
+          },
+          "AwayEPA": {
+            "OffPassEPA": 0.18,
+            "OffRushEPA": 0.06,
+            "DefPassEPAAllowed": 0.22,
+            "DefRushEPAAllowed": 0.16,
+            "PlaysPerGame": 67,
+            "PassRate": 0.62,
+            "L4OffPassEPA": 0,
+            "L4OffRushEPA": 0,
+            "L4DefPassEPAAllowed": 0,
+            "L4DefRushEPAAllowed": 0,
+            "L4PlaysPerGame": 0,
+            "L4PassRate": 0,
+            "OffPassEPARank": 4,
+            "OffRushEPARank": 6,
+            "DefPassEPAAllowedRank": 30,
+            "DefRushEPAAllowedRank": 29,
+            "PlaysPerGameRank": 0,
+            "PassRateRank": 0
+          },
+          "Injuries": null
+        }
+      },
+      "stats": {
+        "p_qb_hot": {
+          "Position": "QB",
+          "Games": {
+            "PASS_YDS": [
+              310,
+              295,
+              280,
+              272,
+              268
+            ]
+          },
+          "Usage": null
+        },
+        "p_rb_hot": {
+          "Position": "RB",
+          "Games": {
+            "ANYTIME_TD": [
+              1,
+              1,
+              1,
+              1,
+              0
+            ],
+            "RUSH_YDS": [
+              105,
+              92,
+              88,
+              80,
+              76
+            ]
+          },
+          "Usage": {
+            "Weeks": [
+              {
+                "WeekNum": 3,
+                "OffensePct": 0.78,
+                "TargetShare": 0,
+                "AirYardsShare": 0,
+                "WOPR": 0,
+                "Carries": 20,
+                "Targets": 0,
+                "TotalEPA": 0,
+                "RZOpps": 0
+              },
+              {
+                "WeekNum": 2,
+                "OffensePct": 0.76,
+                "TargetShare": 0,
+                "AirYardsShare": 0,
+                "WOPR": 0,
+                "Carries": 19,
+                "Targets": 0,
+                "TotalEPA": 0,
+                "RZOpps": 0
+              },
+              {
+                "WeekNum": 1,
+                "OffensePct": 0.75,
+                "TargetShare": 0,
+                "AirYardsShare": 0,
+                "WOPR": 0,
+                "Carries": 18,
+                "Targets": 0,
+                "TotalEPA": 0,
+                "RZOpps": 0
+              }
+            ],
+            "Last3SnapAvg": 0.78,
+            "SeasonSnapAvg": 0.7,
+            "Last3TargetShare": 0,
+            "SeasonTargetShare": 0,
+            "Last3WOPR": 0,
+            "AvgCarries": 19
+          }
+        },
+        "p_rb_trap": {
+          "Position": "RB",
+          "Games": {
+            "RUSH_YDS": [
+              42,
+              38,
+              35,
+              30,
+              28
+            ]
+          },
+          "Usage": {
+            "Weeks": [
+              {
+                "WeekNum": 3,
+                "OffensePct": 0.4,
+                "TargetShare": 0,
+                "AirYardsShare": 0,
+                "WOPR": 0,
+                "Carries": 8,
+                "Targets": 0,
+                "TotalEPA": 0,
+                "RZOpps": 0
+              },
+              {
+                "WeekNum": 2,
+                "OffensePct": 0.45,
+                "TargetShare": 0,
+                "AirYardsShare": 0,
+                "WOPR": 0,
+                "Carries": 9,
+                "Targets": 0,
+                "TotalEPA": 0,
+                "RZOpps": 0
+              },
+              {
+                "WeekNum": 1,
+                "OffensePct": 0.72,
+                "TargetShare": 0,
+                "AirYardsShare": 0,
+                "WOPR": 0,
+                "Carries": 18,
+                "Targets": 0,
+                "TotalEPA": 0,
+                "RZOpps": 0
+              }
+            ],
+            "Last3SnapAvg": 0.42,
+            "SeasonSnapAvg": 0.68,
+            "Last3TargetShare": 0,
+            "SeasonTargetShare": 0,
+            "Last3WOPR": 0,
+            "AvgCarries": 9
+          }
+        },
+        "p_wr_hot": {
+          "Position": "WR",
+          "Games": {
+            "RECEPTIONS": [
+              7,
+              7,
+              6,
+              6,
+              6
+            ],
+            "REC_YDS": [
+              92,
+              84,
+              78,
+              75,
+              71
+            ]
+          },
+          "Usage": {
+            "Weeks": [
+              {
+                "WeekNum": 3,
+                "OffensePct": 0.9,
+                "TargetShare": 0.28,
+                "AirYardsShare": 0,
+                "WOPR": 0,
+                "Carries": 0,
+                "Targets": 0,
+                "TotalEPA": 0,
+                "RZOpps": 0
+              },
+              {
+                "WeekNum": 2,
+                "OffensePct": 0.88,
+                "TargetShare": 0.27,
+                "AirYardsShare": 0,
+                "WOPR": 0,
+                "Carries": 0,
+                "Targets": 0,
+                "TotalEPA": 0,
+                "RZOpps": 0
+              },
+              {
+                "WeekNum": 1,
+                "OffensePct": 0.85,
+                "TargetShare": 0.26,
+                "AirYardsShare": 0,
+                "WOPR": 0,
+                "Carries": 0,
+                "Targets": 0,
+                "TotalEPA": 0,
+                "RZOpps": 0
+              }
+            ],
+            "Last3SnapAvg": 0.9,
+            "SeasonSnapAvg": 0.78,
+            "Last3TargetShare": 0.28,
+            "SeasonTargetShare": 0.22,
+            "Last3WOPR": 0,
+            "AvgCarries": 0
+          }
+        },
+        "p_wr_trap": {
+          "Position": "WR",
+          "Games": {
+            "REC_YDS": [
+              48,
+              45,
+              45,
+              40,
+              32
+            ]
+          },
+          "Usage": {
+            "Weeks": [
+              {
+                "WeekNum": 3,
+                "OffensePct": 0.5,
+                "TargetShare": 0.12,
+                "AirYardsShare": 0,
+                "WOPR": 0,
+                "Carries": 0,
+                "Targets": 0,
+                "TotalEPA": 0,
+                "RZOpps": 0
+              },
+              {
+                "WeekNum": 2,
+                "OffensePct": 0.55,
+                "TargetShare": 0.14,
+                "AirYardsShare": 0,
+                "WOPR": 0,
+                "Carries": 0,
+                "Targets": 0,
+                "TotalEPA": 0,
+                "RZOpps": 0
+              },
+              {
+                "WeekNum": 1,
+                "OffensePct": 0.78,
+                "TargetShare": 0.24,
+                "AirYardsShare": 0,
+                "WOPR": 0,
+                "Carries": 0,
+                "Targets": 0,
+                "TotalEPA": 0,
+                "RZOpps": 0
+              }
+            ],
+            "Last3SnapAvg": 0.55,
+            "SeasonSnapAvg": 0.76,
+            "Last3TargetShare": 0.14,
+            "SeasonTargetShare": 0.23,
+            "Last3WOPR": 0,
+            "AvgCarries": 0
+          }
+        }
+      },
+      "slips": [
+        {
+          "slip_id": 1,
+          "result": "WON",
+          "combined_odds": 5.96,
+          "legs": [
+            {
+              "leg": {
+                "ID": 1,
+                "Owner": "",
+                "GameID": "w1_g1",
+                "Market": "PASS_YDS",
+                "Team": "BUF",
+                "PlayerID": "p_qb_hot",
+                "PlayerName": "Alex Mercer",
+                "Side": "OVER",
+                "Line": 255.5,
+                "Odds": -110
+              },
+              "result": "WON",
+              "decimal_odds": 1.9090909090909092
+            },
+            {
+              "leg": {
+                "ID": 2,
+                "Owner": "",
+                "GameID": "w1_g1",
+                "Market": "REC_YDS",
+                "Team": "BUF",
+                "PlayerID": "p_wr_hot",
+                "PlayerName": "Jordan Vance",
+                "Side": "OVER",
+                "Line": 65.5,
+                "Odds": -110
+              },
+              "result": "WON",
+              "decimal_odds": 1.9090909090909092
+            },
+            {
+              "leg": {
+                "ID": 3,
+                "Owner": "",
+                "GameID": "w1_g1",
+                "Market": "SPREAD",
+                "Team": "BUF",
+                "PlayerID": "",
+                "PlayerName": "",
+                "Side": "TEAM",
+                "Line": -2.5,
+                "Odds": -110
+              },
+              "result": "WON",
+              "decimal_odds": 1.9090909090909092
+            }
+          ]
+        },
+        {
+          "slip_id": 2,
+          "result": "WON",
+          "combined_odds": 5.2,
+          "legs": [
+            {
+              "leg": {
+                "ID": 4,
+                "Owner": "",
+                "GameID": "w1_g3",
+                "Market": "RUSH_YDS",
+                "Team": "SEA",
+                "PlayerID": "p_rb_hot",
+                "PlayerName": "Marcus Cole",
+                "Side": "OVER",
+                "Line": 72.5,
+                "Odds": -115
+              },
+              "result": "WON",
+              "decimal_odds": 1.8695652173913042
+            },
+            {
+              "leg": {
+                "ID": 5,
+                "Owner": "",
+                "GameID": "w1_g3",
+                "Market": "RECEPTIONS",
+                "Team": "SEA",
+                "PlayerID": "p_wr_hot",
+                "PlayerName": "Jordan Vance",
+                "Side": "OVER",
+                "Line": 5.5,
+                "Odds": -110
+              },
+              "result": "WON",
+              "decimal_odds": 1.9090909090909092
+            },
+            {
+              "leg": {
+                "ID": 6,
+                "Owner": "",
+                "GameID": "w1_g3",
+                "Market": "MONEYLINE",
+                "Team": "SEA",
+                "PlayerID": "",
+                "PlayerName": "",
+                "Side": "TEAM",
+                "Line": null,
+                "Odds": -135
+              },
+              "result": "WON",
+              "decimal_odds": 1.7407407407407407
+            }
+          ]
+        },
+        {
+          "slip_id": 3,
+          "result": "WON",
+          "combined_odds": 7.1,
+          "legs": [
+            {
+              "leg": {
+                "ID": 7,
+                "Owner": "",
+                "GameID": "w1_g3",
+                "Market": "TOTAL",
+                "Team": "",
+                "PlayerID": "",
+                "PlayerName": "",
+                "Side": "UNDER",
+                "Line": 44,
+                "Odds": -110
+              },
+              "result": "WON",
+              "decimal_odds": 1.9090909090909092
+            },
+            {
+              "leg": {
+                "ID": 8,
+                "Owner": "",
+                "GameID": "w1_g1",
+                "Market": "SPREAD",
+                "Team": "MIA",
+                "PlayerID": "",
+                "PlayerName": "",
+                "Side": "TEAM",
+                "Line": 3.5,
+                "Odds": -110
+              },
+              "result": "WON",
+              "decimal_odds": 1.9090909090909092
+            },
+            {
+              "leg": {
+                "ID": 9,
+                "Owner": "",
+                "GameID": "w1_g3",
+                "Market": "ANYTIME_TD",
+                "Team": "SEA",
+                "PlayerID": "p_rb_hot",
+                "PlayerName": "Marcus Cole",
+                "Side": "YES",
+                "Line": null,
+                "Odds": 120
+              },
+              "result": "WON",
+              "decimal_odds": 2.2
+            }
+          ]
+        },
+        {
+          "slip_id": 4,
+          "result": "LOST",
+          "combined_odds": 4.1,
+          "legs": [
+            {
+              "leg": {
+                "ID": 10,
+                "Owner": "",
+                "GameID": "w1_g2",
+                "Market": "SPREAD",
+                "Team": "CHI",
+                "PlayerID": "",
+                "PlayerName": "",
+                "Side": "TEAM",
+                "Line": -7.5,
+                "Odds": -110
+              },
+              "result": "WON",
+              "decimal_odds": 1.9090909090909092
+            },
+            {
+              "leg": {
+                "ID": 11,
+                "Owner": "",
+                "GameID": "w1_g2",
+                "Market": "PASS_YDS",
+                "Team": "CHI",
+                "PlayerID": "p_qb_hot",
+                "PlayerName": "Alex Mercer",
+                "Side": "OVER",
+                "Line": 245.5,
+                "Odds": -110
+              },
+              "result": "LOST",
+              "decimal_odds": 1.9090909090909092
+            },
+            {
+              "leg": {
+                "ID": 12,
+                "Owner": "",
+                "GameID": "w1_g1",
+                "Market": "MONEYLINE",
+                "Team": "BUF",
+                "PlayerID": "",
+                "PlayerName": "",
+                "Side": "TEAM",
+                "Line": null,
+                "Odds": -550
+              },
+              "result": "WON",
+              "decimal_odds": 1.1818181818181819
+            }
+          ]
+        },
+        {
+          "slip_id": 5,
+          "result": "LOST",
+          "combined_odds": 5.96,
+          "legs": [
+            {
+              "leg": {
+                "ID": 13,
+                "Owner": "",
+                "GameID": "w1_g2",
+                "Market": "REC_YDS",
+                "Team": "DET",
+                "PlayerID": "p_wr_trap",
+                "PlayerName": "Devon Brooks",
+                "Side": "OVER",
+                "Line": 55.5,
+                "Odds": -110
+              },
+              "result": "LOST",
+              "decimal_odds": 1.9090909090909092
+            },
+            {
+              "leg": {
+                "ID": 14,
+                "Owner": "",
+                "GameID": "w1_g2",
+                "Market": "RUSH_YDS",
+                "Team": "DET",
+                "PlayerID": "p_rb_trap",
+                "PlayerName": "Tyler Vance",
+                "Side": "OVER",
+                "Line": 45.5,
+                "Odds": -110
+              },
+              "result": "LOST",
+              "decimal_odds": 1.9090909090909092
+            },
+            {
+              "leg": {
+                "ID": 15,
+                "Owner": "",
+                "GameID": "w1_g2",
+                "Market": "TOTAL",
+                "Team": "",
+                "PlayerID": "",
+                "PlayerName": "",
+                "Side": "OVER",
+                "Line": 47,
+                "Odds": -110
+              },
+              "result": "LOST",
+              "decimal_odds": 1.9090909090909092
+            }
+          ]
+        },
+        {
+          "slip_id": 6,
+          "result": "LOST",
+          "combined_odds": 5.96,
+          "legs": [
+            {
+              "leg": {
+                "ID": 16,
+                "Owner": "",
+                "GameID": "w1_g2",
+                "Market": "TOTAL",
+                "Team": "",
+                "PlayerID": "",
+                "PlayerName": "",
+                "Side": "OVER",
+                "Line": 43.5,
+                "Odds": -110
+              },
+              "result": "LOST",
+              "decimal_odds": 1.9090909090909092
+            },
+            {
+              "leg": {
+                "ID": 17,
+                "Owner": "",
+                "GameID": "w1_g2",
+                "Market": "TOTAL",
+                "Team": "",
+                "PlayerID": "",
+                "PlayerName": "",
+                "Side": "UNDER",
+                "Line": 43.5,
+                "Odds": -110
+              },
+              "result": "WON",
+              "decimal_odds": 1.9090909090909092
+            },
+            {
+              "leg": {
+                "ID": 18,
+                "Owner": "",
+                "GameID": "w1_g2",
+                "Market": "SPREAD",
+                "Team": "DET",
+                "PlayerID": "",
+                "PlayerName": "",
+                "Side": "TEAM",
+                "Line": 3.5,
+                "Odds": -110
+              },
+              "result": "LOST",
+              "decimal_odds": 1.9090909090909092
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "season": 2025,
+      "week_num": 2,
+      "week_type": "REG",
+      "games": {
+        "w2_g1": {
+          "ID": "w2_g1",
+          "Home": "BUF",
+          "Away": "MIA",
+          "Indoor": true,
+          "Weather": null,
+          "Nfelo": {
+            "HomeSpread": -5.5,
+            "HomeWinProb": 0.68,
+            "HomeQB": "QB_BUF",
+            "AwayQB": "QB_MIA",
+            "HomeQBAdj": 0,
+            "AwayQBAdj": 0
+          },
+          "HomeEPA": {
+            "OffPassEPA": 0.04,
+            "OffRushEPA": 0,
+            "DefPassEPAAllowed": 0.01,
+            "DefRushEPAAllowed": 0.01,
+            "PlaysPerGame": 64,
+            "PassRate": 0.58,
+            "L4OffPassEPA": 0,
+            "L4OffRushEPA": 0,
+            "L4DefPassEPAAllowed": 0,
+            "L4DefRushEPAAllowed": 0,
+            "L4PlaysPerGame": 0,
+            "L4PassRate": 0,
+            "OffPassEPARank": 16,
+            "OffRushEPARank": 16,
+            "DefPassEPAAllowedRank": 16,
+            "DefRushEPAAllowedRank": 16,
+            "PlaysPerGameRank": 0,
+            "PassRateRank": 0
+          },
+          "AwayEPA": {
+            "OffPassEPA": 0.18,
+            "OffRushEPA": 0.06,
+            "DefPassEPAAllowed": 0.22,
+            "DefRushEPAAllowed": 0.16,
+            "PlaysPerGame": 67,
+            "PassRate": 0.62,
+            "L4OffPassEPA": 0,
+            "L4OffRushEPA": 0,
+            "L4DefPassEPAAllowed": 0,
+            "L4DefRushEPAAllowed": 0,
+            "L4PlaysPerGame": 0,
+            "L4PassRate": 0,
+            "OffPassEPARank": 4,
+            "OffRushEPARank": 6,
+            "DefPassEPAAllowedRank": 30,
+            "DefRushEPAAllowedRank": 29,
+            "PlaysPerGameRank": 0,
+            "PassRateRank": 0
+          },
+          "Injuries": {
+            "BUF": [
+              {
+                "AthleteID": "p_wr_out",
+                "FullName": "Sammy Reserve",
+                "Position": "WR",
+                "Status": "Out"
+              }
+            ]
+          }
+        },
+        "w2_g2": {
+          "ID": "w2_g2",
+          "Home": "CHI",
+          "Away": "DET",
+          "Indoor": false,
+          "Weather": {
+            "WindMPH": 22,
+            "GustMPH": 32,
+            "PrecipIn": 0,
+            "TempF": 44
+          },
+          "Nfelo": {
+            "HomeSpread": -3,
+            "HomeWinProb": 0.58,
+            "HomeQB": "QB_CHI",
+            "AwayQB": "QB_DET",
+            "HomeQBAdj": 0,
+            "AwayQBAdj": -35
+          },
+          "HomeEPA": {
+            "OffPassEPA": 0.1,
+            "OffRushEPA": 0.02,
+            "DefPassEPAAllowed": -0.15,
+            "DefRushEPAAllowed": -0.1,
+            "PlaysPerGame": 62,
+            "PassRate": 0.56,
+            "L4OffPassEPA": 0,
+            "L4OffRushEPA": 0,
+            "L4DefPassEPAAllowed": 0,
+            "L4DefRushEPAAllowed": 0,
+            "L4PlaysPerGame": 0,
+            "L4PassRate": 0,
+            "OffPassEPARank": 10,
+            "OffRushEPARank": 12,
+            "DefPassEPAAllowedRank": 3,
+            "DefRushEPAAllowedRank": 4,
+            "PlaysPerGameRank": 0,
+            "PassRateRank": 0
+          },
+          "AwayEPA": {
+            "OffPassEPA": 0.04,
+            "OffRushEPA": 0,
+            "DefPassEPAAllowed": 0.01,
+            "DefRushEPAAllowed": 0.01,
+            "PlaysPerGame": 64,
+            "PassRate": 0.58,
+            "L4OffPassEPA": 0,
+            "L4OffRushEPA": 0,
+            "L4DefPassEPAAllowed": 0,
+            "L4DefRushEPAAllowed": 0,
+            "L4PlaysPerGame": 0,
+            "L4PassRate": 0,
+            "OffPassEPARank": 16,
+            "OffRushEPARank": 16,
+            "DefPassEPAAllowedRank": 16,
+            "DefRushEPAAllowedRank": 16,
+            "PlaysPerGameRank": 0,
+            "PassRateRank": 0
+          },
+          "Injuries": null
+        },
+        "w2_g3": {
+          "ID": "w2_g3",
+          "Home": "SEA",
+          "Away": "LAR",
+          "Indoor": false,
+          "Weather": {
+            "WindMPH": 5,
+            "GustMPH": 8,
+            "PrecipIn": 0.05,
+            "TempF": 52
+          },
+          "Nfelo": {
+            "HomeSpread": -1.5,
+            "HomeWinProb": 0.54,
+            "HomeQB": "QB_SEA",
+            "AwayQB": "QB_LAR",
+            "HomeQBAdj": 0,
+            "AwayQBAdj": 0
+          },
+          "HomeEPA": {
+            "OffPassEPA": 0.04,
+            "OffRushEPA": 0,
+            "DefPassEPAAllowed": 0.01,
+            "DefRushEPAAllowed": 0.01,
+            "PlaysPerGame": 64,
+            "PassRate": 0.58,
+            "L4OffPassEPA": 0,
+            "L4OffRushEPA": 0,
+            "L4DefPassEPAAllowed": 0,
+            "L4DefRushEPAAllowed": 0,
+            "L4PlaysPerGame": 0,
+            "L4PassRate": 0,
+            "OffPassEPARank": 16,
+            "OffRushEPARank": 16,
+            "DefPassEPAAllowedRank": 16,
+            "DefRushEPAAllowedRank": 16,
+            "PlaysPerGameRank": 0,
+            "PassRateRank": 0
+          },
+          "AwayEPA": {
+            "OffPassEPA": 0.18,
+            "OffRushEPA": 0.06,
+            "DefPassEPAAllowed": 0.22,
+            "DefRushEPAAllowed": 0.16,
+            "PlaysPerGame": 67,
+            "PassRate": 0.62,
+            "L4OffPassEPA": 0,
+            "L4OffRushEPA": 0,
+            "L4DefPassEPAAllowed": 0,
+            "L4DefRushEPAAllowed": 0,
+            "L4PlaysPerGame": 0,
+            "L4PassRate": 0,
+            "OffPassEPARank": 4,
+            "OffRushEPARank": 6,
+            "DefPassEPAAllowedRank": 30,
+            "DefRushEPAAllowedRank": 29,
+            "PlaysPerGameRank": 0,
+            "PassRateRank": 0
+          },
+          "Injuries": null
+        }
+      },
+      "stats": {
+        "p_qb_hot": {
+          "Position": "QB",
+          "Games": {
+            "PASS_YDS": [
+              310,
+              295,
+              280,
+              272,
+              268
+            ]
+          },
+          "Usage": null
+        },
+        "p_rb_hot": {
+          "Position": "RB",
+          "Games": {
+            "ANYTIME_TD": [
+              1,
+              1,
+              1,
+              1,
+              0
+            ],
+            "RUSH_YDS": [
+              105,
+              92,
+              88,
+              80,
+              76
+            ]
+          },
+          "Usage": {
+            "Weeks": [
+              {
+                "WeekNum": 3,
+                "OffensePct": 0.78,
+                "TargetShare": 0,
+                "AirYardsShare": 0,
+                "WOPR": 0,
+                "Carries": 20,
+                "Targets": 0,
+                "TotalEPA": 0,
+                "RZOpps": 0
+              },
+              {
+                "WeekNum": 2,
+                "OffensePct": 0.76,
+                "TargetShare": 0,
+                "AirYardsShare": 0,
+                "WOPR": 0,
+                "Carries": 19,
+                "Targets": 0,
+                "TotalEPA": 0,
+                "RZOpps": 0
+              },
+              {
+                "WeekNum": 1,
+                "OffensePct": 0.75,
+                "TargetShare": 0,
+                "AirYardsShare": 0,
+                "WOPR": 0,
+                "Carries": 18,
+                "Targets": 0,
+                "TotalEPA": 0,
+                "RZOpps": 0
+              }
+            ],
+            "Last3SnapAvg": 0.78,
+            "SeasonSnapAvg": 0.7,
+            "Last3TargetShare": 0,
+            "SeasonTargetShare": 0,
+            "Last3WOPR": 0,
+            "AvgCarries": 19
+          }
+        },
+        "p_rb_trap": {
+          "Position": "RB",
+          "Games": {
+            "RUSH_YDS": [
+              42,
+              38,
+              35,
+              30,
+              28
+            ]
+          },
+          "Usage": {
+            "Weeks": [
+              {
+                "WeekNum": 3,
+                "OffensePct": 0.4,
+                "TargetShare": 0,
+                "AirYardsShare": 0,
+                "WOPR": 0,
+                "Carries": 8,
+                "Targets": 0,
+                "TotalEPA": 0,
+                "RZOpps": 0
+              },
+              {
+                "WeekNum": 2,
+                "OffensePct": 0.45,
+                "TargetShare": 0,
+                "AirYardsShare": 0,
+                "WOPR": 0,
+                "Carries": 9,
+                "Targets": 0,
+                "TotalEPA": 0,
+                "RZOpps": 0
+              },
+              {
+                "WeekNum": 1,
+                "OffensePct": 0.72,
+                "TargetShare": 0,
+                "AirYardsShare": 0,
+                "WOPR": 0,
+                "Carries": 18,
+                "Targets": 0,
+                "TotalEPA": 0,
+                "RZOpps": 0
+              }
+            ],
+            "Last3SnapAvg": 0.42,
+            "SeasonSnapAvg": 0.68,
+            "Last3TargetShare": 0,
+            "SeasonTargetShare": 0,
+            "Last3WOPR": 0,
+            "AvgCarries": 9
+          }
+        },
+        "p_wr_hot": {
+          "Position": "WR",
+          "Games": {
+            "RECEPTIONS": [
+              7,
+              7,
+              6,
+              6,
+              6
+            ],
+            "REC_YDS": [
+              92,
+              84,
+              78,
+              75,
+              71
+            ]
+          },
+          "Usage": {
+            "Weeks": [
+              {
+                "WeekNum": 3,
+                "OffensePct": 0.9,
+                "TargetShare": 0.28,
+                "AirYardsShare": 0,
+                "WOPR": 0,
+                "Carries": 0,
+                "Targets": 0,
+                "TotalEPA": 0,
+                "RZOpps": 0
+              },
+              {
+                "WeekNum": 2,
+                "OffensePct": 0.88,
+                "TargetShare": 0.27,
+                "AirYardsShare": 0,
+                "WOPR": 0,
+                "Carries": 0,
+                "Targets": 0,
+                "TotalEPA": 0,
+                "RZOpps": 0
+              },
+              {
+                "WeekNum": 1,
+                "OffensePct": 0.85,
+                "TargetShare": 0.26,
+                "AirYardsShare": 0,
+                "WOPR": 0,
+                "Carries": 0,
+                "Targets": 0,
+                "TotalEPA": 0,
+                "RZOpps": 0
+              }
+            ],
+            "Last3SnapAvg": 0.9,
+            "SeasonSnapAvg": 0.78,
+            "Last3TargetShare": 0.28,
+            "SeasonTargetShare": 0.22,
+            "Last3WOPR": 0,
+            "AvgCarries": 0
+          }
+        },
+        "p_wr_trap": {
+          "Position": "WR",
+          "Games": {
+            "REC_YDS": [
+              48,
+              45,
+              45,
+              40,
+              32
+            ]
+          },
+          "Usage": {
+            "Weeks": [
+              {
+                "WeekNum": 3,
+                "OffensePct": 0.5,
+                "TargetShare": 0.12,
+                "AirYardsShare": 0,
+                "WOPR": 0,
+                "Carries": 0,
+                "Targets": 0,
+                "TotalEPA": 0,
+                "RZOpps": 0
+              },
+              {
+                "WeekNum": 2,
+                "OffensePct": 0.55,
+                "TargetShare": 0.14,
+                "AirYardsShare": 0,
+                "WOPR": 0,
+                "Carries": 0,
+                "Targets": 0,
+                "TotalEPA": 0,
+                "RZOpps": 0
+              },
+              {
+                "WeekNum": 1,
+                "OffensePct": 0.78,
+                "TargetShare": 0.24,
+                "AirYardsShare": 0,
+                "WOPR": 0,
+                "Carries": 0,
+                "Targets": 0,
+                "TotalEPA": 0,
+                "RZOpps": 0
+              }
+            ],
+            "Last3SnapAvg": 0.55,
+            "SeasonSnapAvg": 0.76,
+            "Last3TargetShare": 0.14,
+            "SeasonTargetShare": 0.23,
+            "Last3WOPR": 0,
+            "AvgCarries": 0
+          }
+        }
+      },
+      "slips": [
+        {
+          "slip_id": 7,
+          "result": "WON",
+          "combined_odds": 5.96,
+          "legs": [
+            {
+              "leg": {
+                "ID": 19,
+                "Owner": "",
+                "GameID": "w2_g1",
+                "Market": "PASS_YDS",
+                "Team": "BUF",
+                "PlayerID": "p_qb_hot",
+                "PlayerName": "Alex Mercer",
+                "Side": "OVER",
+                "Line": 255.5,
+                "Odds": -110
+              },
+              "result": "WON",
+              "decimal_odds": 1.9090909090909092
+            },
+            {
+              "leg": {
+                "ID": 20,
+                "Owner": "",
+                "GameID": "w2_g1",
+                "Market": "REC_YDS",
+                "Team": "BUF",
+                "PlayerID": "p_wr_hot",
+                "PlayerName": "Jordan Vance",
+                "Side": "OVER",
+                "Line": 65.5,
+                "Odds": -110
+              },
+              "result": "WON",
+              "decimal_odds": 1.9090909090909092
+            },
+            {
+              "leg": {
+                "ID": 21,
+                "Owner": "",
+                "GameID": "w2_g1",
+                "Market": "SPREAD",
+                "Team": "BUF",
+                "PlayerID": "",
+                "PlayerName": "",
+                "Side": "TEAM",
+                "Line": -2.5,
+                "Odds": -110
+              },
+              "result": "WON",
+              "decimal_odds": 1.9090909090909092
+            }
+          ]
+        },
+        {
+          "slip_id": 8,
+          "result": "LOST",
+          "combined_odds": 5.2,
+          "legs": [
+            {
+              "leg": {
+                "ID": 22,
+                "Owner": "",
+                "GameID": "w2_g3",
+                "Market": "RUSH_YDS",
+                "Team": "SEA",
+                "PlayerID": "p_rb_hot",
+                "PlayerName": "Marcus Cole",
+                "Side": "OVER",
+                "Line": 72.5,
+                "Odds": -115
+              },
+              "result": "WON",
+              "decimal_odds": 1.8695652173913042
+            },
+            {
+              "leg": {
+                "ID": 23,
+                "Owner": "",
+                "GameID": "w2_g3",
+                "Market": "RECEPTIONS",
+                "Team": "SEA",
+                "PlayerID": "p_wr_hot",
+                "PlayerName": "Jordan Vance",
+                "Side": "OVER",
+                "Line": 5.5,
+                "Odds": -110
+              },
+              "result": "WON",
+              "decimal_odds": 1.9090909090909092
+            },
+            {
+              "leg": {
+                "ID": 24,
+                "Owner": "",
+                "GameID": "w2_g3",
+                "Market": "MONEYLINE",
+                "Team": "SEA",
+                "PlayerID": "",
+                "PlayerName": "",
+                "Side": "TEAM",
+                "Line": null,
+                "Odds": -135
+              },
+              "result": "LOST",
+              "decimal_odds": 1.7407407407407407
+            }
+          ]
+        },
+        {
+          "slip_id": 9,
+          "result": "LOST",
+          "combined_odds": 7.1,
+          "legs": [
+            {
+              "leg": {
+                "ID": 25,
+                "Owner": "",
+                "GameID": "w2_g3",
+                "Market": "TOTAL",
+                "Team": "",
+                "PlayerID": "",
+                "PlayerName": "",
+                "Side": "UNDER",
+                "Line": 44,
+                "Odds": -110
+              },
+              "result": "PUSH",
+              "decimal_odds": 1.9090909090909092
+            },
+            {
+              "leg": {
+                "ID": 26,
+                "Owner": "",
+                "GameID": "w2_g1",
+                "Market": "SPREAD",
+                "Team": "MIA",
+                "PlayerID": "",
+                "PlayerName": "",
+                "Side": "TEAM",
+                "Line": 3.5,
+                "Odds": -110
+              },
+              "result": "LOST",
+              "decimal_odds": 1.9090909090909092
+            },
+            {
+              "leg": {
+                "ID": 27,
+                "Owner": "",
+                "GameID": "w2_g3",
+                "Market": "ANYTIME_TD",
+                "Team": "SEA",
+                "PlayerID": "p_rb_hot",
+                "PlayerName": "Marcus Cole",
+                "Side": "YES",
+                "Line": null,
+                "Odds": 120
+              },
+              "result": "WON",
+              "decimal_odds": 2.2
+            }
+          ]
+        },
+        {
+          "slip_id": 10,
+          "result": "LOST",
+          "combined_odds": 4.1,
+          "legs": [
+            {
+              "leg": {
+                "ID": 28,
+                "Owner": "",
+                "GameID": "w2_g2",
+                "Market": "SPREAD",
+                "Team": "CHI",
+                "PlayerID": "",
+                "PlayerName": "",
+                "Side": "TEAM",
+                "Line": -7.5,
+                "Odds": -110
+              },
+              "result": "WON",
+              "decimal_odds": 1.9090909090909092
+            },
+            {
+              "leg": {
+                "ID": 29,
+                "Owner": "",
+                "GameID": "w2_g2",
+                "Market": "PASS_YDS",
+                "Team": "CHI",
+                "PlayerID": "p_qb_hot",
+                "PlayerName": "Alex Mercer",
+                "Side": "OVER",
+                "Line": 245.5,
+                "Odds": -110
+              },
+              "result": "LOST",
+              "decimal_odds": 1.9090909090909092
+            },
+            {
+              "leg": {
+                "ID": 30,
+                "Owner": "",
+                "GameID": "w2_g1",
+                "Market": "MONEYLINE",
+                "Team": "BUF",
+                "PlayerID": "",
+                "PlayerName": "",
+                "Side": "TEAM",
+                "Line": null,
+                "Odds": -550
+              },
+              "result": "WON",
+              "decimal_odds": 1.1818181818181819
+            }
+          ]
+        },
+        {
+          "slip_id": 11,
+          "result": "LOST",
+          "combined_odds": 5.96,
+          "legs": [
+            {
+              "leg": {
+                "ID": 31,
+                "Owner": "",
+                "GameID": "w2_g2",
+                "Market": "REC_YDS",
+                "Team": "DET",
+                "PlayerID": "p_wr_trap",
+                "PlayerName": "Devon Brooks",
+                "Side": "OVER",
+                "Line": 55.5,
+                "Odds": -110
+              },
+              "result": "LOST",
+              "decimal_odds": 1.9090909090909092
+            },
+            {
+              "leg": {
+                "ID": 32,
+                "Owner": "",
+                "GameID": "w2_g2",
+                "Market": "RUSH_YDS",
+                "Team": "DET",
+                "PlayerID": "p_rb_trap",
+                "PlayerName": "Tyler Vance",
+                "Side": "OVER",
+                "Line": 45.5,
+                "Odds": -110
+              },
+              "result": "LOST",
+              "decimal_odds": 1.9090909090909092
+            },
+            {
+              "leg": {
+                "ID": 33,
+                "Owner": "",
+                "GameID": "w2_g2",
+                "Market": "TOTAL",
+                "Team": "",
+                "PlayerID": "",
+                "PlayerName": "",
+                "Side": "OVER",
+                "Line": 47,
+                "Odds": -110
+              },
+              "result": "LOST",
+              "decimal_odds": 1.9090909090909092
+            }
+          ]
+        },
+        {
+          "slip_id": 12,
+          "result": "LOST",
+          "combined_odds": 5.96,
+          "legs": [
+            {
+              "leg": {
+                "ID": 34,
+                "Owner": "",
+                "GameID": "w2_g2",
+                "Market": "TOTAL",
+                "Team": "",
+                "PlayerID": "",
+                "PlayerName": "",
+                "Side": "OVER",
+                "Line": 43.5,
+                "Odds": -110
+              },
+              "result": "LOST",
+              "decimal_odds": 1.9090909090909092
+            },
+            {
+              "leg": {
+                "ID": 35,
+                "Owner": "",
+                "GameID": "w2_g2",
+                "Market": "TOTAL",
+                "Team": "",
+                "PlayerID": "",
+                "PlayerName": "",
+                "Side": "UNDER",
+                "Line": 43.5,
+                "Odds": -110
+              },
+              "result": "WON",
+              "decimal_odds": 1.9090909090909092
+            },
+            {
+              "leg": {
+                "ID": 36,
+                "Owner": "",
+                "GameID": "w2_g2",
+                "Market": "SPREAD",
+                "Team": "DET",
+                "PlayerID": "",
+                "PlayerName": "",
+                "Side": "TEAM",
+                "Line": 3.5,
+                "Odds": -110
+              },
+              "result": "LOST",
+              "decimal_odds": 1.9090909090909092
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "season": 2025,
+      "week_num": 3,
+      "week_type": "REG",
+      "games": {
+        "w3_g1": {
+          "ID": "w3_g1",
+          "Home": "BUF",
+          "Away": "MIA",
+          "Indoor": true,
+          "Weather": null,
+          "Nfelo": {
+            "HomeSpread": -5.5,
+            "HomeWinProb": 0.68,
+            "HomeQB": "QB_BUF",
+            "AwayQB": "QB_MIA",
+            "HomeQBAdj": 0,
+            "AwayQBAdj": 0
+          },
+          "HomeEPA": {
+            "OffPassEPA": 0.04,
+            "OffRushEPA": 0,
+            "DefPassEPAAllowed": 0.01,
+            "DefRushEPAAllowed": 0.01,
+            "PlaysPerGame": 64,
+            "PassRate": 0.58,
+            "L4OffPassEPA": 0,
+            "L4OffRushEPA": 0,
+            "L4DefPassEPAAllowed": 0,
+            "L4DefRushEPAAllowed": 0,
+            "L4PlaysPerGame": 0,
+            "L4PassRate": 0,
+            "OffPassEPARank": 16,
+            "OffRushEPARank": 16,
+            "DefPassEPAAllowedRank": 16,
+            "DefRushEPAAllowedRank": 16,
+            "PlaysPerGameRank": 0,
+            "PassRateRank": 0
+          },
+          "AwayEPA": {
+            "OffPassEPA": 0.18,
+            "OffRushEPA": 0.06,
+            "DefPassEPAAllowed": 0.22,
+            "DefRushEPAAllowed": 0.16,
+            "PlaysPerGame": 67,
+            "PassRate": 0.62,
+            "L4OffPassEPA": 0,
+            "L4OffRushEPA": 0,
+            "L4DefPassEPAAllowed": 0,
+            "L4DefRushEPAAllowed": 0,
+            "L4PlaysPerGame": 0,
+            "L4PassRate": 0,
+            "OffPassEPARank": 4,
+            "OffRushEPARank": 6,
+            "DefPassEPAAllowedRank": 30,
+            "DefRushEPAAllowedRank": 29,
+            "PlaysPerGameRank": 0,
+            "PassRateRank": 0
+          },
+          "Injuries": {
+            "BUF": [
+              {
+                "AthleteID": "p_wr_out",
+                "FullName": "Sammy Reserve",
+                "Position": "WR",
+                "Status": "Out"
+              }
+            ]
+          }
+        },
+        "w3_g2": {
+          "ID": "w3_g2",
+          "Home": "CHI",
+          "Away": "DET",
+          "Indoor": false,
+          "Weather": {
+            "WindMPH": 22,
+            "GustMPH": 32,
+            "PrecipIn": 0,
+            "TempF": 44
+          },
+          "Nfelo": {
+            "HomeSpread": -3,
+            "HomeWinProb": 0.58,
+            "HomeQB": "QB_CHI",
+            "AwayQB": "QB_DET",
+            "HomeQBAdj": 0,
+            "AwayQBAdj": -35
+          },
+          "HomeEPA": {
+            "OffPassEPA": 0.1,
+            "OffRushEPA": 0.02,
+            "DefPassEPAAllowed": -0.15,
+            "DefRushEPAAllowed": -0.1,
+            "PlaysPerGame": 62,
+            "PassRate": 0.56,
+            "L4OffPassEPA": 0,
+            "L4OffRushEPA": 0,
+            "L4DefPassEPAAllowed": 0,
+            "L4DefRushEPAAllowed": 0,
+            "L4PlaysPerGame": 0,
+            "L4PassRate": 0,
+            "OffPassEPARank": 10,
+            "OffRushEPARank": 12,
+            "DefPassEPAAllowedRank": 3,
+            "DefRushEPAAllowedRank": 4,
+            "PlaysPerGameRank": 0,
+            "PassRateRank": 0
+          },
+          "AwayEPA": {
+            "OffPassEPA": 0.04,
+            "OffRushEPA": 0,
+            "DefPassEPAAllowed": 0.01,
+            "DefRushEPAAllowed": 0.01,
+            "PlaysPerGame": 64,
+            "PassRate": 0.58,
+            "L4OffPassEPA": 0,
+            "L4OffRushEPA": 0,
+            "L4DefPassEPAAllowed": 0,
+            "L4DefRushEPAAllowed": 0,
+            "L4PlaysPerGame": 0,
+            "L4PassRate": 0,
+            "OffPassEPARank": 16,
+            "OffRushEPARank": 16,
+            "DefPassEPAAllowedRank": 16,
+            "DefRushEPAAllowedRank": 16,
+            "PlaysPerGameRank": 0,
+            "PassRateRank": 0
+          },
+          "Injuries": null
+        },
+        "w3_g3": {
+          "ID": "w3_g3",
+          "Home": "SEA",
+          "Away": "LAR",
+          "Indoor": false,
+          "Weather": {
+            "WindMPH": 5,
+            "GustMPH": 8,
+            "PrecipIn": 0.05,
+            "TempF": 52
+          },
+          "Nfelo": {
+            "HomeSpread": -1.5,
+            "HomeWinProb": 0.54,
+            "HomeQB": "QB_SEA",
+            "AwayQB": "QB_LAR",
+            "HomeQBAdj": 0,
+            "AwayQBAdj": 0
+          },
+          "HomeEPA": {
+            "OffPassEPA": 0.04,
+            "OffRushEPA": 0,
+            "DefPassEPAAllowed": 0.01,
+            "DefRushEPAAllowed": 0.01,
+            "PlaysPerGame": 64,
+            "PassRate": 0.58,
+            "L4OffPassEPA": 0,
+            "L4OffRushEPA": 0,
+            "L4DefPassEPAAllowed": 0,
+            "L4DefRushEPAAllowed": 0,
+            "L4PlaysPerGame": 0,
+            "L4PassRate": 0,
+            "OffPassEPARank": 16,
+            "OffRushEPARank": 16,
+            "DefPassEPAAllowedRank": 16,
+            "DefRushEPAAllowedRank": 16,
+            "PlaysPerGameRank": 0,
+            "PassRateRank": 0
+          },
+          "AwayEPA": {
+            "OffPassEPA": 0.18,
+            "OffRushEPA": 0.06,
+            "DefPassEPAAllowed": 0.22,
+            "DefRushEPAAllowed": 0.16,
+            "PlaysPerGame": 67,
+            "PassRate": 0.62,
+            "L4OffPassEPA": 0,
+            "L4OffRushEPA": 0,
+            "L4DefPassEPAAllowed": 0,
+            "L4DefRushEPAAllowed": 0,
+            "L4PlaysPerGame": 0,
+            "L4PassRate": 0,
+            "OffPassEPARank": 4,
+            "OffRushEPARank": 6,
+            "DefPassEPAAllowedRank": 30,
+            "DefRushEPAAllowedRank": 29,
+            "PlaysPerGameRank": 0,
+            "PassRateRank": 0
+          },
+          "Injuries": null
+        }
+      },
+      "stats": {
+        "p_qb_hot": {
+          "Position": "QB",
+          "Games": {
+            "PASS_YDS": [
+              310,
+              295,
+              280,
+              272,
+              268
+            ]
+          },
+          "Usage": null
+        },
+        "p_rb_hot": {
+          "Position": "RB",
+          "Games": {
+            "ANYTIME_TD": [
+              1,
+              1,
+              1,
+              1,
+              0
+            ],
+            "RUSH_YDS": [
+              105,
+              92,
+              88,
+              80,
+              76
+            ]
+          },
+          "Usage": {
+            "Weeks": [
+              {
+                "WeekNum": 3,
+                "OffensePct": 0.78,
+                "TargetShare": 0,
+                "AirYardsShare": 0,
+                "WOPR": 0,
+                "Carries": 20,
+                "Targets": 0,
+                "TotalEPA": 0,
+                "RZOpps": 0
+              },
+              {
+                "WeekNum": 2,
+                "OffensePct": 0.76,
+                "TargetShare": 0,
+                "AirYardsShare": 0,
+                "WOPR": 0,
+                "Carries": 19,
+                "Targets": 0,
+                "TotalEPA": 0,
+                "RZOpps": 0
+              },
+              {
+                "WeekNum": 1,
+                "OffensePct": 0.75,
+                "TargetShare": 0,
+                "AirYardsShare": 0,
+                "WOPR": 0,
+                "Carries": 18,
+                "Targets": 0,
+                "TotalEPA": 0,
+                "RZOpps": 0
+              }
+            ],
+            "Last3SnapAvg": 0.78,
+            "SeasonSnapAvg": 0.7,
+            "Last3TargetShare": 0,
+            "SeasonTargetShare": 0,
+            "Last3WOPR": 0,
+            "AvgCarries": 19
+          }
+        },
+        "p_rb_trap": {
+          "Position": "RB",
+          "Games": {
+            "RUSH_YDS": [
+              42,
+              38,
+              35,
+              30,
+              28
+            ]
+          },
+          "Usage": {
+            "Weeks": [
+              {
+                "WeekNum": 3,
+                "OffensePct": 0.4,
+                "TargetShare": 0,
+                "AirYardsShare": 0,
+                "WOPR": 0,
+                "Carries": 8,
+                "Targets": 0,
+                "TotalEPA": 0,
+                "RZOpps": 0
+              },
+              {
+                "WeekNum": 2,
+                "OffensePct": 0.45,
+                "TargetShare": 0,
+                "AirYardsShare": 0,
+                "WOPR": 0,
+                "Carries": 9,
+                "Targets": 0,
+                "TotalEPA": 0,
+                "RZOpps": 0
+              },
+              {
+                "WeekNum": 1,
+                "OffensePct": 0.72,
+                "TargetShare": 0,
+                "AirYardsShare": 0,
+                "WOPR": 0,
+                "Carries": 18,
+                "Targets": 0,
+                "TotalEPA": 0,
+                "RZOpps": 0
+              }
+            ],
+            "Last3SnapAvg": 0.42,
+            "SeasonSnapAvg": 0.68,
+            "Last3TargetShare": 0,
+            "SeasonTargetShare": 0,
+            "Last3WOPR": 0,
+            "AvgCarries": 9
+          }
+        },
+        "p_wr_hot": {
+          "Position": "WR",
+          "Games": {
+            "RECEPTIONS": [
+              7,
+              7,
+              6,
+              6,
+              6
+            ],
+            "REC_YDS": [
+              92,
+              84,
+              78,
+              75,
+              71
+            ]
+          },
+          "Usage": {
+            "Weeks": [
+              {
+                "WeekNum": 3,
+                "OffensePct": 0.9,
+                "TargetShare": 0.28,
+                "AirYardsShare": 0,
+                "WOPR": 0,
+                "Carries": 0,
+                "Targets": 0,
+                "TotalEPA": 0,
+                "RZOpps": 0
+              },
+              {
+                "WeekNum": 2,
+                "OffensePct": 0.88,
+                "TargetShare": 0.27,
+                "AirYardsShare": 0,
+                "WOPR": 0,
+                "Carries": 0,
+                "Targets": 0,
+                "TotalEPA": 0,
+                "RZOpps": 0
+              },
+              {
+                "WeekNum": 1,
+                "OffensePct": 0.85,
+                "TargetShare": 0.26,
+                "AirYardsShare": 0,
+                "WOPR": 0,
+                "Carries": 0,
+                "Targets": 0,
+                "TotalEPA": 0,
+                "RZOpps": 0
+              }
+            ],
+            "Last3SnapAvg": 0.9,
+            "SeasonSnapAvg": 0.78,
+            "Last3TargetShare": 0.28,
+            "SeasonTargetShare": 0.22,
+            "Last3WOPR": 0,
+            "AvgCarries": 0
+          }
+        },
+        "p_wr_trap": {
+          "Position": "WR",
+          "Games": {
+            "REC_YDS": [
+              48,
+              45,
+              45,
+              40,
+              32
+            ]
+          },
+          "Usage": {
+            "Weeks": [
+              {
+                "WeekNum": 3,
+                "OffensePct": 0.5,
+                "TargetShare": 0.12,
+                "AirYardsShare": 0,
+                "WOPR": 0,
+                "Carries": 0,
+                "Targets": 0,
+                "TotalEPA": 0,
+                "RZOpps": 0
+              },
+              {
+                "WeekNum": 2,
+                "OffensePct": 0.55,
+                "TargetShare": 0.14,
+                "AirYardsShare": 0,
+                "WOPR": 0,
+                "Carries": 0,
+                "Targets": 0,
+                "TotalEPA": 0,
+                "RZOpps": 0
+              },
+              {
+                "WeekNum": 1,
+                "OffensePct": 0.78,
+                "TargetShare": 0.24,
+                "AirYardsShare": 0,
+                "WOPR": 0,
+                "Carries": 0,
+                "Targets": 0,
+                "TotalEPA": 0,
+                "RZOpps": 0
+              }
+            ],
+            "Last3SnapAvg": 0.55,
+            "SeasonSnapAvg": 0.76,
+            "Last3TargetShare": 0.14,
+            "SeasonTargetShare": 0.23,
+            "Last3WOPR": 0,
+            "AvgCarries": 0
+          }
+        }
+      },
+      "slips": [
+        {
+          "slip_id": 13,
+          "result": "WON",
+          "combined_odds": 5.96,
+          "legs": [
+            {
+              "leg": {
+                "ID": 37,
+                "Owner": "",
+                "GameID": "w3_g1",
+                "Market": "PASS_YDS",
+                "Team": "BUF",
+                "PlayerID": "p_qb_hot",
+                "PlayerName": "Alex Mercer",
+                "Side": "OVER",
+                "Line": 255.5,
+                "Odds": -110
+              },
+              "result": "WON",
+              "decimal_odds": 1.9090909090909092
+            },
+            {
+              "leg": {
+                "ID": 38,
+                "Owner": "",
+                "GameID": "w3_g1",
+                "Market": "REC_YDS",
+                "Team": "BUF",
+                "PlayerID": "p_wr_hot",
+                "PlayerName": "Jordan Vance",
+                "Side": "OVER",
+                "Line": 65.5,
+                "Odds": -110
+              },
+              "result": "WON",
+              "decimal_odds": 1.9090909090909092
+            },
+            {
+              "leg": {
+                "ID": 39,
+                "Owner": "",
+                "GameID": "w3_g1",
+                "Market": "SPREAD",
+                "Team": "BUF",
+                "PlayerID": "",
+                "PlayerName": "",
+                "Side": "TEAM",
+                "Line": -2.5,
+                "Odds": -110
+              },
+              "result": "WON",
+              "decimal_odds": 1.9090909090909092
+            }
+          ]
+        },
+        {
+          "slip_id": 14,
+          "result": "WON",
+          "combined_odds": 5.2,
+          "legs": [
+            {
+              "leg": {
+                "ID": 40,
+                "Owner": "",
+                "GameID": "w3_g3",
+                "Market": "RUSH_YDS",
+                "Team": "SEA",
+                "PlayerID": "p_rb_hot",
+                "PlayerName": "Marcus Cole",
+                "Side": "OVER",
+                "Line": 72.5,
+                "Odds": -115
+              },
+              "result": "WON",
+              "decimal_odds": 1.8695652173913042
+            },
+            {
+              "leg": {
+                "ID": 41,
+                "Owner": "",
+                "GameID": "w3_g3",
+                "Market": "RECEPTIONS",
+                "Team": "SEA",
+                "PlayerID": "p_wr_hot",
+                "PlayerName": "Jordan Vance",
+                "Side": "OVER",
+                "Line": 5.5,
+                "Odds": -110
+              },
+              "result": "WON",
+              "decimal_odds": 1.9090909090909092
+            },
+            {
+              "leg": {
+                "ID": 42,
+                "Owner": "",
+                "GameID": "w3_g3",
+                "Market": "MONEYLINE",
+                "Team": "SEA",
+                "PlayerID": "",
+                "PlayerName": "",
+                "Side": "TEAM",
+                "Line": null,
+                "Odds": -135
+              },
+              "result": "WON",
+              "decimal_odds": 1.7407407407407407
+            }
+          ]
+        },
+        {
+          "slip_id": 15,
+          "result": "LOST",
+          "combined_odds": 7.1,
+          "legs": [
+            {
+              "leg": {
+                "ID": 43,
+                "Owner": "",
+                "GameID": "w3_g3",
+                "Market": "TOTAL",
+                "Team": "",
+                "PlayerID": "",
+                "PlayerName": "",
+                "Side": "UNDER",
+                "Line": 44,
+                "Odds": -110
+              },
+              "result": "LOST",
+              "decimal_odds": 1.9090909090909092
+            },
+            {
+              "leg": {
+                "ID": 44,
+                "Owner": "",
+                "GameID": "w3_g1",
+                "Market": "SPREAD",
+                "Team": "MIA",
+                "PlayerID": "",
+                "PlayerName": "",
+                "Side": "TEAM",
+                "Line": 3.5,
+                "Odds": -110
+              },
+              "result": "WON",
+              "decimal_odds": 1.9090909090909092
+            },
+            {
+              "leg": {
+                "ID": 45,
+                "Owner": "",
+                "GameID": "w3_g3",
+                "Market": "ANYTIME_TD",
+                "Team": "SEA",
+                "PlayerID": "p_rb_hot",
+                "PlayerName": "Marcus Cole",
+                "Side": "YES",
+                "Line": null,
+                "Odds": 120
+              },
+              "result": "WON",
+              "decimal_odds": 2.2
+            }
+          ]
+        },
+        {
+          "slip_id": 16,
+          "result": "LOST",
+          "combined_odds": 4.1,
+          "legs": [
+            {
+              "leg": {
+                "ID": 46,
+                "Owner": "",
+                "GameID": "w3_g2",
+                "Market": "SPREAD",
+                "Team": "CHI",
+                "PlayerID": "",
+                "PlayerName": "",
+                "Side": "TEAM",
+                "Line": -7.5,
+                "Odds": -110
+              },
+              "result": "LOST",
+              "decimal_odds": 1.9090909090909092
+            },
+            {
+              "leg": {
+                "ID": 47,
+                "Owner": "",
+                "GameID": "w3_g2",
+                "Market": "PASS_YDS",
+                "Team": "CHI",
+                "PlayerID": "p_qb_hot",
+                "PlayerName": "Alex Mercer",
+                "Side": "OVER",
+                "Line": 245.5,
+                "Odds": -110
+              },
+              "result": "LOST",
+              "decimal_odds": 1.9090909090909092
+            },
+            {
+              "leg": {
+                "ID": 48,
+                "Owner": "",
+                "GameID": "w3_g1",
+                "Market": "MONEYLINE",
+                "Team": "BUF",
+                "PlayerID": "",
+                "PlayerName": "",
+                "Side": "TEAM",
+                "Line": null,
+                "Odds": -550
+              },
+              "result": "WON",
+              "decimal_odds": 1.1818181818181819
+            }
+          ]
+        },
+        {
+          "slip_id": 17,
+          "result": "LOST",
+          "combined_odds": 5.96,
+          "legs": [
+            {
+              "leg": {
+                "ID": 49,
+                "Owner": "",
+                "GameID": "w3_g2",
+                "Market": "REC_YDS",
+                "Team": "DET",
+                "PlayerID": "p_wr_trap",
+                "PlayerName": "Devon Brooks",
+                "Side": "OVER",
+                "Line": 55.5,
+                "Odds": -110
+              },
+              "result": "LOST",
+              "decimal_odds": 1.9090909090909092
+            },
+            {
+              "leg": {
+                "ID": 50,
+                "Owner": "",
+                "GameID": "w3_g2",
+                "Market": "RUSH_YDS",
+                "Team": "DET",
+                "PlayerID": "p_rb_trap",
+                "PlayerName": "Tyler Vance",
+                "Side": "OVER",
+                "Line": 45.5,
+                "Odds": -110
+              },
+              "result": "LOST",
+              "decimal_odds": 1.9090909090909092
+            },
+            {
+              "leg": {
+                "ID": 51,
+                "Owner": "",
+                "GameID": "w3_g2",
+                "Market": "TOTAL",
+                "Team": "",
+                "PlayerID": "",
+                "PlayerName": "",
+                "Side": "OVER",
+                "Line": 47,
+                "Odds": -110
+              },
+              "result": "LOST",
+              "decimal_odds": 1.9090909090909092
+            }
+          ]
+        },
+        {
+          "slip_id": 18,
+          "result": "LOST",
+          "combined_odds": 5.96,
+          "legs": [
+            {
+              "leg": {
+                "ID": 52,
+                "Owner": "",
+                "GameID": "w3_g2",
+                "Market": "TOTAL",
+                "Team": "",
+                "PlayerID": "",
+                "PlayerName": "",
+                "Side": "OVER",
+                "Line": 43.5,
+                "Odds": -110
+              },
+              "result": "LOST",
+              "decimal_odds": 1.9090909090909092
+            },
+            {
+              "leg": {
+                "ID": 53,
+                "Owner": "",
+                "GameID": "w3_g2",
+                "Market": "TOTAL",
+                "Team": "",
+                "PlayerID": "",
+                "PlayerName": "",
+                "Side": "UNDER",
+                "Line": 43.5,
+                "Odds": -110
+              },
+              "result": "WON",
+              "decimal_odds": 1.9090909090909092
+            },
+            {
+              "leg": {
+                "ID": 54,
+                "Owner": "",
+                "GameID": "w3_g2",
+                "Market": "SPREAD",
+                "Team": "DET",
+                "PlayerID": "",
+                "PlayerName": "",
+                "Side": "TEAM",
+                "Line": 3.5,
+                "Odds": -110
+              },
+              "result": "LOST",
+              "decimal_odds": 1.9090909090909092
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "season": 2025,
+      "week_num": 4,
+      "week_type": "REG",
+      "games": {
+        "w4_g1": {
+          "ID": "w4_g1",
+          "Home": "BUF",
+          "Away": "MIA",
+          "Indoor": true,
+          "Weather": null,
+          "Nfelo": {
+            "HomeSpread": -5.5,
+            "HomeWinProb": 0.68,
+            "HomeQB": "QB_BUF",
+            "AwayQB": "QB_MIA",
+            "HomeQBAdj": 0,
+            "AwayQBAdj": 0
+          },
+          "HomeEPA": {
+            "OffPassEPA": 0.04,
+            "OffRushEPA": 0,
+            "DefPassEPAAllowed": 0.01,
+            "DefRushEPAAllowed": 0.01,
+            "PlaysPerGame": 64,
+            "PassRate": 0.58,
+            "L4OffPassEPA": 0,
+            "L4OffRushEPA": 0,
+            "L4DefPassEPAAllowed": 0,
+            "L4DefRushEPAAllowed": 0,
+            "L4PlaysPerGame": 0,
+            "L4PassRate": 0,
+            "OffPassEPARank": 16,
+            "OffRushEPARank": 16,
+            "DefPassEPAAllowedRank": 16,
+            "DefRushEPAAllowedRank": 16,
+            "PlaysPerGameRank": 0,
+            "PassRateRank": 0
+          },
+          "AwayEPA": {
+            "OffPassEPA": 0.18,
+            "OffRushEPA": 0.06,
+            "DefPassEPAAllowed": 0.22,
+            "DefRushEPAAllowed": 0.16,
+            "PlaysPerGame": 67,
+            "PassRate": 0.62,
+            "L4OffPassEPA": 0,
+            "L4OffRushEPA": 0,
+            "L4DefPassEPAAllowed": 0,
+            "L4DefRushEPAAllowed": 0,
+            "L4PlaysPerGame": 0,
+            "L4PassRate": 0,
+            "OffPassEPARank": 4,
+            "OffRushEPARank": 6,
+            "DefPassEPAAllowedRank": 30,
+            "DefRushEPAAllowedRank": 29,
+            "PlaysPerGameRank": 0,
+            "PassRateRank": 0
+          },
+          "Injuries": {
+            "BUF": [
+              {
+                "AthleteID": "p_wr_out",
+                "FullName": "Sammy Reserve",
+                "Position": "WR",
+                "Status": "Out"
+              }
+            ]
+          }
+        },
+        "w4_g2": {
+          "ID": "w4_g2",
+          "Home": "CHI",
+          "Away": "DET",
+          "Indoor": false,
+          "Weather": {
+            "WindMPH": 22,
+            "GustMPH": 32,
+            "PrecipIn": 0,
+            "TempF": 44
+          },
+          "Nfelo": {
+            "HomeSpread": -3,
+            "HomeWinProb": 0.58,
+            "HomeQB": "QB_CHI",
+            "AwayQB": "QB_DET",
+            "HomeQBAdj": 0,
+            "AwayQBAdj": -35
+          },
+          "HomeEPA": {
+            "OffPassEPA": 0.1,
+            "OffRushEPA": 0.02,
+            "DefPassEPAAllowed": -0.15,
+            "DefRushEPAAllowed": -0.1,
+            "PlaysPerGame": 62,
+            "PassRate": 0.56,
+            "L4OffPassEPA": 0,
+            "L4OffRushEPA": 0,
+            "L4DefPassEPAAllowed": 0,
+            "L4DefRushEPAAllowed": 0,
+            "L4PlaysPerGame": 0,
+            "L4PassRate": 0,
+            "OffPassEPARank": 10,
+            "OffRushEPARank": 12,
+            "DefPassEPAAllowedRank": 3,
+            "DefRushEPAAllowedRank": 4,
+            "PlaysPerGameRank": 0,
+            "PassRateRank": 0
+          },
+          "AwayEPA": {
+            "OffPassEPA": 0.04,
+            "OffRushEPA": 0,
+            "DefPassEPAAllowed": 0.01,
+            "DefRushEPAAllowed": 0.01,
+            "PlaysPerGame": 64,
+            "PassRate": 0.58,
+            "L4OffPassEPA": 0,
+            "L4OffRushEPA": 0,
+            "L4DefPassEPAAllowed": 0,
+            "L4DefRushEPAAllowed": 0,
+            "L4PlaysPerGame": 0,
+            "L4PassRate": 0,
+            "OffPassEPARank": 16,
+            "OffRushEPARank": 16,
+            "DefPassEPAAllowedRank": 16,
+            "DefRushEPAAllowedRank": 16,
+            "PlaysPerGameRank": 0,
+            "PassRateRank": 0
+          },
+          "Injuries": null
+        },
+        "w4_g3": {
+          "ID": "w4_g3",
+          "Home": "SEA",
+          "Away": "LAR",
+          "Indoor": false,
+          "Weather": {
+            "WindMPH": 5,
+            "GustMPH": 8,
+            "PrecipIn": 0.05,
+            "TempF": 52
+          },
+          "Nfelo": {
+            "HomeSpread": -1.5,
+            "HomeWinProb": 0.54,
+            "HomeQB": "QB_SEA",
+            "AwayQB": "QB_LAR",
+            "HomeQBAdj": 0,
+            "AwayQBAdj": 0
+          },
+          "HomeEPA": {
+            "OffPassEPA": 0.04,
+            "OffRushEPA": 0,
+            "DefPassEPAAllowed": 0.01,
+            "DefRushEPAAllowed": 0.01,
+            "PlaysPerGame": 64,
+            "PassRate": 0.58,
+            "L4OffPassEPA": 0,
+            "L4OffRushEPA": 0,
+            "L4DefPassEPAAllowed": 0,
+            "L4DefRushEPAAllowed": 0,
+            "L4PlaysPerGame": 0,
+            "L4PassRate": 0,
+            "OffPassEPARank": 16,
+            "OffRushEPARank": 16,
+            "DefPassEPAAllowedRank": 16,
+            "DefRushEPAAllowedRank": 16,
+            "PlaysPerGameRank": 0,
+            "PassRateRank": 0
+          },
+          "AwayEPA": {
+            "OffPassEPA": 0.18,
+            "OffRushEPA": 0.06,
+            "DefPassEPAAllowed": 0.22,
+            "DefRushEPAAllowed": 0.16,
+            "PlaysPerGame": 67,
+            "PassRate": 0.62,
+            "L4OffPassEPA": 0,
+            "L4OffRushEPA": 0,
+            "L4DefPassEPAAllowed": 0,
+            "L4DefRushEPAAllowed": 0,
+            "L4PlaysPerGame": 0,
+            "L4PassRate": 0,
+            "OffPassEPARank": 4,
+            "OffRushEPARank": 6,
+            "DefPassEPAAllowedRank": 30,
+            "DefRushEPAAllowedRank": 29,
+            "PlaysPerGameRank": 0,
+            "PassRateRank": 0
+          },
+          "Injuries": null
+        }
+      },
+      "stats": {
+        "p_qb_hot": {
+          "Position": "QB",
+          "Games": {
+            "PASS_YDS": [
+              310,
+              295,
+              280,
+              272,
+              268
+            ]
+          },
+          "Usage": null
+        },
+        "p_rb_hot": {
+          "Position": "RB",
+          "Games": {
+            "ANYTIME_TD": [
+              1,
+              1,
+              1,
+              1,
+              0
+            ],
+            "RUSH_YDS": [
+              105,
+              92,
+              88,
+              80,
+              76
+            ]
+          },
+          "Usage": {
+            "Weeks": [
+              {
+                "WeekNum": 3,
+                "OffensePct": 0.78,
+                "TargetShare": 0,
+                "AirYardsShare": 0,
+                "WOPR": 0,
+                "Carries": 20,
+                "Targets": 0,
+                "TotalEPA": 0,
+                "RZOpps": 0
+              },
+              {
+                "WeekNum": 2,
+                "OffensePct": 0.76,
+                "TargetShare": 0,
+                "AirYardsShare": 0,
+                "WOPR": 0,
+                "Carries": 19,
+                "Targets": 0,
+                "TotalEPA": 0,
+                "RZOpps": 0
+              },
+              {
+                "WeekNum": 1,
+                "OffensePct": 0.75,
+                "TargetShare": 0,
+                "AirYardsShare": 0,
+                "WOPR": 0,
+                "Carries": 18,
+                "Targets": 0,
+                "TotalEPA": 0,
+                "RZOpps": 0
+              }
+            ],
+            "Last3SnapAvg": 0.78,
+            "SeasonSnapAvg": 0.7,
+            "Last3TargetShare": 0,
+            "SeasonTargetShare": 0,
+            "Last3WOPR": 0,
+            "AvgCarries": 19
+          }
+        },
+        "p_rb_trap": {
+          "Position": "RB",
+          "Games": {
+            "RUSH_YDS": [
+              42,
+              38,
+              35,
+              30,
+              28
+            ]
+          },
+          "Usage": {
+            "Weeks": [
+              {
+                "WeekNum": 3,
+                "OffensePct": 0.4,
+                "TargetShare": 0,
+                "AirYardsShare": 0,
+                "WOPR": 0,
+                "Carries": 8,
+                "Targets": 0,
+                "TotalEPA": 0,
+                "RZOpps": 0
+              },
+              {
+                "WeekNum": 2,
+                "OffensePct": 0.45,
+                "TargetShare": 0,
+                "AirYardsShare": 0,
+                "WOPR": 0,
+                "Carries": 9,
+                "Targets": 0,
+                "TotalEPA": 0,
+                "RZOpps": 0
+              },
+              {
+                "WeekNum": 1,
+                "OffensePct": 0.72,
+                "TargetShare": 0,
+                "AirYardsShare": 0,
+                "WOPR": 0,
+                "Carries": 18,
+                "Targets": 0,
+                "TotalEPA": 0,
+                "RZOpps": 0
+              }
+            ],
+            "Last3SnapAvg": 0.42,
+            "SeasonSnapAvg": 0.68,
+            "Last3TargetShare": 0,
+            "SeasonTargetShare": 0,
+            "Last3WOPR": 0,
+            "AvgCarries": 9
+          }
+        },
+        "p_wr_hot": {
+          "Position": "WR",
+          "Games": {
+            "RECEPTIONS": [
+              7,
+              7,
+              6,
+              6,
+              6
+            ],
+            "REC_YDS": [
+              92,
+              84,
+              78,
+              75,
+              71
+            ]
+          },
+          "Usage": {
+            "Weeks": [
+              {
+                "WeekNum": 3,
+                "OffensePct": 0.9,
+                "TargetShare": 0.28,
+                "AirYardsShare": 0,
+                "WOPR": 0,
+                "Carries": 0,
+                "Targets": 0,
+                "TotalEPA": 0,
+                "RZOpps": 0
+              },
+              {
+                "WeekNum": 2,
+                "OffensePct": 0.88,
+                "TargetShare": 0.27,
+                "AirYardsShare": 0,
+                "WOPR": 0,
+                "Carries": 0,
+                "Targets": 0,
+                "TotalEPA": 0,
+                "RZOpps": 0
+              },
+              {
+                "WeekNum": 1,
+                "OffensePct": 0.85,
+                "TargetShare": 0.26,
+                "AirYardsShare": 0,
+                "WOPR": 0,
+                "Carries": 0,
+                "Targets": 0,
+                "TotalEPA": 0,
+                "RZOpps": 0
+              }
+            ],
+            "Last3SnapAvg": 0.9,
+            "SeasonSnapAvg": 0.78,
+            "Last3TargetShare": 0.28,
+            "SeasonTargetShare": 0.22,
+            "Last3WOPR": 0,
+            "AvgCarries": 0
+          }
+        },
+        "p_wr_trap": {
+          "Position": "WR",
+          "Games": {
+            "REC_YDS": [
+              48,
+              45,
+              45,
+              40,
+              32
+            ]
+          },
+          "Usage": {
+            "Weeks": [
+              {
+                "WeekNum": 3,
+                "OffensePct": 0.5,
+                "TargetShare": 0.12,
+                "AirYardsShare": 0,
+                "WOPR": 0,
+                "Carries": 0,
+                "Targets": 0,
+                "TotalEPA": 0,
+                "RZOpps": 0
+              },
+              {
+                "WeekNum": 2,
+                "OffensePct": 0.55,
+                "TargetShare": 0.14,
+                "AirYardsShare": 0,
+                "WOPR": 0,
+                "Carries": 0,
+                "Targets": 0,
+                "TotalEPA": 0,
+                "RZOpps": 0
+              },
+              {
+                "WeekNum": 1,
+                "OffensePct": 0.78,
+                "TargetShare": 0.24,
+                "AirYardsShare": 0,
+                "WOPR": 0,
+                "Carries": 0,
+                "Targets": 0,
+                "TotalEPA": 0,
+                "RZOpps": 0
+              }
+            ],
+            "Last3SnapAvg": 0.55,
+            "SeasonSnapAvg": 0.76,
+            "Last3TargetShare": 0.14,
+            "SeasonTargetShare": 0.23,
+            "Last3WOPR": 0,
+            "AvgCarries": 0
+          }
+        }
+      },
+      "slips": [
+        {
+          "slip_id": 19,
+          "result": "LOST",
+          "combined_odds": 5.96,
+          "legs": [
+            {
+              "leg": {
+                "ID": 55,
+                "Owner": "",
+                "GameID": "w4_g1",
+                "Market": "PASS_YDS",
+                "Team": "BUF",
+                "PlayerID": "p_qb_hot",
+                "PlayerName": "Alex Mercer",
+                "Side": "OVER",
+                "Line": 255.5,
+                "Odds": -110
+              },
+              "result": "WON",
+              "decimal_odds": 1.9090909090909092
+            },
+            {
+              "leg": {
+                "ID": 56,
+                "Owner": "",
+                "GameID": "w4_g1",
+                "Market": "REC_YDS",
+                "Team": "BUF",
+                "PlayerID": "p_wr_hot",
+                "PlayerName": "Jordan Vance",
+                "Side": "OVER",
+                "Line": 65.5,
+                "Odds": -110
+              },
+              "result": "LOST",
+              "decimal_odds": 1.9090909090909092
+            },
+            {
+              "leg": {
+                "ID": 57,
+                "Owner": "",
+                "GameID": "w4_g1",
+                "Market": "SPREAD",
+                "Team": "BUF",
+                "PlayerID": "",
+                "PlayerName": "",
+                "Side": "TEAM",
+                "Line": -2.5,
+                "Odds": -110
+              },
+              "result": "WON",
+              "decimal_odds": 1.9090909090909092
+            }
+          ]
+        },
+        {
+          "slip_id": 20,
+          "result": "LOST",
+          "combined_odds": 5.2,
+          "legs": [
+            {
+              "leg": {
+                "ID": 58,
+                "Owner": "",
+                "GameID": "w4_g3",
+                "Market": "RUSH_YDS",
+                "Team": "SEA",
+                "PlayerID": "p_rb_hot",
+                "PlayerName": "Marcus Cole",
+                "Side": "OVER",
+                "Line": 72.5,
+                "Odds": -115
+              },
+              "result": "WON",
+              "decimal_odds": 1.8695652173913042
+            },
+            {
+              "leg": {
+                "ID": 59,
+                "Owner": "",
+                "GameID": "w4_g3",
+                "Market": "RECEPTIONS",
+                "Team": "SEA",
+                "PlayerID": "p_wr_hot",
+                "PlayerName": "Jordan Vance",
+                "Side": "OVER",
+                "Line": 5.5,
+                "Odds": -110
+              },
+              "result": "WON",
+              "decimal_odds": 1.9090909090909092
+            },
+            {
+              "leg": {
+                "ID": 60,
+                "Owner": "",
+                "GameID": "w4_g3",
+                "Market": "MONEYLINE",
+                "Team": "SEA",
+                "PlayerID": "",
+                "PlayerName": "",
+                "Side": "TEAM",
+                "Line": null,
+                "Odds": -135
+              },
+              "result": "LOST",
+              "decimal_odds": 1.7407407407407407
+            }
+          ]
+        },
+        {
+          "slip_id": 21,
+          "result": "LOST",
+          "combined_odds": 7.1,
+          "legs": [
+            {
+              "leg": {
+                "ID": 61,
+                "Owner": "",
+                "GameID": "w4_g3",
+                "Market": "TOTAL",
+                "Team": "",
+                "PlayerID": "",
+                "PlayerName": "",
+                "Side": "UNDER",
+                "Line": 44,
+                "Odds": -110
+              },
+              "result": "LOST",
+              "decimal_odds": 1.9090909090909092
+            },
+            {
+              "leg": {
+                "ID": 62,
+                "Owner": "",
+                "GameID": "w4_g1",
+                "Market": "SPREAD",
+                "Team": "MIA",
+                "PlayerID": "",
+                "PlayerName": "",
+                "Side": "TEAM",
+                "Line": 3.5,
+                "Odds": -110
+              },
+              "result": "LOST",
+              "decimal_odds": 1.9090909090909092
+            },
+            {
+              "leg": {
+                "ID": 63,
+                "Owner": "",
+                "GameID": "w4_g3",
+                "Market": "ANYTIME_TD",
+                "Team": "SEA",
+                "PlayerID": "p_rb_hot",
+                "PlayerName": "Marcus Cole",
+                "Side": "YES",
+                "Line": null,
+                "Odds": 120
+              },
+              "result": "WON",
+              "decimal_odds": 2.2
+            }
+          ]
+        },
+        {
+          "slip_id": 22,
+          "result": "LOST",
+          "combined_odds": 4.1,
+          "legs": [
+            {
+              "leg": {
+                "ID": 64,
+                "Owner": "",
+                "GameID": "w4_g2",
+                "Market": "SPREAD",
+                "Team": "CHI",
+                "PlayerID": "",
+                "PlayerName": "",
+                "Side": "TEAM",
+                "Line": -7.5,
+                "Odds": -110
+              },
+              "result": "LOST",
+              "decimal_odds": 1.9090909090909092
+            },
+            {
+              "leg": {
+                "ID": 65,
+                "Owner": "",
+                "GameID": "w4_g2",
+                "Market": "PASS_YDS",
+                "Team": "CHI",
+                "PlayerID": "p_qb_hot",
+                "PlayerName": "Alex Mercer",
+                "Side": "OVER",
+                "Line": 245.5,
+                "Odds": -110
+              },
+              "result": "LOST",
+              "decimal_odds": 1.9090909090909092
+            },
+            {
+              "leg": {
+                "ID": 66,
+                "Owner": "",
+                "GameID": "w4_g1",
+                "Market": "MONEYLINE",
+                "Team": "BUF",
+                "PlayerID": "",
+                "PlayerName": "",
+                "Side": "TEAM",
+                "Line": null,
+                "Odds": -550
+              },
+              "result": "WON",
+              "decimal_odds": 1.1818181818181819
+            }
+          ]
+        },
+        {
+          "slip_id": 23,
+          "result": "LOST",
+          "combined_odds": 5.96,
+          "legs": [
+            {
+              "leg": {
+                "ID": 67,
+                "Owner": "",
+                "GameID": "w4_g2",
+                "Market": "REC_YDS",
+                "Team": "DET",
+                "PlayerID": "p_wr_trap",
+                "PlayerName": "Devon Brooks",
+                "Side": "OVER",
+                "Line": 55.5,
+                "Odds": -110
+              },
+              "result": "LOST",
+              "decimal_odds": 1.9090909090909092
+            },
+            {
+              "leg": {
+                "ID": 68,
+                "Owner": "",
+                "GameID": "w4_g2",
+                "Market": "RUSH_YDS",
+                "Team": "DET",
+                "PlayerID": "p_rb_trap",
+                "PlayerName": "Tyler Vance",
+                "Side": "OVER",
+                "Line": 45.5,
+                "Odds": -110
+              },
+              "result": "LOST",
+              "decimal_odds": 1.9090909090909092
+            },
+            {
+              "leg": {
+                "ID": 69,
+                "Owner": "",
+                "GameID": "w4_g2",
+                "Market": "TOTAL",
+                "Team": "",
+                "PlayerID": "",
+                "PlayerName": "",
+                "Side": "OVER",
+                "Line": 47,
+                "Odds": -110
+              },
+              "result": "LOST",
+              "decimal_odds": 1.9090909090909092
+            }
+          ]
+        },
+        {
+          "slip_id": 24,
+          "result": "LOST",
+          "combined_odds": 5.96,
+          "legs": [
+            {
+              "leg": {
+                "ID": 70,
+                "Owner": "",
+                "GameID": "w4_g2",
+                "Market": "TOTAL",
+                "Team": "",
+                "PlayerID": "",
+                "PlayerName": "",
+                "Side": "OVER",
+                "Line": 43.5,
+                "Odds": -110
+              },
+              "result": "LOST",
+              "decimal_odds": 1.9090909090909092
+            },
+            {
+              "leg": {
+                "ID": 71,
+                "Owner": "",
+                "GameID": "w4_g2",
+                "Market": "TOTAL",
+                "Team": "",
+                "PlayerID": "",
+                "PlayerName": "",
+                "Side": "UNDER",
+                "Line": 43.5,
+                "Odds": -110
+              },
+              "result": "WON",
+              "decimal_odds": 1.9090909090909092
+            },
+            {
+              "leg": {
+                "ID": 72,
+                "Owner": "",
+                "GameID": "w4_g2",
+                "Market": "SPREAD",
+                "Team": "DET",
+                "PlayerID": "",
+                "PlayerName": "",
+                "Side": "TEAM",
+                "Line": 3.5,
+                "Odds": -110
+              },
+              "result": "LOST",
+              "decimal_odds": 1.9090909090909092
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "coverage": {
+    "total_legs": 72,
+    "with_game_logs": 32,
+    "with_injuries": 20,
+    "with_nflverse": 72,
+    "with_nfelo": 72,
+    "with_odds": 72
+  }
+}

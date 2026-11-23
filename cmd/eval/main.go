@@ -36,6 +36,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	fs.SetOutput(stderr)
 
 	dbPath := fs.String("db", "", "path to SQLite database (opened read-only)")
+	datasetPath := fs.String("dataset", "", "path to replay dataset JSON file (mutually exclusive with --db)")
+	allRubrics := fs.Bool("all", false, "evaluate all built-in rubrics and emit suite calibration + diffs")
 	rubricName := fs.String("rubric", analyzer.RubricV1.Name, "built-in rubric name for single-rubric eval")
 	baselineName := fs.String("baseline", "", "baseline built-in rubric name for comparison")
 	candidateName := fs.String("candidate", "", "candidate built-in rubric name for comparison")
@@ -43,38 +45,61 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	season := fs.Int("season", 0, "filter to season year (0 = all)")
 	fromWeek := fs.Int("from-week", 0, "filter to week >= from-week (0 = unbounded)")
 	toWeek := fs.Int("to-week", 0, "filter to week <= to-week (0 = unbounded)")
-	format := fs.String("format", "text", "output format: text or json")
+	format := fs.String("format", "text", "output format: text, json, or markdown")
 
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 
-	if strings.TrimSpace(*dbPath) == "" {
-		return errors.New("--db is required")
+	hasDB := strings.TrimSpace(*dbPath) != ""
+	hasDataset := strings.TrimSpace(*datasetPath) != ""
+	if hasDB && hasDataset {
+		return errors.New("--db and --dataset are mutually exclusive")
 	}
-	if *format != "text" && *format != "json" {
-		return fmt.Errorf("unsupported --format %q (want text or json)", *format)
+	if !hasDB && !hasDataset {
+		return errors.New("--db or --dataset is required")
 	}
-
-	database, err := db.OpenReadOnly(*dbPath)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = database.Close() }()
-
-	store := db.NewStore(database)
-	defer func() { _ = store.Close() }()
-
-	dataset, err := eval.LoadDataset(ctx, store, eval.ReplayFilter{
-		Season:   *season,
-		FromWeek: *fromWeek,
-		ToWeek:   *toWeek,
-	})
-	if err != nil {
-		return err
+	if *format != "text" && *format != "json" && *format != "markdown" {
+		return fmt.Errorf("unsupported --format %q (want text, json, or markdown)", *format)
 	}
 
 	compareMode := *baselineName != "" || *candidateName != "" || *candidateFile != ""
+	if *allRubrics && compareMode {
+		return errors.New("--all cannot be combined with --baseline, --candidate, or --candidate-file")
+	}
+
+	var (
+		dataset eval.ReplayDataset
+		err     error
+	)
+	if hasDataset {
+		dataset, err = eval.LoadDatasetJSON(*datasetPath)
+		if err != nil {
+			return err
+		}
+	} else {
+		dataset, err = loadDatasetFromDB(ctx, *dbPath, eval.ReplayFilter{
+			Season:   *season,
+			FromWeek: *fromWeek,
+			ToWeek:   *toWeek,
+		})
+		if err != nil {
+			return err
+		}
+	}
+
+	if *allRubrics {
+		suite := eval.EvaluateAll(dataset, analyzer.BuiltInRubrics())
+		switch *format {
+		case "json":
+			return writeJSON(stdout, suite)
+		case "markdown":
+			return writeSuiteMarkdown(stdout, suite)
+		default:
+			return writeSuiteText(stdout, suite)
+		}
+	}
+
 	if !compareMode {
 		rubric, ok := analyzer.RubricByName(*rubricName)
 		if !ok {
@@ -85,10 +110,14 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			)
 		}
 		report := eval.Evaluate(dataset, rubric)
-		if *format == "json" {
+		switch *format {
+		case "json":
 			return writeJSON(stdout, report)
+		case "markdown":
+			return writeReportMarkdown(stdout, report)
+		default:
+			return writeReportText(stdout, report)
 		}
-		return writeReportText(stdout, report)
 	}
 
 	baseName := *baselineName
@@ -113,14 +142,31 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	candReport := eval.Evaluate(dataset, candRubric)
 	diff := eval.Compare(baseReport, candReport)
 
-	if *format == "json" {
+	switch *format {
+	case "json":
 		return writeJSON(stdout, diffJSONOutput{
 			Baseline:  baseReport,
 			Candidate: candReport,
 			Diff:      diff,
 		})
+	case "markdown":
+		return writeDiffMarkdown(stdout, baseReport, candReport, diff)
+	default:
+		return writeDiffText(stdout, baseReport, candReport, diff)
 	}
-	return writeDiffText(stdout, baseReport, candReport, diff)
+}
+
+func loadDatasetFromDB(ctx context.Context, dbPath string, filter eval.ReplayFilter) (eval.ReplayDataset, error) {
+	database, err := db.OpenReadOnly(dbPath)
+	if err != nil {
+		return eval.ReplayDataset{}, err
+	}
+	defer func() { _ = database.Close() }()
+
+	store := db.NewStore(database)
+	defer func() { _ = store.Close() }()
+
+	return eval.LoadDataset(ctx, store, filter)
 }
 
 func loadCandidateRubric(name, file string) (analyzer.Rubric, error) {
@@ -324,4 +370,170 @@ func writeMigrationsTable(w io.Writer, migrations []eval.MigrationCell) error {
 		return ew.err
 	}
 	return tw.Flush()
+}
+
+func writeSuiteText(w io.Writer, suite eval.SuiteReport) error {
+	ew := &errWriter{w: w}
+	ew.printf("Suite (active: %s)\n", suite.ActiveRubric)
+	if ew.err != nil {
+		return ew.err
+	}
+	for i, r := range suite.Reports {
+		if i > 0 {
+			ew.println()
+			if ew.err != nil {
+				return ew.err
+			}
+		}
+		if err := writeReportText(w, r); err != nil {
+			return err
+		}
+	}
+	for _, d := range suite.Diffs {
+		ew.println()
+		if ew.err != nil {
+			return ew.err
+		}
+		cand := findReportByName(suite.Reports, d.CandidateName)
+		base := findReportByName(suite.Reports, d.BaselineName)
+		if err := writeDiffText(w, base, cand, d); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func findReportByName(reports []eval.Report, name string) eval.Report {
+	for _, r := range reports {
+		if r.RubricName == name {
+			return r
+		}
+	}
+	return eval.Report{}
+}
+
+func writeReportMarkdown(w io.Writer, r eval.Report) error {
+	ew := &errWriter{w: w}
+	ew.printf("## Grading Eval: %s\n\n", r.RubricName)
+	writeCoverageMarkdown(ew, r.Coverage)
+	writeReportSectionsMarkdown(ew, r)
+	return ew.err
+}
+
+func writeSuiteMarkdown(w io.Writer, suite eval.SuiteReport) error {
+	ew := &errWriter{w: w}
+	ew.printf("## Grading Eval Suite (active: `%s`)\n\n", suite.ActiveRubric)
+	writeCoverageMarkdown(ew, suite.Coverage)
+
+	for _, r := range suite.Reports {
+		ew.printf("\n### Rubric: `%s`\n\n", r.RubricName)
+		writeReportSectionsMarkdown(ew, r)
+	}
+
+	for _, d := range suite.Diffs {
+		ew.printf("\n### Diff: `%s` -> `%s`\n\n", d.BaselineName, d.CandidateName)
+		writeDiffSectionsMarkdown(ew, d)
+	}
+	return ew.err
+}
+
+func writeDiffMarkdown(w io.Writer, base, cand eval.Report, diff eval.DiffReport) error {
+	ew := &errWriter{w: w}
+	ew.printf("## Grading Eval Comparison: `%s` -> `%s`\n\n", diff.BaselineName, diff.CandidateName)
+	writeCoverageMarkdown(ew, base.Coverage)
+	ew.println()
+	writeDiffSectionsMarkdown(ew, diff)
+	ew.printf("\n### Candidate Factor Attribution (`%s`)\n\n", cand.RubricName)
+	writeFactorsMarkdown(ew, cand.Factors)
+	return ew.err
+}
+
+func writeCoverageMarkdown(ew *errWriter, c eval.DataCoverage) {
+	ew.printf(
+		"**Data Coverage:** legs=%d | gamelogs=%d | injuries=%d | nflverse=%d | nfelo=%d | odds=%d\n",
+		c.TotalLegs, c.WithGameLogs, c.WithInjuries, c.WithNFLVerse, c.WithNfelo, c.WithOdds,
+	)
+}
+
+func writeReportSectionsMarkdown(ew *errWriter, r eval.Report) {
+	ew.printf("\n#### Leg Calibration\n\n")
+	writeBandsMarkdown(ew, r.LegBands)
+	ew.printf(
+		"\nMonotonic: `%v` (win=`%v`, lift=`%v`)\n",
+		r.LegMonotonic, r.LegMonotonicWin, r.LegMonotonicLift,
+	)
+
+	ew.printf("\n#### Slip Calibration\n\n")
+	writeBandsMarkdown(ew, r.SlipBands)
+
+	ew.printf("\n#### Top Factor Attribution\n\n")
+	writeFactorsMarkdown(ew, r.Factors)
+}
+
+func writeDiffSectionsMarkdown(ew *errWriter, diff eval.DiffReport) {
+	ew.printf("#### Leg Calibration Diff\n\n")
+	writeBandDiffsMarkdown(ew, diff.LegBandDiffs)
+
+	ew.printf("\n#### Slip Calibration Diff\n\n")
+	writeBandDiffsMarkdown(ew, diff.SlipBandDiffs)
+
+	ew.printf("\n#### Leg Band Migrations\n\n")
+	writeMigrationsMarkdown(ew, diff.Migrations)
+}
+
+func writeBandsMarkdown(ew *errWriter, bands []eval.BandStats) {
+	ew.println("| Band | Total | Decided | W-L-P | Win Rate | Implied | Lift | Flat ROI | Brier |")
+	ew.println("| --- | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: |")
+	for _, b := range bands {
+		ew.printf(
+			"| %s | %d | %d | %d-%d-%d | %.3f | %.3f | %+.3f | %+.3f | %.4f |\n",
+			b.Band, b.Total, b.Decided, b.Wins, b.Losses, b.Pushes,
+			b.WinRate, b.AvgImpliedProb, b.Lift, b.FlatROI, b.BrierScore,
+		)
+	}
+}
+
+func writeFactorsMarkdown(ew *errWriter, factors []eval.FactorStats) {
+	if len(factors) == 0 {
+		ew.println("_None_")
+		return
+	}
+	const maxFactors = 15
+	limit := min(len(factors), maxFactors)
+	ew.println("| Rule | Label | Count | W-L | Win Rate | Implied | Lift | Avg Delta |")
+	ew.println("| --- | --- | ---: | --- | ---: | ---: | ---: | ---: |")
+	for _, f := range factors[:limit] {
+		ew.printf(
+			"| `%s` | %s | %d | %d-%d | %.3f | %.3f | %+.3f | %+.2f |\n",
+			f.Rule, f.Label, f.Count, f.Wins, f.Losses,
+			f.WinRate, f.AvgImpliedProb, f.Lift, f.AvgDelta,
+		)
+	}
+}
+
+func writeBandDiffsMarkdown(ew *errWriter, diffs []eval.BandDiff) {
+	ew.println("| Band | Base N | Cand N | Win Rate Delta | Lift Delta | Flat ROI Delta |")
+	ew.println("| --- | ---: | ---: | ---: | ---: | ---: |")
+	for _, d := range diffs {
+		ew.printf(
+			"| %s | %d | %d | %+.3f | %+.3f | %+.3f |\n",
+			d.Band, d.BaselineDecided, d.CandidateDecided,
+			d.WinRateDelta, d.LiftDelta, d.FlatROIDelta,
+		)
+	}
+}
+
+func writeMigrationsMarkdown(ew *errWriter, migrations []eval.MigrationCell) {
+	if len(migrations) == 0 {
+		ew.println("_None_")
+		return
+	}
+	ew.println("| From | To | Total | Decided | W-L | Win Rate |")
+	ew.println("| --- | --- | ---: | ---: | --- | ---: |")
+	for _, m := range migrations {
+		ew.printf(
+			"| %s | %s | %d | %d | %d-%d | %.3f |\n",
+			m.FromBand, m.ToBand, m.Total, m.Decided, m.Wins, m.Losses, m.WinRate,
+		)
+	}
 }

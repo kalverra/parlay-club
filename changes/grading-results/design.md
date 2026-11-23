@@ -273,7 +273,7 @@ low (pure Go package and CLI additions with no live request-path impact, fully v
 - [x] Add `BuiltInRubrics()` to `internal/analyzer/rubric.go`, add `WeekSummary`, `Report.Weekly`, `SuiteReport`,
       `EvaluateAll`, and `LoadDatasetJSON` in `internal/eval/`, and add unit tests in `internal/eval/metrics_test.go`
       and `internal/eval/replay_test.go`.
-- [ ] Add the deterministic synthetic fixture `internal/eval/testdata/benchmark_dataset.json`, extend `cmd/eval/main.go`
+- [x] Add the deterministic synthetic fixture `internal/eval/testdata/benchmark_dataset.json`, extend `cmd/eval/main.go`
       with `--dataset`, `--all`, and `--format markdown` output, and cover all new CLI modes and error cases in
       `cmd/eval/main_test.go`.
 
