@@ -196,4 +196,4 @@ Risk: low (standalone offline CLI and pure metrics functions with full unit and 
 
 - [x] Implement `Evaluate` and `Compare` (leg/slip calibration by band, lift over implied odds, flat ROI, per-factor attribution, and migration matrix) in `internal/eval/metrics.go` with table-driven tests in `internal/eval/metrics_test.go`.
 - [x] Add the offline CLI in `cmd/eval/main.go` supporting single-rubric, `--baseline`/`--candidate`, `--candidate-file`, week/season filters, and `text`/`json` output, with smoke tests in `cmd/eval/main_test.go`.
-- [ ] Docs: update `docs/concepts/analyzer.md` and `docs/guides/local-dev.md` to document versioned rubrics and how to run offline grading evals against a local or Litestream-restored SQLite database, then run `good-vibes docs lint`.
+- [x] Docs: update `docs/concepts/analyzer.md` and `docs/guides/local-dev.md` to document versioned rubrics and how to run offline grading evals against a local or Litestream-restored SQLite database, then run `good-vibes docs lint`.

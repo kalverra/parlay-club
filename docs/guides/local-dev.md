@@ -236,6 +236,49 @@ go tool pprof -http=:6060 "http://localhost:8080/debug/pprof/profile?seconds=15"
 go tool pprof -http=:6060 http://localhost:8080/debug/pprof/heap
 ```
 
+## Offline grading evals
+
+Run offline grading evals to check how well A–F grades calibrate against settled slips and legs, or to compare a candidate `Rubric` JSON file against the baseline `v1` rubric. The eval CLI opens the database read-only, makes no external API calls, and reconstructs historical inputs strictly from pre-kickoff `api_archive` rows and prior-week `nflverse` data so live overwritten tables never leak future outcomes.
+
+### Against a local database
+
+```sh
+go run ./cmd/eval --db ./data/parlay.db --rubric v1
+```
+
+Filter by season or week range, or emit JSON for scripting:
+
+```sh
+go run ./cmd/eval --db ./data/parlay.db --season 2025 --from-week 1 --to-week 12 --format json
+```
+
+To compare the built-in `v1` rubric against a candidate rubric file (for example, `rubric-v2.json` matching `analyzer.Rubric` JSON tags):
+
+```sh
+go run ./cmd/eval --db ./data/parlay.db --baseline v1 --candidate-file ./rubric-v2.json
+```
+
+Use `--candidate <name>` instead of `--candidate-file` when comparing two built-in rubrics. The diff output prints data coverage counts, per-band leg and slip calibration deltas (win rate, lift over implied odds, flat ROI), per-factor attribution, and the leg band migration matrix.
+
+### Against a Litestream-restored database
+
+Restore a read-only copy of the production replica to a local path first, then run the eval CLI against the restored file:
+
+```sh
+litestream restore -o ./data/prod-eval.db "gs://$LITESTREAM_BUCKET/parlay.db"
+go run ./cmd/eval --db ./data/prod-eval.db --baseline v1 --candidate-file ./rubric-v2.json
+```
+
+Alternatively, reuse `deploy/litestream.yml` by setting `DB_PATH` and `LITESTREAM_REPLICA_URL`:
+
+```sh
+DB_PATH=./data/prod-eval.db LITESTREAM_REPLICA_URL="gs://$LITESTREAM_BUCKET/parlay.db" \
+  litestream restore -config deploy/litestream.yml "$DB_PATH"
+go run ./cmd/eval --db ./data/prod-eval.db --rubric v1
+```
+
+Delete the restored file when finished; `data/` is gitignored.
+
 ## Check your work
 
 ```sh
