@@ -187,6 +187,7 @@ func run() error {
 		Bugs:       bugService,
 		Stream:     stream,
 		Refresh:    refresher,
+		EvalCache:  evalCache,
 		Now:        appNow,
 	})
 

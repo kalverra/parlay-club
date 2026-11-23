@@ -64,6 +64,7 @@ type slipHandlers struct {
 func (h *slipHandlers) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /{$}", h.home)
 	mux.HandleFunc("GET /analyzer/guide", h.analyzerGuide)
+	mux.HandleFunc("GET /analyzer/results", h.evalResults)
 	mux.HandleFunc("GET /record", h.recordBook)
 	mux.HandleFunc("GET /groups/{id}/week", h.groupWeek)
 	mux.HandleFunc("GET /me", h.profile)

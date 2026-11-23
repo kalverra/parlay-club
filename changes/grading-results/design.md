@@ -288,7 +288,7 @@ rendering are covered by handler and service tests)
       `internal/eval/cache_test.go`, add `SetOnGradeChange` to `internal/slips/rules.go` (invoked on `SetLegResult` and
       `AutoGradeLegs` commits) with tests in `internal/slips/grade_test.go`, and wire both in `cmd/server/main.go` and
       `cmd/server/sandbox.go`.
-- [ ] Add `GET /analyzer/results` in `internal/web/eval_results.go` and `internal/web/slips.go`, create
+- [x] Add `GET /analyzer/results` in `internal/web/eval_results.go` and `internal/web/slips.go`, create
       `web/templates/analyzer_results.html`, link it from `web/templates/analyzer_guide.html`, register the template in
       `internal/web/render.go` and `internal/web/render_test.go`, run `go generate ./...`, and add handler tests in
       `internal/web/eval_results_test.go` covering auth, group isolation, empty state, season/rubric filters, and cache
