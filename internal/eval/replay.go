@@ -15,7 +15,6 @@ import (
 	"github.com/kalverra/parlay-club/internal/db"
 	"github.com/kalverra/parlay-club/internal/ingest/espn"
 	"github.com/kalverra/parlay-club/internal/ingest/nflverse"
-	"github.com/kalverra/parlay-club/internal/ingest/odds"
 	"github.com/kalverra/parlay-club/internal/parlay"
 )
 
@@ -93,6 +92,8 @@ func LoadDataset(ctx context.Context, store *db.Store, filter ReplayFilter) (Rep
 		positionByID := make(map[string]string)
 		gameHasInjuries := make(map[string]bool, len(weekGames))
 		gameHasArchivedOdds := make(map[string]bool, len(weekGames))
+		referencedGames, gameNeedsOddsCheck := referencedGamesFromSlips(slips)
+		linesByKickoff := make(map[int64]bool)
 
 		for _, g := range weekGames {
 			var proj *db.NfeloGame
@@ -104,18 +105,22 @@ func LoadDataset(ctx context.Context, store *db.Store, filter ReplayFilter) (Rep
 			preKickoffGame.Status = db.GameScheduled
 			converted := analyzer.GameFromDB(preKickoffGame, proj, teamEPA)
 
-			injuries, rosterPositions, hasInj := loadArchivedGameInjuries(ctx, store, g)
-			if len(injuries) > 0 {
-				converted.Injuries = injuries
-			}
-			gameHasInjuries[g.ID] = hasInj
-			for id, pos := range rosterPositions {
-				if _, exists := positionByID[id]; !exists {
-					positionByID[id] = pos
+			if referencedGames[g.ID] {
+				injuries, rosterPositions, hasInj := loadArchivedGameInjuries(ctx, store, g)
+				if len(injuries) > 0 {
+					converted.Injuries = injuries
+				}
+				gameHasInjuries[g.ID] = hasInj
+				for id, pos := range rosterPositions {
+					if _, exists := positionByID[id]; !exists {
+						positionByID[id] = pos
+					}
+				}
+
+				if gameNeedsOddsCheck[g.ID] {
+					gameHasArchivedOdds[g.ID] = hasArchivedOddsBefore(ctx, store, g.ID, g.Kickoff, linesByKickoff)
 				}
 			}
-
-			gameHasArchivedOdds[g.ID] = hasArchivedOddsBefore(ctx, store, g.ID, g.Kickoff)
 			gamesMap[g.ID] = converted
 		}
 
@@ -128,38 +133,15 @@ func LoadDataset(ctx context.Context, store *db.Store, filter ReplayFilter) (Rep
 			positionByID,
 		)
 
-		for _, s := range slips {
-			for _, rl := range s.Legs {
-				dataset.Coverage.TotalLegs++
-				if rl.Leg.PlayerID != "" && playerHasGameLog[rl.Leg.PlayerID] {
-					dataset.Coverage.WithGameLogs++
-				}
-				if rl.Leg.GameID != "" {
-					if gameHasInjuries[rl.Leg.GameID] {
-						dataset.Coverage.WithInjuries++
-					}
-					if g, ok := gamesMap[rl.Leg.GameID]; ok {
-						if g.Nfelo != nil {
-							dataset.Coverage.WithNfelo++
-						}
-						hasNFLV := g.HomeEPA != nil || g.AwayEPA != nil
-						if !hasNFLV && rl.Leg.PlayerID != "" {
-							if ps, ok := statsMap[rl.Leg.PlayerID]; ok && ps.Usage != nil {
-								hasNFLV = true
-							}
-						}
-						if hasNFLV {
-							dataset.Coverage.WithNFLVerse++
-						}
-					}
-					if gameHasArchivedOdds[rl.Leg.GameID] || rl.DecimalOdds > 1 {
-						dataset.Coverage.WithOdds++
-					}
-				} else if rl.DecimalOdds > 1 {
-					dataset.Coverage.WithOdds++
-				}
-			}
-		}
+		accumulateWeekCoverage(
+			&dataset.Coverage,
+			slips,
+			gamesMap,
+			statsMap,
+			playerHasGameLog,
+			gameHasInjuries,
+			gameHasArchivedOdds,
+		)
 
 		dataset.Weeks = append(dataset.Weeks, ReplayedWeek{
 			Season:   week.Season,
@@ -172,6 +154,68 @@ func LoadDataset(ctx context.Context, store *db.Store, filter ReplayFilter) (Rep
 	}
 
 	return dataset, nil
+}
+
+func referencedGamesFromSlips(slips []ReplayedSlip) (map[string]bool, map[string]bool) {
+	referenced := make(map[string]bool, len(slips))
+	needsOddsCheck := make(map[string]bool, len(slips))
+	for _, s := range slips {
+		for _, rl := range s.Legs {
+			if rl.Leg.GameID == "" {
+				continue
+			}
+			referenced[rl.Leg.GameID] = true
+			if rl.DecimalOdds <= 1 {
+				needsOddsCheck[rl.Leg.GameID] = true
+			}
+		}
+	}
+	return referenced, needsOddsCheck
+}
+
+func accumulateWeekCoverage(
+	cov *DataCoverage,
+	slips []ReplayedSlip,
+	gamesMap map[string]analyzer.Game,
+	statsMap map[string]analyzer.PlayerStats,
+	playerHasGameLog map[string]bool,
+	gameHasInjuries map[string]bool,
+	gameHasArchivedOdds map[string]bool,
+) {
+	for _, s := range slips {
+		for _, rl := range s.Legs {
+			cov.TotalLegs++
+			if rl.Leg.PlayerID != "" && playerHasGameLog[rl.Leg.PlayerID] {
+				cov.WithGameLogs++
+			}
+			if rl.Leg.GameID == "" {
+				if rl.DecimalOdds > 1 {
+					cov.WithOdds++
+				}
+				continue
+			}
+			if gameHasInjuries[rl.Leg.GameID] {
+				cov.WithInjuries++
+			}
+			if g, ok := gamesMap[rl.Leg.GameID]; ok {
+				if g.Nfelo != nil {
+					cov.WithNfelo++
+				}
+				hasNFLV := g.HomeEPA != nil || g.AwayEPA != nil
+				if !hasNFLV && rl.Leg.PlayerID != "" {
+					if ps, ok := statsMap[rl.Leg.PlayerID]; ok && ps.Usage != nil {
+						hasNFLV = true
+					}
+				}
+				if hasNFLV {
+					cov.WithNFLVerse++
+				}
+			}
+			if gameHasArchivedOdds[rl.Leg.GameID] || rl.DecimalOdds > 1 {
+				cov.WithOdds++
+			}
+		}
+	}
 }
 
 func filterWeeks(weeks []db.Week, filter ReplayFilter) []db.Week {
@@ -480,22 +524,34 @@ func extractSummaryInjuriesJSON(raw []byte) (string, bool) {
 	return string(obj.Injuries), true
 }
 
-func hasArchivedOddsBefore(ctx context.Context, store *db.Store, gameID string, kickoff time.Time) bool {
+func hasArchivedOddsBefore(
+	ctx context.Context,
+	store *db.Store,
+	gameID string,
+	kickoff time.Time,
+	linesByKickoff map[int64]bool,
+) bool {
 	if kickoff.IsZero() {
 		return false
 	}
-	propsKey := db.ArchiveOddsPropsKey(gameID)
-	if raw, ok := latestArchivedBodyBefore(ctx, store, propsKey, kickoff); ok {
-		if _, err := odds.ParsePropsJSON(raw); err == nil {
-			return true
-		}
+	if hasArchivedResponseBefore(ctx, store, db.ArchiveOddsPropsKey(gameID), kickoff) {
+		return true
 	}
-	if raw, ok := latestArchivedBodyBefore(ctx, store, db.ArchiveOddsLinesKey, kickoff); ok {
-		if _, err := odds.ParseLinesJSON(raw); err == nil {
-			return true
+	if linesByKickoff != nil {
+		key := kickoff.UTC().UnixNano()
+		if cached, ok := linesByKickoff[key]; ok {
+			return cached
 		}
+		found := hasArchivedResponseBefore(ctx, store, db.ArchiveOddsLinesKey, kickoff)
+		linesByKickoff[key] = found
+		return found
 	}
-	return false
+	return hasArchivedResponseBefore(ctx, store, db.ArchiveOddsLinesKey, kickoff)
+}
+
+func hasArchivedResponseBefore(ctx context.Context, store *db.Store, key string, kickoff time.Time) bool {
+	resp, ok, err := store.LatestAPIResponseBefore(ctx, key, beforeKickoff(kickoff))
+	return err == nil && ok && resp.FetchedAt.Before(kickoff)
 }
 
 func beforeKickoff(kickoff time.Time) time.Time {

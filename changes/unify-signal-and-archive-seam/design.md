@@ -143,6 +143,10 @@ outputs)
 - [x] Export shared `DistinctLegPlayerIDs`, `NFLverseSeasonTypes`, and `MergeInjuryFeeds` in
       `internal/analyzer/signals.go`, and update `internal/eval/replay.go` to use them alongside `db.Archive*Key`,
       `LatestAPIResponseBefore`, and batched slip/leg loading.
-- [ ] Scope `eval.LoadDataset`'s per-game archive reads to games referenced by settled slips and replace full odds-body
+- [x] Scope `eval.LoadDataset`'s per-game archive reads to games referenced by settled slips and replace full odds-body
       parsing in `hasArchivedOddsBefore` with metadata-only presence checks, with replay tests covering multi-game
       slates and coverage parity.
+
+## Reviews
+
+- [x] Final review: agy@gemini-4-neon-medium
