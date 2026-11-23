@@ -195,7 +195,12 @@ func RuleDocs() []RuleDoc {
 // GradeRubric returns the A-F scoring bands and factor weights used by
 // ScoreLeg and ScoreSlip, reading directly from ActiveRubric.
 func GradeRubric() RubricDoc {
-	r := ActiveRubric
+	return GradeRubricFor(ActiveRubric)
+}
+
+// GradeRubricFor returns the A-F scoring bands and factor weights for r
+// without reading or mutating ActiveRubric.
+func GradeRubricFor(r Rubric) RubricDoc {
 	return RubricDoc{
 		BaselineScore: r.LegBaseline,
 		Bands: []GradeBand{
