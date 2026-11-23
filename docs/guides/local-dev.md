@@ -24,7 +24,7 @@ starts it. Once `/healthz` answers, it opens the app in Chrome. If Chrome is not
 with no desktop opener it prints the URL instead. The browser opens once per run, so rebuilds do not open more tabs.
 Leave it running while you edit.
 
-Dev defaults set `APP_ENV=dev`, port 8080, and the database at `./data/parlay.db`. Override any of them with an
+Dev defaults set `APP_ENV=dev`, port 8080, and the database at ./data/parlay.db. Override any of them with an
 environment variable, for example `PORT=9000 mise run dev`, which opens port 9000. The full list is in
 [Configuration](../reference/config.md).
 
@@ -47,8 +47,8 @@ SUNDAY_SANDBOX=1 mise run dev
 
 The hot-reload loop is unchanged. The differences are all in startup:
 
-- The database is always `./data/sunday-sandbox.db`. `DB_PATH` is ignored, so a sandbox run cannot touch the normal
-  `./data/parlay.db`.
+- The database is always ./data/sunday-sandbox.db. `DB_PATH` is ignored, so a sandbox run cannot touch the normal
+  ./data/parlay.db.
 - Startup skips history import and Google provider construction. The dev sign-in form is always on, even when `.env`
   holds Google values.
 - Every ingest client points at `internal/sandbox`'s fail-closed replay transport. No request can reach a provider, and
@@ -91,7 +91,7 @@ reset button is the same operation as the **Sunday morning** stage.
   invite flow; reset restores the outsider view.
 - **Reset to Sunday morning** posts to `/dev/sandbox/reset`. It deletes every sandbox person, group, slip, pick,
   activity line, cache row, and manual edit, rebuilds the morning through the real services, and signs the browser back
-  in as the same persona. It never touches `./data/parlay.db`.
+  in as the same persona. It never touches ./data/parlay.db.
 
 The controls page and its forms exist only while `SUNDAY_SANDBOX=1`. They sit inside the ordinary sign-in, group scope,
 and HTMX CSRF checks, so a signed-out browser lands on `/login` and a plain form post is refused. In normal dev the paths
@@ -109,7 +109,7 @@ The normal dev database is separate, so that command never touches your own slip
 ### What reloads
 
 Air reads `.air.toml` and watches Go files, templates, and static JS and CSS. Before every build it runs
-`go generate ./...`, then builds `./tmp/server` and restarts it.
+`go generate ./...`, then builds ./tmp/server and restarts it.
 
 - **Go edit:** rebuild and restart, and the new behavior serves.
 - **Template edit:** the CSS regenerates, the server restarts, and the page shows the change on reload. Templates also
@@ -194,7 +194,7 @@ mise run dev
 
 ## Database
 
-The first start creates `./data/parlay.db` and applies the migrations. `data/` is gitignored and excluded from the
+The first start creates ./data/parlay.db and applies the migrations. `data/` is gitignored and excluded from the
 watcher. Groups added `slips.group_id` by editing `0001_init.sql` in place, so a database created before groups existed
 has the wrong shape. Delete it and let the migrations rebuild. To start over for any reason, stop the server and delete
 it:
@@ -258,26 +258,27 @@ To compare the built-in `v1` rubric against a candidate rubric file (for example
 go run ./cmd/eval --db ./data/parlay.db --baseline v1 --candidate-file ./rubric-v2.json
 ```
 
-Use `--candidate <name>` instead of `--candidate-file` when comparing two built-in rubrics. The diff output prints data coverage counts, per-band leg and slip calibration deltas (win rate, lift over implied odds, flat ROI), per-factor attribution, and the leg band migration matrix.
+Use `--candidate <name>` instead of `--candidate-file` when comparing two built-in rubrics, or `--all` to evaluate every built-in rubric and emit side-by-side diffs. The diff output prints data coverage counts, per-band leg and slip calibration deltas (win rate, lift over implied odds, flat ROI), per-factor attribution, and the leg band migration matrix.
+
+To replay the synthetic benchmark fixture (the same check CI runs with `--format markdown` to populate `$GITHUB_STEP_SUMMARY`):
+
+```sh
+go run ./cmd/eval --dataset internal/eval/testdata/benchmark_dataset.json --all --format markdown
+```
 
 ### Against a Litestream-restored database
 
-Restore a read-only copy of the production replica to a local path first, then run the eval CLI against the restored file:
+Run `mise run eval-prod` (backed by `scripts/eval-prod.sh`) to restore a read-only production snapshot into a temporary directory under `./data/`, run `cmd/eval`, and clean up the temporary files automatically on exit:
 
 ```sh
-litestream restore -o ./data/prod-eval.db "gs://$LITESTREAM_BUCKET/parlay.db"
-go run ./cmd/eval --db ./data/prod-eval.db --baseline v1 --candidate-file ./rubric-v2.json
+LITESTREAM_BUCKET=<bucket> mise run eval-prod
 ```
 
-Alternatively, reuse `deploy/litestream.yml` by setting `DB_PATH` and `LITESTREAM_REPLICA_URL`:
+By default, `eval-prod` passes `--all` to `cmd/eval`. Pass custom `cmd/eval` flags after `--` (set `LITESTREAM_REPLICA_URL` instead of `LITESTREAM_BUCKET` if using a custom replica URL):
 
 ```sh
-DB_PATH=./data/prod-eval.db LITESTREAM_REPLICA_URL="gs://$LITESTREAM_BUCKET/parlay.db" \
-  litestream restore -config deploy/litestream.yml "$DB_PATH"
-go run ./cmd/eval --db ./data/prod-eval.db --rubric v1
+LITESTREAM_BUCKET=<bucket> mise run eval-prod -- --baseline v1 --candidate-file ./rubric-v2.json
 ```
-
-Delete the restored file when finished; `data/` is gitignored.
 
 ## Check your work
 

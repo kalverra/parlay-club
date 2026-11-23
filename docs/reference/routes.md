@@ -88,6 +88,7 @@ accept the shared invite. A forged group cookie still falls back to a real membe
 | `GET /research`           | Research page: week games, player search, injury reports, and last-5 hit bars                     |
 | `GET /record`             | Season Record Book for the active group (optional `?season=`)                                    |
 | `GET /analyzer/guide`     | Grading & Analyzer Guide: live `A`–`F` rubric, pick-board badges, and every warning rule         |
+| `GET /analyzer/results`   | Grading Results: group-scoped `A`–`F` calibration, rubric diffs, weekly progression, and factors |
 
 The bottom bar has three destinations: Groups (`/`), This week (`/groups/{active}/week`), and Record Book. Research
 keeps a full page but leaves the bar; the hub links to the pick board, and pick rows link to Research.
@@ -367,9 +368,30 @@ and the member leaderboard (stacked cards below `sm:` and a table at `sm:+`). Se
 `GET /analyzer/guide` renders `web/templates/analyzer_guide.html` behind `RequireUser` and `Scope`. It displays the
 live `A`–`F` leg and slip grading rubric (`analyzer.GradeRubric()`), pick-board badge descriptions, and every active
 warning rule (`analyzer.RuleDocs()`) grouped by category with stable anchors (`#leg-grades`, `#slip-grade`,
-`#suggestions`, `#rules`, and `#rule-<id>`). An optional `?from=` query parameter renders a `"← Back"` link when it
-passes `safeReturnPath` (starts with `/` and not `//`); external or protocol-relative targets are ignored. See
-[Analyzer](../concepts/analyzer.md) and [Analyzer rules](analyzer-rules.md).
+`#suggestions`, `#rules`, and `#rule-<id>`). It links to `/analyzer/results` ("Grading results"), and an optional
+`?from=` query parameter renders a `"← Back"` link when it passes `safeReturnPath` (starts with `/` and not `//`);
+external or protocol-relative targets are ignored. See [Analyzer](../concepts/analyzer.md) and
+[Analyzer rules](analyzer-rules.md).
+
+### Analyzer results
+
+| Method + path            | Purpose                                                               | Response |
+| ------------------------ | --------------------------------------------------------------------- | -------- |
+| `GET /analyzer/results`  | Group-scoped Grading Results backed by `eval.Cache` and `EvaluateAll` | Full page; invalid or non-positive `?season=` is 400. |
+
+`GET /analyzer/results` renders `web/templates/analyzer_results.html` behind `RequireUser` and `Scope`, isolating all
+replayed calibration data to the viewer's active group. It reads from `eval.Cache` keyed by `(groupID, season)`, which
+invalidates for that group when `SetLegResult` or `AutoGradeLegs` commits a settlement change, and clears globally on
+sandbox stage transitions or resets.
+
+Query parameters:
+
+- `?season=`: `all` (or `0`) for all seasons, or a positive season year. Defaults to the latest season with graded
+  slips for the active group (`GradedSeasonsForGroup`), falling back to `SeasonsForGroup` or `all`. Unreadable or
+  non-positive values return `400 Bad Request`.
+- `?rubric=`: selects which built-in rubric to display (defaults to `analyzer.ActiveRubric.Name`).
+- `?from=`: optional safe return path validated by `safeReturnPath`, preserved on season/rubric pills and the
+  `"How grading works"` link back to `/analyzer/guide`. See [Analyzer](../concepts/analyzer.md).
 
 ### Profile
 

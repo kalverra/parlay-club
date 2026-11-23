@@ -21,7 +21,9 @@ flowchart LR
   Rules --> UI["Slip Panel & Pick Tray"]
   Grades --> UI
   UI -->|"tap Why? or rubric"| Guide["GET /analyzer/guide"]
+  Guide <-->|"results / how grading works"| Results["GET /analyzer/results"]
   EngineDocs["RuleDocs() + GradeRubric()"] --> Guide
+  Cache["eval.Cache (Group-Scoped)"] --> Results
 ```
 
 ## What the banner shows
@@ -54,13 +56,19 @@ The clamped 0–100 score maps to A (85–100), B (73–84), C (60–72), D (48�
 
 ### Versioned rubrics and offline evals
 
-Scoring weights, category clamps, slip adjustments, and A–F cutoffs live in `Rubric` (`internal/analyzer/rubric.go`) rather than hardcoded constants. `RubricV1` holds the baseline production weights, `ActiveRubric` selects the live rubric, and the registry functions expose built-in rubrics by name. ScoreLeg, ScoreSlip, and GradeRubric all read from `ActiveRubric`, while ScoreLegWithRubric and ScoreSlipWithRubric accept any rubric value without mutating live state.
+Scoring weights, category clamps, slip adjustments, and A–F cutoffs live in Rubric (`internal/analyzer/rubric.go`) rather than hardcoded constants. RubricV1 holds the baseline production weights, ActiveRubric selects the live rubric, and BuiltInRubrics exposes all registered rubrics in order. ScoreLeg, ScoreSlip, and GradeRubric all read from ActiveRubric, while ScoreLegWithRubric and ScoreSlipWithRubric accept any rubric value without mutating live state.
 
-To test weight changes against settled outcomes before promoting a new rubric, the eval package replays historical weeks read-only from SQLite. To prevent post-kickoff data leakage, the replayer reads nflverse rows strictly prior to the target week and reconstructs overwritten inputs (game logs, injury statuses, and odds) only from archived API responses recorded before kickoff, failing soft and reporting coverage counts when an archive entry is missing. Evaluation computes leg and slip calibration by band, lift over implied odds, flat ROI, Brier score, and per-factor attribution; rubric comparison diffs a baseline and candidate rubric and builds the leg band migration matrix. See [Local development](../guides/local-dev.md#offline-grading-evals) for CLI usage.
+To test weight changes against settled outcomes before promoting a new rubric, the eval package replays historical weeks read-only from SQLite. To prevent post-kickoff data leakage, the replayer reads nflverse rows strictly prior to the target week and reconstructs overwritten inputs (game logs, injury statuses, and odds) only from archived API responses recorded before kickoff, failing soft and reporting coverage counts when an archive entry is missing. Evaluation computes leg and slip calibration by band, lift over implied odds, flat ROI, Brier score, week-over-week progression, and per-factor attribution; EvaluateAll evaluates all built-in rubrics and compares subsequent rubrics against the baseline, building the leg band migration matrix.
 
-## In-app grading guide
+In CI, `.github/workflows/ci.yml` runs the eval CLI against the synthetic fixture `internal/eval/testdata/benchmark_dataset.json` and appends the Markdown benchmark summary to the workflow job summary without accessing production data or credentials. See [Local development](../guides/local-dev.md#offline-grading-evals) for CLI and `mise run eval-prod` usage.
 
-`GET /analyzer/guide` renders the live rubric (`GradeRubric()`) and every active warning rule (`RuleDocs()`) directly from `internal/analyzer`, so the guide page cannot drift from the engine's thresholds. Stable anchors (`#leg-grades`, `#slip-grade`, `#suggestions`, `#rule-<id>`) let any warning card or grade breakdown link straight to its explanation, with a safe `?from=` back link to return to the slip or pick board.
+## In-app grading guide and results
+
+`GET /analyzer/guide` renders the live rubric (GradeRubric) and every active warning rule (RuleDocs) directly from `internal/analyzer`, so the guide page cannot drift from the engine's thresholds. Stable anchors (`#leg-grades`, `#slip-grade`, `#suggestions`, `#rule-<id>`) let any warning card or grade breakdown link straight to its explanation, with a safe `?from=` back link to return to the slip or pick board, plus a "Grading results" link to `/analyzer/results`.
+
+`GET /analyzer/results` shows live calibration for the viewer's active group: A–F leg and slip bands (record, hit %, implied %, lift, flat ROI), side-by-side rubric comparison when multiple built-in rubrics exist, chronological week-over-week progression, ranked factor attribution, and pre-kickoff data coverage. Results are strictly scoped to the active group so settled slips never leak across groups.
+
+To avoid replaying SQLite on every page load without persisting derived tables, `eval.Cache` (`internal/eval/cache.go`) memoizes each suite report in memory by group and season. Normal settlement and re-grading in `internal/slips` invalidate the affected group after commit via SetOnGradeChange, and sandbox stage transitions or resets clear the whole cache.
 
 ## Tone
 
