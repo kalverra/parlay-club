@@ -226,8 +226,8 @@ func (a *factorAccum) stats() FactorStats {
 	return s
 }
 
-func rubricFactorLabels() map[string]string {
-	doc := analyzer.GradeRubric()
+func rubricFactorLabels(rubric analyzer.Rubric) map[string]string {
+	doc := analyzer.GradeRubricFor(rubric)
 	labels := make(map[string]string, len(doc.LegFactors)+len(doc.SlipFactors))
 	for _, f := range doc.LegFactors {
 		labels[f.Rule] = f.Label
@@ -245,7 +245,7 @@ func Evaluate(dataset ReplayDataset, rubric analyzer.Rubric) Report {
 	legBands := newBandAccumMap()
 	slipBands := newBandAccumMap()
 	factors := make(map[string]*factorAccum)
-	factorLabels := rubricFactorLabels()
+	factorLabels := rubricFactorLabels(rubric)
 	var outcomes []legOutcome
 	weekly := make([]WeekSummary, 0, len(dataset.Weeks))
 

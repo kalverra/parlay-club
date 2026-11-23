@@ -277,14 +277,17 @@ func wind(a *analysis) []Warning {
 		seen[leg.GameID] = true
 
 		game, ok := a.games[leg.GameID]
-		if !ok || game.Indoor || game.Weather == nil {
+		if !ok {
 			continue
 		}
-		severity, windy := windLevel(*game.Weather)
-		if !windy {
-			continue
-		}
-		flagged := a.inGame(leg.GameID, windHit)
+		var severity Severity
+		flagged := a.inGame(leg.GameID, func(l Leg) bool {
+			sev, windy := evalWindHazard(l, game)
+			if windy {
+				severity = sev
+			}
+			return windy
+		})
 		if len(flagged) == 0 {
 			continue
 		}

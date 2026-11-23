@@ -126,3 +126,7 @@ by analyzer and web handler tests)
 - [x] Add `SlipEvaluation`, `EvaluateSlip`, and `EvaluateSlipWithRubric` in `internal/analyzer/grade.go` (with
       `ScoreSlipWithRubric` delegating to it), update `internal/web/analyzer.go` (`analyzerView`) to call `EvaluateSlip`
       once, and add tests covering single-pass warning and grade parity.
+
+## Reviews
+
+- [x] Final review: agy@gemini-4-neon-medium
