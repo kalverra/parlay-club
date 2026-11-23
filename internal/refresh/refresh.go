@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -1008,11 +1009,53 @@ func (s *Service) KickPickGame(ctx context.Context, weekID int64, gameID string)
 	})
 }
 
+// KickSlipExportEnrich starts a background prop-link enrichment pass for a
+// locked slip's upcoming games that still have unlinked prop legs. Concurrent
+// callers share upstream fetches via singleflight, and Shutdown waits for or
+// cancels in-flight work.
+func (s *Service) KickSlipExportEnrich(ctx context.Context, slipID int64) {
+	if slipID == 0 || s.fallbackProps == nil {
+		return
+	}
+	s.kickAsync(
+		ctx,
+		func(err error) {
+			s.logger.Warn().
+				Err(err).
+				Int64("slip_id", slipID).
+				Msg("kick slip export enrich")
+		},
+		func(runCtx context.Context) error {
+			runCtx, cancel := context.WithTimeout(runCtx, syncTimeout)
+			defer cancel()
+			return s.syncSlipExportEnrich(runCtx, slipID)
+		},
+	)
+}
+
 func (s *Service) kickPick(
 	ctx context.Context,
 	msg string,
 	weekID int64,
 	gameID string,
+	run func(context.Context) error,
+) {
+	s.kickAsync(
+		ctx,
+		func(err error) {
+			s.logger.Warn().
+				Err(err).
+				Int64("week_id", weekID).
+				Str("game_id", gameID).
+				Msg(msg)
+		},
+		run,
+	)
+}
+
+func (s *Service) kickAsync(
+	ctx context.Context,
+	onErr func(error),
 	run func(context.Context) error,
 ) {
 	s.stopMu.Lock()
@@ -1030,13 +1073,86 @@ func (s *Service) kickPick(
 		defer unregister()
 
 		if err := run(runCtx); err != nil && !s.stopping() {
-			s.logger.Warn().
-				Err(err).
-				Int64("week_id", weekID).
-				Str("game_id", gameID).
-				Msg(msg)
+			onErr(err)
 		}
 	})
+}
+
+func (s *Service) syncSlipExportEnrich(ctx context.Context, slipID int64) error {
+	slip, err := s.store.SlipByID(ctx, slipID)
+	if err != nil {
+		return fmt.Errorf("slip %d: %w", slipID, err)
+	}
+	if slip.Status != db.SlipLocked {
+		return nil
+	}
+
+	legs, err := s.store.LegsForSlip(ctx, slipID)
+	if err != nil {
+		return fmt.Errorf("slip %d legs: %w", slipID, err)
+	}
+	games, err := s.store.GamesForWeek(ctx, slip.WeekID)
+	if err != nil {
+		return fmt.Errorf("week %d games: %w", slip.WeekID, err)
+	}
+	gameByID := make(map[string]db.Game, len(games))
+	for _, game := range games {
+		gameByID[game.ID] = game
+	}
+
+	now := s.now()
+	oddsByGame := make(map[string][]db.Odds)
+	seen := make(map[string]bool)
+	var toEnrich []db.Game
+	for _, leg := range legs {
+		if leg.GameID == nil || *leg.GameID == "" || !isPropLeg(leg) {
+			continue
+		}
+		gameID := *leg.GameID
+		if seen[gameID] {
+			continue
+		}
+		game, ok := gameByID[gameID]
+		if !ok || !now.Before(game.Kickoff) {
+			continue
+		}
+		oddsRows, loaded := oddsByGame[gameID]
+		if !loaded {
+			oddsRows, err = s.store.OddsForGame(ctx, gameID)
+			if err != nil {
+				return fmt.Errorf("game %s odds: %w", gameID, err)
+			}
+			oddsByGame[gameID] = oddsRows
+		}
+		if legNeedsExportEnrich(leg, oddsRows) {
+			seen[gameID] = true
+			toEnrich = append(toEnrich, game)
+		}
+	}
+
+	var errs []error
+	for _, game := range toEnrich {
+		err := s.refreshSync(ctx, s.oddsPropsEnrichSource(game, now, false), now)
+		if err != nil && !errors.Is(err, odds.ErrNoAPIKey) {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func isPropLeg(leg db.Leg) bool {
+	return leg.MarketType == "TEAM_TOTAL" || db.IsPlayerMarket(leg.MarketType) ||
+		(leg.PlayerName != nil && *leg.PlayerName != "")
+}
+
+func legNeedsExportEnrich(leg db.Leg, oddsRows []db.Odds) bool {
+	for _, book := range []string{"draftkings", "fanduel"} {
+		row, ok := db.MatchBookOdds(leg, oddsRows, book)
+		if !ok || row.Link == nil || strings.TrimSpace(*row.Link) == "" {
+			return true
+		}
+	}
+	return false
 }
 
 // ForcePickRefresh refreshes the week's lines and, when gameID is non-empty,

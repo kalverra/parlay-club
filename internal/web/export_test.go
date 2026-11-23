@@ -1,18 +1,29 @@
 package web_test
 
 import (
+	"bufio"
+	"context"
 	"fmt"
 	"html"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/kalverra/parlay-club/internal/db"
+	"github.com/kalverra/parlay-club/internal/ingest/odds"
+	"github.com/kalverra/parlay-club/internal/live"
+	"github.com/kalverra/parlay-club/internal/refresh"
+	"github.com/kalverra/parlay-club/internal/slips"
+	webui "github.com/kalverra/parlay-club/internal/web"
+	assets "github.com/kalverra/parlay-club/web"
 )
 
 // exportFetched is the odds fetch time the export card's note shows.
@@ -436,4 +447,293 @@ func getExport(t *testing.T, handler http.Handler, slipID int64) *httptest.Respo
 	request.Header.Set("Hx-Request", "true")
 	handler.ServeHTTP(recorder, request)
 	return recorder
+}
+
+type exportSpyRefresher struct {
+	stubRefresher
+	enrichCalls []int64
+}
+
+func (r *exportSpyRefresher) KickSlipExportEnrich(_ context.Context, slipID int64) {
+	r.enrichCalls = append(r.enrichCalls, slipID)
+}
+
+type exportFakeFallbackProps struct {
+	events []odds.Event
+	props  map[string][]odds.Prop
+}
+
+func (f *exportFakeFallbackProps) Events(_ context.Context) ([]odds.Event, odds.Credits, error) {
+	return f.events, odds.Credits{Remaining: 300}, nil
+}
+
+func (f *exportFakeFallbackProps) EventProps(_ context.Context, eventID string) ([]odds.Prop, odds.Credits, error) {
+	return f.props[eventID], odds.Credits{Remaining: 299}, nil
+}
+
+// TestLockInKicksExportEnrichOnlyWhenSlipTransitionsToLocked checks that
+// partial lock-ins on a multi-member slip do not kick export enrichment, and
+// the final lock-in that transitions the slip to LOCKED does.
+func TestLockInKicksExportEnrichOnlyWhenSlipTransitionsToLocked(t *testing.T) {
+	t.Parallel()
+
+	database, err := db.Open(filepath.Join(t.TempDir(), "parlay.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { assert.NoError(t, database.Close()) })
+	require.NoError(t, db.Migrate(t.Context(), database))
+
+	store := db.NewStore(database)
+	t.Cleanup(func() { assert.NoError(t, store.Close()) })
+
+	ada, err := store.CreateUserWithIdentity(t.Context(), "Ada", "ada@example.com", "google-ada", "")
+	require.NoError(t, err)
+	sam, err := store.CreateUserWithIdentity(t.Context(), "Sam", "sam@example.com", "google-sam", "")
+	require.NoError(t, err)
+	group, err := store.Create(t.Context(), ada.ID, "Sunday Parlay Club")
+	require.NoError(t, err)
+	_, err = store.JoinByToken(t.Context(), sam.ID, group.InviteToken)
+	require.NoError(t, err)
+	week, err := store.UpsertWeek(t.Context(), 2026, 2, 9)
+	require.NoError(t, err)
+	slip, err := store.CreateSlip(
+		t.Context(),
+		group.ID,
+		week.ID,
+		nil,
+		"Week 9",
+		db.SlateScopeFullWeek,
+		1,
+		[]int64{ada.ID, sam.ID},
+	)
+	require.NoError(t, err)
+
+	renderer, err := webui.NewRenderer(assets.Templates, false)
+	require.NoError(t, err)
+
+	spy := &exportSpyRefresher{}
+	signedIn := ada
+	handler := webui.NewWithDeps(webui.Dependencies{
+		Logger:   zerolog.Nop(),
+		Renderer: renderer,
+		UserFrom: func(context.Context) (db.User, bool) {
+			return signedIn, true
+		},
+		GroupsFrom: func(context.Context) []webui.GroupOption {
+			return []webui.GroupOption{{ID: group.ID, Name: group.Name, Current: true}}
+		},
+		GroupFrom: func(context.Context) (db.Group, bool) {
+			return group, true
+		},
+		Store:   store,
+		Slips:   slips.New(store, &live.Hub{}, nil),
+		Refresh: spy,
+	})
+
+	fixture := &slipFixture{handler: handler, store: store, week: week, slip: slip}
+	require.Equal(t, http.StatusOK, addLeg(t, handler, slip.ID, "BUF ML").Code)
+	signedIn = sam
+	require.Equal(t, http.StatusOK, addLeg(t, handler, slip.ID, "MIA ML").Code)
+
+	// First member locks in: slip is still OPEN, so enrichment is not kicked.
+	signedIn = ada
+	firstLock := postForm(t, handler, fmt.Sprintf("/slips/%d/lock", slip.ID), url.Values{})
+	require.Equal(t, http.StatusOK, firstLock.Code)
+	assert.Empty(t, spy.enrichCalls)
+
+	// Second member locks in: slip transitions to LOCKED and kicks enrichment.
+	signedIn = sam
+	secondLock := postForm(t, handler, fmt.Sprintf("/slips/%d/lock", slip.ID), url.Values{})
+	require.Equal(t, http.StatusOK, secondLock.Code)
+	assert.Equal(t, []int64{slip.ID}, spy.enrichCalls)
+	_ = fixture
+}
+
+// TestLockInEnrichesUnlinkedPropInBackgroundAndPushesSSE checks that locking a
+// slip with an unlinked Parlay-only prop leg runs background enrichment and
+// pushes slip-updated over SSE once the deep links land.
+func TestLockInEnrichesUnlinkedPropInBackgroundAndPushesSSE(t *testing.T) {
+	t.Parallel()
+
+	database, err := db.Open(filepath.Join(t.TempDir(), "parlay.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { assert.NoError(t, database.Close()) })
+	require.NoError(t, db.Migrate(t.Context(), database))
+
+	store := db.NewStore(database)
+	t.Cleanup(func() { assert.NoError(t, store.Close()) })
+
+	user, err := store.CreateUserWithIdentity(t.Context(), "Ada", "ada@example.com", "google-ada", "")
+	require.NoError(t, err)
+	group, err := store.Create(t.Context(), user.ID, "Sunday Parlay Club")
+	require.NoError(t, err)
+	week, err := store.UpsertWeek(t.Context(), 2026, 2, 9)
+	require.NoError(t, err)
+	slip, err := store.CreateSlip(
+		t.Context(),
+		group.ID,
+		week.ID,
+		nil,
+		"Week 9",
+		db.SlateScopeFullWeek,
+		1,
+		[]int64{user.ID},
+	)
+	require.NoError(t, err)
+
+	now := time.Now().UTC().Truncate(time.Second)
+	kickoff := now.Add(4 * time.Hour)
+	game, err := store.UpsertGame(t.Context(), db.Game{
+		ID:        "401772099",
+		WeekID:    week.ID,
+		HomeTeam:  "BUF",
+		AwayTeam:  "MIA",
+		HomeName:  "Buffalo Bills",
+		AwayName:  "Miami Dolphins",
+		Kickoff:   kickoff,
+		Status:    db.GameScheduled,
+		UpdatedAt: now,
+	})
+	require.NoError(t, err)
+
+	// Seed Parlay-only prop row (no link/sid) and odds:props:{gameID}.
+	require.NoError(t, store.Tx(t.Context(), func(tx *db.Store) error {
+		_, err := tx.UpsertOdds(t.Context(), []db.Odds{{
+			GameID:     game.ID,
+			Book:       "draftkings",
+			MarketType: odds.MarketPassYds,
+			PlayerName: "Josh Allen",
+			Side:       odds.SideOver,
+			Line:       new(255.5),
+			Price:      -110,
+			FetchedAt:  now,
+		}})
+		if err != nil {
+			return err
+		}
+		return tx.RecordSync(t.Context(), refresh.OddsPropsSource(game.ID), now, nil)
+	}))
+
+	hub := &live.Hub{}
+	svc := refresh.New(refresh.Deps{
+		Store: store,
+		FallbackProps: &exportFakeFallbackProps{
+			events: []odds.Event{{
+				ID:           "toa-99",
+				CommenceTime: kickoff,
+				HomeTeam:     "Buffalo Bills",
+				AwayTeam:     "Miami Dolphins",
+			}},
+			props: map[string][]odds.Prop{
+				"toa-99": {{
+					EventID:    "toa-99",
+					Book:       "draftkings",
+					MarketType: odds.MarketPassYds,
+					PlayerName: "Josh Allen",
+					Side:       odds.SideOver,
+					Line:       new(255.5),
+					Price:      -110,
+					Link:       "https://sportsbook.draftkings.com/event/dk-evt-99?outcomes=dk-sid-99",
+					Sid:        "dk-sid-99",
+					EventSid:   "dk-evt-99",
+				}},
+			},
+		},
+		Publisher: hub,
+		Now:       func() time.Time { return now },
+		Logger:    zerolog.Nop(),
+	})
+	t.Cleanup(func() { assert.NoError(t, svc.Shutdown(context.Background())) })
+
+	renderer, err := webui.NewRenderer(assets.Templates, false)
+	require.NoError(t, err)
+
+	handler := webui.NewWithDeps(webui.Dependencies{
+		Logger:   zerolog.Nop(),
+		Renderer: renderer,
+		UserFrom: func(context.Context) (db.User, bool) {
+			return user, true
+		},
+		GroupsFrom: func(context.Context) []webui.GroupOption {
+			return []webui.GroupOption{{ID: group.ID, Name: group.Name, Current: true}}
+		},
+		GroupFrom: func(context.Context) (db.Group, bool) {
+			return group, true
+		},
+		Store:   store,
+		Slips:   slips.New(store, hub, nil),
+		Stream:  live.NewStream(hub, func(int64) bool { return false }),
+		Refresh: svc,
+		Now:     func() time.Time { return now },
+	})
+
+	fixture := &slipFixture{handler: handler, store: store, week: week, slip: slip}
+	addExportLeg(t, fixture, url.Values{
+		"game_id":     {game.ID},
+		"market_type": {odds.MarketPassYds},
+		"player_name": {"Josh Allen"},
+		"side":        {odds.SideOver},
+		"line":        {"255.5"},
+		"selection":   {"Josh Allen Over 255.5 Pass Yds"},
+		"odds":        {"-110"},
+	})
+
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+
+	streamReq, err := http.NewRequestWithContext(
+		t.Context(),
+		http.MethodGet,
+		fmt.Sprintf("%s/slips/%d/events", server.URL, slip.ID),
+		nil,
+	)
+	require.NoError(t, err)
+	streamResp, err := server.Client().Do(streamReq)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, streamResp.StatusCode)
+	t.Cleanup(func() { assert.NoError(t, streamResp.Body.Close()) })
+
+	lockResp := postForm(t, handler, fmt.Sprintf("/slips/%d/lock", slip.ID), url.Values{})
+	require.Equal(t, http.StatusOK, lockResp.Code)
+
+	// LockIn publishes slip-updated immediately, and background enrichment
+	// publishes board-updated + slip-updated once the enriched DraftKings link is written.
+	// Read with one scanner so buffered bytes are not lost across events.
+	scanner := bufio.NewScanner(streamResp.Body)
+	nextEvent := func() string {
+		done := make(chan string, 1)
+		go func() {
+			for scanner.Scan() {
+				if ev, ok := strings.CutPrefix(scanner.Text(), "event: "); ok {
+					done <- ev
+					return
+				}
+			}
+			done <- ""
+		}()
+		select {
+		case ev := <-done:
+			require.NoError(t, scanner.Err())
+			require.NotEmpty(t, ev, "stream ended before expected event")
+			return ev
+		case <-time.After(3 * time.Second):
+			t.Fatal("timed out waiting for an SSE event")
+			return ""
+		}
+	}
+
+	assert.Equal(t, "slip-updated", nextEvent())
+	seenSlipUpdated := false
+	for range 2 {
+		switch ev := nextEvent(); ev {
+		case "slip-updated":
+			seenSlipUpdated = true
+		case "board-updated":
+		default:
+			t.Fatalf("unexpected SSE event %q", ev)
+		}
+	}
+	assert.True(t, seenSlipUpdated, "expected slip-updated after background enrichment")
+
+	body := html.UnescapeString(getExport(t, handler, slip.ID).Body.String())
+	assert.Contains(t, body, "https://sportsbook.draftkings.com/event/dk-evt-99?outcomes=dk-sid-99")
 }

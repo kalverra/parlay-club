@@ -1760,6 +1760,8 @@ func (r *pickTestRefresher) KickPickGame(_ context.Context, weekID int64, gameID
 	r.gameCalls = append(r.gameCalls, pickSyncCall{weekID: weekID, gameID: gameID})
 }
 
+func (r *pickTestRefresher) KickSlipExportEnrich(_ context.Context, _ int64) {}
+
 func (r *pickTestRefresher) ForcePickRefresh(_ context.Context, weekID int64, gameID string) error {
 	r.forceCalls = append(r.forceCalls, pickSyncCall{weekID: weekID, gameID: gameID})
 	return nil
