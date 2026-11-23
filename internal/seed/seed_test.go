@@ -339,3 +339,29 @@ func TestLoadValidatesTheFileBeforeWriting(t *testing.T) {
 		})
 	}
 }
+
+func TestTargetGroupResolvesNamedOrFirstGroup(t *testing.T) {
+	t.Parallel()
+
+	store := newStore(t)
+	owner, err := store.CreateUserWithIdentity(t.Context(), "Owner", "", "", "")
+	require.NoError(t, err)
+	first, err := store.Create(t.Context(), owner.ID, "Just me")
+	require.NoError(t, err)
+	beasts, err := store.Create(t.Context(), owner.ID, "NFC Beasts")
+	require.NoError(t, err)
+
+	namedPath := writeHistory(t, "group: NFC Beasts\n"+validFile)
+	got, err := seed.TargetGroup(t.Context(), store, namedPath)
+	require.NoError(t, err)
+	assert.Equal(t, beasts, got)
+
+	fallbackPath := writeHistory(t, validFile)
+	got, err = seed.TargetGroup(t.Context(), store, fallbackPath)
+	require.NoError(t, err)
+	assert.Equal(t, first, got)
+
+	missingPath := writeHistory(t, "group: No Such Group\n"+validFile)
+	_, err = seed.TargetGroup(t.Context(), store, missingPath)
+	require.ErrorIs(t, err, db.ErrGroupNotFound)
+}

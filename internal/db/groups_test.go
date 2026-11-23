@@ -68,6 +68,25 @@ func TestFirstGroupReportsNoGroups(t *testing.T) {
 	require.ErrorIs(t, err, db.ErrGroupNotFound)
 }
 
+func TestGroupByNameMatchesCaseInsensitively(t *testing.T) {
+	t.Parallel()
+
+	store, _ := openTestStore(t)
+	ada := createUser(t, store, "Ada")
+
+	_, err := store.Create(t.Context(), ada.ID, "Just me")
+	require.NoError(t, err)
+	beasts, err := store.Create(t.Context(), ada.ID, "NFC Beasts")
+	require.NoError(t, err)
+
+	found, err := store.GroupByName(t.Context(), " nfc beasts ")
+	require.NoError(t, err)
+	assert.Equal(t, beasts, found)
+
+	_, err = store.GroupByName(t.Context(), "Missing")
+	require.ErrorIs(t, err, db.ErrGroupNotFound)
+}
+
 func TestCreateGroupMintsAUniqueToken(t *testing.T) {
 	t.Parallel()
 

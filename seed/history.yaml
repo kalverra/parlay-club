@@ -1,9 +1,11 @@
-# Past slips load on every boot into the app's first group. A slip already
-# present with the same week and name is skipped, so correcting this file later
-# does not rewrite a slip that already loaded.
+# Past slips load on every boot into the named group (or the app's first group
+# when omitted). A slip already present with the same week and name is skipped,
+# so correcting this file later does not rewrite a slip that already loaded.
 #
 # A leg's market defaults to OTHER, its odds to -110, and its result to PENDING.
 # The slip result is computed from the legs, not stored here.
+
+group: NFC Beasts
 
 slips:
   - season: 2026
@@ -12,7 +14,7 @@ slips:
     name: Week 7
     legs_per_member: 2
     legs:
-      - user: Bob
+      - user: Bobby
         selection: Josh Jacobs 50+ Rush Yds
         market: RUSH_YDS
         team: GB
@@ -21,14 +23,14 @@ slips:
         line: 49.5
         odds: 126
         result: LOST
-      - user: Bob
+      - user: Bobby
         selection: Tyler Allgeier Anytime TD
         market: ANYTIME_TD
         team: ARI
         player: Tyler Allgeier
         odds: 231
         result: LOST
-      - user: Adam
+      - user: Adam Hamrick
         selection: Christian McCaffrey 4+ Receptions
         market: RECEPTIONS
         team: SF
@@ -37,7 +39,7 @@ slips:
         line: 3.5
         odds: -309
         result: WON
-      - user: Adam
+      - user: Adam Hamrick
         selection: Joe Burrow Over 6.5 Rush Yds
         market: RUSH_YDS
         team: CIN
@@ -45,13 +47,13 @@ slips:
         side: OVER
         line: 6.5
         result: WON
-      - user: Connor
+      - user: Connor Hite
         selection: Ja'Marr Chase Anytime TD
         market: ANYTIME_TD
         team: CIN
         player: Ja'Marr Chase
         result: WON
-      - user: Connor
+      - user: Connor Hite
         selection: Kyren Williams 80+ Rush Yds
         market: RUSH_YDS
         team: LAR
@@ -67,20 +69,20 @@ slips:
     name: Week 8
     legs_per_member: 2
     legs:
-      - user: Bob
+      - user: Bobby
         selection: Minnesota Vikings +10.5
         market: SPREAD
         team: MIN
         line: 10.5
         odds: -308
         result: WON
-      - user: Bob
+      - user: Bobby
         selection: Javonte Williams Anytime TD
         market: ANYTIME_TD
         team: DAL
         player: Javonte Williams
         result: LOST
-      - user: Adam
+      - user: Adam Hamrick
         selection: Dak Prescott Under 8.5 Rush Yds
         market: RUSH_YDS
         team: DAL
@@ -88,7 +90,7 @@ slips:
         side: UNDER
         line: 8.5
         result: LOST
-      - user: Adam
+      - user: Adam Hamrick
         selection: Antonio Williams Over 3.5 Receptions
         market: RECEPTIONS
         team: WAS
@@ -97,7 +99,7 @@ slips:
         line: 3.5
         odds: 129
         result: WON
-      - user: Connor
+      - user: Connor Hite
         selection: Zay Flowers Over 6.5 Receptions
         market: RECEPTIONS
         team: BAL
@@ -106,7 +108,7 @@ slips:
         line: 6.5
         odds: 129
         result: LOST
-      - user: Connor
+      - user: Connor Hite
         selection: Jaylen Warren Over 22.5 Rec Yds
         market: REC_YDS
         team: PIT
@@ -122,19 +124,19 @@ slips:
     name: Week 9
     legs_per_member: 2
     legs:
-      - user: Bob
+      - user: Bobby
         selection: Detroit Lions -6.5
         market: SPREAD
         team: DET
         line: -6.5
         result: WON
-      - user: Bob
+      - user: Bobby
         selection: Jahmyr Gibbs Anytime TD
         market: ANYTIME_TD
         team: DET
         player: Jahmyr Gibbs
         result: WON
-      - user: Adam
+      - user: Adam Hamrick
         selection: Bucky Irving Over 15.5 Rush Att
         market: RUSH_ATT
         team: TB
@@ -143,7 +145,7 @@ slips:
         line: 15.5
         odds: -105
         result: LOST
-      - user: Adam
+      - user: Adam Hamrick
         selection: Jameson Williams Over 51.5 Rec Yds
         market: REC_YDS
         team: DET
@@ -151,7 +153,7 @@ slips:
         side: OVER
         line: 51.5
         result: LOST
-      - user: Connor
+      - user: Connor Hite
         selection: George Kittle Over 69.5 Rec Yds
         market: REC_YDS
         team: SF
@@ -160,7 +162,7 @@ slips:
         line: 69.5
         odds: -104
         result: LOST
-      - user: Connor
+      - user: Connor Hite
         selection: Rhamondre Stevenson Anytime TD
         market: ANYTIME_TD
         team: NE
