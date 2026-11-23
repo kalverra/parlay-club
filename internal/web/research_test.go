@@ -957,3 +957,61 @@ func TestResearchGameDropsStalePropPlayers(t *testing.T) {
 	assert.Contains(t, body, "Josh Allen")
 	assert.NotContains(t, body, "Stale Runner")
 }
+
+func TestResearchGameIncludesTruncatedRosterInjuries(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	game := addGame(t, fixture, gameKickoff())
+	injuriesJSON := `[
+		{
+			"team": {"id": "2", "displayName": "Buffalo Bills", "abbreviation": "BUF"},
+			"injuries": [
+				{
+					"status": "Out",
+					"athlete": {"id": "999", "fullName": "Curtis Samuel", "position": {"abbreviation": "WR"}},
+					"details": {"type": "Foot"}
+				}
+			]
+		}
+	]`
+	_, err := fixture.store.SetGameInjuries(t.Context(), game.ID, injuriesJSON)
+	require.NoError(t, err)
+
+	now := time.Now().UTC()
+	require.NoError(t, fixture.store.UpsertRosterPlayers(t.Context(), []db.RosterPlayer{
+		{
+			AthleteID:    "4362887",
+			Team:         "BUF",
+			ESPNTeamID:   "2",
+			FullName:     "Dalton Kincaid",
+			Position:     "TE",
+			HeadshotURL:  "https://a.espncdn.com/i/headshots/nfl/players/full/4362887.png",
+			InjuryStatus: "Out",
+			InjuryDate:   "2026-11-20T17:00Z",
+			UpdatedAt:    now,
+		},
+		{
+			AthleteID:    "5550001",
+			Team:         "BUF",
+			ESPNTeamID:   "2",
+			FullName:     "Depth Linebacker",
+			Position:     "LB",
+			InjuryStatus: "Out",
+			InjuryDate:   "2026-11-20T17:00Z",
+			UpdatedAt:    now,
+		},
+	}))
+
+	handler := researchHandlerWithRefresher(t, fixture, fixture.user, &researchTestRefresher{})
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/research/games/"+game.ID, nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	body := rec.Body.String()
+	assert.Contains(t, body, "Key Injuries")
+	assert.Contains(t, body, "Curtis Samuel")
+	assert.Contains(t, body, "Dalton Kincaid")
+	assert.NotContains(t, body, "Depth Linebacker")
+}

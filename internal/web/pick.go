@@ -14,7 +14,6 @@ import (
 	"github.com/kalverra/parlay-club/internal/analyzer"
 	"github.com/kalverra/parlay-club/internal/board"
 	"github.com/kalverra/parlay-club/internal/db"
-	"github.com/kalverra/parlay-club/internal/ingest/espn"
 	"github.com/kalverra/parlay-club/internal/parlay"
 	"github.com/kalverra/parlay-club/internal/slips"
 )
@@ -1607,31 +1606,18 @@ func (h *slipHandlers) boardSignalsForGame(
 	for _, leg := range legs {
 		slipLegs = append(slipLegs, analyzer.LegFromDB(leg, ""))
 	}
+	var rosters []db.RosterPlayer
+	if loaded, err := h.deps.Store.RosterForTeams(ctx, []string{game.AwayTeam, game.HomeTeam}); err == nil {
+		rosters = loaded
+	}
 	teamEPA, playerUsage := analyzer.LoadGameSignals(ctx, h.deps.Store, h.deps.now(), weekID, playerIDs)
 	signals := board.BoardSignals{
 		TeamEPA:  teamEPA,
-		Injuries: parseGameInjuries(game),
+		Injuries: analyzer.MergeGameInjuries(game, rosters),
 		SlipLegs: slipLegs,
 	}
 	if len(playerUsage) > 0 {
 		signals.PlayerUsage = playerUsage
 	}
 	return signals
-}
-
-func parseGameInjuries(game db.Game) map[string][]espn.Injury {
-	if game.InjuriesJSON == nil || *game.InjuriesJSON == "" {
-		return nil
-	}
-	teamInjuries, err := espn.ParseInjuries(*game.InjuriesJSON)
-	if err != nil || len(teamInjuries) == 0 {
-		return nil
-	}
-	byTeam := make(map[string][]espn.Injury, len(teamInjuries))
-	for _, ti := range teamInjuries {
-		if ti.Abbreviation != "" && len(ti.Injuries) > 0 {
-			byTeam[ti.Abbreviation] = ti.Injuries
-		}
-	}
-	return byTeam
 }

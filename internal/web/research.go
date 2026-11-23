@@ -401,7 +401,7 @@ func (h *researchHandlers) loadGameResearch(ctx context.Context, gameID string) 
 	}
 
 	// Parse injuries
-	view.Injuries = buildInjuryViews(game, rosterMap)
+	view.Injuries = buildInjuryViews(game, rosterPlayers, rosterMap)
 
 	playerMatches, err := h.deps.Store.PlayerMatchesForTeams(ctx, teams)
 	matchesByNormTeam := make(map[string]db.PlayerMatch)
@@ -762,34 +762,31 @@ func (h *researchHandlers) renderPartial(w http.ResponseWriter, name string, dat
 	_, _ = w.Write(html)
 }
 
-func buildInjuryViews(game db.Game, rosterMap map[string]db.RosterPlayer) []TeamInjuriesView {
+func buildInjuryViews(
+	game db.Game,
+	rosterPlayers []db.RosterPlayer,
+	rosterMap map[string]db.RosterPlayer,
+) []TeamInjuriesView {
+	mergedByTeam := analyzer.MergeGameInjuries(game, rosterPlayers)
 	rawInjuries := ""
 	if game.InjuriesJSON != nil {
 		rawInjuries = *game.InjuriesJSON
 	}
 	teamInjuries, err := espn.ParseInjuries(rawInjuries)
 	if err != nil {
-		return nil
+		teamInjuries = nil
 	}
-	views := make([]TeamInjuriesView, 0, len(teamInjuries))
-	for _, ti := range teamInjuries {
-		logoURL := ti.LogoURL
-		if logoURL == "" {
-			logoURL = gameTeamLogo(game, ti.Abbreviation, ti.Team)
-		}
-		tView := TeamInjuriesView{
-			Team:         ti.Team,
-			Abbreviation: ti.Abbreviation,
-			LogoURL:      logoURL,
-		}
-		for _, inj := range ti.Injuries {
+
+	toInjuryViews := func(injuries []espn.Injury) []InjuryView {
+		out := make([]InjuryView, 0, len(injuries))
+		for _, inj := range injuries {
 			headshotURL := inj.HeadshotURL
 			if headshotURL == "" {
 				if rp, ok := rosterMap[inj.AthleteID]; ok {
 					headshotURL = rp.HeadshotURL
 				}
 			}
-			tView.Injuries = append(tView.Injuries, InjuryView{
+			out = append(out, InjuryView{
 				AthleteID:   inj.AthleteID,
 				FullName:    inj.FullName,
 				Position:    inj.Position,
@@ -799,9 +796,64 @@ func buildInjuryViews(game db.Game, rosterMap map[string]db.RosterPlayer) []Team
 				Detail:      inj.Detail,
 			})
 		}
-		views = append(views, tView)
+		return out
 	}
+
+	views := make([]TeamInjuriesView, 0, len(teamInjuries)+len(mergedByTeam))
+	seenTeams := make(map[string]struct{}, len(teamInjuries)+len(mergedByTeam))
+	for _, ti := range teamInjuries {
+		if ti.Abbreviation != "" {
+			seenTeams[ti.Abbreviation] = struct{}{}
+		}
+		logoURL := ti.LogoURL
+		if logoURL == "" {
+			logoURL = gameTeamLogo(game, ti.Abbreviation, ti.Team)
+		}
+		injuries := ti.Injuries
+		if merged, ok := mergedByTeam[ti.Abbreviation]; ok {
+			injuries = merged
+		}
+		views = append(views, TeamInjuriesView{
+			Team:         ti.Team,
+			Abbreviation: ti.Abbreviation,
+			LogoURL:      logoURL,
+			Injuries:     toInjuryViews(injuries),
+		})
+	}
+
+	for _, abbr := range []string{game.AwayTeam, game.HomeTeam} {
+		if abbr == "" {
+			continue
+		}
+		if _, ok := seenTeams[abbr]; ok {
+			continue
+		}
+		injuries := mergedByTeam[abbr]
+		if len(injuries) == 0 {
+			continue
+		}
+		seenTeams[abbr] = struct{}{}
+		teamName := gameTeamName(game, abbr)
+		views = append(views, TeamInjuriesView{
+			Team:         teamName,
+			Abbreviation: abbr,
+			LogoURL:      gameTeamLogo(game, abbr, teamName),
+			Injuries:     toInjuryViews(injuries),
+		})
+	}
+
 	return views
+}
+
+func gameTeamName(game db.Game, abbr string) string {
+	switch {
+	case abbr != "" && abbr == game.AwayTeam && game.AwayName != "":
+		return game.AwayName
+	case abbr != "" && abbr == game.HomeTeam && game.HomeName != "":
+		return game.HomeName
+	default:
+		return abbr
+	}
 }
 
 func gameTeamLogo(game db.Game, abbr, teamName string) string {
