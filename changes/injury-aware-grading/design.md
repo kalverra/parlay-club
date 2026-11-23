@@ -259,5 +259,5 @@ unit tests covering edge cases and the Knox/Kincaid regression scenario)
       `teammate_out_bump` (`+5`) when a same-team, same-position (`WR`/`TE`/`RB`) teammate is `Out` on an Over/Anytime
       TD prop, and update `GradeRubric()` in `internal/analyzer/docs.go`, with unit tests in
       `internal/analyzer/analyzer_test.go` and `internal/analyzer/nflverse_grade_test.go`.
-- [ ] Docs: update `docs/concepts/analyzer.md` and `docs/reference/analyzer-rules.md` to document the roster+summary
+- [x] Docs: update `docs/concepts/analyzer.md` and `docs/reference/analyzer-rules.md` to document the roster+summary
       injury merge and the teammate-out `ScoreLeg` adjustments.
