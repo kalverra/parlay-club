@@ -1,0 +1,452 @@
+package eval
+
+import (
+	"cmp"
+	"slices"
+
+	"github.com/kalverra/parlay-club/internal/analyzer"
+	"github.com/kalverra/parlay-club/internal/parlay"
+)
+
+const ungradedBand = "ungraded"
+
+var bandOrder = []string{"A", "B", "C", "D", "F", ungradedBand}
+
+// BandStats holds calibration and return metrics for one grade band.
+type BandStats struct {
+	Band           string  `json:"band"`
+	Total          int     `json:"total"`
+	Decided        int     `json:"decided"`
+	Wins           int     `json:"wins"`
+	Losses         int     `json:"losses"`
+	Pushes         int     `json:"pushes"`
+	WinRate        float64 `json:"win_rate"`
+	AvgImpliedProb float64 `json:"avg_implied_prob"`
+	Lift           float64 `json:"lift"`
+	FlatROI        float64 `json:"flat_roi"`
+	BrierScore     float64 `json:"brier_score"`
+}
+
+// FactorStats holds per-factor attribution across decided legs.
+type FactorStats struct {
+	Rule           string  `json:"rule"`
+	Label          string  `json:"label"`
+	Count          int     `json:"count"`
+	Wins           int     `json:"wins"`
+	Losses         int     `json:"losses"`
+	WinRate        float64 `json:"win_rate"`
+	AvgImpliedProb float64 `json:"avg_implied_prob"`
+	Lift           float64 `json:"lift"`
+	AvgDelta       float64 `json:"avg_delta"`
+}
+
+// Report summarizes calibration, factor attribution, and monotonicity for one
+// rubric evaluated on a ReplayDataset.
+type Report struct {
+	RubricName       string        `json:"rubric_name"`
+	Coverage         DataCoverage  `json:"coverage"`
+	LegBands         []BandStats   `json:"leg_bands"`
+	SlipBands        []BandStats   `json:"slip_bands"`
+	Factors          []FactorStats `json:"factors"`
+	LegMonotonic     bool          `json:"leg_monotonic"`
+	LegMonotonicWin  bool          `json:"leg_monotonic_win"`
+	LegMonotonicLift bool          `json:"leg_monotonic_lift"`
+	legOutcomes      []legOutcome
+}
+
+// BandDiff records the metric delta from baseline to candidate for one band.
+type BandDiff struct {
+	Band             string  `json:"band"`
+	BaselineDecided  int     `json:"baseline_decided"`
+	CandidateDecided int     `json:"candidate_decided"`
+	WinRateDelta     float64 `json:"win_rate_delta"`
+	LiftDelta        float64 `json:"lift_delta"`
+	FlatROIDelta     float64 `json:"flat_roi_delta"`
+}
+
+// MigrationCell records legs that moved from FromBand to ToBand between
+// baseline and candidate rubrics.
+type MigrationCell struct {
+	FromBand string  `json:"from_band"`
+	ToBand   string  `json:"to_band"`
+	Total    int     `json:"total"`
+	Decided  int     `json:"decided"`
+	Wins     int     `json:"wins"`
+	Losses   int     `json:"losses"`
+	WinRate  float64 `json:"win_rate"`
+}
+
+// DiffReport compares a candidate Report against a baseline Report.
+type DiffReport struct {
+	BaselineName  string          `json:"baseline_name"`
+	CandidateName string          `json:"candidate_name"`
+	LegBandDiffs  []BandDiff      `json:"leg_band_diffs"`
+	SlipBandDiffs []BandDiff      `json:"slip_band_diffs"`
+	Migrations    []MigrationCell `json:"migrations"`
+}
+
+type legOutcome struct {
+	band    string
+	decided bool
+	won     bool
+}
+
+type bandAccum struct {
+	band           string
+	total          int
+	wins           int
+	losses         int
+	pushes         int
+	oddsCount      int
+	impliedProbSum float64
+	unitsSum       float64
+	brierSum       float64
+}
+
+func (a *bandAccum) add(result parlay.Result, decimalOdds float64) {
+	a.total++
+	switch result {
+	case parlay.Push, parlay.Void:
+		a.pushes++
+		return
+	case parlay.Won:
+		a.wins++
+	case parlay.Lost:
+		a.losses++
+	default:
+		return
+	}
+
+	if decimalOdds > 1 {
+		implied := 1.0 / decimalOdds
+		outcome := 0.0
+		if result == parlay.Won {
+			outcome = 1.0
+		}
+		diff := implied - outcome
+		a.oddsCount++
+		a.impliedProbSum += implied
+		a.unitsSum += parlay.Units(result, decimalOdds)
+		a.brierSum += diff * diff
+	}
+}
+
+func (a *bandAccum) stats() BandStats {
+	decided := a.wins + a.losses
+	s := BandStats{
+		Band:    a.band,
+		Total:   a.total,
+		Decided: decided,
+		Wins:    a.wins,
+		Losses:  a.losses,
+		Pushes:  a.pushes,
+	}
+	if decided > 0 {
+		s.WinRate = float64(a.wins) / float64(decided)
+	}
+	if a.oddsCount > 0 {
+		s.AvgImpliedProb = a.impliedProbSum / float64(a.oddsCount)
+		s.Lift = s.WinRate - s.AvgImpliedProb
+		s.FlatROI = a.unitsSum / float64(a.oddsCount)
+		s.BrierScore = a.brierSum / float64(a.oddsCount)
+	}
+	return s
+}
+
+type factorAccum struct {
+	rule           string
+	label          string
+	count          int
+	wins           int
+	losses         int
+	oddsCount      int
+	impliedProbSum float64
+	deltaSum       int
+}
+
+func (a *factorAccum) add(result parlay.Result, decimalOdds float64, delta int) {
+	a.count++
+	a.deltaSum += delta
+	if result == parlay.Won {
+		a.wins++
+	} else {
+		a.losses++
+	}
+	if decimalOdds > 1 {
+		a.oddsCount++
+		a.impliedProbSum += 1.0 / decimalOdds
+	}
+}
+
+func (a *factorAccum) stats() FactorStats {
+	s := FactorStats{
+		Rule:   a.rule,
+		Label:  a.label,
+		Count:  a.count,
+		Wins:   a.wins,
+		Losses: a.losses,
+	}
+	if a.count > 0 {
+		s.WinRate = float64(a.wins) / float64(a.count)
+		s.AvgDelta = float64(a.deltaSum) / float64(a.count)
+	}
+	if a.oddsCount > 0 {
+		s.AvgImpliedProb = a.impliedProbSum / float64(a.oddsCount)
+		s.Lift = s.WinRate - s.AvgImpliedProb
+	}
+	return s
+}
+
+// Evaluate scores every slip and leg in dataset under rubric and returns leg
+// and slip calibration by band, lift over implied odds, flat ROI, per-factor
+// attribution, and monotonicity checks.
+func Evaluate(dataset ReplayDataset, rubric analyzer.Rubric) Report {
+	legBands := newBandAccumMap()
+	slipBands := newBandAccumMap()
+	factors := make(map[string]*factorAccum)
+	var outcomes []legOutcome
+
+	for _, week := range dataset.Weeks {
+		for _, slip := range week.Slips {
+			analyzerLegs := make([]analyzer.Leg, len(slip.Legs))
+			for i, rl := range slip.Legs {
+				analyzerLegs[i] = rl.Leg
+			}
+
+			slipGrade := analyzer.ScoreSlipWithRubric(analyzerLegs, week.Games, week.Stats, rubric)
+			slipBand := normalizeBand(slipGrade.Letter)
+			slipBands[slipBand].add(slip.Result, slipDecimalOdds(slip))
+
+			for i, rl := range slip.Legs {
+				var lg analyzer.LegGrade
+				if i < len(slipGrade.LegGrades) {
+					lg = slipGrade.LegGrades[i]
+				}
+				band := normalizeBand(lg.Letter)
+				dec := legDecimalOdds(rl)
+				legBands[band].add(rl.Result, dec)
+
+				decided := rl.Result == parlay.Won || rl.Result == parlay.Lost
+				outcomes = append(outcomes, legOutcome{
+					band:    band,
+					decided: decided,
+					won:     rl.Result == parlay.Won,
+				})
+
+				if !decided {
+					continue
+				}
+				for _, f := range lg.Factors {
+					fa, ok := factors[f.Rule]
+					if !ok {
+						fa = &factorAccum{rule: f.Rule, label: f.Label}
+						factors[f.Rule] = fa
+					}
+					fa.add(rl.Result, dec, f.Delta)
+				}
+			}
+		}
+	}
+
+	legBandStats := finalizeBandStats(legBands)
+	slipBandStats := finalizeBandStats(slipBands)
+	monoWin, monoLift := checkMonotonicity(legBandStats)
+
+	factorStats := make([]FactorStats, 0, len(factors))
+	for _, fa := range factors {
+		factorStats = append(factorStats, fa.stats())
+	}
+	slices.SortFunc(factorStats, func(a, b FactorStats) int {
+		if c := cmp.Compare(b.Count, a.Count); c != 0 {
+			return c
+		}
+		return cmp.Compare(a.Rule, b.Rule)
+	})
+
+	return Report{
+		RubricName:       rubric.Name,
+		Coverage:         dataset.Coverage,
+		LegBands:         legBandStats,
+		SlipBands:        slipBandStats,
+		Factors:          factorStats,
+		LegMonotonic:     monoWin && monoLift,
+		LegMonotonicWin:  monoWin,
+		LegMonotonicLift: monoLift,
+		legOutcomes:      outcomes,
+	}
+}
+
+// Compare computes per-band calibration deltas and the leg band migration
+// matrix between baseline and candidate reports.
+func Compare(baseline, candidate Report) DiffReport {
+	return DiffReport{
+		BaselineName:  baseline.RubricName,
+		CandidateName: candidate.RubricName,
+		LegBandDiffs:  diffBandStats(baseline.LegBands, candidate.LegBands),
+		SlipBandDiffs: diffBandStats(baseline.SlipBands, candidate.SlipBands),
+		Migrations:    computeMigrations(baseline.legOutcomes, candidate.legOutcomes),
+	}
+}
+
+func newBandAccumMap() map[string]*bandAccum {
+	m := make(map[string]*bandAccum, len(bandOrder))
+	for _, b := range bandOrder {
+		m[b] = &bandAccum{band: b}
+	}
+	return m
+}
+
+func finalizeBandStats(m map[string]*bandAccum) []BandStats {
+	out := make([]BandStats, len(bandOrder))
+	for i, b := range bandOrder {
+		out[i] = m[b].stats()
+	}
+	return out
+}
+
+func normalizeBand(letter string) string {
+	switch letter {
+	case "A", "B", "C", "D", "F":
+		return letter
+	default:
+		return ungradedBand
+	}
+}
+
+func legDecimalOdds(rl ReplayedLeg) float64 {
+	if rl.DecimalOdds > 1 {
+		return rl.DecimalOdds
+	}
+	if rl.Leg.Odds != 0 {
+		return parlay.AmericanToDecimal(rl.Leg.Odds)
+	}
+	return 0
+}
+
+func slipDecimalOdds(rs ReplayedSlip) float64 {
+	if rs.CombinedOdds > 1 {
+		return rs.CombinedOdds
+	}
+	parlayLegs := make([]parlay.Leg, 0, len(rs.Legs))
+	for _, rl := range rs.Legs {
+		if !rl.Result.Counts() {
+			continue
+		}
+		dec := legDecimalOdds(rl)
+		if dec <= 1 {
+			return 0
+		}
+		parlayLegs = append(parlayLegs, parlay.Leg{
+			Decimal: dec,
+			Result:  rl.Result,
+		})
+	}
+	if len(parlayLegs) == 0 {
+		return 0
+	}
+	return parlay.CombinedOdds(parlayLegs)
+}
+
+func checkMonotonicity(bands []BandStats) (winMono, liftMono bool) {
+	winMono = true
+	liftMono = true
+	hasPrev := false
+	var prev BandStats
+	for _, b := range bands {
+		if b.Band == ungradedBand || b.Decided == 0 {
+			continue
+		}
+		if hasPrev {
+			if b.WinRate > prev.WinRate {
+				winMono = false
+			}
+			if b.Lift > prev.Lift {
+				liftMono = false
+			}
+		}
+		prev = b
+		hasPrev = true
+	}
+	return winMono, liftMono
+}
+
+func diffBandStats(base, cand []BandStats) []BandDiff {
+	baseMap := make(map[string]BandStats, len(base))
+	for _, b := range base {
+		baseMap[b.Band] = b
+	}
+	candMap := make(map[string]BandStats, len(cand))
+	for _, c := range cand {
+		candMap[c.Band] = c
+	}
+
+	diffs := make([]BandDiff, len(bandOrder))
+	for i, band := range bandOrder {
+		b := baseMap[band]
+		c := candMap[band]
+		diffs[i] = BandDiff{
+			Band:             band,
+			BaselineDecided:  b.Decided,
+			CandidateDecided: c.Decided,
+			WinRateDelta:     c.WinRate - b.WinRate,
+			LiftDelta:        c.Lift - b.Lift,
+			FlatROIDelta:     c.FlatROI - b.FlatROI,
+		}
+	}
+	return diffs
+}
+
+func computeMigrations(base, cand []legOutcome) []MigrationCell {
+	n := min(len(base), len(cand))
+	type key struct {
+		from string
+		to   string
+	}
+	type counts struct {
+		total  int
+		wins   int
+		losses int
+	}
+	cells := make(map[key]*counts)
+	for i := range n {
+		k := key{from: base[i].band, to: cand[i].band}
+		c, ok := cells[k]
+		if !ok {
+			c = &counts{}
+			cells[k] = c
+		}
+		c.total++
+		if base[i].decided {
+			if base[i].won {
+				c.wins++
+			} else {
+				c.losses++
+			}
+		}
+	}
+
+	var out []MigrationCell
+	for _, from := range bandOrder {
+		for _, to := range bandOrder {
+			c, ok := cells[key{from: from, to: to}]
+			if !ok {
+				continue
+			}
+			decided := c.wins + c.losses
+			winRate := 0.0
+			if decided > 0 {
+				winRate = float64(c.wins) / float64(decided)
+			}
+			out = append(out, MigrationCell{
+				FromBand: from,
+				ToBand:   to,
+				Total:    c.total,
+				Decided:  decided,
+				Wins:     c.wins,
+				Losses:   c.losses,
+				WinRate:  winRate,
+			})
+		}
+	}
+	return out
+}
