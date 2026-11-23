@@ -421,6 +421,9 @@
       {{range .Books}}
         <div class="rounded-lg border border-slate-800 px-3 py-2">
           <h3 class="text-xs font-semibold uppercase tracking-wide text-slate-400">{{.Label}}</h3>
+          {{if .MultiGameNote}}
+            <p class="mt-1 text-xs text-slate-400">{{.MultiGameNote}}</p>
+          {{end}}
 
           {{if .OpenURL}}
             <a
@@ -436,6 +439,53 @@
                 <p class="mt-1.5 text-xs text-amber-300">{{.Selection}}: {{.DriftNote}}</p>
               {{end}}
             {{end}}
+          {{else if .Groups}}
+            <div class="mt-2 space-y-2">
+              {{range .Groups}}
+                {{if .CombinedURL}}
+                  <div class="rounded-md border border-sky-900/70 bg-sky-950/20 p-2">
+                    <a
+                      href="{{.CombinedURL}}"
+                      target="_blank"
+                      rel="noopener"
+                      class="block w-full rounded-lg bg-sky-600 px-3 py-2 text-center text-sm font-semibold text-white hover:bg-sky-500"
+                    >
+                      Open {{.Label}} ({{len .Legs}} legs)
+                    </a>
+                    <ul class="mt-1.5 space-y-0.5 text-xs text-slate-300">
+                      {{range .Legs}}
+                        <li>
+                          <span class="flex items-center justify-between gap-2">
+                            <span class="min-w-0 truncate">{{.Selection}}</span>
+                            <span class="shrink-0 text-slate-400">{{.Price}}</span>
+                          </span>
+                          {{if .LineMoved}}
+                            <span class="block text-amber-300">{{.DriftNote}}</span>
+                          {{end}}
+                        </li>
+                      {{end}}
+                    </ul>
+                  </div>
+                {{else}}
+                  {{range .Legs}}
+                    <a
+                      href="{{.URL}}"
+                      target="_blank"
+                      rel="noopener"
+                      class="flex items-center justify-between gap-2 rounded-md border border-sky-800 bg-sky-950/40 px-2 py-1.5 text-sm text-sky-300 hover:bg-sky-900/60"
+                    >
+                      <span class="min-w-0">
+                        <span class="block min-w-0 truncate">{{.Selection}}</span>
+                        {{if .LineMoved}}
+                          <span class="mt-0.5 block text-xs text-amber-300">{{.DriftNote}}</span>
+                        {{end}}
+                      </span>
+                      <span class="shrink-0 text-xs text-slate-400">{{.Price}}</span>
+                    </a>
+                  {{end}}
+                {{end}}
+              {{end}}
+            </div>
           {{else if .Linked}}
             <ol class="mt-2 space-y-1">
               {{range $index, $link := .Linked}}

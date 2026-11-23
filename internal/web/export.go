@@ -33,13 +33,25 @@ type ExportView struct {
 }
 
 // ExportBookView is one sportsbook's part of the card: one combined link when
-// the book has a verified format, otherwise one tap per linked leg, plus every
-// leg the person has to add by hand.
+// the book has a verified format, per-game groups when a single-event book
+// spans multiple games with 2+ legs in one game, otherwise one tap per linked
+// leg, plus every leg the person has to add by hand.
 type ExportBookView struct {
-	Label   string
-	OpenURL string
-	Linked  []ExportLinkView
-	Manual  []ExportManualView
+	Label         string
+	OpenURL       string
+	MultiGameNote string
+	Groups        []ExportGroupView
+	Linked        []ExportLinkView
+	Manual        []ExportManualView
+}
+
+// ExportGroupView is one game's group of linked legs for a book whose combined
+// URL is scoped to a single event. CombinedURL is set when 2+ legs in the
+// group combine into one tap.
+type ExportGroupView struct {
+	Label       string
+	CombinedURL string
+	Legs        []ExportLinkView
 }
 
 // ExportLinkView is one linked leg's tap.
@@ -94,8 +106,12 @@ func (h *slipHandlers) exportView(ctx context.Context, slip db.Slip) (ExportView
 	}
 
 	kickoffs := make(map[string]time.Time, len(games))
+	matchups := make(map[string]string, len(games))
 	for _, game := range games {
 		kickoffs[game.ID] = game.Kickoff
+		if game.AwayTeam != "" && game.HomeTeam != "" {
+			matchups[game.ID] = game.AwayTeam + " @ " + game.HomeTeam
+		}
 	}
 
 	oddsByGame := make(map[string][]db.Odds, len(kickoffs))
@@ -139,7 +155,7 @@ func (h *slipHandlers) exportView(ctx context.Context, slip db.Slip) (ExportView
 	now := h.deps.now()
 	for _, book := range exportBooks {
 		plan := export.Plan(slip, exportLegs, oddsRows, book.key, now)
-		view.Books = append(view.Books, exportBookView(plan, book.label))
+		view.Books = append(view.Books, exportBookView(plan, book.label, matchups))
 	}
 
 	view.CopyText = exportCopyText(legs, names)
@@ -149,16 +165,21 @@ func (h *slipHandlers) exportView(ctx context.Context, slip db.Slip) (ExportView
 
 // exportBookView shapes one book's plan and turns each manual reason into a
 // short note in the app's voice.
-func exportBookView(plan export.BookPlan, label string) ExportBookView {
+func exportBookView(plan export.BookPlan, label string, matchups map[string]string) ExportBookView {
 	book := ExportBookView{Label: label, OpenURL: plan.Combined}
-	for _, link := range plan.Linked {
-		book.Linked = append(book.Linked, ExportLinkView{
-			Selection: link.Leg.Selection,
-			URL:       link.URL,
-			Price:     formatOdds(link.Price),
-			LineMoved: link.LineMoved,
-			DriftNote: driftNote(link),
-		})
+	if plan.MultiGameNote {
+		book.MultiGameNote = label + " links load one game at a time — tap each game below to add its legs."
+	}
+	book.Linked = exportLinkViews(plan.Linked)
+	if hasCombinedGroup(plan.Groups) {
+		book.Groups = make([]ExportGroupView, 0, len(plan.Groups))
+		for _, group := range plan.Groups {
+			book.Groups = append(book.Groups, ExportGroupView{
+				Label:       groupLabel(group.GameID, matchups),
+				CombinedURL: group.Combined,
+				Legs:        exportLinkViews(group.Legs),
+			})
+		}
 	}
 	for _, manual := range plan.Manual {
 		book.Manual = append(book.Manual, ExportManualView{
@@ -167,6 +188,42 @@ func exportBookView(plan export.BookPlan, label string) ExportBookView {
 		})
 	}
 	return book
+}
+
+func exportLinkViews(links []export.LegLink) []ExportLinkView {
+	if len(links) == 0 {
+		return nil
+	}
+	out := make([]ExportLinkView, 0, len(links))
+	for _, link := range links {
+		out = append(out, ExportLinkView{
+			Selection: link.Leg.Selection,
+			URL:       link.URL,
+			Price:     formatOdds(link.Price),
+			LineMoved: link.LineMoved,
+			DriftNote: driftNote(link),
+		})
+	}
+	return out
+}
+
+func hasCombinedGroup(groups []export.LinkGroup) bool {
+	for _, group := range groups {
+		if group.Combined != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func groupLabel(gameID string, matchups map[string]string) string {
+	if label := matchups[gameID]; label != "" {
+		return label
+	}
+	if gameID != "" {
+		return gameID
+	}
+	return "Game"
 }
 
 // driftNote formats a concise line-drift callout when a linked leg's live
@@ -222,6 +279,12 @@ func manualNote(manual export.ManualLeg, book string) string {
 	case export.ReasonGameStarted:
 		return "Heads up: this game already started, so add it by hand."
 	case export.ReasonNoLine:
+		if manual.PropsSynced {
+			return fmt.Sprintf(
+				"Heads up: %s isn't offering this prop right now, so add it by hand if it appears on their board.",
+				book,
+			)
+		}
 		return fmt.Sprintf(
 			"Heads up: %s has no line for this pick yet, so add it by hand.",
 			book,

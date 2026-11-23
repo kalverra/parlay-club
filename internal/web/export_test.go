@@ -320,8 +320,16 @@ func TestExportCardIgnoresStaleOddsRows(t *testing.T) {
 
 	body := html.UnescapeString(getExport(t, fixture.handler, fixture.slip.ID).Body.String())
 	assert.NotContains(t, body, "outcomes=stale")
-	assert.Contains(t, body, "DraftKings has no line for this pick yet")
-	assert.Contains(t, body, "FanDuel has no line for this pick yet")
+	assert.Contains(
+		t,
+		body,
+		"DraftKings isn't offering this prop right now, so add it by hand if it appears on their board.",
+	)
+	assert.Contains(
+		t,
+		body,
+		"FanDuel isn't offering this prop right now, so add it by hand if it appears on their board.",
+	)
 }
 
 func TestExportUsesTheScenarioClockForKickoff(t *testing.T) {
@@ -736,4 +744,244 @@ func TestLockInEnrichesUnlinkedPropInBackgroundAndPushesSSE(t *testing.T) {
 
 	body := html.UnescapeString(getExport(t, handler, slip.ID).Body.String())
 	assert.Contains(t, body, "https://sportsbook.draftkings.com/event/dk-evt-99?outcomes=dk-sid-99")
+}
+
+func TestExportCardDraftKingsMultiGameWithCombinedGroup(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 4)
+	gameA := addGame(t, fixture, gameKickoff()) // MIA @ BUF
+	gameB, err := fixture.store.UpsertGame(t.Context(), db.Game{
+		ID:         "401772002",
+		WeekID:     fixture.week.ID,
+		HomeTeam:   "KC",
+		AwayTeam:   "LAC",
+		HomeName:   "Kansas City Chiefs",
+		AwayName:   "Los Angeles Chargers",
+		HomeESPNID: "12",
+		AwayESPNID: "24",
+		Kickoff:    gameKickoff(),
+		Status:     db.GameScheduled,
+		UpdatedAt:  time.Now().UTC(),
+	})
+	require.NoError(t, err)
+
+	_, err = fixture.store.UpsertOdds(t.Context(), []db.Odds{
+		{
+			GameID:     gameA.ID,
+			Book:       "draftkings",
+			MarketType: "ML",
+			Team:       "BUF",
+			Side:       "TEAM",
+			Price:      -150,
+			Link:       new("https://sportsbook.draftkings.com/event/dk-evt-a?outcomes=dk-a1"),
+			Sid:        new("dk-a1"),
+			EventSid:   new("dk-evt-a"),
+			FetchedAt:  exportFetched,
+		},
+		{
+			GameID:     gameA.ID,
+			Book:       "draftkings",
+			MarketType: "SPREAD",
+			Team:       "BUF",
+			Side:       "TEAM",
+			Line:       new(-3.0),
+			Price:      -110,
+			Link:       new("https://sportsbook.draftkings.com/event/dk-evt-a?outcomes=dk-a2"),
+			Sid:        new("dk-a2"),
+			EventSid:   new("dk-evt-a"),
+			FetchedAt:  exportFetched,
+		},
+		{
+			GameID:     gameB.ID,
+			Book:       "draftkings",
+			MarketType: "ML",
+			Team:       "KC",
+			Side:       "TEAM",
+			Price:      -180,
+			Link:       new("https://sportsbook.draftkings.com/event/dk-evt-b?outcomes=dk-b1"),
+			Sid:        new("dk-b1"),
+			EventSid:   new("dk-evt-b"),
+			FetchedAt:  exportFetched,
+		},
+	})
+	require.NoError(t, err)
+
+	addExportLeg(t, fixture, url.Values{
+		"game_id":     {gameA.ID},
+		"market_type": {"ML"},
+		"team":        {"BUF"},
+		"side":        {"TEAM"},
+		"selection":   {"BUF ML"},
+		"odds":        {"-150"},
+	})
+	addExportLeg(t, fixture, url.Values{
+		"game_id":     {gameA.ID},
+		"market_type": {"SPREAD"},
+		"team":        {"BUF"},
+		"side":        {"TEAM"},
+		"line":        {"-3.5"},
+		"selection":   {"BUF -3.5"},
+		"odds":        {"-110"},
+	})
+	addExportLeg(t, fixture, url.Values{
+		"game_id":     {gameB.ID},
+		"market_type": {"ML"},
+		"team":        {"KC"},
+		"side":        {"TEAM"},
+		"selection":   {"KC ML"},
+		"odds":        {"-180"},
+	})
+	lockSlip(t, fixture)
+
+	body := html.UnescapeString(getExport(t, fixture.handler, fixture.slip.ID).Body.String())
+	assert.Contains(t, body, "DraftKings links load one game at a time — tap each game below to add its legs.")
+	assert.Contains(t, body, "Open MIA @ BUF (2 legs)")
+	assert.Contains(t, body, "https://sportsbook.draftkings.com/event/dk-evt-a?outcomes=dk-a1,dk-a2")
+	assert.Contains(t, body, "BUF ML")
+	assert.Contains(t, body, "BUF -3.5")
+	assert.Contains(t, body, "Book at -3 · slip -3.5")
+	assert.Contains(t, body, "https://sportsbook.draftkings.com/event/dk-evt-b?outcomes=dk-b1")
+	assert.Contains(t, body, "KC ML")
+}
+
+func TestExportCardDraftKingsMultiGameAllSingleLegs(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 4)
+	gameA := addGame(t, fixture, gameKickoff())
+	gameB, err := fixture.store.UpsertGame(t.Context(), db.Game{
+		ID:         "401772002",
+		WeekID:     fixture.week.ID,
+		HomeTeam:   "KC",
+		AwayTeam:   "LAC",
+		HomeName:   "Kansas City Chiefs",
+		AwayName:   "Los Angeles Chargers",
+		HomeESPNID: "12",
+		AwayESPNID: "24",
+		Kickoff:    gameKickoff(),
+		Status:     db.GameScheduled,
+		UpdatedAt:  time.Now().UTC(),
+	})
+	require.NoError(t, err)
+
+	_, err = fixture.store.UpsertOdds(t.Context(), []db.Odds{
+		{
+			GameID:     gameA.ID,
+			Book:       "draftkings",
+			MarketType: "ML",
+			Team:       "BUF",
+			Side:       "TEAM",
+			Price:      -150,
+			Link:       new("https://sportsbook.draftkings.com/event/dk-evt-a?outcomes=dk-a1"),
+			Sid:        new("dk-a1"),
+			EventSid:   new("dk-evt-a"),
+			FetchedAt:  exportFetched,
+		},
+		{
+			GameID:     gameB.ID,
+			Book:       "draftkings",
+			MarketType: "ML",
+			Team:       "KC",
+			Side:       "TEAM",
+			Price:      -180,
+			Link:       new("https://sportsbook.draftkings.com/event/dk-evt-b?outcomes=dk-b1"),
+			Sid:        new("dk-b1"),
+			EventSid:   new("dk-evt-b"),
+			FetchedAt:  exportFetched,
+		},
+	})
+	require.NoError(t, err)
+
+	addExportLeg(t, fixture, url.Values{
+		"game_id":     {gameA.ID},
+		"market_type": {"ML"},
+		"team":        {"BUF"},
+		"side":        {"TEAM"},
+		"selection":   {"BUF ML"},
+		"odds":        {"-150"},
+	})
+	addExportLeg(t, fixture, url.Values{
+		"game_id":     {gameB.ID},
+		"market_type": {"ML"},
+		"team":        {"KC"},
+		"side":        {"TEAM"},
+		"selection":   {"KC ML"},
+		"odds":        {"-180"},
+	})
+	lockSlip(t, fixture)
+
+	body := html.UnescapeString(getExport(t, fixture.handler, fixture.slip.ID).Body.String())
+	assert.Contains(t, body, "DraftKings links load one game at a time — tap each game below to add its legs.")
+	assert.NotContains(t, body, "Open MIA @ BUF")
+	assert.Contains(t, body, "https://sportsbook.draftkings.com/event/dk-evt-a?outcomes=dk-a1")
+	assert.Contains(t, body, "https://sportsbook.draftkings.com/event/dk-evt-b?outcomes=dk-b1")
+	assert.Contains(t, body, "1.")
+	assert.Contains(t, body, "2.")
+}
+
+func TestExportCardUnquotedPropVsUnsyncedGame(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 4)
+	syncedGame := addGame(t, fixture, gameKickoff())
+	unsyncedGame, err := fixture.store.UpsertGame(t.Context(), db.Game{
+		ID:         "401772002",
+		WeekID:     fixture.week.ID,
+		HomeTeam:   "KC",
+		AwayTeam:   "LAC",
+		HomeName:   "Kansas City Chiefs",
+		AwayName:   "Los Angeles Chargers",
+		HomeESPNID: "12",
+		AwayESPNID: "24",
+		Kickoff:    gameKickoff(),
+		Status:     db.GameScheduled,
+		UpdatedAt:  time.Now().UTC(),
+	})
+	require.NoError(t, err)
+
+	_, err = fixture.store.UpsertOdds(t.Context(), []db.Odds{
+		{
+			GameID:     syncedGame.ID,
+			Book:       "draftkings",
+			MarketType: odds.MarketRushYds,
+			Team:       "BUF",
+			PlayerName: "James Cook",
+			Side:       odds.SideOver,
+			Line:       new(65.5),
+			Price:      -110,
+			FetchedAt:  exportFetched,
+		},
+	})
+	require.NoError(t, err)
+
+	addExportLeg(t, fixture, url.Values{
+		"game_id":     {syncedGame.ID},
+		"market_type": {odds.MarketPassYds},
+		"team":        {"BUF"},
+		"player_name": {"Josh Allen"},
+		"side":        {odds.SideOver},
+		"line":        {"245.5"},
+		"selection":   {"Josh Allen Over 245.5 Pass Yds"},
+		"odds":        {"-110"},
+	})
+	addExportLeg(t, fixture, url.Values{
+		"game_id":     {unsyncedGame.ID},
+		"market_type": {odds.MarketPassYds},
+		"team":        {"KC"},
+		"player_name": {"Patrick Mahomes"},
+		"side":        {odds.SideOver},
+		"line":        {"265.5"},
+		"selection":   {"Patrick Mahomes Over 265.5 Pass Yds"},
+		"odds":        {"-110"},
+	})
+	lockSlip(t, fixture)
+
+	body := html.UnescapeString(getExport(t, fixture.handler, fixture.slip.ID).Body.String())
+	assert.Contains(
+		t,
+		body,
+		"Heads up: FanDuel isn't offering this prop right now, so add it by hand if it appears on their board.",
+	)
+	assert.Contains(t, body, "Heads up: FanDuel has no line for this pick yet, so add it by hand.")
 }
