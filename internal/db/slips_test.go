@@ -307,6 +307,99 @@ func TestSlipIDsForWeekReturnsEveryGroupsSlips(t *testing.T) {
 	assert.ElementsMatch(t, []int64{first.ID, second.ID}, ids)
 }
 
+func TestSlipsWithLegsForWeekFiltersByGroupAndStatus(t *testing.T) {
+	t.Parallel()
+
+	store, _ := openTestStore(t)
+	ada := createUser(t, store, "Ada")
+	bob := createUser(t, store, "Bob")
+	groupA := createTestGroup(t, store, ada)
+	groupB := createTestGroup(t, store, bob)
+	week9 := createTestWeek(t, store, 9)
+	week8 := createTestWeek(t, store, 8)
+
+	// Week 9, Group A: one GRADED with two legs, one OPEN with one leg.
+	aGraded := createTestSlip(t, store, groupA, week9, "A Graded", 2, ada)
+	aGradedLeg1, err := store.CreateLeg(t.Context(), db.Leg{
+		SlipID: aGraded.ID, UserID: ada.ID, MarketType: "ML", Selection: "BUF ML", Odds: -140,
+	})
+	require.NoError(t, err)
+	aGradedLeg2, err := store.CreateLeg(t.Context(), db.Leg{
+		SlipID: aGraded.ID, UserID: ada.ID, MarketType: "TOTAL", Selection: "Over 47.5", Odds: -110,
+	})
+	require.NoError(t, err)
+	require.NoError(t, store.SetSlipGrade(t.Context(), aGraded.ID, parlay.Won, db.SlipGraded))
+	aGraded, err = store.SlipByID(t.Context(), aGraded.ID)
+	require.NoError(t, err)
+
+	aOpen := createTestSlip(t, store, groupA, week9, "A Open", 2, ada)
+	aOpenLeg, err := store.CreateLeg(t.Context(), db.Leg{
+		SlipID: aOpen.ID, UserID: ada.ID, MarketType: "ML", Selection: "KC ML", Odds: -120,
+	})
+	require.NoError(t, err)
+
+	// Week 9, Group B: one GRADED with zero legs, one LOCKED with one leg.
+	bGraded := createTestSlip(t, store, groupB, week9, "B Graded Empty", 2, bob)
+	require.NoError(t, store.SetSlipGrade(t.Context(), bGraded.ID, parlay.Lost, db.SlipGraded))
+	bGraded, err = store.SlipByID(t.Context(), bGraded.ID)
+	require.NoError(t, err)
+
+	bLocked := createTestSlip(t, store, groupB, week9, "B Locked", 2, bob)
+	bLockedLeg, err := store.CreateLeg(t.Context(), db.Leg{
+		SlipID: bLocked.ID, UserID: bob.ID, MarketType: "SPREAD", Selection: "MIA +3.5", Odds: -110,
+	})
+	require.NoError(t, err)
+	require.NoError(t, store.SetSlipStatus(t.Context(), bLocked.ID, db.SlipLocked))
+	bLocked, err = store.SlipByID(t.Context(), bLocked.ID)
+	require.NoError(t, err)
+
+	// Week 8, Group A: must not leak into Week 9 queries.
+	otherWeek := createTestSlip(t, store, groupA, week8, "Week 8 Graded", 2, ada)
+	require.NoError(t, store.SetSlipGrade(t.Context(), otherWeek.ID, parlay.Won, db.SlipGraded))
+
+	// Invalid status is rejected.
+	_, err = store.SlipsWithLegsForWeek(t.Context(), week9.ID, 0, db.SlipStatus("BOGUS"))
+	require.ErrorIs(t, err, db.ErrSlipStatusInvalid)
+
+	// All groups, all statuses in week 9 (oldest slip ID first).
+	all, err := store.SlipsWithLegsForWeek(t.Context(), week9.ID, 0, "")
+	require.NoError(t, err)
+	assert.Equal(t, []db.SlipWithLegs{
+		{Slip: aGraded, Legs: []db.Leg{aGradedLeg1, aGradedLeg2}},
+		{Slip: aOpen, Legs: []db.Leg{aOpenLeg}},
+		{Slip: bGraded, Legs: []db.Leg{}},
+		{Slip: bLocked, Legs: []db.Leg{bLockedLeg}},
+	}, all)
+
+	// All groups, GRADED only.
+	graded, err := store.SlipsWithLegsForWeek(t.Context(), week9.ID, 0, db.SlipGraded)
+	require.NoError(t, err)
+	assert.Equal(t, []db.SlipWithLegs{
+		{Slip: aGraded, Legs: []db.Leg{aGradedLeg1, aGradedLeg2}},
+		{Slip: bGraded, Legs: []db.Leg{}},
+	}, graded)
+
+	// Group A, all statuses.
+	groupAAll, err := store.SlipsWithLegsForWeek(t.Context(), week9.ID, groupA.ID, "")
+	require.NoError(t, err)
+	assert.Equal(t, []db.SlipWithLegs{
+		{Slip: aGraded, Legs: []db.Leg{aGradedLeg1, aGradedLeg2}},
+		{Slip: aOpen, Legs: []db.Leg{aOpenLeg}},
+	}, groupAAll)
+
+	// Group A, GRADED only.
+	groupAGraded, err := store.SlipsWithLegsForWeek(t.Context(), week9.ID, groupA.ID, db.SlipGraded)
+	require.NoError(t, err)
+	assert.Equal(t, []db.SlipWithLegs{
+		{Slip: aGraded, Legs: []db.Leg{aGradedLeg1, aGradedLeg2}},
+	}, groupAGraded)
+
+	// Week with no matching slips returns empty non-nil slice.
+	none, err := store.SlipsWithLegsForWeek(t.Context(), week8.ID, groupB.ID, "")
+	require.NoError(t, err)
+	assert.Empty(t, none)
+}
+
 func TestNewestSlipForWeekReportsAMissingWeek(t *testing.T) {
 	t.Parallel()
 

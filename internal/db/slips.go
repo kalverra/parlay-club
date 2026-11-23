@@ -236,6 +236,80 @@ func (s *Store) SlipsForWeek(ctx context.Context, groupID, weekID int64) ([]Slip
 	return slips, nil
 }
 
+// SlipWithLegs pairs a slip with its legs in added order.
+type SlipWithLegs struct {
+	Slip Slip
+	Legs []Leg
+}
+
+// SlipsWithLegsForWeek returns slips in one week along with their legs in
+// added order, ordered oldest slip first (matching SlipIDsForWeek). A zero
+// groupID matches all groups, and an empty status matches all statuses. An
+// unknown non-empty status returns ErrSlipStatusInvalid.
+func (s *Store) SlipsWithLegsForWeek(
+	ctx context.Context,
+	weekID, groupID int64,
+	status SlipStatus,
+) ([]SlipWithLegs, error) {
+	if status != "" && !status.Valid() {
+		return nil, fmt.Errorf("list slips with legs for week %d: %w", weekID, ErrSlipStatusInvalid)
+	}
+
+	clauses := []string{"week_id = ?"}
+	args := []any{weekID}
+	if groupID != 0 {
+		clauses = append(clauses, "group_id = ?")
+		args = append(args, groupID)
+	}
+	if status != "" {
+		clauses = append(clauses, "status = ?")
+		args = append(args, string(status))
+	}
+
+	// #nosec G202 -- clauses contains only static column predicates.
+	query := "SELECT" + slipColumns + " FROM slips WHERE " + strings.Join(clauses, " AND ") + " ORDER BY id"
+	rows, err := s.readConn().QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list slips with legs for week %d: %w", weekID, err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	slips := make([]Slip, 0)
+	slipIDs := make([]int64, 0)
+	for rows.Next() {
+		slip, err := scanSlip(rows)
+		if err != nil {
+			return nil, fmt.Errorf("list slips with legs for week %d: %w", weekID, err)
+		}
+		slips = append(slips, slip)
+		slipIDs = append(slipIDs, slip.ID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list slips with legs for week %d: %w", weekID, err)
+	}
+	if len(slips) == 0 {
+		return []SlipWithLegs{}, nil
+	}
+
+	legsBySlip, err := s.LegsForSlips(ctx, slipIDs)
+	if err != nil {
+		return nil, fmt.Errorf("list slips with legs for week %d: %w", weekID, err)
+	}
+
+	out := make([]SlipWithLegs, len(slips))
+	for i, slip := range slips {
+		legs := legsBySlip[slip.ID]
+		if legs == nil {
+			legs = []Leg{}
+		}
+		out[i] = SlipWithLegs{
+			Slip: slip,
+			Legs: legs,
+		}
+	}
+	return out, nil
+}
+
 // SlipIDsForWeek returns every slip ID in a week across all groups, oldest
 // first. Refresh uses it to signal every affected slip after a board change.
 func (s *Store) SlipIDsForWeek(ctx context.Context, weekID int64) ([]int64, error) {
