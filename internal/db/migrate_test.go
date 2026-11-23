@@ -14,7 +14,7 @@ import (
 )
 
 // latestSchemaVersion is the version the last migration records.
-const latestSchemaVersion = 13
+const latestSchemaVersion = 14
 
 func TestMigrateFreshDatabase(t *testing.T) {
 	t.Parallel()
@@ -429,6 +429,62 @@ func TestMigration0013CanonicalPlayers(t *testing.T) {
 	require.NoError(t, db.BackfillCanonicalPlayers(t.Context(), database))
 	require.NoError(t, database.QueryRowContext(t.Context(), "SELECT count(*) FROM odds").Scan(&totalOdds))
 	assert.Equal(t, 5, totalOdds)
+}
+
+func TestMigration0014RosterInjuries(t *testing.T) {
+	t.Parallel()
+
+	database := openTestDB(t)
+
+	// Apply migrations 0001 through 0013 manually.
+	entries, err := os.ReadDir("migrations")
+	require.NoError(t, err)
+	for _, entry := range entries {
+		if entry.Name() < "0014" && filepath.Ext(entry.Name()) == ".sql" {
+			content, err := os.ReadFile(filepath.Join("migrations", entry.Name()))
+			require.NoError(t, err)
+			_, err = database.ExecContext(t.Context(), string(content))
+			require.NoError(t, err)
+		}
+	}
+	_, err = database.ExecContext(t.Context(), "PRAGMA user_version = 13")
+	require.NoError(t, err)
+
+	// Seed a pre-0014 roster player.
+	_, err = database.ExecContext(t.Context(), `
+		INSERT INTO roster_players (
+			athlete_id, team, espn_team_id, full_name, norm_name, position, updated_at
+		) VALUES (
+			'4385690', 'BUF', '2', 'Dalton Kincaid', 'dalton kincaid', 'TE', '2026-11-07T12:00:00Z'
+		)`)
+	require.NoError(t, err)
+
+	require.NoError(t, db.Migrate(t.Context(), database))
+	assert.Equal(t, latestSchemaVersion, schemaVersion(t, database))
+
+	// Existing row must default both injury columns to ''.
+	var status, date string
+	require.NoError(t, database.QueryRowContext(t.Context(),
+		"SELECT injury_status, injury_date FROM roster_players WHERE athlete_id = '4385690'").
+		Scan(&status, &date))
+	assert.Empty(t, status)
+	assert.Empty(t, date)
+
+	// Inserting a row with injury_status and injury_date works.
+	_, err = database.ExecContext(t.Context(), `
+		INSERT INTO roster_players (
+			athlete_id, team, espn_team_id, full_name, norm_name, position,
+			injury_status, injury_date, updated_at
+		) VALUES (
+			'3918298', 'BUF', '2', 'Josh Allen', 'josh allen', 'QB',
+			'Questionable', '2026-11-08T12:00:00Z', '2026-11-08T12:00:00Z'
+		)`)
+	require.NoError(t, err)
+	require.NoError(t, database.QueryRowContext(t.Context(),
+		"SELECT injury_status, injury_date FROM roster_players WHERE athlete_id = '3918298'").
+		Scan(&status, &date))
+	assert.Equal(t, "Questionable", status)
+	assert.Equal(t, "2026-11-08T12:00:00Z", date)
 }
 
 // schemaVersion reads PRAGMA user_version, the migration runner's record of the

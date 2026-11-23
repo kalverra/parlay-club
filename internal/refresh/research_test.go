@@ -758,3 +758,61 @@ func TestMapPropsToOddsUnmatchedCasingAndCollisions(t *testing.T) {
 	assert.Equal(t, "Josh Allen", rows2[3].PlayerName)
 	assert.Empty(t, rows2[3].Team)
 }
+
+func TestSyncRosterPersistsAndClearsInjuries(t *testing.T) {
+	t.Parallel()
+
+	store := openTestStore(t)
+	now := novemberTime(8, 10, 0)
+	espnClient := &fakeESPNResearch{
+		rosters: map[string][]espn.RosterPlayer{
+			"2": {
+				{
+					ID:           "4385690",
+					FullName:     "Dalton Kincaid",
+					Position:     "TE",
+					InjuryStatus: "Out",
+					InjuryDate:   "2026-11-08T15:00Z",
+				},
+				{
+					ID:       "3918298",
+					FullName: "Josh Allen",
+					Position: "QB",
+				},
+			},
+		},
+	}
+
+	service := New(Deps{
+		Store:  store,
+		ESPN:   espnClient,
+		Now:    func() time.Time { return now },
+		Logger: zerolog.Nop(),
+	})
+
+	changed, err := service.syncRoster(t.Context(), "BUF", "2", now)
+	require.NoError(t, err)
+	assert.True(t, changed)
+
+	kincaid, err := store.RosterPlayerByID(t.Context(), "4385690")
+	require.NoError(t, err)
+	assert.Equal(t, "Out", kincaid.InjuryStatus)
+	assert.Equal(t, "2026-11-08T15:00Z", kincaid.InjuryDate)
+
+	allen, err := store.RosterPlayerByID(t.Context(), "3918298")
+	require.NoError(t, err)
+	assert.Empty(t, allen.InjuryStatus)
+	assert.Empty(t, allen.InjuryDate)
+
+	// Next refresh with empty injury fields clears the stored status.
+	espnClient.rosters["2"][0].InjuryStatus = ""
+	espnClient.rosters["2"][0].InjuryDate = ""
+	changed, err = service.syncRoster(t.Context(), "BUF", "2", now.Add(2*time.Hour))
+	require.NoError(t, err)
+	assert.True(t, changed)
+
+	kincaid, err = store.RosterPlayerByID(t.Context(), "4385690")
+	require.NoError(t, err)
+	assert.Empty(t, kincaid.InjuryStatus)
+	assert.Empty(t, kincaid.InjuryDate)
+}

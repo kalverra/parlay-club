@@ -19,17 +19,19 @@ var (
 
 // RosterPlayer is one athlete on an NFL team's ESPN roster.
 type RosterPlayer struct {
-	AthleteID   string
-	Team        string
-	ESPNTeamID  string
-	FullName    string
-	NormName    string
-	Position    string
-	HeadshotURL string
-	UpdatedAt   time.Time
+	AthleteID    string
+	Team         string
+	ESPNTeamID   string
+	FullName     string
+	NormName     string
+	Position     string
+	HeadshotURL  string
+	InjuryStatus string
+	InjuryDate   string
+	UpdatedAt    time.Time
 }
 
-const rosterColumns = `athlete_id, team, espn_team_id, full_name, norm_name, position, headshot_url, updated_at`
+const rosterColumns = `athlete_id, team, espn_team_id, full_name, norm_name, position, headshot_url, injury_status, injury_date, updated_at`
 
 // PlayerGameLog is one athlete's cached season game log and market stats.
 type PlayerGameLog struct {
@@ -154,8 +156,9 @@ func (s *Store) UpsertRosterPlayers(ctx context.Context, players []RosterPlayer)
 			}
 			_, err := tx.conn().ExecContext(ctx, `
 				INSERT INTO roster_players (
-					athlete_id, team, espn_team_id, full_name, norm_name, position, headshot_url, updated_at
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+					athlete_id, team, espn_team_id, full_name, norm_name, position, headshot_url,
+					injury_status, injury_date, updated_at
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 				ON CONFLICT (athlete_id) DO UPDATE SET
 					team = excluded.team,
 					espn_team_id = excluded.espn_team_id,
@@ -163,6 +166,8 @@ func (s *Store) UpsertRosterPlayers(ctx context.Context, players []RosterPlayer)
 					norm_name = excluded.norm_name,
 					position = excluded.position,
 					headshot_url = excluded.headshot_url,
+					injury_status = excluded.injury_status,
+					injury_date = excluded.injury_date,
 					updated_at = excluded.updated_at`,
 				p.AthleteID,
 				p.Team,
@@ -171,6 +176,8 @@ func (s *Store) UpsertRosterPlayers(ctx context.Context, players []RosterPlayer)
 				norm,
 				p.Position,
 				p.HeadshotURL,
+				p.InjuryStatus,
+				p.InjuryDate,
 				formatTimestamp(p.UpdatedAt),
 			)
 			if err != nil {
@@ -612,6 +619,8 @@ func scanRosterPlayer(row rowScanner) (RosterPlayer, error) {
 		&p.NormName,
 		&p.Position,
 		&p.HeadshotURL,
+		&p.InjuryStatus,
+		&p.InjuryDate,
 		&updatedAt,
 	); err != nil {
 		return RosterPlayer{}, err
