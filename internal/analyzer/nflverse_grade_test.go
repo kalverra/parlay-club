@@ -686,6 +686,82 @@ func TestRuleDocsCoverageAndGradeRubric(t *testing.T) {
 	assert.Equal(t, "+5", factorByRule["teammate_out_bump"].Delta)
 }
 
+func TestGradeRubricForNonActiveRubric(t *testing.T) {
+	t.Parallel()
+
+	activeBefore := analyzer.ActiveRubric
+	activeDocBefore := analyzer.GradeRubric()
+
+	assert.Equal(t, activeDocBefore, analyzer.GradeRubricFor(activeBefore))
+
+	custom := analyzer.RubricV1
+	custom.Name = "custom-candidate"
+	custom.LegBaseline = 80
+	custom.BandA = 90
+	custom.BandB = 78
+	custom.BandC = 65
+	custom.BandD = 50
+	custom.HitRate = 14
+	custom.MedianTrap = -18
+	custom.MedianTrapSoftened = -6
+	custom.WindWarn = -9
+	custom.WindDanger = -22
+	custom.Hook = -11
+	custom.HookSoftened = -3
+	custom.ChalkMin = -12
+	custom.ChalkMax = -25
+	custom.StackBonus = 11
+	custom.ParlayDragPerLeg = -4
+	custom.ParlayDragFreeLegs = 2
+	custom.ChalkDragPerExtraLeg = -7
+
+	got := analyzer.GradeRubricFor(custom)
+
+	assert.Equal(t, activeBefore, analyzer.ActiveRubric, "GradeRubricFor must not mutate ActiveRubric")
+	assert.Equal(t, activeDocBefore, analyzer.GradeRubric(), "GradeRubric must remain unchanged")
+
+	assert.Equal(t, 80, got.BaselineScore)
+	require.Len(t, got.Bands, 5)
+	assert.Equal(t, 90, got.Bands[0].MinScore)
+	assert.Equal(t, "90–100", got.Bands[0].Range)
+	assert.Equal(t, 78, got.Bands[1].MinScore)
+	assert.Equal(t, "78–89", got.Bands[1].Range)
+	assert.Equal(t, 65, got.Bands[2].MinScore)
+	assert.Equal(t, "65–77", got.Bands[2].Range)
+	assert.Equal(t, 50, got.Bands[3].MinScore)
+	assert.Equal(t, "50–64", got.Bands[3].Range)
+	assert.Equal(t, 0, got.Bands[4].MinScore)
+	assert.Equal(t, "0–49", got.Bands[4].Range)
+
+	legByRule := make(map[string]analyzer.FactorDoc, len(got.LegFactors))
+	for _, f := range got.LegFactors {
+		assert.NotEmpty(t, f.Label)
+		legByRule[f.Rule] = f
+	}
+	assert.Equal(t, "+14", legByRule["hit_rate"].Delta)
+	assert.Equal(t, "Strong L5 hit rate", legByRule["hit_rate"].Label)
+	assert.Equal(t, "-18 (-6 w/ teammate Out)", legByRule["median_trap"].Delta)
+	assert.Contains(t, legByRule["median_trap"].Description, "-6")
+	assert.Equal(t, "-9 / -22", legByRule["wind"].Delta)
+	assert.Contains(t, legByRule["wind"].Description, "-9")
+	assert.Contains(t, legByRule["wind"].Description, "-22")
+	assert.Equal(t, "-11 (-3 w/ cushion)", legByRule["hook"].Delta)
+	assert.Contains(t, legByRule["hook"].Description, "-3")
+	assert.Equal(t, "-12 to -25", legByRule["chalk"].Delta)
+	assert.Contains(t, legByRule["chalk"].Description, "-12")
+	assert.Contains(t, legByRule["chalk"].Description, "-25")
+
+	slipByRule := make(map[string]analyzer.FactorDoc, len(got.SlipFactors))
+	for _, f := range got.SlipFactors {
+		assert.NotEmpty(t, f.Label)
+		slipByRule[f.Rule] = f
+	}
+	assert.Equal(t, "+11", slipByRule["stack_shootout"].Delta)
+	assert.Equal(t, "-4 / leg", slipByRule["parlay_drag"].Delta)
+	assert.Contains(t, slipByRule["parlay_drag"].Description, "beyond 2 legs")
+	assert.Equal(t, "-7 / leg", slipByRule["chalk_drag"].Delta)
+}
+
 func assertSumEqualsScore(t *testing.T, g analyzer.LegGrade) {
 	t.Helper()
 	sum := 75

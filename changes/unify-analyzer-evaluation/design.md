@@ -64,9 +64,9 @@ func EvaluateSlipWithRubric(legs []Leg, games map[string]Game, stats map[string]
 
 ### 3. Parameterize rubric documentation by explicit `Rubric` (`internal/analyzer/docs.go`)
 
-- Add `GradeRubricFor(r Rubric) GradeRubricDoc` containing the full rubric doc construction using `r` instead of
+- Add `GradeRubricFor(r Rubric) RubricDoc` containing the full rubric doc construction using `r` instead of
   `ActiveRubric`.
-- Make `GradeRubric() GradeRubricDoc` a one-line wrapper: `return GradeRubricFor(ActiveRubric)`.
+- Make `GradeRubric() RubricDoc` a one-line wrapper: `return GradeRubricFor(ActiveRubric)`.
 
 ```mermaid
 flowchart LR
@@ -114,7 +114,7 @@ scoring and warning parity) Risk: low (backed by comprehensive table-driven test
 - [x] Define constants for all grade factor rule IDs in `internal/analyzer`, extract shared single-leg predicates
       (`medianTrap`, weather hazard, spread hook, heavy chalk) used by both `rules.go` and `grade.go`, and verify exact
       parity against existing analyzer tests.
-- [ ] Add `GradeRubricFor(r Rubric) GradeRubricDoc` in `internal/analyzer/docs.go` with `GradeRubric()` delegating to
+- [x] Add `GradeRubricFor(r Rubric) GradeRubricDoc` in `internal/analyzer/docs.go` with `GradeRubric()` delegating to
       `ActiveRubric`, and add unit tests confirming non-active rubrics render their own weights and labels without
       touching global state.
 
