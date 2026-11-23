@@ -55,9 +55,10 @@ type Publisher interface {
 // updates the slip's status, then publishes slip:{id}. now is injected so the
 // kickoff and locking rules stay testable.
 type Service struct {
-	store   *db.Store
-	publish Publisher
-	now     func() time.Time
+	store         *db.Store
+	publish       Publisher
+	now           func() time.Time
+	onGradeChange func(groupID int64)
 }
 
 // New builds a Service over store. A nil publisher skips live updates, and a
@@ -67,6 +68,12 @@ func New(store *db.Store, publish Publisher, now func() time.Time) *Service {
 		now = time.Now
 	}
 	return &Service{store: store, publish: publish, now: now}
+}
+
+// SetOnGradeChange registers a callback invoked after a transaction commits
+// leg or slip grade changes for a group. A nil fn disables the callback.
+func (s *Service) SetOnGradeChange(fn func(groupID int64)) {
+	s.onGradeChange = fn
 }
 
 // AddMember puts userID on the slip. Members can change only while the slip is
@@ -329,6 +336,9 @@ func (s *Service) SetLegResult(
 	}
 	if changed {
 		s.notify(slipID)
+		if s.onGradeChange != nil {
+			s.onGradeChange(updated.GroupID)
+		}
 	}
 	return updated, nil
 }
@@ -358,7 +368,11 @@ func (s *Service) AutoGradeLegs(ctx context.Context, grades []AutoGrade) error {
 		}
 	}
 
-	var slipOrder []int64
+	var (
+		slipOrder  []int64
+		groupIDs   []int64
+		seenGroups = make(map[int64]struct{})
+	)
 	err := s.store.Tx(ctx, func(tx *db.Store) error {
 		slipChanges := make(map[int64][]string)
 		for _, g := range grades {
@@ -389,6 +403,15 @@ func (s *Service) AutoGradeLegs(ctx context.Context, grades []AutoGrade) error {
 		}
 
 		for _, slipID := range slipOrder {
+			slip, err := tx.SlipByID(ctx, slipID)
+			if err != nil {
+				return err
+			}
+			if _, seen := seenGroups[slip.GroupID]; !seen {
+				seenGroups[slip.GroupID] = struct{}{}
+				groupIDs = append(groupIDs, slip.GroupID)
+			}
+
 			legs, err := tx.LegsForSlip(ctx, slipID)
 			if err != nil {
 				return err
@@ -419,6 +442,11 @@ func (s *Service) AutoGradeLegs(ctx context.Context, grades []AutoGrade) error {
 
 	for _, slipID := range slipOrder {
 		s.notify(slipID)
+	}
+	if s.onGradeChange != nil {
+		for _, groupID := range groupIDs {
+			s.onGradeChange(groupID)
+		}
 	}
 	return nil
 }

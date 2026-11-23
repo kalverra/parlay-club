@@ -26,6 +26,7 @@ import (
 	"github.com/kalverra/parlay-club/internal/bugs"
 	"github.com/kalverra/parlay-club/internal/config"
 	"github.com/kalverra/parlay-club/internal/db"
+	"github.com/kalverra/parlay-club/internal/eval"
 	"github.com/kalverra/parlay-club/internal/groups"
 	"github.com/kalverra/parlay-club/internal/ingest/archive"
 	"github.com/kalverra/parlay-club/internal/ingest/espn"
@@ -109,6 +110,7 @@ func run() error {
 	}()
 	cookies := auth.NewCookies(cfg.SessionKey, cfg.IsProd())
 	hub := &live.Hub{}
+	evalCache := eval.NewCache()
 
 	provider, devLogin, err := authSettings(ctx, cfg)
 	if err != nil {
@@ -134,6 +136,7 @@ func run() error {
 		}
 		runtime.cookies = cookies
 		runtime.renderer = renderer
+		runtime.evalCache = evalCache
 		refresher = runtime.refresher
 		slipService = runtime.slips
 		appNow = runtime.scenario.Now
@@ -158,6 +161,7 @@ func run() error {
 		kick = refresher.Kick
 		drain = refresher.Shutdown
 	}
+	slipService.SetOnGradeChange(evalCache.InvalidateGroup)
 
 	handlers := auth.NewHandlers(logger, store, cookies, renderer, provider, devLogin)
 	scope := groups.Scope(logger, store, auth.UserFrom, cookies)

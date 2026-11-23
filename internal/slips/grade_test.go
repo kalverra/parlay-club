@@ -119,3 +119,49 @@ func TestAutoGradeLegsPreservesManualOverridesAndNoOpsQuietly(t *testing.T) {
 	assert.Len(t, afterNoOp, len(afterActivity))
 	assert.Empty(t, f.published.topics)
 }
+
+func TestOnGradeChangeCallback(t *testing.T) {
+	t.Parallel()
+
+	f := newFixture(t)
+	var changedGroups []int64
+	f.service.SetOnGradeChange(func(groupID int64) {
+		changedGroups = append(changedGroups, groupID)
+	})
+
+	leg1, err := f.store.CreateLeg(t.Context(), db.Leg{
+		SlipID: f.slip.ID, UserID: f.ada.ID, GameID: &f.upcoming,
+		MarketType: "ML", Selection: "BUF ML",
+	})
+	require.NoError(t, err)
+	leg2, err := f.store.CreateLeg(t.Context(), db.Leg{
+		SlipID: f.slip.ID, UserID: f.sam.ID, GameID: &f.upcoming,
+		MarketType: "TOTAL", Selection: "Over 45.5",
+	})
+	require.NoError(t, err)
+
+	// SetLegResult invokes callback once on change, and not on repeated identical grade.
+	_, err = f.service.SetLegResult(t.Context(), f.ada.ID, leg1.ID, parlay.Won)
+	require.NoError(t, err)
+	assert.Equal(t, []int64{f.group.ID}, changedGroups)
+
+	_, err = f.service.SetLegResult(t.Context(), f.ada.ID, leg1.ID, parlay.Won)
+	require.NoError(t, err)
+	assert.Equal(t, []int64{f.group.ID}, changedGroups)
+
+	// AutoGradeLegs invokes callback once per distinct group with updated legs.
+	changedGroups = nil
+	err = f.service.AutoGradeLegs(t.Context(), []slips.AutoGrade{
+		{LegID: leg2.ID, Result: parlay.Won},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, []int64{f.group.ID}, changedGroups)
+
+	// No-op AutoGradeLegs does not invoke callback.
+	changedGroups = nil
+	err = f.service.AutoGradeLegs(t.Context(), []slips.AutoGrade{
+		{LegID: leg2.ID, Result: parlay.Lost},
+	})
+	require.NoError(t, err)
+	assert.Empty(t, changedGroups)
+}
