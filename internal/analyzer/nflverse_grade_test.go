@@ -422,6 +422,32 @@ func TestScoreLeg(t *testing.T) {
 		assertSumEqualsScore(t, g)
 	})
 
+	t.Run("teammate out softens L5 median trap and awards role bump", func(t *testing.T) {
+		t.Parallel()
+		l := withPlayerID(leg(1, "Adam", "buf-mia", "REC_YDS", "BUF", "Dawson Knox", "OVER", new(21.0), -110), "knox")
+		gs := map[string]analyzer.Game{
+			"buf-mia": {
+				ID:   "buf-mia",
+				Home: "MIA",
+				Away: "BUF",
+				Injuries: map[string][]analyzer.Injury{
+					"BUF": {{AthleteID: "kincaid", FullName: "Dalton Kincaid", Position: "TE", Status: "Out"}},
+				},
+			},
+		}
+		stats := map[string]analyzer.PlayerStats{
+			"knox": {
+				Position: "TE",
+				Games:    map[string][]float64{"REC_YDS": {5, 7, 12, 0, 14}},
+			},
+		}
+		g := analyzer.ScoreLeg(l, gs, stats)
+		// 75 - 5 (softened median_trap) + 5 (teammate_out_bump) = 75 (B)
+		assert.Equal(t, "B", g.Letter)
+		assert.Equal(t, 75, g.Score)
+		assertSumEqualsScore(t, g)
+	})
+
 	t.Run("chalk scaling and category caps preserve factor sum invariant", func(t *testing.T) {
 		t.Parallel()
 		l := withPlayerID(leg(1, "Adam", "buf-mia", "PASS_YDS", "BUF", "Josh Allen", "OVER", new(260.5), -500), "p1")
@@ -651,6 +677,13 @@ func TestRuleDocsCoverageAndGradeRubric(t *testing.T) {
 	})
 	assert.NotEmpty(t, rubric.LegFactors)
 	assert.NotEmpty(t, rubric.SlipFactors)
+
+	factorByRule := make(map[string]analyzer.FactorDoc, len(rubric.LegFactors))
+	for _, f := range rubric.LegFactors {
+		factorByRule[f.Rule] = f
+	}
+	assert.Contains(t, factorByRule["median_trap"].Delta, "-5 w/ teammate Out")
+	assert.Equal(t, "+5", factorByRule["teammate_out_bump"].Delta)
 }
 
 func assertSumEqualsScore(t *testing.T, g analyzer.LegGrade) {
