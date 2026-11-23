@@ -1,3 +1,4 @@
+// Command eval runs offline grading calibration and rubric comparison reports.
 package main
 
 import (
@@ -19,7 +20,7 @@ import (
 
 func main() {
 	if err := run(context.Background(), os.Args[1:], os.Stdout, os.Stderr); err != nil {
-		fmt.Fprintf(os.Stderr, "eval: %v\n", err)
+		_, _ = fmt.Fprintf(os.Stderr, "eval: %v\n", err)
 		os.Exit(1)
 	}
 }
@@ -77,7 +78,11 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if !compareMode {
 		rubric, ok := analyzer.RubricByName(*rubricName)
 		if !ok {
-			return fmt.Errorf("unknown rubric %q (available: %s)", *rubricName, strings.Join(analyzer.RubricNames(), ", "))
+			return fmt.Errorf(
+				"unknown rubric %q (available: %s)",
+				*rubricName,
+				strings.Join(analyzer.RubricNames(), ", "),
+			)
 		}
 		report := eval.Evaluate(dataset, rubric)
 		if *format == "json" {
@@ -92,7 +97,11 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 	baseRubric, ok := analyzer.RubricByName(baseName)
 	if !ok {
-		return fmt.Errorf("unknown baseline rubric %q (available: %s)", baseName, strings.Join(analyzer.RubricNames(), ", "))
+		return fmt.Errorf(
+			"unknown baseline rubric %q (available: %s)",
+			baseName,
+			strings.Join(analyzer.RubricNames(), ", "),
+		)
 	}
 
 	candRubric, err := loadCandidateRubric(*candidateName, *candidateFile)
@@ -116,16 +125,18 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 
 func loadCandidateRubric(name, file string) (analyzer.Rubric, error) {
 	if file != "" {
-		raw, err := os.ReadFile(file)
+		cleanPath := filepath.Clean(file)
+		// #nosec G304 -- CLI flag intentionally reads a user-specified rubric JSON file.
+		raw, err := os.ReadFile(cleanPath)
 		if err != nil {
-			return analyzer.Rubric{}, fmt.Errorf("read candidate rubric %s: %w", file, err)
+			return analyzer.Rubric{}, fmt.Errorf("read candidate rubric %s: %w", cleanPath, err)
 		}
 		var r analyzer.Rubric
 		if err := json.Unmarshal(raw, &r); err != nil {
-			return analyzer.Rubric{}, fmt.Errorf("parse candidate rubric %s: %w", file, err)
+			return analyzer.Rubric{}, fmt.Errorf("parse candidate rubric %s: %w", cleanPath, err)
 		}
 		if strings.TrimSpace(r.Name) == "" {
-			r.Name = filepath.Base(file)
+			r.Name = filepath.Base(cleanPath)
 		}
 		return r, nil
 	}
@@ -134,7 +145,11 @@ func loadCandidateRubric(name, file string) (analyzer.Rubric, error) {
 	}
 	r, ok := analyzer.RubricByName(name)
 	if !ok {
-		return analyzer.Rubric{}, fmt.Errorf("unknown candidate rubric %q (available: %s)", name, strings.Join(analyzer.RubricNames(), ", "))
+		return analyzer.Rubric{}, fmt.Errorf(
+			"unknown candidate rubric %q (available: %s)",
+			name,
+			strings.Join(analyzer.RubricNames(), ", "),
+		)
 	}
 	return r, nil
 }
@@ -145,107 +160,168 @@ func writeJSON(w io.Writer, v any) error {
 	return enc.Encode(v)
 }
 
+type errWriter struct {
+	w   io.Writer
+	err error
+}
+
+func (ew *errWriter) printf(format string, args ...any) {
+	if ew.err != nil {
+		return
+	}
+	_, ew.err = fmt.Fprintf(ew.w, format, args...)
+}
+
+func (ew *errWriter) println(args ...any) {
+	if ew.err != nil {
+		return
+	}
+	_, ew.err = fmt.Fprintln(ew.w, args...)
+}
+
 func writeReportText(w io.Writer, r eval.Report) error {
-	fmt.Fprintf(w, "Rubric: %s\n", r.RubricName)
-	writeCoverage(w, r.Coverage)
+	ew := &errWriter{w: w}
+	ew.printf("Rubric: %s\n", r.RubricName)
+	writeCoverage(ew, r.Coverage)
 
-	fmt.Fprintln(w, "\nLeg Calibration:")
-	writeBandsTable(w, r.LegBands)
-	fmt.Fprintf(w, "Monotonic: %v (win=%v, lift=%v)\n", r.LegMonotonic, r.LegMonotonicWin, r.LegMonotonicLift)
+	ew.println("\nLeg Calibration:")
+	if ew.err != nil {
+		return ew.err
+	}
+	if err := writeBandsTable(w, r.LegBands); err != nil {
+		return err
+	}
+	ew.printf("Monotonic: %v (win=%v, lift=%v)\n", r.LegMonotonic, r.LegMonotonicWin, r.LegMonotonicLift)
 
-	fmt.Fprintln(w, "\nFactor Attribution:")
-	writeFactorsTable(w, r.Factors)
+	ew.println("\nFactor Attribution:")
+	if ew.err != nil {
+		return ew.err
+	}
+	if err := writeFactorsTable(w, r.Factors); err != nil {
+		return err
+	}
 
-	fmt.Fprintln(w, "\nSlip Calibration:")
-	writeBandsTable(w, r.SlipBands)
-	return nil
+	ew.println("\nSlip Calibration:")
+	if ew.err != nil {
+		return ew.err
+	}
+	return writeBandsTable(w, r.SlipBands)
 }
 
 func writeDiffText(w io.Writer, base, cand eval.Report, diff eval.DiffReport) error {
-	fmt.Fprintf(w, "Comparison: %s -> %s\n", diff.BaselineName, diff.CandidateName)
-	writeCoverage(w, base.Coverage)
+	ew := &errWriter{w: w}
+	ew.printf("Comparison: %s -> %s\n", diff.BaselineName, diff.CandidateName)
+	writeCoverage(ew, base.Coverage)
 
-	fmt.Fprintln(w, "\nLeg Calibration Diff:")
-	writeBandDiffsTable(w, diff.LegBandDiffs)
+	ew.println("\nLeg Calibration Diff:")
+	if ew.err != nil {
+		return ew.err
+	}
+	if err := writeBandDiffsTable(w, diff.LegBandDiffs); err != nil {
+		return err
+	}
 
-	fmt.Fprintln(w, "\nSlip Calibration Diff:")
-	writeBandDiffsTable(w, diff.SlipBandDiffs)
+	ew.println("\nSlip Calibration Diff:")
+	if ew.err != nil {
+		return ew.err
+	}
+	if err := writeBandDiffsTable(w, diff.SlipBandDiffs); err != nil {
+		return err
+	}
 
-	fmt.Fprintln(w, "\nLeg Band Migrations:")
-	writeMigrationsTable(w, diff.Migrations)
+	ew.println("\nLeg Band Migrations:")
+	if ew.err != nil {
+		return ew.err
+	}
+	if err := writeMigrationsTable(w, diff.Migrations); err != nil {
+		return err
+	}
 
-	fmt.Fprintf(w, "\nCandidate Factor Attribution (%s):\n", cand.RubricName)
-	writeFactorsTable(w, cand.Factors)
-	return nil
+	ew.printf("\nCandidate Factor Attribution (%s):\n", cand.RubricName)
+	if ew.err != nil {
+		return ew.err
+	}
+	return writeFactorsTable(w, cand.Factors)
 }
 
-func writeCoverage(w io.Writer, c eval.DataCoverage) {
-	fmt.Fprintf(
-		w,
+func writeCoverage(ew *errWriter, c eval.DataCoverage) {
+	ew.printf(
 		"Data Coverage: legs=%d gamelogs=%d injuries=%d nflverse=%d nfelo=%d odds=%d\n",
 		c.TotalLegs, c.WithGameLogs, c.WithInjuries, c.WithNFLVerse, c.WithNfelo, c.WithOdds,
 	)
 }
 
-func writeBandsTable(w io.Writer, bands []eval.BandStats) {
+func writeBandsTable(w io.Writer, bands []eval.BandStats) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "Band\tTotal\tDecided\tW-L-P\tWinRate\tImplied\tLift\tFlatROI\tBrier")
+	ew := &errWriter{w: tw}
+	ew.println("Band\tTotal\tDecided\tW-L-P\tWinRate\tImplied\tLift\tFlatROI\tBrier")
 	for _, b := range bands {
-		fmt.Fprintf(
-			tw,
+		ew.printf(
 			"%s\t%d\t%d\t%d-%d-%d\t%.3f\t%.3f\t%+.3f\t%+.3f\t%.4f\n",
 			b.Band, b.Total, b.Decided, b.Wins, b.Losses, b.Pushes,
 			b.WinRate, b.AvgImpliedProb, b.Lift, b.FlatROI, b.BrierScore,
 		)
 	}
-	_ = tw.Flush()
+	if ew.err != nil {
+		return ew.err
+	}
+	return tw.Flush()
 }
 
-func writeFactorsTable(w io.Writer, factors []eval.FactorStats) {
+func writeFactorsTable(w io.Writer, factors []eval.FactorStats) error {
 	if len(factors) == 0 {
-		fmt.Fprintln(w, "(none)")
-		return
+		_, err := fmt.Fprintln(w, "(none)")
+		return err
 	}
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "Rule\tLabel\tCount\tW-L\tWinRate\tImplied\tLift\tAvgDelta")
+	ew := &errWriter{w: tw}
+	ew.println("Rule\tLabel\tCount\tW-L\tWinRate\tImplied\tLift\tAvgDelta")
 	for _, f := range factors {
-		fmt.Fprintf(
-			tw,
+		ew.printf(
 			"%s\t%s\t%d\t%d-%d\t%.3f\t%.3f\t%+.3f\t%+.2f\n",
 			f.Rule, f.Label, f.Count, f.Wins, f.Losses,
 			f.WinRate, f.AvgImpliedProb, f.Lift, f.AvgDelta,
 		)
 	}
-	_ = tw.Flush()
+	if ew.err != nil {
+		return ew.err
+	}
+	return tw.Flush()
 }
 
-func writeBandDiffsTable(w io.Writer, diffs []eval.BandDiff) {
+func writeBandDiffsTable(w io.Writer, diffs []eval.BandDiff) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "Band\tBaseN\tCandN\tWinRateDelta\tLiftDelta\tFlatROIDelta")
+	ew := &errWriter{w: tw}
+	ew.println("Band\tBaseN\tCandN\tWinRateDelta\tLiftDelta\tFlatROIDelta")
 	for _, d := range diffs {
-		fmt.Fprintf(
-			tw,
+		ew.printf(
 			"%s\t%d\t%d\t%+.3f\t%+.3f\t%+.3f\n",
 			d.Band, d.BaselineDecided, d.CandidateDecided,
 			d.WinRateDelta, d.LiftDelta, d.FlatROIDelta,
 		)
 	}
-	_ = tw.Flush()
+	if ew.err != nil {
+		return ew.err
+	}
+	return tw.Flush()
 }
 
-func writeMigrationsTable(w io.Writer, migrations []eval.MigrationCell) {
+func writeMigrationsTable(w io.Writer, migrations []eval.MigrationCell) error {
 	if len(migrations) == 0 {
-		fmt.Fprintln(w, "(none)")
-		return
+		_, err := fmt.Fprintln(w, "(none)")
+		return err
 	}
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "From\tTo\tTotal\tDecided\tW-L\tWinRate")
+	ew := &errWriter{w: tw}
+	ew.println("From\tTo\tTotal\tDecided\tW-L\tWinRate")
 	for _, m := range migrations {
-		fmt.Fprintf(
-			tw,
+		ew.printf(
 			"%s\t%s\t%d\t%d\t%d-%d\t%.3f\n",
 			m.FromBand, m.ToBand, m.Total, m.Decided, m.Wins, m.Losses, m.WinRate,
 		)
 	}
-	_ = tw.Flush()
+	if ew.err != nil {
+		return ew.err
+	}
+	return tw.Flush()
 }

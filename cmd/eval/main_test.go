@@ -101,7 +101,12 @@ func TestEvalCLI(t *testing.T) {
 	t.Run("single rubric json format", func(t *testing.T) {
 		t.Parallel()
 		var out, errBuf bytes.Buffer
-		err := run(t.Context(), []string{"--db", dbPath, "--season", "2025", "--from-week", "1", "--to-week", "12", "--format", "json"}, &out, &errBuf)
+		err := run(
+			t.Context(),
+			[]string{"--db", dbPath, "--season", "2025", "--from-week", "1", "--to-week", "12", "--format", "json"},
+			&out,
+			&errBuf,
+		)
 		require.NoError(t, err)
 
 		var report eval.Report
@@ -123,7 +128,12 @@ func TestEvalCLI(t *testing.T) {
 		require.NoError(t, os.WriteFile(candPath, candBytes, 0o600))
 
 		var out, errBuf bytes.Buffer
-		err = run(t.Context(), []string{"--db", dbPath, "--baseline", "v1", "--candidate-file", candPath}, &out, &errBuf)
+		err = run(
+			t.Context(),
+			[]string{"--db", dbPath, "--baseline", "v1", "--candidate-file", candPath},
+			&out,
+			&errBuf,
+		)
 		require.NoError(t, err)
 
 		text := out.String()

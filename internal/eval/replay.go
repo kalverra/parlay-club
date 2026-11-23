@@ -97,7 +97,14 @@ func LoadDataset(ctx context.Context, store *db.Store, filter ReplayFilter) (Rep
 			gamesMap[g.ID] = converted
 		}
 
-		statsMap, playerHasGameLog := loadArchivedPlayerStats(ctx, store, rawLegs, gameByDBID, usageByPlayer, positionByID)
+		statsMap, playerHasGameLog := loadArchivedPlayerStats(
+			ctx,
+			store,
+			rawLegs,
+			gameByDBID,
+			usageByPlayer,
+			positionByID,
+		)
 
 		for _, s := range slips {
 			for _, rl := range s.Legs {
@@ -299,7 +306,11 @@ func loadPriorNFLverse(
 
 	var usageByPlayer map[string]*analyzer.PlayerUsage
 	if len(athleteIDs) > 0 {
-		if byPlayer, err := store.NFLversePlayerWeeksForPlayersTypes(ctx, athleteIDs, week.Season, seasonTypes...); err == nil {
+		if byPlayer, err := store.NFLversePlayerWeeksForPlayersTypes(
+			ctx,
+			athleteIDs,
+			week.Season,
+			seasonTypes...); err == nil {
 			usageByPlayer = make(map[string]*analyzer.PlayerUsage, len(athleteIDs))
 			for _, id := range athleteIDs {
 				rows := byPlayer[id]
@@ -534,8 +545,7 @@ func latestArchivedBodyBefore(
 	if err != nil || len(responses) == 0 {
 		return nil, false
 	}
-	for i := len(responses) - 1; i >= 0; i-- {
-		r := responses[i]
+	for _, r := range slices.Backward(responses) {
 		if exactKey != "" && r.Key != exactKey {
 			continue
 		}
