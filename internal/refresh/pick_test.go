@@ -1057,3 +1057,86 @@ func TestKickSlipExportEnrich(t *testing.T) {
 	assert.Equal(t, 1, fallbackProps.eventPropsCalls)
 	assert.Empty(t, publisher.seen())
 }
+
+func TestEnrichGamePropsMergesUnresolvedVariantPlayerName(t *testing.T) {
+	t.Parallel()
+
+	store := openTestStore(t)
+	kickoff := novemberTime(8, 13, 0)
+	game := setupTestGame(t, store, kickoff, db.GameScheduled)
+
+	t0 := novemberTime(8, 6, 0)
+	clock := &fakeClock{now: t0}
+
+	// Seed an unlinked Parlay-only prop row with a punctuation variant ("D.J. Moore")
+	// that is not canonicalized in roster_players, and mark odds:props:{game} fresh.
+	require.NoError(t, store.Tx(t.Context(), func(tx *db.Store) error {
+		_, err := tx.UpsertOdds(t.Context(), []db.Odds{{
+			GameID:     game.ID,
+			Book:       "draftkings",
+			MarketType: odds.MarketRecYds,
+			PlayerName: "D.J. Moore",
+			Side:       odds.SideOver,
+			Line:       new(58.5),
+			Price:      -110,
+			FetchedAt:  t0,
+		}})
+		if err != nil {
+			return err
+		}
+		return tx.RecordSync(t.Context(), OddsPropsSource(game.ID), t0, nil)
+	}))
+
+	fallbackProps := &fakeFallbackPropsClient{
+		events: []odds.Event{{
+			ID:           "toa-401",
+			CommenceTime: kickoff,
+			HomeTeam:     "Buffalo Bills",
+			AwayTeam:     "Miami Dolphins",
+		}},
+		eventsCredits: odds.Credits{Remaining: 250},
+		eventProps: map[string][]odds.Prop{
+			"toa-401": {{
+				EventID:    "toa-401",
+				Book:       "draftkings",
+				MarketType: odds.MarketRecYds,
+				PlayerName: "DJ Moore",
+				Side:       odds.SideOver,
+				Line:       new(58.5),
+				Price:      -115,
+				Link:       "https://sportsbook.draftkings.com/event/dk-evt-401?outcomes=dk-moore",
+				Sid:        "dk-moore",
+				EventSid:   "dk-evt-401",
+			}},
+		},
+		eventPropsCredits: odds.Credits{Remaining: 249},
+	}
+
+	svc := New(Deps{
+		Store:         store,
+		Props:         &blockingPropsClient{},
+		FallbackProps: fallbackProps,
+		Now:           clock.Now,
+		Logger:        zerolog.Nop(),
+	})
+
+	clock.Advance(5 * time.Minute)
+	require.NoError(t, svc.SyncGameProps(t.Context(), game.ID))
+	assert.Equal(t, 1, fallbackProps.eventPropsCalls)
+
+	stored, err := store.OddsForGame(t.Context(), game.ID)
+	require.NoError(t, err)
+	require.Len(t, stored, 1, "variant player names should merge into a single row")
+	require.NotNil(t, stored[0].Link)
+	assert.Equal(t, "https://sportsbook.draftkings.com/event/dk-evt-401?outcomes=dk-moore", *stored[0].Link)
+
+	matched, ok := db.MatchBookOdds(db.Leg{
+		GameID:     new(game.ID),
+		MarketType: odds.MarketRecYds,
+		PlayerName: new("D.J. Moore"),
+		Side:       new(odds.SideOver),
+	}, stored, "draftkings")
+	require.True(t, ok)
+	require.NotNil(t, matched.Link)
+	assert.Equal(t, "https://sportsbook.draftkings.com/event/dk-evt-401?outcomes=dk-moore", *matched.Link)
+}

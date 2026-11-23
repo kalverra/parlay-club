@@ -313,12 +313,10 @@ punctuation and generational-suffix variants such as `"D.J. Moore"` / `"DJ Moore
   refresh fetches The Odds API props too and records `odds:props:enrich:{game}` in the same transaction. Unlinked
   primary rows gain DraftKings `link`, `sid`, and `event_sid` (and adopt the linked line and price if they differ).
   Secondary-only rows append missing books and markets.
-- **Enrichment-only after `RunPrefill`.** When `odds:props:{game}` is already fresh from Parlay-only `RunPrefill` and
-  `odds:props:enrich:{game}` (`refresh.OddsPropsEnrichSource`) is missing, older than `odds:props:{game}`, or stale,
-  `SyncGameProps`, `SyncPickGame`, `ForcePickRefresh`, and `KickSlipExportEnrich` (triggered asynchronously when a slip
-  transitions to `LOCKED` with unlinked prop legs on upcoming games) run `enrichGameProps`. It calls The Odds API
-  `EventProps` only (never Parlay API) at or above `TheOddsAPIEnrichFloor`, merges against existing current prop rows at
-  a unified `FetchedAt`, and records both `odds:props:{game}` and `odds:props:enrich:{game}` in one transaction.
+- **Enrichment-only after `RunPrefill`.** When `odds:props:{game}` is already fresh from Parlay-only `RunPrefill`,
+  enrichment calls The Odds API `EventProps` only (never Parlay API) at or above `TheOddsAPIEnrichFloor` (100 credits)
+  and merges deep links and missing markets against existing prop rows. See [Data refresh](../concepts/data-refresh.md)
+  for the sync triggers and `sync_state` rules.
 - **Fallback.** When Parlay API is unconfigured, errors, returns no props, or sits below 150 credits, The Odds API
   serves the game's props if it has at least 25 credits (`TheOddsAPIFallbackFloor`).
 
