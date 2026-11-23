@@ -241,6 +241,8 @@ func (s *stubRefresher) KickPickLines(_ context.Context, _ int64) {}
 
 func (s *stubRefresher) KickPickGame(_ context.Context, _ int64, _ string) {}
 
+func (s *stubRefresher) KickSlipExportEnrich(_ context.Context, _ int64) {}
+
 func (s *stubRefresher) ForcePickRefresh(_ context.Context, _ int64, _ string) error {
 	return nil
 }

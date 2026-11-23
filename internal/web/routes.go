@@ -37,6 +37,7 @@ type Refresher interface {
 	SyncPlayerResearch(ctx context.Context, athleteID string) error
 	KickPickLines(ctx context.Context, weekID int64)
 	KickPickGame(ctx context.Context, weekID int64, gameID string)
+	KickSlipExportEnrich(ctx context.Context, slipID int64)
 	ForcePickRefresh(ctx context.Context, weekID int64, gameID string) error
 }
 

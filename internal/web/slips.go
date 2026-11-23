@@ -979,6 +979,17 @@ func (h *slipHandlers) lockIn(w http.ResponseWriter, r *http.Request) {
 		h.respondError(w, err)
 		return
 	}
+	if h.deps.Refresh != nil {
+		updated, err := h.deps.Store.SlipByID(r.Context(), slip.ID)
+		if err != nil {
+			h.serverError(w, err)
+			return
+		}
+		if updated.Status == db.SlipLocked {
+			h.deps.Refresh.KickSlipExportEnrich(r.Context(), updated.ID)
+		}
+		slip = updated
+	}
 	// The export card is a sibling of the panel, so it needs its own refresh
 	// signal even when no SSE stream is open.
 	w.Header().Set("Hx-Trigger", "slip-updated")

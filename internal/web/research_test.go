@@ -46,6 +46,8 @@ func (r *researchTestRefresher) KickPickLines(_ context.Context, _ int64) {}
 
 func (r *researchTestRefresher) KickPickGame(_ context.Context, _ int64, _ string) {}
 
+func (r *researchTestRefresher) KickSlipExportEnrich(_ context.Context, _ int64) {}
+
 func (r *researchTestRefresher) ForcePickRefresh(_ context.Context, _ int64, _ string) error {
 	return nil
 }
