@@ -57,6 +57,50 @@ var keyPositions = map[string]bool{
 	"S":  true,
 }
 
+// IsKeyInjuryPosition reports whether pos is one of the tracked injury positions.
+func IsKeyInjuryPosition(pos string) bool {
+	return keyPositions[strings.ToUpper(strings.TrimSpace(pos))]
+}
+
+// MergeTeamInjuries combines summary injuries with fallback roster injuries for
+// one team, keeping summary entries first and appending key-position roster
+// entries not already present (matched by AthleteID, then case-insensitive name).
+func MergeTeamInjuries(summary, extra []Injury) []Injury {
+	merged := make([]Injury, 0, len(summary)+len(extra))
+	seenIDs := make(map[string]bool, len(summary)+len(extra))
+	seenNames := make(map[string]bool, len(summary)+len(extra))
+
+	for _, inj := range summary {
+		merged = append(merged, inj)
+		if id := strings.TrimSpace(inj.AthleteID); id != "" {
+			seenIDs[id] = true
+		}
+		if name := strings.ToLower(strings.TrimSpace(inj.FullName)); name != "" {
+			seenNames[name] = true
+		}
+	}
+
+	for _, inj := range extra {
+		if !IsKeyInjuryPosition(inj.Position) {
+			continue
+		}
+		id := strings.TrimSpace(inj.AthleteID)
+		name := strings.ToLower(strings.TrimSpace(inj.FullName))
+		if (id != "" && seenIDs[id]) || (name != "" && seenNames[name]) {
+			continue
+		}
+		merged = append(merged, inj)
+		if id != "" {
+			seenIDs[id] = true
+		}
+		if name != "" {
+			seenNames[name] = true
+		}
+	}
+
+	return merged
+}
+
 // rawInjuryTeam represents one team's injury list in ESPN's summary JSON.
 type rawInjuryTeam struct {
 	Team struct {
@@ -106,8 +150,7 @@ func ParseInjuries(rawJSON string) ([]TeamInjuries, error) {
 
 		injuries := make([]Injury, 0)
 		for _, item := range rawTeam.Injuries {
-			pos := strings.ToUpper(strings.TrimSpace(item.Athlete.Position.Abbreviation))
-			if !keyPositions[pos] {
+			if !IsKeyInjuryPosition(item.Athlete.Position.Abbreviation) {
 				continue
 			}
 			if item.Athlete.ID == "" || item.Athlete.FullName == "" {
