@@ -1,5 +1,10 @@
 package analyzer
 
+import (
+	"fmt"
+	"strconv"
+)
+
 // RuleDoc describes one analyzer warning rule for the in-app grading guide.
 type RuleDoc struct {
 	ID        string
@@ -188,33 +193,39 @@ func RuleDocs() []RuleDoc {
 }
 
 // GradeRubric returns the A-F scoring bands and factor weights used by
-// ScoreLeg and ScoreSlip.
+// ScoreLeg and ScoreSlip, reading directly from ActiveRubric.
 func GradeRubric() RubricDoc {
+	r := ActiveRubric
 	return RubricDoc{
-		BaselineScore: legBaselineScore,
+		BaselineScore: r.LegBaseline,
 		Bands: []GradeBand{
 			{
 				Letter:      "A",
-				Range:       "85–100",
-				MinScore:    85,
+				Range:       fmt.Sprintf("%d–100", r.BandA),
+				MinScore:    r.BandA,
 				Description: "Strong form, matchup, and price with clean script alignment.",
 			},
-			{Letter: "B", Range: "73–84", MinScore: 73, Description: "Solid leg or slip with minor or no red flags."},
+			{
+				Letter:      "B",
+				Range:       fmt.Sprintf("%d–%d", r.BandB, r.BandA-1),
+				MinScore:    r.BandB,
+				Description: "Solid leg or slip with minor or no red flags.",
+			},
 			{
 				Letter:      "C",
-				Range:       "60–72",
-				MinScore:    60,
+				Range:       fmt.Sprintf("%d–%d", r.BandC, r.BandB-1),
+				MinScore:    r.BandC,
 				Description: "Mixed signals: playable, but fighting a hook, chalk, or tough spot.",
 			},
 			{
 				Letter:      "D",
-				Range:       "48–59",
-				MinScore:    48,
+				Range:       fmt.Sprintf("%d–%d", r.BandD, r.BandC-1),
+				MinScore:    r.BandD,
 				Description: "Multiple headwinds or script friction dragging down the ticket.",
 			},
 			{
 				Letter:      "F",
-				Range:       "0–47",
+				Range:       fmt.Sprintf("0–%d", r.BandD-1),
 				MinScore:    0,
 				Description: "Severe script conflict, heavy chalk, or stacked environmental headwinds.",
 			},
@@ -224,99 +235,121 @@ func GradeRubric() RubricDoc {
 				Rule:        "hit_rate",
 				Category:    "Form & Usage",
 				Label:       "Strong L5 hit rate",
-				Delta:       "+10",
+				Delta:       formatSignedDelta(r.HitRate),
 				Description: "Cleared the line in at least 4 of the last 5 games.",
 			},
 			{
 				Rule:        "rising_usage",
 				Category:    "Form & Usage",
 				Label:       "Rising usage",
-				Delta:       "+5",
+				Delta:       formatSignedDelta(r.RisingUsage),
 				Description: "Last-3-game snap share (+8 pp) or target share (+4 pp) trending above season average.",
 			},
 			{
-				Rule:        ruleMedianTrap,
-				Category:    "Form & Usage",
-				Label:       "L5 median trap",
-				Delta:       "-15 (-5 w/ teammate Out)",
-				Description: "Yardage Over line sits above the player's last-5 game median; softened to -5 when a same-position teammate is Out.",
+				Rule:     ruleMedianTrap,
+				Category: "Form & Usage",
+				Label:    "L5 median trap",
+				Delta: fmt.Sprintf(
+					"%s (%s w/ teammate Out)",
+					formatSignedDelta(r.MedianTrap),
+					formatSignedDelta(r.MedianTrapSoftened),
+				),
+				Description: fmt.Sprintf(
+					"Yardage Over line sits above the player's last-5 game median; softened to %s when a same-position teammate is Out.",
+					formatSignedDelta(r.MedianTrapSoftened),
+				),
 			},
 			{
 				Rule:        "teammate_out_bump",
 				Category:    "Form & Usage",
 				Label:       "Teammate out (role bump)",
-				Delta:       "+5",
+				Delta:       formatSignedDelta(r.TeammateOutBump),
 				Description: "Same-team, same-position (WR, TE, RB) teammate is Out on an Over or Anytime TD prop.",
 			},
 			{
 				Rule:        ruleShrinkingRole,
 				Category:    "Form & Usage",
 				Label:       "Shrinking role",
-				Delta:       "-15",
+				Delta:       formatSignedDelta(r.ShrinkingRole),
 				Description: "Last-2-game snap share (-15 pp) or target share (-8 pp) dropped below season average.",
 			},
 			{
 				Rule:        "favorable_matchup",
 				Category:    "Matchup & Environment",
 				Label:       "Weak opposing defense",
-				Delta:       "+10",
+				Delta:       formatSignedDelta(r.FavorableMatchup),
 				Description: "Opposing defense ranks #25–#32 in matching pass or rush EPA allowed.",
 			},
 			{
 				Rule:        ruleToughMatchup,
 				Category:    "Matchup & Environment",
 				Label:       "Tough opposing defense",
-				Delta:       "-12",
+				Delta:       formatSignedDelta(r.ToughMatchup),
 				Description: "Opposing defense ranks #1–#5 in matching pass or rush EPA allowed.",
 			},
 			{
-				Rule:        ruleWind,
-				Category:    "Matchup & Environment",
-				Label:       "Wind headwind",
-				Delta:       "-8 / -18",
-				Description: "-8 for Warn wind/gusts; -18 for Danger wind (>= 20 mph) on passing/kicking/total Overs.",
+				Rule:     ruleWind,
+				Category: "Matchup & Environment",
+				Label:    "Wind headwind",
+				Delta:    fmt.Sprintf("%s / %s", formatSignedDelta(r.WindWarn), formatSignedDelta(r.WindDanger)),
+				Description: fmt.Sprintf(
+					"%s for Warn wind/gusts; %s for Danger wind (>= 20 mph) on passing/kicking/total Overs.",
+					formatSignedDelta(r.WindWarn),
+					formatSignedDelta(r.WindDanger),
+				),
 			},
 			{
 				Rule:        ruleQBDrag,
 				Category:    "Matchup & Environment",
 				Label:       "nfelo QB drag",
-				Delta:       "-8",
+				Delta:       formatSignedDelta(r.QBDrag),
 				Description: "nfelo marks down the team's QB by <= -30 Elo on a favorite or passing Over.",
 			},
 			{
 				Rule:        ruleFakeWeather,
 				Category:    "Matchup & Environment",
 				Label:       "Light rain myth",
-				Delta:       "-3",
+				Delta:       formatSignedDelta(r.FakeWeather),
 				Description: "Light rain without wind gives a game total Under no real scoring brake.",
 			},
 			{
 				Rule:        "nfelo_cushion",
 				Category:    "Line & Price",
 				Label:       "nfelo spread cushion",
-				Delta:       "+8",
+				Delta:       formatSignedDelta(r.NfeloCushion),
 				Description: "nfelo projects at least 2 points of cushion on a spread leg.",
 			},
 			{
-				Rule:        ruleHook,
-				Category:    "Line & Price",
-				Label:       "Spread on hook",
-				Delta:       "-10 (-4 w/ cushion)",
-				Description: "Spread sits on -3.5, +2.5, -7.5, or +6.5; softened to -4 with >= +2 nfelo cushion.",
+				Rule:     ruleHook,
+				Category: "Line & Price",
+				Label:    "Spread on hook",
+				Delta: fmt.Sprintf(
+					"%s (%s w/ cushion)",
+					formatSignedDelta(r.Hook),
+					formatSignedDelta(r.HookSoftened),
+				),
+				Description: fmt.Sprintf(
+					"Spread sits on -3.5, +2.5, -7.5, or +6.5; softened to %s with >= +2 nfelo cushion.",
+					formatSignedDelta(r.HookSoftened),
+				),
 			},
 			{
 				Rule:        ruleTotalKeyNumber,
 				Category:    "Line & Price",
 				Label:       "Total on key number",
-				Delta:       "-5",
+				Delta:       formatSignedDelta(r.TotalKeyNumber),
 				Description: "Game total sits within 0.5 points of 37, 41, 43, 44, 47, or 51.",
 			},
 			{
-				Rule:        ruleChalk,
-				Category:    "Line & Price",
-				Label:       "Heavy chalk",
-				Delta:       "-10 to -18",
-				Description: "Odds <= -230 scale from -10 at -230 down to -18 at -500 or worse.",
+				Rule:     ruleChalk,
+				Category: "Line & Price",
+				Label:    "Heavy chalk",
+				Delta:    fmt.Sprintf("%s to %s", formatSignedDelta(r.ChalkMin), formatSignedDelta(r.ChalkMax)),
+				Description: fmt.Sprintf(
+					"Odds <= -230 scale from %s at -230 down to %s at -500 or worse.",
+					formatSignedDelta(r.ChalkMin),
+					formatSignedDelta(r.ChalkMax),
+				),
 			},
 		},
 		SlipFactors: []FactorDoc{
@@ -324,51 +357,58 @@ func GradeRubric() RubricDoc {
 				Rule:        ruleStackShootout,
 				Category:    "Slip Correlation & Drag",
 				Label:       "Shootout stack",
-				Delta:       "+8",
+				Delta:       formatSignedDelta(r.StackBonus),
 				Description: "Pass Over + same-team receiver Over + game Total Over in the same game.",
 			},
 			{
 				Rule:        ruleStackClockDrain,
 				Category:    "Slip Correlation & Drag",
 				Label:       "Clock-drain stack",
-				Delta:       "+8",
+				Delta:       formatSignedDelta(r.StackBonus),
 				Description: "Favorite spread/ML + same-team Rush Over + opponent Team Total Under.",
 			},
 			{
 				Rule:        ruleBlowoutPassing,
 				Category:    "Slip Correlation & Drag",
 				Label:       "Blowout script conflict",
-				Delta:       "-12",
+				Delta:       formatSignedDelta(r.WarnConflict),
 				Description: "Big favorite spread (<= -7.0) paired with same-team passing/receiving Over.",
 			},
 			{
 				Rule:        ruleTrailingRB,
 				Category:    "Slip Correlation & Drag",
 				Label:       "Trailing RB danger",
-				Delta:       "-20",
+				Delta:       formatSignedDelta(r.DangerConflict),
 				Description: "Underdog spread (>= +4.5) or ML paired with same-team rushing Over.",
 			},
 			{
 				Rule:        ruleTotalContradiction,
 				Category:    "Slip Correlation & Drag",
 				Label:       "Total contradiction",
-				Delta:       "-20",
+				Delta:       formatSignedDelta(r.DangerConflict),
 				Description: "Game Total Under paired with 2+ point-scoring Overs or Anytime TDs.",
 			},
 			{
 				Rule:        "parlay_drag",
 				Category:    "Slip Correlation & Drag",
 				Label:       "Parlay length drag",
-				Delta:       "-3 / leg",
-				Description: "Applied for every leg beyond 3 legs.",
+				Delta:       formatSignedDelta(r.ParlayDragPerLeg) + " / leg",
+				Description: fmt.Sprintf("Applied for every leg beyond %d legs.", r.ParlayDragFreeLegs),
 			},
 			{
 				Rule:        "chalk_drag",
 				Category:    "Slip Correlation & Drag",
 				Label:       "Extra chalk drag",
-				Delta:       "-5 / leg",
+				Delta:       formatSignedDelta(r.ChalkDragPerExtraLeg) + " / leg",
 				Description: "Applied for every heavy favorite leg (<= -230) beyond the first.",
 			},
 		},
 	}
+}
+
+func formatSignedDelta(v int) string {
+	if v > 0 {
+		return fmt.Sprintf("+%d", v)
+	}
+	return strconv.Itoa(v)
 }

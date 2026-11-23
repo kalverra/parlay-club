@@ -6,29 +6,7 @@ import (
 	"strings"
 )
 
-const (
-	legBaselineScore = 75
-
-	formUsageMin = -20
-	formUsageMax = 15
-
-	matchupEnvMin = -20
-	matchupEnvMax = 15
-
-	linePriceMin = -20
-	linePriceMax = 10
-
-	chalkMaxOdds    = -500
-	chalkMinPenalty = -10
-	chalkMaxPenalty = -18
-
-	stackBonus            = 8
-	warnConflictPenalty   = -12
-	dangerConflictPenalty = -20
-	parlayDragPerLeg      = -3
-	parlayDragFreeLegs    = 3
-	chalkDragPerExtraLeg  = -5
-)
+const chalkMaxOdds = -500
 
 // GradeFactor is one scoring adjustment applied to a leg or slip grade.
 type GradeFactor struct {
@@ -56,9 +34,15 @@ type SlipGrade struct {
 }
 
 // ScoreLeg computes the deterministic A-F quality grade and factor breakdown
-// for a single leg. Legs with market OTHER, no game, or a missing game are
-// skipped (Letter == "", Score == 0).
+// for a single leg using ActiveRubric. Legs with market OTHER, no game, or a
+// missing game are skipped (Letter == "", Score == 0).
 func ScoreLeg(leg Leg, games map[string]Game, stats map[string]PlayerStats) LegGrade {
+	return ScoreLegWithRubric(leg, games, stats, ActiveRubric)
+}
+
+// ScoreLegWithRubric computes the deterministic A-F quality grade and factor
+// breakdown for a single leg using the supplied rubric.
+func ScoreLegWithRubric(leg Leg, games map[string]Game, stats map[string]PlayerStats, rubric Rubric) LegGrade {
 	if leg.Market == marketOther || leg.GameID == "" {
 		return LegGrade{LegID: leg.ID}
 	}
@@ -68,11 +52,11 @@ func ScoreLeg(leg Leg, games map[string]Game, stats map[string]PlayerStats) LegG
 	}
 
 	var factors []GradeFactor
-	factors = append(factors, scoreFormAndUsage(leg, game, stats)...)
-	factors = append(factors, scoreMatchupAndEnv(leg, game)...)
-	factors = append(factors, scoreLineAndPrice(leg, game)...)
+	factors = append(factors, scoreFormAndUsage(leg, game, stats, rubric)...)
+	factors = append(factors, scoreMatchupAndEnv(leg, game, rubric)...)
+	factors = append(factors, scoreLineAndPrice(leg, game, rubric)...)
 
-	score := legBaselineScore
+	score := rubric.LegBaseline
 	for _, f := range factors {
 		score += f.Delta
 	}
@@ -80,21 +64,27 @@ func ScoreLeg(leg Leg, games map[string]Game, stats map[string]PlayerStats) LegG
 
 	return LegGrade{
 		LegID:   leg.ID,
-		Letter:  letterGrade(score),
+		Letter:  letterGrade(score, rubric),
 		Score:   score,
 		Factors: factors,
 	}
 }
 
-// ScoreSlip computes per-leg grades and the overall parlay grade from the
-// graded legs' baseline, script correlations, parlay length drag, and chalk
-// drag.
+// ScoreSlip computes per-leg grades and the overall parlay grade using
+// ActiveRubric.
 func ScoreSlip(legs []Leg, games map[string]Game, stats map[string]PlayerStats) SlipGrade {
+	return ScoreSlipWithRubric(legs, games, stats, ActiveRubric)
+}
+
+// ScoreSlipWithRubric computes per-leg grades and the overall parlay grade from
+// the graded legs' baseline, script correlations, parlay length drag, and chalk
+// drag using the supplied rubric.
+func ScoreSlipWithRubric(legs []Leg, games map[string]Game, stats map[string]PlayerStats, rubric Rubric) SlipGrade {
 	legGrades := make([]LegGrade, len(legs))
 	gradedSum := 0
 	gradedCount := 0
 	for i, leg := range legs {
-		lg := ScoreLeg(leg, games, stats)
+		lg := ScoreLegWithRubric(leg, games, stats, rubric)
 		legGrades[i] = lg
 		if lg.Letter != "" {
 			gradedSum += lg.Score
@@ -116,21 +106,21 @@ func ScoreSlip(legs []Leg, games map[string]Game, stats map[string]PlayerStats) 
 			factors = append(factors, GradeFactor{
 				Rule:   w.Rule,
 				Label:  "Positive stack",
-				Delta:  stackBonus,
+				Delta:  rubric.StackBonus,
 				Detail: w.Message,
 			})
 		case ruleBlowoutPassing:
 			factors = append(factors, GradeFactor{
 				Rule:   w.Rule,
 				Label:  "Script conflict",
-				Delta:  warnConflictPenalty,
+				Delta:  rubric.WarnConflict,
 				Detail: w.Message,
 			})
 		case ruleTrailingRB, ruleTotalContradiction:
 			factors = append(factors, GradeFactor{
 				Rule:   w.Rule,
 				Label:  "Danger conflict",
-				Delta:  dangerConflictPenalty,
+				Delta:  rubric.DangerConflict,
 				Detail: w.Message,
 			})
 		case ruleChalk:
@@ -138,22 +128,31 @@ func ScoreSlip(legs []Leg, games map[string]Game, stats map[string]PlayerStats) 
 		}
 	}
 
-	if len(legs) > parlayDragFreeLegs {
-		extra := len(legs) - parlayDragFreeLegs
+	if len(legs) > rubric.ParlayDragFreeLegs {
+		extra := len(legs) - rubric.ParlayDragFreeLegs
 		factors = append(factors, GradeFactor{
-			Rule:   "parlay_drag",
-			Label:  fmt.Sprintf("%d-leg parlay drag", len(legs)),
-			Delta:  parlayDragPerLeg * extra,
-			Detail: fmt.Sprintf("-%d per leg beyond %d legs (%d extra).", -parlayDragPerLeg, parlayDragFreeLegs, extra),
+			Rule:  "parlay_drag",
+			Label: fmt.Sprintf("%d-leg parlay drag", len(legs)),
+			Delta: rubric.ParlayDragPerLeg * extra,
+			Detail: fmt.Sprintf(
+				"-%d per leg beyond %d legs (%d extra).",
+				-rubric.ParlayDragPerLeg,
+				rubric.ParlayDragFreeLegs,
+				extra,
+			),
 		})
 	}
 	if chalkCount > 1 {
 		extra := chalkCount - 1
 		factors = append(factors, GradeFactor{
-			Rule:   "chalk_drag",
-			Label:  fmt.Sprintf("%d chalk legs", chalkCount),
-			Delta:  chalkDragPerExtraLeg * extra,
-			Detail: fmt.Sprintf("-%d per heavy favorite beyond the first (%d extra).", -chalkDragPerExtraLeg, extra),
+			Rule:  "chalk_drag",
+			Label: fmt.Sprintf("%d chalk legs", chalkCount),
+			Delta: rubric.ChalkDragPerExtraLeg * extra,
+			Detail: fmt.Sprintf(
+				"-%d per heavy favorite beyond the first (%d extra).",
+				-rubric.ChalkDragPerExtraLeg,
+				extra,
+			),
 		})
 	}
 
@@ -162,7 +161,7 @@ func ScoreSlip(legs []Leg, games map[string]Game, stats map[string]PlayerStats) 
 		score += f.Delta
 	}
 	score = clampInt(score, 0, 100)
-	letter := letterGrade(score)
+	letter := letterGrade(score, rubric)
 
 	return SlipGrade{
 		Letter:    letter,
@@ -173,7 +172,7 @@ func ScoreSlip(legs []Leg, games map[string]Game, stats map[string]PlayerStats) 
 	}
 }
 
-func scoreFormAndUsage(leg Leg, game Game, stats map[string]PlayerStats) []GradeFactor {
+func scoreFormAndUsage(leg Leg, game Game, stats map[string]PlayerStats, rubric Rubric) []GradeFactor {
 	if leg.PlayerID == "" || len(stats) == 0 {
 		return nil
 	}
@@ -189,10 +188,10 @@ func scoreFormAndUsage(leg Leg, game Game, stats map[string]PlayerStats) []Grade
 		if games := ps.Games[leg.Market]; len(games) >= 3 {
 			median := Median(games[:min(5, len(games))])
 			if *leg.Line > median {
-				delta := -15
+				delta := rubric.MedianTrap
 				detail := fmt.Sprintf("Line %s sits above last-5 median of %s.", number(*leg.Line), number(median))
 				if hasOutTeammate {
-					delta = -5
+					delta = rubric.MedianTrapSoftened
 					detail = fmt.Sprintf(
 						"Line %s sits above last-5 median of %s, softened with %s teammate %s Out.",
 						number(*leg.Line),
@@ -215,7 +214,7 @@ func scoreFormAndUsage(leg Leg, game Game, stats map[string]PlayerStats) []Grade
 		candidates = append(candidates, GradeFactor{
 			Rule:   "hit_rate",
 			Label:  fmt.Sprintf("Strong L5 hit rate (%d/%d)", hits, total),
-			Delta:  10,
+			Delta:  rubric.HitRate,
 			Detail: fmt.Sprintf("Cleared this mark in %d of the last %d games.", hits, total),
 		})
 	}
@@ -227,7 +226,7 @@ func scoreFormAndUsage(leg Leg, game Game, stats map[string]PlayerStats) []Grade
 			candidates = append(candidates, GradeFactor{
 				Rule:   "rising_usage",
 				Label:  "Rising usage",
-				Delta:  5,
+				Delta:  rubric.RisingUsage,
 				Detail: "Last-3-game snap or target share is trending above season average.",
 			})
 		}
@@ -237,7 +236,7 @@ func scoreFormAndUsage(leg Leg, game Game, stats map[string]PlayerStats) []Grade
 		candidates = append(candidates, GradeFactor{
 			Rule:  "teammate_out_bump",
 			Label: "Teammate out (role bump)",
-			Delta: 5,
+			Delta: rubric.TeammateOutBump,
 			Detail: fmt.Sprintf(
 				"%s %s %s is Out, opening extra volume.",
 				leg.Team,
@@ -251,12 +250,12 @@ func scoreFormAndUsage(leg Leg, game Game, stats map[string]PlayerStats) []Grade
 		candidates = append(candidates, GradeFactor{
 			Rule:   ruleShrinkingRole,
 			Label:  "Shrinking role",
-			Delta:  -15,
+			Delta:  rubric.ShrinkingRole,
 			Detail: fmt.Sprintf("%s's %s.", playerName(leg), reason),
 		})
 	}
 
-	return clampCategoryFactors(candidates, formUsageMin, formUsageMax)
+	return clampCategoryFactors(candidates, rubric.FormUsageMin, rubric.FormUsageMax)
 }
 
 func outSamePositionTeammate(leg Leg, game Game, position string) (Injury, bool) {
@@ -306,21 +305,21 @@ func isEligibleTeammateOutLeg(leg Leg) bool {
 	}
 }
 
-func scoreMatchupAndEnv(leg Leg, game Game) []GradeFactor {
+func scoreMatchupAndEnv(leg Leg, game Game, rubric Rubric) []GradeFactor {
 	var candidates []GradeFactor
 
 	if split, rank, hit := favorableMatchupHit(leg, game); hit {
 		candidates = append(candidates, GradeFactor{
 			Rule:   "favorable_matchup",
 			Label:  fmt.Sprintf("Weak %s defense (#%d)", split, rank),
-			Delta:  10,
+			Delta:  rubric.FavorableMatchup,
 			Detail: fmt.Sprintf("Opposing %s defense ranks #%d in EPA allowed.", split, rank),
 		})
 	} else if split, rank, hit := toughMatchupHit(leg, game); hit {
 		candidates = append(candidates, GradeFactor{
 			Rule:   ruleToughMatchup,
 			Label:  fmt.Sprintf("Tough %s defense (#%d)", split, rank),
-			Delta:  -12,
+			Delta:  rubric.ToughMatchup,
 			Detail: fmt.Sprintf("Opposing %s defense ranks #%d in EPA allowed.", split, rank),
 		})
 	}
@@ -328,9 +327,9 @@ func scoreMatchupAndEnv(leg Leg, game Game) []GradeFactor {
 	if !game.Indoor && game.Weather != nil {
 		if windHit(leg) {
 			if sev, windy := windLevel(*game.Weather); windy {
-				delta := -8
+				delta := rubric.WindWarn
 				if sev == Danger {
-					delta = -18
+					delta = rubric.WindDanger
 				}
 				candidates = append(candidates, GradeFactor{
 					Rule:  ruleWind,
@@ -351,7 +350,7 @@ func scoreMatchupAndEnv(leg Leg, game Game) []GradeFactor {
 			candidates = append(candidates, GradeFactor{
 				Rule:   ruleFakeWeather,
 				Label:  "Light rain myth",
-				Delta:  -3,
+				Delta:  rubric.FakeWeather,
 				Detail: "Light rain without wind does not lower NFL scoring.",
 			})
 		}
@@ -361,15 +360,15 @@ func scoreMatchupAndEnv(leg Leg, game Game) []GradeFactor {
 		candidates = append(candidates, GradeFactor{
 			Rule:   ruleQBDrag,
 			Label:  "nfelo QB drag",
-			Delta:  -8,
+			Delta:  rubric.QBDrag,
 			Detail: fmt.Sprintf("nfelo marks down %s's QB.", team),
 		})
 	}
 
-	return clampCategoryFactors(candidates, matchupEnvMin, matchupEnvMax)
+	return clampCategoryFactors(candidates, rubric.MatchupEnvMin, rubric.MatchupEnvMax)
 }
 
-func scoreLineAndPrice(leg Leg, game Game) []GradeFactor {
+func scoreLineAndPrice(leg Leg, game Game, rubric Rubric) []GradeFactor {
 	var candidates []GradeFactor
 
 	if leg.Market == marketSpread && leg.Line != nil {
@@ -379,10 +378,10 @@ func scoreLineAndPrice(leg Leg, game Game) []GradeFactor {
 			cushion = *leg.Line - model
 		}
 		if _, _, _, onHook := hookPoint(*leg.Line); onHook {
-			delta := -10
+			delta := rubric.Hook
 			detail := selection(leg) + " sits on a key NFL hook number."
 			if hasModel && cushion >= 2 {
-				delta = -4
+				delta = rubric.HookSoftened
 				detail = fmt.Sprintf(
 					"%s sits on a hook, softened by nfelo's %s projection.",
 					selection(leg),
@@ -400,7 +399,7 @@ func scoreLineAndPrice(leg Leg, game Game) []GradeFactor {
 			candidates = append(candidates, GradeFactor{
 				Rule:  "nfelo_cushion",
 				Label: "nfelo spread cushion",
-				Delta: 8,
+				Delta: rubric.NfeloCushion,
 				Detail: fmt.Sprintf(
 					"nfelo has %s at %s, giving at least 2 points of cushion.",
 					leg.Team,
@@ -415,14 +414,14 @@ func scoreLineAndPrice(leg Leg, game Game) []GradeFactor {
 			candidates = append(candidates, GradeFactor{
 				Rule:   ruleTotalKeyNumber,
 				Label:  "Total on key number",
-				Delta:  -5,
+				Delta:  rubric.TotalKeyNumber,
 				Detail: fmt.Sprintf("Total %s sits near common NFL total %s.", number(*leg.Line), number(keys[0])),
 			})
 		}
 	}
 
 	if leg.Odds <= chalkOdds {
-		delta := chalkPenalty(leg.Odds)
+		delta := chalkPenalty(leg.Odds, rubric)
 		candidates = append(candidates, GradeFactor{
 			Rule:   ruleChalk,
 			Label:  fmt.Sprintf("Heavy chalk (%d)", leg.Odds),
@@ -431,7 +430,7 @@ func scoreLineAndPrice(leg Leg, game Game) []GradeFactor {
 		})
 	}
 
-	return clampCategoryFactors(candidates, linePriceMin, linePriceMax)
+	return clampCategoryFactors(candidates, rubric.LinePriceMin, rubric.LinePriceMax)
 }
 
 // clampCategoryFactors bounds the cumulative delta of a category to [minTotal, maxTotal]
@@ -488,27 +487,27 @@ func l5HitRate(leg Leg, ps PlayerStats) (hits, total int, ok bool) {
 	}
 }
 
-func chalkPenalty(odds int) int {
+func chalkPenalty(odds int, rubric Rubric) int {
 	if odds <= chalkMaxOdds {
-		return chalkMaxPenalty
+		return rubric.ChalkMax
 	}
 	if odds >= chalkOdds {
-		return chalkMinPenalty
+		return rubric.ChalkMin
 	}
 	ratio := float64(-odds-(-chalkOdds)) / float64(-chalkMaxOdds-(-chalkOdds))
-	penalty := chalkMinPenalty - int(math.Round(ratio*float64(chalkMinPenalty-chalkMaxPenalty)))
-	return clampInt(penalty, chalkMaxPenalty, chalkMinPenalty)
+	penalty := rubric.ChalkMin - int(math.Round(ratio*float64(rubric.ChalkMin-rubric.ChalkMax)))
+	return clampInt(penalty, rubric.ChalkMax, rubric.ChalkMin)
 }
 
-func letterGrade(score int) string {
+func letterGrade(score int, rubric Rubric) string {
 	switch {
-	case score >= 85:
+	case score >= rubric.BandA:
 		return "A"
-	case score >= 73:
+	case score >= rubric.BandB:
 		return "B"
-	case score >= 60:
+	case score >= rubric.BandC:
 		return "C"
-	case score >= 48:
+	case score >= rubric.BandD:
 		return "D"
 	default:
 		return "F"
