@@ -131,7 +131,7 @@ storage methods; existing queries unchanged)
       `ArchiveGameLogKey`, `ArchiveSummaryKey`) and `LatestAPIResponseBefore` in `internal/db`, wire
       `internal/refresh/refresh.go` source key helpers to use them, and add unit tests verifying 2xx/cutoff selection
       and key parity.
-- [ ] Add batched slip-and-leg loading for a week in `internal/db` with SQLite tests covering group and status
+- [x] Add batched slip-and-leg loading for a week in `internal/db` with SQLite tests covering group and status
       filtering.
 
 ### Phase 2: Share pure signal helpers and scope `eval.LoadDataset` to referenced games

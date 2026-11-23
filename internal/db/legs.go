@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/kalverra/parlay-club/internal/parlay"
@@ -115,6 +116,41 @@ func (s *Store) LegsForSlip(ctx context.Context, slipID int64) ([]Leg, error) {
 		return nil, fmt.Errorf("list legs of slip %d: %w", slipID, err)
 	}
 	return legs, nil
+}
+
+// LegsForSlips returns legs keyed by slip ID in added order for every slip in
+// slipIDs. An empty slice returns an empty map without querying.
+func (s *Store) LegsForSlips(ctx context.Context, slipIDs []int64) (map[int64][]Leg, error) {
+	out := make(map[int64][]Leg, len(slipIDs))
+	if len(slipIDs) == 0 {
+		return out, nil
+	}
+
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(slipIDs)), ",")
+	args := make([]any, len(slipIDs))
+	for i, id := range slipIDs {
+		args[i] = id
+	}
+
+	// #nosec G202 -- placeholders contains only static "?,..." tokens.
+	query := "SELECT" + legColumns + " FROM legs WHERE slip_id IN (" + placeholders + ") ORDER BY slip_id, id"
+	rows, err := s.readConn().QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list legs for %d slips: %w", len(slipIDs), err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	for rows.Next() {
+		leg, err := scanLeg(rows)
+		if err != nil {
+			return nil, fmt.Errorf("list legs for %d slips: %w", len(slipIDs), err)
+		}
+		out[leg.SlipID] = append(out[leg.SlipID], leg)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list legs for %d slips: %w", len(slipIDs), err)
+	}
+	return out, nil
 }
 
 // UpdateLeg changes a leg's pick fields. The owner, slip, result, and graded_by

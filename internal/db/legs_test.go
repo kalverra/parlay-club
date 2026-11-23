@@ -137,6 +137,41 @@ func TestLegsForSlipReturnsThemInAddedOrder(t *testing.T) {
 	assert.Equal(t, []db.Leg{first, second}, legs)
 }
 
+func TestLegsForSlipsBatchesAndPreservesOrder(t *testing.T) {
+	t.Parallel()
+
+	store, _ := openTestStore(t)
+	ada := createUser(t, store, "Ada")
+	group := createTestGroup(t, store, ada)
+	week := createTestWeek(t, store, 9)
+	s1 := createTestSlip(t, store, group, week, "Slip 1", 2, ada)
+	s2 := createTestSlip(t, store, group, week, "Slip 2", 2, ada)
+	s3 := createTestSlip(t, store, group, week, "Slip 3", 2, ada)
+
+	l1a, err := store.CreateLeg(t.Context(), db.Leg{
+		SlipID: s1.ID, UserID: ada.ID, MarketType: "ML", Selection: "BUF ML", Odds: -140,
+	})
+	require.NoError(t, err)
+	l1b, err := store.CreateLeg(t.Context(), db.Leg{
+		SlipID: s1.ID, UserID: ada.ID, MarketType: "TOTAL", Selection: "Over 47.5", Odds: -110,
+	})
+	require.NoError(t, err)
+	l2a, err := store.CreateLeg(t.Context(), db.Leg{
+		SlipID: s2.ID, UserID: ada.ID, MarketType: "SPREAD", Selection: "KC -3.5", Odds: -110,
+	})
+	require.NoError(t, err)
+
+	empty, err := store.LegsForSlips(t.Context(), nil)
+	require.NoError(t, err)
+	assert.Empty(t, empty)
+
+	bySlip, err := store.LegsForSlips(t.Context(), []int64{s1.ID, s2.ID, s3.ID})
+	require.NoError(t, err)
+	assert.Equal(t, []db.Leg{l1a, l1b}, bySlip[s1.ID])
+	assert.Equal(t, []db.Leg{l2a}, bySlip[s2.ID])
+	assert.Empty(t, bySlip[s3.ID])
+}
+
 func TestUpdateLegChangesOnlyThePick(t *testing.T) {
 	t.Parallel()
 
