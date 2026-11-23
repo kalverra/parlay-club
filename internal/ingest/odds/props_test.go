@@ -895,6 +895,88 @@ func TestMergePropsDeduplicatesPrimaryWhenSecondaryEmpty(t *testing.T) {
 	assert.Equal(t, -112, merged[0].Price)
 }
 
+func TestMergePropsMatchesNormalizedPlayerNames(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		primaryName   string
+		secondaryName string
+		market        string
+		side          string
+	}{
+		"generational suffix": {
+			primaryName:   "Kenneth Walker III",
+			secondaryName: "Kenneth Walker",
+			market:        odds.MarketRushYds,
+			side:          odds.SideOver,
+		},
+		"initials with periods": {
+			primaryName:   "D.J. Moore",
+			secondaryName: "DJ Moore",
+			market:        odds.MarketRecYds,
+			side:          odds.SideOver,
+		},
+		"apostrophe and case": {
+			primaryName:   "Ja'Marr Chase",
+			secondaryName: "jamarr chase",
+			market:        odds.MarketAnytimeTD,
+			side:          odds.SideYES,
+		},
+		"jr suffix with period": {
+			primaryName:   "Michael Penix Jr.",
+			secondaryName: "Michael Penix",
+			market:        odds.MarketPassYds,
+			side:          odds.SideUnder,
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var line *float64
+			var secLine *float64
+			wantPrice := -110
+			if test.side != odds.SideYES {
+				line = new(65.5)
+				secLine = new(68.5)
+				wantPrice = -115
+			}
+
+			primary := []odds.Prop{{
+				EventID:    "evt-1",
+				Book:       "draftkings",
+				MarketType: test.market,
+				PlayerName: test.primaryName,
+				Side:       test.side,
+				Line:       line,
+				Price:      -110,
+			}}
+			secondary := []odds.Prop{{
+				EventID:    "evt-1",
+				Book:       "draftkings",
+				MarketType: test.market,
+				PlayerName: test.secondaryName,
+				Side:       test.side,
+				Line:       secLine,
+				Price:      -115,
+				Link:       "https://draftkings.test/prop",
+				Sid:        "sid-1",
+				EventSid:   "evt-sid-1",
+			}}
+
+			merged := odds.MergeProps(primary, secondary)
+			require.Len(t, merged, 1, "variant player names should merge instead of duplicating")
+			assert.Equal(t, test.primaryName, merged[0].PlayerName)
+			assert.Equal(t, "https://draftkings.test/prop", merged[0].Link)
+			assert.Equal(t, "sid-1", merged[0].Sid)
+			assert.Equal(t, "evt-sid-1", merged[0].EventSid)
+			assert.Equal(t, secLine, merged[0].Line)
+			assert.Equal(t, wantPrice, merged[0].Price)
+		})
+	}
+}
+
 // findProp returns the one merged row matching a selection, failing the test
 // when it is missing or duplicated.
 func findProp(

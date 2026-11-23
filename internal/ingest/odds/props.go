@@ -295,13 +295,15 @@ type propKey struct {
 	side       string
 }
 
-// propKeyOf builds the merge key for a row.
+// propKeyOf builds the merge key for a row. Player names are normalized so
+// cross-provider enrichment matches punctuation and generational-suffix
+// variants.
 func propKeyOf(prop Prop) propKey {
 	return propKey{
 		book:       prop.Book,
 		marketType: prop.MarketType,
 		team:       prop.Team,
-		playerName: prop.PlayerName,
+		playerName: normalizePropSubject(prop.PlayerName),
 		side:       prop.Side,
 	}
 }
@@ -593,9 +595,9 @@ func absInt(x int) int {
 	return x
 }
 
-// normalizePropSubject normalizes a player or team name for grouping quotes
-// within a single book's prop response (lowercased, punctuation stripped,
-// whitespace collapsed, trailing generational suffixes dropped).
+// normalizePropSubject normalizes a player or team name for grouping and merging
+// prop quotes (lowercased, punctuation stripped, whitespace collapsed, trailing
+// generational suffixes dropped).
 func normalizePropSubject(subject string) string {
 	lower := strings.ToLower(subject)
 	var b strings.Builder
