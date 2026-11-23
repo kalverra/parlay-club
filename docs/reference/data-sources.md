@@ -2,7 +2,7 @@
 id: data-sources
 title: Data sources
 type: reference
-summary: The free sources behind the slate, the ESPN scoreboard endpoint and its Sunday and Monday filter, the Open-Meteo forecast behind a game's weather, Parlay API game lines and props with The Odds API enrichment and fallback, ESPN rosters, game logs, and summary injuries, player matching, nfelo model projections, nflverse team/player/snap-count CSVs, bookmakers, deep links, tiered credit floors, and the raw response archive every successful call leaves.
+summary: ESPN scoreboard, rosters, game logs, and injuries, Open-Meteo weather, Parlay API and The Odds API lines, props, and credits, nfelo, nflverse, player matching, and the API archive.
 tags: [data, espn, scoreboard, games, sync, fixtures, weather, open-meteo, venues, odds, parlay-api, the-odds-api, props, lines, bookmakers, links, credits, budget, enrichment, fallback, nfelo, nflverse, projections, spreads, quarterbacks, archive, raw-responses, sqlite, rosters, gamelogs, injuries, player-matching]
 ---
 
@@ -76,8 +76,12 @@ With no params it returns the current week. For a specific week: `?seasontype={2
 
 `GET https://site.api.espn.com/apis/site/v2/sports/football/nfl/teams/{espnTeamID}/roster`
 
-- `Roster(ctx, espnTeamID)` flattens position groups into `[]RosterPlayer{ID, FullName, Position, HeadshotURL}` (with
-  `HeadshotURL` from `headshot.href`), skipping entries without an athlete ID or full name.
+- `Roster(ctx, espnTeamID)` flattens position groups into
+  `[]RosterPlayer{ID, FullName, Position, HeadshotURL, InjuryStatus, InjuryDate}` (with `HeadshotURL` from
+  `headshot.href`), skipping entries without an athlete ID or full name.
+- Each athlete's `injuries` array (`status`, `date`) is decoded and reduced to the highest-priority non-empty status
+  (`Out` > `Doubtful` > `Questionable` > `Injured Reserve` > first non-empty) and its `date`. When `injuries` is empty
+  or has no non-empty status, both fields are `""`, which clears any prior injury status in `roster_players` on sync.
 - All ESPN logo and headshot URLs are trimmed and accepted only when they use `https://` with a non-empty host
   (returning `""` otherwise).
 

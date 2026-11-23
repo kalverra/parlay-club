@@ -2,7 +2,7 @@
 id: schema
 title: Database schema
 type: reference
-summary: SQLite tables, including groups and their members, legs and their votes, odds rows with sportsbook deep links, rosters and player game logs for props research, player name matching, nfelo model projections, nflverse player crosswalks and weekly team/player signals, the raw external response archive, how migrations are tracked and applied, and connection settings.
+summary: SQLite schema, migrations, connection pools, and table conventions for groups, users, games, odds, nfelo, nflverse, slips, legs, rosters, game logs, and the API archive.
 tags: [database, sqlite, migrations, groups, archive, api, raw-responses, odds, links, nfelo, nflverse, projections, roster, gamelog, player-matching, injuries, votes]
 ---
 
@@ -21,7 +21,8 @@ one model projection per game. `0007_props_research.sql` adds `roster_players` a
 `0012_nflverse_signals.sql` adds `nflverse_player_ids`, `nflverse_team_weeks`, and `nflverse_player_weeks` for nflverse
 team efficiency, player usage, and snap-count signals. `0013_canonical_players.sql` (paired with the `Migrate` backfill
 hook) refreshes `roster_players.norm_name`, deduplicates colliding `odds` rows onto canonical `player_name` and `team`
-values, and backfills missing `legs.player_id` and `legs.team` values.
+values, and backfills missing `legs.player_id` and `legs.team` values. `0014_roster_injuries.sql` adds `injury_status`
+and `injury_date` to `roster_players`.
 
 ## Connection settings
 
@@ -53,7 +54,7 @@ writer handle.
 - `db.Migrate` applies every file whose number is greater than `PRAGMA user_version`, in number order.
 - Each file runs in its own transaction. The migration's statements and its `user_version` bump commit together, so a
   failed migration leaves neither behind.
-- A fresh database ends at version 13 with every table below.
+- A fresh database ends at version 14 with every table below.
 - `0001_init.sql` creates `groups`, `group_members`, and `slips.group_id`. A database created before groups existed has
   the old `slips` shape, so delete it and let the migrations rebuild.
 - `0002_google_identity.sql` rebuilds `users` in its transaction with the SQLite 12-step method and
@@ -79,7 +80,9 @@ writer handle.
   (preferring linked rows and richer `link`/`sid`/`event_sid` metadata, deleting losers before updating winners to
   canonical `player_name` and `team`), unifies unmatched casing per game, backfills `legs.player_id`, `legs.team`, and
   `legs.player_name`, and upserts auto-discovered `player_matches`.
-- Never edit an applied file. Add `0014_name.sql` and up.
+- `0014_roster_injuries.sql` adds `injury_status TEXT NOT NULL DEFAULT ''` and `injury_date TEXT NOT NULL DEFAULT ''` to
+  `roster_players`.
+- Never edit an applied file. Add `0015_name.sql` and up.
 - `PRAGMA user_version` on the database file is the only record of what ran.
 
 ## Tables
@@ -102,7 +105,7 @@ writer handle.
 | `leg_votes`       | Up and down votes members cast on each other's legs.          |
 | `wagers`          | Optional stake, odds, and boost per member per slip.          |
 | `player_matches`  | Odds player name to ESPN athlete ID, per team.                |
-| `roster_players`  | ESPN NFL team rosters by athlete ID with normalized names.    |
+| `roster_players`  | ESPN NFL team rosters by athlete ID with normalized names and injury status. |
 | `player_gamelogs` | ESPN athlete game logs and market stats by athlete ID.        |
 | `activity`        | Human-readable slip history; `user_id` is NULL for system entries. |
 | `sync_state`      | Last fetch time per outside data source, plus remaining odds credits. |
@@ -342,14 +345,16 @@ CREATE TABLE player_matches (
 );
 
 CREATE TABLE roster_players (
-  athlete_id   TEXT PRIMARY KEY,
-  team         TEXT NOT NULL,
-  espn_team_id TEXT NOT NULL,
-  full_name    TEXT NOT NULL,
-  norm_name    TEXT NOT NULL,
-  position     TEXT NOT NULL DEFAULT '',
-  updated_at   TEXT NOT NULL,
-  headshot_url TEXT NOT NULL DEFAULT ''        -- ESPN athlete headshot URL (https:// only)
+  athlete_id    TEXT PRIMARY KEY,
+  team          TEXT NOT NULL,
+  espn_team_id  TEXT NOT NULL,
+  full_name     TEXT NOT NULL,
+  norm_name     TEXT NOT NULL,
+  position      TEXT NOT NULL DEFAULT '',
+  updated_at    TEXT NOT NULL,
+  headshot_url  TEXT NOT NULL DEFAULT '',       -- ESPN athlete headshot URL (https:// only)
+  injury_status TEXT NOT NULL DEFAULT '',       -- ESPN roster injury status (e.g. 'Out', 'Questionable')
+  injury_date   TEXT NOT NULL DEFAULT ''        -- ESPN roster injury report timestamp
 );
 CREATE INDEX roster_players_team_norm ON roster_players(team, norm_name);
 
@@ -431,8 +436,9 @@ how to read it.
 - `groups`, `group_members`, `slips`, and the rows that hang off a slip are scoped to one group. Weeks, games, odds,
   nfelo projections, nflverse signals, player matches, rosters, player game logs, and `sync_state` are global.
 - `roster_players` stores team roster athletes with `norm_name` (`NormalizePlayerName(full_name)`, accent-folded and
-  stripped of punctuation, trailing suffixes, and parenthetical tags) for fast matching and `headshot_url` (`''` when
-  missing).
+  stripped of punctuation, trailing suffixes, and parenthetical tags) for fast matching, `headshot_url` (`''` when
+  missing), and `injury_status` / `injury_date` (`''` when healthy; cleared automatically on roster sync when ESPN
+  returns no injuries).
 - `odds.player_name` stores the canonical `roster_players.full_name` when matched (with trailing `(TEAM)` tags stripped)
   or a batch-unified spelling when unmatched; `odds.team` stores the matched team or valid `(TEAM)` tag hint.
 - `games.home_logo` and `games.away_logo` store validated `https://` ESPN team logo URLs (`NULL` when missing).

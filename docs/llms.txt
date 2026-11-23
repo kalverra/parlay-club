@@ -29,10 +29,10 @@
 
 - [Analyzer rules](reference/analyzer-rules.md): The stable IDs, severities, triggers, and example messages for the correlation, weather, key-number, chalk, player stats, nfelo model, and nflverse rules, plus the A–F leg and slip grading rubric in internal/analyzer.
 - [Configuration](reference/config.md): Environment variables the server reads, their dev defaults, the odds provider keys, pre-fill bearer token, and GitHub issue reporting settings they configure, the offline sandbox switch, and the values it rejects in prod.
-- [Data sources](reference/data-sources.md): The free sources behind the slate, the ESPN scoreboard endpoint and its Sunday and Monday filter, the Open-Meteo forecast behind a game's weather, Parlay API game lines and props with The Odds API enrichment and fallback, ESPN rosters, game logs, and summary injuries, player matching, nfelo model projections, nflverse team/player/snap-count CSVs, bookmakers, deep links, tiered credit floors, and the raw response archive every successful call leaves.
+- [Data sources](reference/data-sources.md): ESPN scoreboard, rosters, game logs, and injuries, Open-Meteo weather, Parlay API and The Odds API lines, props, and credits, nfelo, nflverse, player matching, and the API archive.
 - [Routes](reference/routes.md): Every HTTP route the server serves, the middleware in front of them, and the status codes, HTMX headers, and SSE frames handlers return.
 - [Sandbox replay](reference/sandbox-replay.md): The fail-closed HTTP transport and named week 9 response registry behind the local Sunday sandbox, the requests they answer or leave as labeled empty fallbacks, which fixtures are real captures versus derived snapshots, and how startup, reset, stages, seeded people, and scripted grades replay them.
-- [Database schema](reference/schema.md): SQLite tables, including groups and their members, legs and their votes, odds rows with sportsbook deep links, rosters and player game logs for props research, player name matching, nfelo model projections, nflverse player crosswalks and weekly team/player signals, the raw external response archive, how migrations are tracked and applied, and connection settings.
+- [Database schema](reference/schema.md): SQLite schema, migrations, connection pools, and table conventions for groups, users, games, odds, nfelo, nflverse, slips, legs, rosters, game logs, and the API archive.
 
 ## Runbook
 
