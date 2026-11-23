@@ -30,7 +30,9 @@ func NFLverseSource(season int) string {
 	return fmt.Sprintf("nflverse:season:%d", season)
 }
 
-func nflverseSeasonTypes(seasonType int) []int {
+// NFLverseSeasonTypes returns the nflverse season_type values to query for a
+// week's seasonType, including regular-season rows during the postseason.
+func NFLverseSeasonTypes(seasonType int) []int {
 	if seasonType == nflverse.SeasonTypePostseason {
 		return []int{nflverse.SeasonTypeRegular, nflverse.SeasonTypePostseason}
 	}
@@ -51,7 +53,7 @@ func LoadFreshTeamProfiles(
 	}
 
 	teamWeeks, err := store.NFLverseTeamWeeksForSeasonTypes(
-		ctx, week.Season, nflverseSeasonTypes(week.SeasonType)...,
+		ctx, week.Season, NFLverseSeasonTypes(week.SeasonType)...,
 	)
 	if err != nil || len(teamWeeks) == 0 {
 		return nil, true
@@ -71,7 +73,7 @@ func LoadPlayerUsageForIDs(
 		return nil
 	}
 	byPlayer, err := store.NFLversePlayerWeeksForPlayersTypes(
-		ctx, athleteIDs, season, nflverseSeasonTypes(seasonType)...,
+		ctx, athleteIDs, season, NFLverseSeasonTypes(seasonType)...,
 	)
 	if err != nil {
 		return nil
@@ -348,22 +350,45 @@ func MergeGameInjuries(game db.Game, rosters []db.RosterPlayer) map[string][]esp
 		})
 	}
 
-	teams := make([]string, 0, 2+len(summaryByTeam))
-	seen := make(map[string]struct{}, 2+len(summaryByTeam))
-	for _, team := range []string{game.AwayTeam, game.HomeTeam} {
+	merged := mergeTeamInjuryFeeds(summaryByTeam, rosterByTeam, game.AwayTeam, game.HomeTeam)
+	return merged
+}
+
+// MergeInjuryFeeds combines per-team summary injuries with per-team roster
+// injuries and converts them to analyzer.Injury slices, keeping summary entries
+// primary.
+func MergeInjuryFeeds(
+	summaryByTeam map[string][]espn.Injury,
+	rosterByTeam map[string][]espn.Injury,
+) map[string][]Injury {
+	return toAnalyzerInjuries(mergeTeamInjuryFeeds(summaryByTeam, rosterByTeam))
+}
+
+func mergeTeamInjuryFeeds(
+	summaryByTeam map[string][]espn.Injury,
+	rosterByTeam map[string][]espn.Injury,
+	preferredTeams ...string,
+) map[string][]espn.Injury {
+	seen := make(map[string]struct{}, len(preferredTeams)+len(summaryByTeam)+len(rosterByTeam))
+	teams := make([]string, 0, len(preferredTeams)+len(summaryByTeam)+len(rosterByTeam))
+	addTeam := func(team string) {
 		if team == "" {
-			continue
+			return
 		}
-		if _, ok := seen[team]; !ok {
-			seen[team] = struct{}{}
-			teams = append(teams, team)
+		if _, ok := seen[team]; ok {
+			return
 		}
+		seen[team] = struct{}{}
+		teams = append(teams, team)
+	}
+	for _, team := range preferredTeams {
+		addTeam(team)
 	}
 	for team := range summaryByTeam {
-		if _, ok := seen[team]; !ok {
-			seen[team] = struct{}{}
-			teams = append(teams, team)
-		}
+		addTeam(team)
+	}
+	for team := range rosterByTeam {
+		addTeam(team)
 	}
 
 	merged := make(map[string][]espn.Injury, len(teams))
@@ -393,7 +418,7 @@ func LoadSlipSignals(
 
 	var teamEPA map[string]*TeamDefenseProfile
 	var usageByPlayer map[string]*PlayerUsage
-	athleteIDs := distinctLegPlayerIDs(legs)
+	athleteIDs := DistinctLegPlayerIDs(legs)
 
 	if week, err := store.WeekByID(ctx, weekID); err == nil {
 		if profiles, fresh := LoadFreshTeamProfiles(ctx, store, now, week); fresh {
@@ -494,7 +519,7 @@ func LoadPlayerResearchSignals(
 
 	var res PlayerResearchSignals
 	if pWeeks, err := store.NFLversePlayerWeeksForPlayerTypes(
-		ctx, athleteID, week.Season, nflverseSeasonTypes(week.SeasonType)...,
+		ctx, athleteID, week.Season, NFLverseSeasonTypes(week.SeasonType)...,
 	); err == nil {
 		if snap, target, wopr, ok := SummarizeRecentUsage(pWeeks); ok {
 			res.HasUsage = true
@@ -564,7 +589,9 @@ func loadFreshNfelo(ctx context.Context, store *db.Store, now time.Time, games [
 	return rows
 }
 
-func distinctLegPlayerIDs(legs []db.Leg) []string {
+// DistinctLegPlayerIDs returns the unique non-empty player IDs referenced by
+// legs in first-seen order.
+func DistinctLegPlayerIDs(legs []db.Leg) []string {
 	seen := make(map[string]struct{}, len(legs))
 	var athleteIDs []string
 	for _, leg := range legs {
