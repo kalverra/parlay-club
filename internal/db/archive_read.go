@@ -79,42 +79,72 @@ func (s *Store) ListAPIResponses(ctx context.Context, filter APIResponseFilter) 
 
 	var list []APIResponse
 	for rows.Next() {
-		var (
-			response  APIResponse
-			fetchedAt string
-			duration  int64
-			credits   sql.NullInt64
-			used      sql.NullInt64
-		)
-		if err := rows.Scan(
-			&response.ID,
-			&response.Source,
-			&response.Key,
-			&response.Method,
-			&response.URL,
-			&response.Status,
-			&fetchedAt,
-			&duration,
-			&response.BodySHA256,
-			&credits,
-			&used,
-		); err != nil {
-			return nil, fmt.Errorf("scan API response: %w", err)
-		}
-
-		response.FetchedAt, err = scanTimestamp(fetchedAt)
+		response, err := scanAPIResponse(rows)
 		if err != nil {
 			return nil, fmt.Errorf("list API responses: %w", err)
 		}
-		response.Duration = time.Duration(duration) * time.Millisecond
-		response.CreditsRemaining = nullableIntPtr(credits)
-		response.CreditsUsed = nullableIntPtr(used)
 		list = append(list, response)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("list API responses: %w", err)
 	}
 	return list, nil
+}
+
+// LatestAPIResponseBefore returns the newest 2xx archived response for key
+// fetched at or before before. It reads only the metadata table, never a body.
+func (s *Store) LatestAPIResponseBefore(ctx context.Context, key string, before time.Time) (APIResponse, bool, error) {
+	row := s.readConn().QueryRowContext(ctx, `
+		SELECT id, source, key, method, url, status, fetched_at, duration_ms,
+		       body_sha256, credits_remaining, credits_used
+		FROM api_responses
+		WHERE key = ? AND fetched_at <= ? AND status >= 200 AND status < 300
+		ORDER BY fetched_at DESC, id DESC
+		LIMIT 1`, key, formatTimestamp(before))
+
+	response, err := scanAPIResponse(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return APIResponse{}, false, nil
+	}
+	if err != nil {
+		return APIResponse{}, false, fmt.Errorf("latest API response before: %w", err)
+	}
+	return response, true, nil
+}
+
+func scanAPIResponse(scanner interface{ Scan(dest ...any) error }) (APIResponse, error) {
+	var (
+		response  APIResponse
+		fetchedAt string
+		duration  int64
+		credits   sql.NullInt64
+		used      sql.NullInt64
+	)
+	if err := scanner.Scan(
+		&response.ID,
+		&response.Source,
+		&response.Key,
+		&response.Method,
+		&response.URL,
+		&response.Status,
+		&fetchedAt,
+		&duration,
+		&response.BodySHA256,
+		&credits,
+		&used,
+	); err != nil {
+		return APIResponse{}, err
+	}
+
+	var err error
+	response.FetchedAt, err = scanTimestamp(fetchedAt)
+	if err != nil {
+		return APIResponse{}, err
+	}
+	response.Duration = time.Duration(duration) * time.Millisecond
+	response.CreditsRemaining = nullableIntPtr(credits)
+	response.CreditsUsed = nullableIntPtr(used)
+	return response, nil
 }
 
 // prefixUpperBound returns the smallest string that sorts after every string
