@@ -1,55 +1,156 @@
 {{define "content"}}
 <section class="space-y-4">
   <div class="flex items-center justify-between gap-3">
-    <div class="space-y-1">
-      <h1 class="text-xl font-semibold">This week's slips</h1>
-      <p class="text-sm text-page-muted">
-        {{.Group.Name}} &middot; {{.Page.WeekLabel}}
-      </p>
+    <div class="min-w-0 space-y-0.5">
+      <h1 class="truncate text-xl font-semibold">{{.Group.Name}}</h1>
+      {{if .Page.WeekLabel}}
+        <p class="text-sm text-page-muted">{{.Page.WeekLabel}}</p>
+      {{end}}
     </div>
     <a
-      href="/slips/new{{if .Week.ID}}?week={{.Week.ID}}{{end}}"
-      class="rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-accent-ink shadow-sm hover:opacity-90"
+      href="/slips/new{{if .Week}}?week={{.Week.ID}}{{end}}"
+      class="shrink-0 rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-accent-ink shadow-sm hover:opacity-90"
     >
-      + Add one-off slip
+      + New slip
     </a>
   </div>
 
-  <div class="space-y-3">
-    {{range .Cards}}
-      <a
-        href="/slips/{{.ID}}"
-        class="ui-card block p-4 transition hover:border-line-strong hover:bg-surface-2"
-      >
-        <div class="flex items-center justify-between gap-3">
-          <div class="flex items-center gap-2 min-w-0">
-            <span class="truncate text-base font-semibold">{{.Name}}</span>
-            <span class="shrink-0 rounded-md border border-line bg-surface-2 px-2 py-0.5 text-xs font-medium text-ink-muted">
-              {{.ScopeBadge}}
+  {{if .Spotlight}}
+    <div class="space-y-3">
+      {{range .Spotlight}}
+        <article class="ui-card border-l-4 border-l-accent p-4 space-y-3">
+          <div class="flex items-start justify-between gap-3">
+            <div class="min-w-0 space-y-1">
+              <div class="flex flex-wrap items-center gap-2">
+                <a href="/slips/{{.ID}}" class="truncate text-base font-semibold text-ink hover:underline">{{.Name}}</a>
+                <span class="shrink-0 rounded-md border border-line bg-surface-2 px-2 py-0.5 text-xs font-medium text-ink-muted">
+                  {{.ScopeBadge}}
+                </span>
+              </div>
+              <p class="text-xs text-ink-muted">{{.Progress}}</p>
+            </div>
+            <span class="shrink-0 rounded-md bg-accent-soft px-2 py-0.5 text-xs font-semibold text-ink">
+              {{.NextStep}}
             </span>
           </div>
-          <span class="shrink-0 rounded-md bg-accent-soft px-2 py-0.5 text-xs font-semibold text-ink">
-            {{.NextStep}}
-          </span>
-        </div>
-        <div class="mt-2 flex items-center justify-between gap-2 text-xs text-ink-muted">
-          <span>{{.Progress}}</span>
-          {{if .Deadline}}
-            <span>
-              Deadline: <time datetime="{{.Deadline.ISO}}">{{.Deadline.Label}}</time>
-            </span>
-          {{end}}
-        </div>
-      </a>
-    {{end}}
-  </div>
 
-  <section class="space-y-4 border-t border-chrome-border pt-6">
-    <div class="space-y-1">
-      <h2 class="text-base font-semibold">Recurring schedules</h2>
-      <p class="text-xs text-page-muted">
-        Automatically create slips each week for recurring game slates.
+          <div class="flex flex-wrap items-center justify-between gap-3 pt-1">
+            <div class="text-xs text-ink-muted">
+              {{if .Deadline}}
+                Deadline: <time datetime="{{.Deadline.ISO}}">{{.Deadline.Label}}</time>
+              {{else if .WeekLabel}}
+                {{.WeekLabel}}
+              {{end}}
+            </div>
+            <a
+              href="{{.ActionHref}}"
+              class="rounded-lg bg-accent px-3.5 py-1.5 text-xs font-semibold text-accent-ink shadow-sm hover:opacity-90"
+            >
+              {{.ActionLabel}}
+            </a>
+          </div>
+        </article>
+      {{end}}
+    </div>
+  {{else}}
+    <div class="ui-card border-dashed p-5 space-y-3">
+      <div class="space-y-1">
+        <h2 class="text-base font-semibold text-ink">No active slip right now</h2>
+        {{if .NextWeekLabel}}
+          <p class="text-sm text-ink-muted">
+            Next up: {{.NextWeekLabel}}. Start a slip when the group is ready to pick.
+          </p>
+        {{else}}
+          <p class="text-sm text-ink-muted">
+            No upcoming games are loaded yet. Start a slip once the next slate arrives.
+          </p>
+        {{end}}
+      </div>
+      <div>
+        <a
+          href="/slips/new{{if .Week}}?week={{.Week.ID}}{{end}}"
+          class="inline-flex items-center rounded-lg bg-accent px-3.5 py-2 text-sm font-semibold text-accent-ink shadow-sm hover:opacity-90"
+        >
+          + Start a slip
+        </a>
+      </div>
+    </div>
+  {{end}}
+
+  <section class="ui-card p-4 space-y-3">
+    <div class="flex items-center justify-between gap-2">
+      <h2 class="text-sm font-semibold text-ink">Group record ({{.Record.Season}})</h2>
+      <a href="/record" class="text-xs font-medium text-ink-muted hover:text-ink hover:underline">
+        Full record book &rarr;
+      </a>
+    </div>
+    <div class="grid grid-cols-3 gap-3">
+      <div>
+        <p class="text-[11px] font-medium text-ink-muted">W&ndash;L</p>
+        <p class="mt-0.5 font-mono text-lg font-semibold tabular-nums text-ink">
+          {{if .Record.HasSlips}}{{.Record.Record}}{{else}}0-0{{end}}
+        </p>
+      </div>
+      <div>
+        <p class="text-[11px] font-medium text-ink-muted">Streak</p>
+        <p class="mt-0.5 font-mono text-lg font-semibold tabular-nums text-ink">{{.Record.Streak}}</p>
+      </div>
+      <div>
+        <p class="text-[11px] font-medium text-ink-muted">Graded</p>
+        <p class="mt-0.5 font-mono text-lg font-semibold tabular-nums text-ink">{{.Record.TotalSlips}}</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="space-y-2.5">
+    <h2 class="text-base font-semibold">Recent slips</h2>
+    {{if .RecentSlips}}
+      <ul class="space-y-2">
+        {{range .RecentSlips}}
+          <li>
+            <a
+              href="{{.Href}}"
+              class="ui-card flex items-center justify-between gap-3 p-3.5 transition hover:border-line-strong hover:bg-surface-2"
+            >
+              <div class="min-w-0 space-y-0.5">
+                <div class="flex items-center gap-2 min-w-0">
+                  <span class="truncate text-sm font-semibold text-ink">{{.Name}}</span>
+                  <span class="shrink-0 rounded-md border border-line bg-surface-2 px-1.5 py-0.5 text-[11px] font-medium text-ink-muted">
+                    {{.ScopeBadge}}
+                  </span>
+                </div>
+                <p class="text-xs text-ink-muted">{{.WeekLabel}}</p>
+              </div>
+              <span
+                class="shrink-0 rounded-full border px-2.5 py-0.5 text-xs font-semibold {{if eq .ResultTone "won"}}border-positive bg-positive-soft text-positive-ink{{else if eq .ResultTone "lost"}}border-danger bg-danger-soft text-danger-ink{{else if eq .ResultTone "push"}}border-warning bg-warning-soft text-warning-ink{{else}}border-line-strong bg-surface-2 text-ink-muted{{end}}"
+              >
+                {{.ResultLabel}}
+              </span>
+            </a>
+          </li>
+        {{end}}
+      </ul>
+    {{else}}
+      <p class="ui-card border-dashed p-4 text-xs text-ink-muted">
+        No finished slips yet.
       </p>
+    {{end}}
+  </section>
+
+  <section class="space-y-3 border-t border-chrome-border pt-4">
+    <div class="flex items-center justify-between gap-3">
+      <div class="space-y-0.5">
+        <h2 class="text-base font-semibold">Recurring schedules</h2>
+        <p class="text-xs text-page-muted">
+          Automatically create slips each week for recurring game slates.
+        </p>
+      </div>
+      <a
+        href="/slips/new?mode=recurring"
+        class="shrink-0 rounded-lg border border-line-strong bg-surface-2 px-3 py-1.5 text-xs font-semibold text-ink hover:opacity-90"
+      >
+        + Add recurring slip
+      </a>
     </div>
 
     {{if .Schedules}}
@@ -112,70 +213,23 @@
     {{else}}
       <p class="text-xs text-page-muted">No recurring schedules configured.</p>
     {{end}}
+  </section>
 
-    <form
-      hx-post="/groups/{{.Group.ID}}/schedules"
-      hx-swap="none"
-      class="ui-card space-y-3 border-dashed p-4"
-    >
-      <h3 class="text-sm font-medium text-ink">Add recurring schedule</h3>
-      <div class="space-y-2">
-        <label for="schedule-name" class="block text-xs font-medium text-ink-muted">Name</label>
-        <input
-          id="schedule-name"
-          name="name"
-          type="text"
-          required
-          maxlength="60"
-          placeholder="e.g. Thursday Slip"
-          class="w-full rounded-md border border-line-strong bg-surface-2 px-3 py-1.5 text-sm text-ink placeholder:text-ink-subtle focus:border-accent focus:outline-none"
-        >
-      </div>
-
-      <div class="grid grid-cols-2 gap-3">
-        <div class="space-y-1">
-          <label for="schedule-scope" class="block text-xs font-medium text-ink-muted">Game Slate</label>
-          <select
-            id="schedule-scope"
-            name="slate_scope"
-            class="w-full rounded-md border border-line-strong bg-surface-2 px-2 py-1.5 text-sm text-ink focus:border-accent focus:outline-none"
-          >
-            {{if .SlateScopes}}
-              {{range .SlateScopes}}
-                <option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>
-              {{end}}
-            {{else}}
-              <option value="sunday_main">Sunday Slate</option>
-              <option value="thursday">Thursday Slate</option>
-              <option value="weekend">Weekend Slate</option>
-              <option value="full_week">Full Week</option>
-            {{end}}
-          </select>
-        </div>
-
-        <div class="space-y-1">
-          <label for="schedule-legs" class="block text-xs font-medium text-ink-muted">Picks per person</label>
-          <select
-            id="schedule-legs"
-            name="legs_per_member"
-            class="w-full rounded-md border border-line-strong bg-surface-2 px-2 py-1.5 text-sm text-ink focus:border-accent focus:outline-none"
-          >
-            <option value="1">1 pick</option>
-            <option value="2" selected>2 picks</option>
-            <option value="3">3 picks</option>
-            <option value="4">4 picks</option>
-            <option value="5">5 picks</option>
-          </select>
-        </div>
-      </div>
-
-      <button
-        type="submit"
-        class="rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-accent-ink shadow-sm hover:opacity-90"
-      >
-        Save schedule
-      </button>
-    </form>
+  <section class="space-y-3 border-t border-chrome-border pt-4">
+    <div class="flex items-center justify-between gap-2">
+      <h2 class="text-base font-semibold">Members</h2>
+      <a href="/groups" class="text-xs font-medium text-ink-muted hover:text-ink hover:underline">
+        Invite friends &rarr;
+      </a>
+    </div>
+    <ul class="flex flex-wrap gap-2">
+      {{range .Members}}
+        <li class="ui-card flex items-center gap-2 px-2.5 py-1.5">
+          {{template "avatar" .}}
+          <span class="text-xs font-medium text-ink">{{.Name}}</span>
+        </li>
+      {{end}}
+    </ul>
   </section>
 </section>
 {{end}}

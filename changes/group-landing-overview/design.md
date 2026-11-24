@@ -135,7 +135,7 @@ Complexity: medium (replaces the branching redirect/inline-create behavior in `g
 `web/templates/week.html` phone-first) Risk: low (presentation and route-rendering change with zero mutation or
 API-budget impact; verified by handler and template tests)
 
-- [ ] Update `groupWeek` in `internal/web/home.go` and redesign `web/templates/week.html` to always render the group
+- [x] Update `groupWeek` in `internal/web/home.go` and redesign `web/templates/week.html` to always render the group
       overview with the conditional active/upcoming slip spotlight, quiet-state CTA, record snapshot, recent slips,
       recurring schedules (linking to `/slips/new?mode=recurring`), and members strip; update
       `internal/web/home_test.go` for active, multi-slip, quiet, and non-member cases.

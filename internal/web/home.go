@@ -27,16 +27,6 @@ type HomeCard struct {
 	Summary string
 }
 
-// WeekPage is the multi-slip hub rendered for a group's week when multiple slips exist.
-type WeekPage struct {
-	Page
-	Group       db.Group
-	Week        db.Week
-	Cards       []WeekSlipCard
-	Schedules   []ScheduleView
-	SlateScopes []SlateScopeOption
-}
-
 // ScheduleView holds schedule data formatted for templates.
 type ScheduleView struct {
 	ID            int64
@@ -45,20 +35,6 @@ type ScheduleView struct {
 	ScopeBadge    string
 	LegsPerMember int
 	IsActive      bool
-}
-
-// WeekSlipCard is one slip card shown in the multi-slip week view.
-type WeekSlipCard struct {
-	ID          int64
-	Name        string
-	ScopeBadge  string
-	NextStep    string
-	Deadline    *DeadlineView
-	MemberCount int
-	PicksCount  int
-	TotalPicks  int
-	LockedCount int
-	Progress    string
 }
 
 const recentSlipsLimit = 5
@@ -535,9 +511,7 @@ func stepPriority(step slips.Step) int {
 	}
 }
 
-// groupWeek switches the active group and opens the newest slip of the latest
-// week, or the create form when the group has none yet. When multiple slips
-// exist for the week, it renders the multi-slip week hub.
+// groupWeek switches the active group and renders the group overview page.
 func (h *slipHandlers) groupWeek(w http.ResponseWriter, r *http.Request) {
 	if h.deps.Store == nil {
 		http.NotFound(w, r)
@@ -553,7 +527,8 @@ func (h *slipHandlers) groupWeek(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	member, err := h.deps.Store.IsMember(r.Context(), groupID, user.ID)
+	ctx := r.Context()
+	member, err := h.deps.Store.IsMember(ctx, groupID, user.ID)
 	if err != nil {
 		h.serverError(w, err)
 		return
@@ -562,7 +537,7 @@ func (h *slipHandlers) groupWeek(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	group, err := h.deps.Store.GroupByID(r.Context(), groupID)
+	group, err := h.deps.Store.GroupByID(ctx, groupID)
 	if errors.Is(err, db.ErrGroupNotFound) {
 		http.NotFound(w, r)
 		return
@@ -574,100 +549,138 @@ func (h *slipHandlers) groupWeek(w http.ResponseWriter, r *http.Request) {
 
 	h.setGroup(w, groupID)
 	page := h.pageForGroup(r, "This week", groupID)
-
-	week, err := h.deps.Store.LatestWeek(r.Context())
-	if errors.Is(err, db.ErrWeekNotFound) {
-		h.renderCreate(w, r, page, user, group, nil, nil, nil)
-		return
-	}
-	if err != nil {
-		h.serverError(w, err)
-		return
-	}
-	page.WeekLabel = weekLabel(week)
-
 	now := h.deps.now()
-	groupSlips, err := slips.EnsureWeekSlips(r.Context(), h.deps.Store, group.ID, week.ID, now)
-	if err != nil {
-		h.serverError(w, err)
-		return
-	}
-	if len(groupSlips) == 0 {
-		upcoming, err := h.deps.Store.UpcomingWeeks(r.Context(), now)
-		if err != nil {
-			h.serverError(w, err)
-			return
-		}
-		var selected *db.Week
-		if containsWeekID(upcoming, week.ID) {
-			selected = &week
-		} else if len(upcoming) > 0 {
-			selected = &upcoming[0]
-		}
-		h.renderCreate(w, r, page, user, group, upcoming, selected, nil)
-		return
-	}
-	if len(groupSlips) == 1 {
-		h.redirect(w, r, fmt.Sprintf("/slips/%d", groupSlips[0].ID))
-		return
-	}
 
-	games, err := h.deps.Store.GamesForWeek(r.Context(), week.ID)
+	upcoming, err := h.deps.Store.UpcomingWeeks(ctx, now)
 	if err != nil {
 		h.serverError(w, err)
 		return
 	}
 
-	cards := make([]WeekSlipCard, 0, len(groupSlips))
-	for _, slip := range groupSlips {
-		members, err := h.deps.Store.SlipMembers(r.Context(), slip.ID)
-		if err != nil {
-			h.serverError(w, err)
+	var activeWeek *db.Week
+	var nextWeek *db.Week
+	if len(upcoming) > 0 {
+		w0 := upcoming[0]
+		activeWeek = &w0
+		nextWeek = &w0
+	} else {
+		latest, hasLatest, ok := h.latestWeek(w, r)
+		if !ok {
 			return
 		}
-		legs, err := h.deps.Store.LegsForSlip(r.Context(), slip.ID)
-		if err != nil {
-			h.serverError(w, err)
-			return
+		if hasLatest {
+			activeWeek = &latest
 		}
-
-		next := slips.NextStep(slip, members, legs, games, user.ID, now)
-		var deadline *DeadlineView
-		if next.Deadline != nil {
-			deadline = newDeadlineView(games, *next.Deadline)
-		}
-
-		lockedCount, progress := slipProgressSummary(members, legs, slip.LegsPerMember)
-
-		cards = append(cards, WeekSlipCard{
-			ID:          slip.ID,
-			Name:        slip.Name,
-			ScopeBadge:  scopeBadge(slip),
-			NextStep:    next.Label(),
-			Deadline:    deadline,
-			MemberCount: len(members),
-			PicksCount:  len(legs),
-			TotalPicks:  len(members) * slip.LegsPerMember,
-			LockedCount: lockedCount,
-			Progress:    progress,
-		})
 	}
 
-	schedules, err := h.deps.Store.GroupSlipSchedules(r.Context(), group.ID)
+	var weekGames []db.Game
+	var weekSlips []groupOverviewSlip
+	if activeWeek != nil {
+		page.WeekLabel = weekLabel(*activeWeek)
+		groupSlips, err := slips.EnsureWeekSlips(ctx, h.deps.Store, group.ID, activeWeek.ID, now)
+		if err != nil {
+			h.serverError(w, err)
+			return
+		}
+		weekGames, err = h.deps.Store.GamesForWeek(ctx, activeWeek.ID)
+		if err != nil {
+			h.serverError(w, err)
+			return
+		}
+		weekSlips = make([]groupOverviewSlip, 0, len(groupSlips))
+		for _, slip := range groupSlips {
+			members, err := h.deps.Store.SlipMembers(ctx, slip.ID)
+			if err != nil {
+				h.serverError(w, err)
+				return
+			}
+			legs, err := h.deps.Store.LegsForSlip(ctx, slip.ID)
+			if err != nil {
+				h.serverError(w, err)
+				return
+			}
+			weekSlips = append(weekSlips, groupOverviewSlip{
+				Slip:    slip,
+				Week:    *activeWeek,
+				Members: members,
+				Legs:    legs,
+			})
+		}
+	}
+
+	recentSlips, err := h.deps.Store.RecentSlipsForGroup(ctx, group.ID, recentSlipsLimit+len(weekSlips))
 	if err != nil {
 		h.serverError(w, err)
 		return
 	}
-	schedViews := buildScheduleViews(schedules)
 
-	h.renderPage(w, "week", WeekPage{
-		Page:        page,
-		Group:       group,
-		Week:        week,
-		Cards:       cards,
-		Schedules:   schedViews,
-		SlateScopes: defaultSlateScopeOptions(""),
+	recordSeason, ok := h.overviewRecordSeason(w, r, group.ID, activeWeek, now)
+	if !ok {
+		return
+	}
+	gradedSlips, err := h.deps.Store.GradedSlipsForGroupSeason(ctx, group.ID, recordSeason)
+	if err != nil {
+		h.serverError(w, err)
+		return
+	}
+
+	schedules, err := h.deps.Store.GroupSlipSchedules(ctx, group.ID)
+	if err != nil {
+		h.serverError(w, err)
+		return
+	}
+	groupMembers, err := h.deps.Store.Members(ctx, group.ID)
+	if err != nil {
+		h.serverError(w, err)
+		return
+	}
+
+	overview := buildGroupOverviewPage(groupOverviewInput{
+		Page:         page,
+		Group:        group,
+		ActiveWeek:   activeWeek,
+		NextWeek:     nextWeek,
+		WeekSlips:    weekSlips,
+		WeekGames:    weekGames,
+		RecentSlips:  recentSlips,
+		RecordSeason: recordSeason,
+		GradedSlips:  gradedSlips,
+		Schedules:    schedules,
+		GroupMembers: groupMembers,
+		ViewerID:     user.ID,
+		Now:          now,
 	})
+	h.renderPage(w, "week", overview)
+}
+
+func (h *slipHandlers) overviewRecordSeason(
+	w http.ResponseWriter,
+	r *http.Request,
+	groupID int64,
+	activeWeek *db.Week,
+	now time.Time,
+) (int, bool) {
+	ctx := r.Context()
+	gradedSeasons, err := h.deps.Store.GradedSeasonsForGroup(ctx, groupID)
+	if err != nil {
+		h.serverError(w, err)
+		return 0, false
+	}
+	if len(gradedSeasons) > 0 {
+		return gradedSeasons[0], true
+	}
+	allSeasons, err := h.deps.Store.SeasonsForGroup(ctx, groupID)
+	if err != nil {
+		h.serverError(w, err)
+		return 0, false
+	}
+	if len(allSeasons) > 0 {
+		return allSeasons[0], true
+	}
+	if activeWeek != nil {
+		return activeWeek.Season, true
+	}
+	return now.Year(), true
 }
 
 // renderHome writes the group list, or just its list element for an HTMX
