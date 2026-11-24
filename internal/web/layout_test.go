@@ -86,6 +86,8 @@ func TestLayoutTopBar(t *testing.T) {
 
 	assert.Contains(t, out, `href="/"`)
 	assert.Contains(t, out, `aria-label="Home"`)
+	assert.Contains(t, out, `data-theme-cycle`)
+	assert.Contains(t, out, `data-theme-label`)
 	assert.Contains(t, out, ">Week 9</span>")
 	assert.Contains(t, out, `id="slip-switcher"`)
 	assert.Contains(t, out, `<option value="2" selected>Week 9 #2</option>`)

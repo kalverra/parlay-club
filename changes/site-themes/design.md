@@ -139,7 +139,7 @@ Complexity: medium (coordinates Go theme registry across four handler packages, 
 Risk: low (additive token layer and allowlisted cookie read; existing templates remain valid and tests verify fallback behavior).
 
 - [x] Add `internal/web/theme.go` (`ThemeID`, `Theme`, allowlist for `paper-turf`, `redzone`, `almanac`, `ThemeCookie`, `ThemeFromRequest`) and `Page.Theme` / `Page.ActiveTheme()` in `internal/web/page.go`; wire `ThemeFromRequest(r)` in `internal/web`, `internal/auth`, `internal/groups`, and `cmd/server/sandbox.go`, with unit tests covering default, valid, and invalid cookies plus `layout_test.go` SSR assertions.
-- [ ] Define the semantic `@theme` tokens, three `[data-theme="..."]` palettes (`paper-turf`, `redzone`, `almanac`), and shared component/badge classes in `web/tailwind/input.css`; add Google Fonts links, `data-theme`/`color-scheme`/`theme-color` attributes, and the compact top-bar `[data-theme-cycle]` button in `web/templates/layout.html`; implement instant theme cycling and `pc_theme` cookie persistence in `web/static/app.js`; regenerate `web/static/app.css`.
+- [x] Define the semantic `@theme` tokens, three `[data-theme="..."]` palettes (`paper-turf`, `redzone`, `almanac`), and shared component/badge classes in `web/tailwind/input.css`; add Google Fonts links, `data-theme`/`color-scheme`/`theme-color` attributes, and the compact top-bar `[data-theme-cycle]` button in `web/templates/layout.html`; implement instant theme cycling and `pc_theme` cookie persistence in `web/static/app.js`; regenerate `web/static/app.css`.
 
 ### Phase 2: Semantic status, grade, and result roles in Go view builders
 

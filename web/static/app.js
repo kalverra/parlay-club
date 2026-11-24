@@ -203,7 +203,54 @@ function closeGroupSwitcher(event) {
   }
 }
 
+// Theme cycling and pc_theme cookie persistence.
+const themeCatalog = [
+  { id: "paper-turf", label: "Paper & Turf", shortLabel: "Paper", colorScheme: "dark", themeColor: "#0f1e16" },
+  { id: "redzone", label: "RedZone", shortLabel: "RedZone", colorScheme: "dark", themeColor: "#090a0c" },
+  { id: "almanac", label: "90s Almanac", shortLabel: "Almanac", colorScheme: "light", themeColor: "#fff8e7" },
+];
+
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme.id;
+
+  const schemeMeta = document.querySelector('meta[name="color-scheme"]');
+  if (schemeMeta) {
+    schemeMeta.setAttribute("content", theme.colorScheme);
+  }
+  const colorMeta = document.querySelector('meta[name="theme-color"]');
+  if (colorMeta) {
+    colorMeta.setAttribute("content", theme.themeColor);
+  }
+
+  for (const button of document.querySelectorAll("[data-theme-cycle]")) {
+    button.setAttribute("title", `Theme: ${theme.label}`);
+    button.setAttribute("aria-label", `Switch theme (${theme.label})`);
+    const labelEl = button.querySelector("[data-theme-label]");
+    if (labelEl) {
+      labelEl.textContent = theme.shortLabel;
+    }
+  }
+
+  let cookie = `pc_theme=${encodeURIComponent(theme.id)}; Path=/; Max-Age=31536000; SameSite=Lax`;
+  if (window.location.protocol === "https:") {
+    cookie += "; Secure";
+  }
+  document.cookie = cookie;
+}
+
+function cycleTheme() {
+  const currentID = document.documentElement.dataset.theme || "paper-turf";
+  const idx = themeCatalog.findIndex((t) => t.id === currentID);
+  const next = themeCatalog[(idx + 1) % themeCatalog.length];
+  applyTheme(next);
+}
+
 document.addEventListener("click", (event) => {
+  const themeButton = event.target.closest("[data-theme-cycle]");
+  if (themeButton) {
+    cycleTheme();
+    return;
+  }
   const copyButton = event.target.closest("[data-copy-target]");
   if (copyButton) {
     copyInvite(copyButton);
