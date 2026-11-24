@@ -129,6 +129,8 @@ type SlipPage struct {
 // combos shown during the viewer's pick step.
 type HighlightsView struct {
 	Has            bool
+	SlipID         int64
+	FromBoard      bool
 	RemainingSlots int
 	Legs           []LegHighlightView
 	Parlays        []ParlayHighlightView
@@ -868,9 +870,19 @@ func (h *slipHandlers) addLeg(w http.ResponseWriter, r *http.Request) {
 		h.respondError(w, err)
 		return
 	}
-	if r.PostForm.Get("from") == "board" {
+	switch r.PostForm.Get("from") {
+	case "board":
 		w.Header().Set("Hx-Trigger", "tray-updated")
 		h.renderPartial(w, "pick-line-group", h.pickPairRow(r.Context(), slip, created, true))
+		return
+	case "pick":
+		data, err := h.pickPageData(r.Context(), slip, pickQuery(r, h.deps.now()))
+		if err != nil {
+			h.serverError(w, err)
+			return
+		}
+		w.Header().Set("Hx-Trigger", "tray-updated, slip-updated")
+		h.renderPartialCtx(r.Context(), w, "pick-body", data.Body)
 		return
 	}
 	// Tell the browser the bottom sheet can close now that the leg landed.
@@ -1780,7 +1792,9 @@ func (h *slipHandlers) slipHighlights(
 	set := board.SelectHighlights(rows, boardGames, boardStats, board.HighlightOptions{
 		ExcludePicked: true,
 	})
-	return highlightsView(set, remainingSlots), nil
+	view := highlightsView(set, remainingSlots)
+	view.SlipID = slip.ID
+	return view, nil
 }
 
 func highlightsView(set board.HighlightSet, remainingSlots int) HighlightsView {
