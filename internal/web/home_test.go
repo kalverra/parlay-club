@@ -17,6 +17,7 @@ import (
 
 	"github.com/kalverra/parlay-club/internal/db"
 	"github.com/kalverra/parlay-club/internal/live"
+	"github.com/kalverra/parlay-club/internal/parlay"
 	"github.com/kalverra/parlay-club/internal/slips"
 	webui "github.com/kalverra/parlay-club/internal/web"
 	assets "github.com/kalverra/parlay-club/web"
@@ -459,4 +460,196 @@ func TestHubKeepsTheThreeTabBar(t *testing.T) {
 	}
 	assert.Contains(t, body, fmt.Sprintf(`href="/groups/%d/week"`, fixture.first.ID))
 	assert.Equal(t, 1, strings.Count(body, `aria-current="page"`))
+}
+
+func TestHomeGroupSummaryPrioritizesActionableSlips(t *testing.T) {
+	t.Parallel()
+
+	t.Run("open Sunday slip beats newer graded Thanksgiving slip", func(t *testing.T) {
+		t.Parallel()
+
+		fixture := newLandingFixture(t)
+		now := time.Date(2026, 11, 25, 12, 0, 0, 0, time.UTC)
+		fixture.clock = func() time.Time { return now }
+		fixture.handler = fixture.build()
+
+		// fixture.first already has an open Sunday slip (2 legs per member -> "Pick 2 more").
+		thuSlip, err := fixture.store.CreateSlip(
+			t.Context(), fixture.first.ID, fixture.week.ID, nil, "Thanksgiving", db.SlateScopeThursday, 1,
+			[]int64{fixture.user.ID},
+		)
+		require.NoError(t, err)
+		require.NoError(t, fixture.store.SetSlipGrade(t.Context(), thuSlip.ID, parlay.Won, db.SlipGraded))
+
+		recorder := fixture.get(t, "/")
+		require.Equal(t, http.StatusOK, recorder.Code)
+		body := recorder.Body.String()
+
+		assert.Contains(t, body, "Pick 2 more")
+		assert.NotContains(t, body, "Won")
+	})
+
+	t.Run("earlier upcoming deadline breaks ties among actionable slips", func(t *testing.T) {
+		t.Parallel()
+
+		fixture := newLandingFixture(t)
+		now := time.Date(2026, 11, 25, 12, 0, 0, 0, time.UTC)
+		fixture.clock = func() time.Time { return now }
+		fixture.handler = fixture.build()
+
+		thuKick := time.Date(2026, 11, 26, 17, 30, 0, 0, time.UTC)
+		sunKick := time.Date(2026, 11, 29, 18, 0, 0, 0, time.UTC)
+		_, err := fixture.store.UpsertGame(t.Context(), db.Game{
+			ID:         "401873101",
+			WeekID:     fixture.week.ID,
+			HomeTeam:   "DET",
+			AwayTeam:   "GB",
+			HomeName:   "Detroit Lions",
+			AwayName:   "Green Bay Packers",
+			HomeESPNID: "8",
+			AwayESPNID: "9",
+			Kickoff:    thuKick,
+			Status:     db.GameScheduled,
+			UpdatedAt:  now,
+		})
+		require.NoError(t, err)
+		_, err = fixture.store.UpsertGame(t.Context(), db.Game{
+			ID:         "401873102",
+			WeekID:     fixture.week.ID,
+			HomeTeam:   "KC",
+			AwayTeam:   "BUF",
+			HomeName:   "Kansas City Chiefs",
+			AwayName:   "Buffalo Bills",
+			HomeESPNID: "12",
+			AwayESPNID: "2",
+			Kickoff:    sunKick,
+			Status:     db.GameScheduled,
+			UpdatedAt:  now,
+		})
+		require.NoError(t, err)
+
+		// fixture.first already has Sunday (2 legs -> "Pick 2 more"). Add a 1-leg Thursday slip ("Pick 1 more").
+		_, err = fixture.store.CreateSlip(
+			t.Context(), fixture.first.ID, fixture.week.ID, nil, "Thanksgiving", db.SlateScopeThursday, 1,
+			[]int64{fixture.user.ID},
+		)
+		require.NoError(t, err)
+
+		recorder := fixture.get(t, "/")
+		require.Equal(t, http.StatusOK, recorder.Code)
+		body := recorder.Body.String()
+
+		assert.Contains(t, body, "Pick 1 more")
+		assert.NotContains(t, body, "Pick 2 more")
+	})
+
+	t.Run("actionable Sunday slip beats locked Thursday slip", func(t *testing.T) {
+		t.Parallel()
+
+		fixture := newLandingFixture(t)
+		now := time.Date(2026, 11, 25, 12, 0, 0, 0, time.UTC)
+		fixture.clock = func() time.Time { return now }
+		fixture.handler = fixture.build()
+
+		thuKick := time.Date(2026, 11, 26, 17, 30, 0, 0, time.UTC)
+		sunKick := time.Date(2026, 11, 29, 18, 0, 0, 0, time.UTC)
+		_, err := fixture.store.UpsertGame(t.Context(), db.Game{
+			ID:         "401873201",
+			WeekID:     fixture.week.ID,
+			HomeTeam:   "DET",
+			AwayTeam:   "GB",
+			HomeName:   "Detroit Lions",
+			AwayName:   "Green Bay Packers",
+			HomeESPNID: "8",
+			AwayESPNID: "9",
+			Kickoff:    thuKick,
+			Status:     db.GameScheduled,
+			UpdatedAt:  now,
+		})
+		require.NoError(t, err)
+		_, err = fixture.store.UpsertGame(t.Context(), db.Game{
+			ID:         "401873202",
+			WeekID:     fixture.week.ID,
+			HomeTeam:   "KC",
+			AwayTeam:   "BUF",
+			HomeName:   "Kansas City Chiefs",
+			AwayName:   "Buffalo Bills",
+			HomeESPNID: "12",
+			AwayESPNID: "2",
+			Kickoff:    sunKick,
+			Status:     db.GameScheduled,
+			UpdatedAt:  now,
+		})
+		require.NoError(t, err)
+
+		thuSlip, err := fixture.store.CreateSlip(
+			t.Context(), fixture.first.ID, fixture.week.ID, nil, "Thanksgiving", db.SlateScopeThursday, 1,
+			[]int64{fixture.user.ID},
+		)
+		require.NoError(t, err)
+		require.NoError(t, fixture.store.SetSlipMemberLock(t.Context(), thuSlip.ID, fixture.user.ID, &now))
+		require.NoError(t, fixture.store.SetSlipStatus(t.Context(), thuSlip.ID, db.SlipLocked))
+
+		recorder := fixture.get(t, "/")
+		require.Equal(t, http.StatusOK, recorder.Code)
+		body := recorder.Body.String()
+
+		assert.Contains(t, body, "Pick 2 more")
+		assert.NotContains(t, body, "Ready to place")
+	})
+
+	t.Run("waiting or export beats closed which beats done", func(t *testing.T) {
+		t.Parallel()
+
+		fixture := newLandingFixture(t)
+		now := time.Date(2026, 11, 29, 23, 0, 0, 0, time.UTC)
+		fixture.clock = func() time.Time { return now }
+		fixture.handler = fixture.build()
+
+		sunKick := time.Date(2026, 11, 29, 18, 0, 0, 0, time.UTC)
+		_, err := fixture.store.UpsertGame(t.Context(), db.Game{
+			ID:         "401873301",
+			WeekID:     fixture.week.ID,
+			HomeTeam:   "KC",
+			AwayTeam:   "BUF",
+			HomeName:   "Kansas City Chiefs",
+			AwayName:   "Buffalo Bills",
+			HomeESPNID: "12",
+			AwayESPNID: "2",
+			Kickoff:    sunKick,
+			Status:     db.GameFinal,
+			UpdatedAt:  now,
+		})
+		require.NoError(t, err)
+
+		// fixture.first has Sunday slip with all Sunday games kicked off -> StepClosed ("Picks are closed").
+		// Add a newer graded slip -> StepDone ("Won"). Closed should beat Done.
+		doneSlip, err := fixture.store.CreateSlip(
+			t.Context(), fixture.first.ID, fixture.week.ID, nil, "Thursday Done", db.SlateScopeThursday, 1,
+			[]int64{fixture.user.ID},
+		)
+		require.NoError(t, err)
+		require.NoError(t, fixture.store.SetSlipGrade(t.Context(), doneSlip.ID, parlay.Won, db.SlipGraded))
+
+		recorder := fixture.get(t, "/")
+		require.Equal(t, http.StatusOK, recorder.Code)
+		body := recorder.Body.String()
+		assert.Contains(t, body, "Picks are closed")
+		assert.NotContains(t, body, "Won")
+
+		// Add a locked slip -> StepExport ("Ready to place"). Export should beat Closed and Done.
+		exportSlip, err := fixture.store.CreateSlip(
+			t.Context(), fixture.first.ID, fixture.week.ID, nil, "Sunday Export", db.SlateScopeSundayMain, 1,
+			[]int64{fixture.user.ID},
+		)
+		require.NoError(t, err)
+		require.NoError(t, fixture.store.SetSlipMemberLock(t.Context(), exportSlip.ID, fixture.user.ID, &now))
+		require.NoError(t, fixture.store.SetSlipStatus(t.Context(), exportSlip.ID, db.SlipLocked))
+
+		recorder = fixture.get(t, "/")
+		require.Equal(t, http.StatusOK, recorder.Code)
+		body = recorder.Body.String()
+		assert.Contains(t, body, "Ready to place")
+		assert.NotContains(t, body, "Picks are closed")
+	})
 }

@@ -89,6 +89,15 @@ func (h *slipHandlers) home(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	var games []db.Game
+	if hasWeek && len(groupList) > 0 {
+		var err error
+		games, err = h.deps.Store.GamesForWeek(r.Context(), week.ID)
+		if err != nil {
+			h.serverError(w, err)
+			return
+		}
+	}
 	for _, group := range groupList {
 		summary := "No slip yet"
 		if hasWeek {
@@ -98,8 +107,9 @@ func (h *slipHandlers) home(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			if len(groupSlips) > 0 {
-				summary = h.groupStep(w, r, groupSlips[0], user.ID, now)
-				if summary == "" {
+				var ok bool
+				summary, ok = h.groupWeekSummary(w, r, groupSlips, games, user.ID, now)
+				if !ok {
 					return
 				}
 			}
@@ -127,31 +137,72 @@ func (h *slipHandlers) latestWeek(w http.ResponseWriter, r *http.Request) (db.We
 	return week, true, true
 }
 
-// groupStep is the viewer's next-step summary on a group's newest slip. It
-// writes the error response and returns "" when a query fails.
-func (h *slipHandlers) groupStep(
+// groupWeekSummary picks the highest-priority next-step summary across all of
+// a group's slips in the week. It writes the error response and returns false
+// when a query fails.
+func (h *slipHandlers) groupWeekSummary(
 	w http.ResponseWriter,
 	r *http.Request,
-	slip db.Slip,
+	groupSlips []db.Slip,
+	games []db.Game,
 	viewerID int64,
 	now time.Time,
-) string {
-	members, err := h.deps.Store.SlipMembers(r.Context(), slip.ID)
-	if err != nil {
-		h.serverError(w, err)
-		return ""
+) (string, bool) {
+	var best slips.Next
+	hasBest := false
+	for _, slip := range groupSlips {
+		members, err := h.deps.Store.SlipMembers(r.Context(), slip.ID)
+		if err != nil {
+			h.serverError(w, err)
+			return "", false
+		}
+		legs, err := h.deps.Store.LegsForSlip(r.Context(), slip.ID)
+		if err != nil {
+			h.serverError(w, err)
+			return "", false
+		}
+		next := slips.NextStep(slip, members, legs, games, viewerID, now)
+		if !hasBest || betterStep(next, best) {
+			best = next
+			hasBest = true
+		}
 	}
-	legs, err := h.deps.Store.LegsForSlip(r.Context(), slip.ID)
-	if err != nil {
-		h.serverError(w, err)
-		return ""
+	if !hasBest {
+		return "No slip yet", true
 	}
-	games, err := h.deps.Store.GamesForWeek(r.Context(), slip.WeekID)
-	if err != nil {
-		h.serverError(w, err)
-		return ""
+	return best.Label(), true
+}
+
+// betterStep reports whether candidate should headline a group card ahead of
+// current: actionable steps beat waiting/export, which beat closed, which beat
+// done; ties break by earliest upcoming deadline, then existing slice order.
+func betterStep(candidate, current slips.Next) bool {
+	cp, curP := stepPriority(candidate.Step), stepPriority(current.Step)
+	if cp != curP {
+		return cp > curP
 	}
-	return slips.NextStep(slip, members, legs, games, viewerID, now).Label()
+	if candidate.Deadline == nil {
+		return false
+	}
+	if current.Deadline == nil {
+		return true
+	}
+	return candidate.Deadline.Before(*current.Deadline)
+}
+
+func stepPriority(step slips.Step) int {
+	switch step {
+	case slips.StepPick, slips.StepLockIn, slips.StepJoin:
+		return 4
+	case slips.StepWaiting, slips.StepExport:
+		return 3
+	case slips.StepClosed:
+		return 2
+	case slips.StepDone:
+		return 1
+	default:
+		return 0
+	}
 }
 
 // groupWeek switches the active group and opens the newest slip of the latest

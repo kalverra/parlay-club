@@ -175,7 +175,7 @@ Risk: low (read-only display and form presentation changes with focused unit and
   existing-slip weeks show accurate copy and *"Or add a past week"* collapses inside a `<details>` unless no weeks exist
   or past-week fields were submitted, and add handler tests in `internal/web/slips_test.go` and
   `internal/web/home_test.go`.
-- [ ] Update `home` in `internal/web/home.go` to pick the highest-priority actionable slip summary across all slips in
+- [x] Update `home` in `internal/web/home.go` to pick the highest-priority actionable slip summary across all slips in
   the latest week (actionable step > waiting/export > closed > done, tie-breaking by earliest upcoming deadline) and add
   multi-slip summary tests in `internal/web/home_test.go`.
 - [ ] Docs: update `docs/concepts/slips.md` to document `"Thursday Slate"`, the slip hub's scope badge and `+ New slip`
