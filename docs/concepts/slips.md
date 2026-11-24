@@ -2,13 +2,28 @@
 id: slips
 title: Slips
 type: concept
-summary: How a group builds shared parlays from the slate, with slate scopes and deadline isolation, multi-slip week views, sibling slip switching, one-off slip creation, the hub's next-step banner and deadline, the game-first pick board and its pick dock, members, legs, votes, wagers, quick-add, create-slip defaults, grading, the editing and locking rules, and research.
-tags: [slips, weeks, legs, members, locking, grading, results, activity, groups, games, quick-add, nfelo, props, autocomplete, research, next-step, hub, pick-board, slate, drilldown, tabs, search, dock, tray, votes, voting, wagers, slate-scopes, deadlines, multi-slip]
+summary: How a group builds shared parlays from the slate, covering slate scopes, deadlines, the hub, A-grade highlights, the pick board, votes, wagers, grading, and editing rules.
+tags: [slips, weeks, legs, members, locking, grading, results, activity, groups, games, quick-add, nfelo, props, autocomplete, research, next-step, hub, pick-board, slate, drilldown, tabs, search, dock, tray, votes, voting, wagers, slate-scopes, deadlines, multi-slip, highlights]
+budget:
+  max_lines: 550
+  max_spans_per_100_lines: 100
+  reason: Covers the full slip lifecycle, pick board, highlights, voting, research, grading, wagers, and multi-slip rules in one concept doc.
 ---
 
 # Slips
 
-## Summary
+## Overview
+
+```mermaid
+flowchart LR
+  Week["Week & Slate Scope"] --> Hub["Slip Hub (GET /slips/{id})"]
+  Hub -->|"Pick step + Open slots"| Highlights["Top A-Grade Ideas"]
+  Hub -->|"Primary action"| Pick["Pick Board (/slips/{id}/pick)"]
+  Pick -->|"Game card + detail"| GameHighlights["Top Plays in Game"]
+  Highlights -->|"+ Add / Batch"| Hub
+  GameHighlights -->|"+ Add / Batch"| Pick
+  Pick -->|"All legs picked"| Lock["Lock In -> Export -> Grade"]
+```
 
 A group builds shared parlays for each week. A **week** is an ESPN NFL week: a season, a season type (regular or
 postseason), and a week number. Its id is `season*1000 + season_type*100 + week_num`, so Week 9 of the 2026 regular
@@ -28,6 +43,13 @@ refreshes do not wipe out in-progress wager inputs. When a group has multiple sl
 renders a horizontal sibling slip switcher bar below the title with links to each sibling slip and their status summary
 (`(Locked)`, `(1/2 Picks)`, `(Won)`). The bottom bar keeps Groups, This week, and Record Book; the hub's one primary
 action is the way into picking. The hub stays one column at every width.
+
+When the slip is `OPEN` and the viewer is in the `pick` step (has remaining leg slots), `#slip-panel` renders a compact
+**"Top A-grade ideas"** strip below the step banner. It runs `analyzer.LoadBoardSignals` and `board.SelectHighlights`
+over cached SQLite odds and signals—making zero external API calls—to surface up to 3 A-grade legs and up to 2 A-grade
+2–3 leg parlay combos. Each card shows its `A` pill, a concise reason, odds, an inline `<details>` factor breakdown, and
+one-tap `+ Add` (or `"Add all N"` via `POST /slips/{id}/legs/batch`, which disables as `"Needs N open slots"` when fewer
+than `N` slots remain). When no A-grade plays exist or the viewer finishes picking, the strip hides cleanly.
 
 `slips.NextStep` is one pure function over the slip, its members, its legs, the week's games, the viewer, and `now`. It
 returns the step, the legs still needed, the names the slip waits on, the first kickoff still ahead, and the slip's
@@ -215,12 +237,14 @@ the response pushes the full page URL so `q` survives a refresh or a shared link
 kickoff (Thursday, Sunday morning before noon, Sunday early before 4, Sunday late before 7, Sunday night, Monday); a
 Thursday- or Monday-night game that lands on the next day in UTC still reads by its local Eastern day. A chip shows how
 many rows it covers and appears only when it has rows. Each card shows paired away and home team logos beside the
-matchup, venue, kickoff, spread, total, moneyline, and either "Explore N props" or "No props yet", and the open game is
-highlighted. Cards are links: a plain `href` to the full page and an `hx-get` that swaps `#pick-body` and pushes the
+matchup, venue, kickoff, spread, total, moneyline, an `"N A-grade"` pill when that game has unpicked A-grade legs, and
+either "Explore N props" or "No props yet", and the open game is highlighted. Cards are links: a plain `href` to the full page and an `hx-get` that swaps `#pick-body` and pushes the
 full page URL.
 
 A card opens the detail: a pinned header with paired matchup logos, the matchup, kickoff, venue, a Research link, and an
-"All games" back link, then a horizontal tab bar and the sort chips. The header and tab bar stay below the top bar while
+"All games" back link, then—when the slip is `OPEN` and the viewer has open slots—a **"Top plays in this game"** strip
+(up to 3 A-grade legs and up to 1 same-game A-grade parlay combo with one-tap `+ Add`), followed by a horizontal tab bar
+and the sort chips. The header and tab bar stay below the top bar while
 the rows scroll, and the tab bar scrolls sideways on a phone with no visible scrollbar.
 
 The tabs are Lines, Passing, Rushing, Receiving, TDs, and Kicking. Team totals fold into Lines, so they have no tab of

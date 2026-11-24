@@ -158,7 +158,8 @@ slip outside every group is 404.
 | `POST /slips/{id}/members`                 | Add a group member from `user_id`                               | Panel partial. |
 | `DELETE /slips/{id}/members/{userID}`      | Remove a member                                                 | Panel partial. |
 | `PATCH /slips/{id}`                        | Change `name` or `legs_per_member`                              | Panel partial. |
-| `POST /slips/{id}/legs`                    | Add the signed-in member's leg                                  | Panel partial, the `leg-added` partial for a quick add, or the refreshed pair row for `from=board`; `Hx-Trigger: leg-saved` or `tray-updated`. |
+| `POST /slips/{id}/legs`                    | Add the signed-in member's leg                                  | Panel partial, the `leg-added` partial for a quick add, the refreshed pair row for `from=board` (`Hx-Trigger: tray-updated`), or `#pick-body` for `from=pick` (`Hx-Trigger: tray-updated, slip-updated`). |
+| `POST /slips/{id}/legs/batch`              | Atomically add a combo of legs for the signed-in member         | Panel partial (`Hx-Trigger: slip-updated`), `#pick-body` for `from=board` or `from=pick` (`Hx-Trigger: tray-updated, slip-updated`), or `pick-dock` for `from=dock` (`Hx-Trigger: tray-updated, board-updated, slip-updated`). |
 | `GET /legs/{id}/edit`                      | Edit form filled from the leg with player autocomplete          | Leg form partial. |
 | `PUT /legs/{id}`                           | Save the leg's pick fields                                      | Panel partial with `Hx-Trigger: leg-saved`, or the refreshed pair row with `Hx-Trigger: tray-updated` for `from=board` (plus `board-updated` when the leg moves to another line). |
 | `PUT /legs/{id}/result`                    | Grade the leg from an upper-case `result`                       | Panel partial. Any member may grade any leg; an unknown result is 422. |
@@ -180,6 +181,13 @@ unreadable number is 422 with "Odds need to be a number.", "Line needs to be a n
 
 `?quick=1` turns the form into a quick add: the target becomes the game card's `#quick-add-{gameID}` element, and a
 successful `POST` answers with the `leg-added` partial instead of the slip panel.
+
+`POST /slips/{id}/legs/batch` accepts indexed leg fields (`legs[0][game_id]`, `legs[0][market_type]`, `legs[0][team]`,
+`legs[0][player_name]`, `legs[0][player_id]`, `legs[0][side]`, `legs[0][line]`, `legs[0][odds]`, and optional
+`legs[0][selection]`). It validates that the slip is `OPEN` and the viewer is unlocked, skips any selection already on
+the viewer's slip (`db.SameSelection`), checks remaining `legs_per_member` capacity, inserts all new legs in one SQLite
+transaction (`slips.Service.AddLegs`), writes activity entries, and publishes `slip:{id}`. Unreadable fields, empty
+batches, locked slips, or insufficient capacity answer 422.
 
 `POST /legs/{id}/vote` records an up vote (`1`), a down vote (`-1`), or a clear (`0`) on another member's leg. Voting
 again with the same value changes nothing, and a change publishes `slip:{id}` without writing an activity entry, so the
@@ -242,8 +250,8 @@ The board's query contract:
 | `sort`    | detail        | `player` (default), `odds` (shortest price first), `line` (highest line first), or `matchup` (strongest suggestion signal and softest opposing defense first). Kickoff, category, and unknown values resolve to `player`. |
 
 The slate shows one card per upcoming game, ordered by kickoff, with the matchup, venue, kickoff, spread, total,
-moneyline, and either "Explore N props" or "No props yet". A game with no stored odds still gets a card, with no lines
-and no props. The open game is highlighted.
+moneyline, an `"N A-grade"` pill when that game has unpicked A-grade legs, and either "Explore N props" or "No props yet".
+A game with no stored odds still gets a card, with no lines and no props. The open game is highlighted.
 
 The search input debounces at 250 ms and swaps `GET /slips/{id}/pick/results`. Window chips are Thursday, Sun morning
 (before noon Eastern), Sun early (before 4), Sun late (before 7), Sun night, and Monday. A chip shows how many rows it
@@ -254,7 +262,8 @@ covers and appears only when it has rows. A card is a link with a plain `href` t
 without touching the open detail.
 
 Inside the open game, the detail has a pinned header with the back link, matchup, kickoff, venue, and a Research link,
-then a horizontal tab bar and the sort chips. The tabs are Lines, Passing, Rushing, Receiving, TDs, and Kicking. Team
+then—when the slip is `OPEN` and the viewer has open slots—the `"Top plays in this game"` strip (up to 3 A-grade legs
+and 1 same-game A-grade combo), followed by a horizontal tab bar and the sort chips. The tabs are Lines, Passing, Rushing, Receiving, TDs, and Kicking. Team
 totals fold into Lines, a tab appears only when it has rows or is open, and each badge counts its rows, so the Lines
 badge includes both sides of each line. Tab and sort chips swap `#pick-detail` and push the full page URL, leaving the
 slate and its scroll alone. `#pick-detail` re-fetches itself from its resolved tab and sort on `board-updated`, and a
