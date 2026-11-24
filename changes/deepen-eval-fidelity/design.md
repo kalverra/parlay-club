@@ -114,7 +114,7 @@ flowchart LR
 Complexity: medium (touches replay leg retention, odds aggregation, and settled-leg filtering in `Evaluate`) Risk: low
 (verified by deterministic early-busted slip replay tests)
 
-- [ ] Update `loadWeekSlips` in `internal/eval/replay.go` to keep all pre-kickoff legs on `SlipGraded` slips (computing
+- [x] Update `loadWeekSlips` in `internal/eval/replay.go` to keep all pre-kickoff legs on `SlipGraded` slips (computing
       `CombinedOdds` only from counting settled legs), and update `Evaluate` in `internal/eval/metrics.go` to score the
       full slip while restricting leg-band, leg-factor, and outcome accumulation to settled legs, with replay and
       metrics tests for early-busted slips.

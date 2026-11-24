@@ -273,14 +273,11 @@ func loadWeekSlips(
 		allLegsValidOdds := true
 
 		for _, dl := range dbLegs {
-			if !isSettledResult(dl.Result) {
-				continue
-			}
 			dec := 0.0
 			if dl.Odds != 0 {
 				dec = parlay.AmericanToDecimal(dl.Odds)
 			}
-			if dl.Result.Counts() {
+			if isSettledResult(dl.Result) && dl.Result.Counts() {
 				if dec > 1 {
 					parlayLegs = append(parlayLegs, parlay.Leg{
 						Decimal: dec,

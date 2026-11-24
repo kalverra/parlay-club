@@ -543,3 +543,73 @@ func TestLoadDatasetMultiGameSlateAndCoverageParity(t *testing.T) {
 		WithOdds:     2,
 	}, ds.Coverage)
 }
+
+func TestLoadDatasetEarlyBustedSlip(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	store := newTestStore(t)
+
+	group, user := seedGroupAndMember(t, store, "ada")
+	week1, err := store.UpsertWeek(ctx, 2025, nflverse.SeasonTypeRegular, 1)
+	require.NoError(t, err)
+
+	kickoff := time.Date(2025, 9, 7, 17, 0, 0, 0, time.UTC)
+	_, err = store.UpsertGame(ctx, db.Game{
+		ID: "g1", WeekID: week1.ID, HomeTeam: "BUF", AwayTeam: "MIA",
+		HomeName: "Buffalo Bills", AwayName: "Miami Dolphins",
+		Kickoff: kickoff, Status: db.GameFinal,
+	})
+	require.NoError(t, err)
+
+	slip, err := store.CreateSlip(
+		ctx, group.ID, week1.ID, nil, "Early Bust", db.SlateScopeFullWeek, 4, []int64{user.ID},
+	)
+	require.NoError(t, err)
+
+	legSpecs := []struct {
+		selection string
+		odds      int
+		result    parlay.Result
+	}{
+		{selection: "BUF -3.5", odds: -110, result: parlay.Lost},
+		{selection: "MIA +3.5", odds: 150, result: parlay.Pending},
+		{selection: "OVER 45.5", odds: 200, result: parlay.Pending},
+		{selection: "UNDER 45.5", odds: -120, result: parlay.NeedsGrading},
+	}
+	for _, spec := range legSpecs {
+		leg, createErr := store.CreateLeg(ctx, db.Leg{
+			SlipID:     slip.ID,
+			UserID:     user.ID,
+			GameID:     new("g1"),
+			MarketType: "SPREAD",
+			Selection:  spec.selection,
+			Team:       new("BUF"),
+			Side:       new("TEAM"),
+			Line:       new(-3.5),
+			Odds:       spec.odds,
+		})
+		require.NoError(t, createErr)
+		if spec.result != parlay.Pending {
+			require.NoError(t, store.SetLegResult(ctx, leg.ID, spec.result, "test"))
+		}
+	}
+	require.NoError(t, store.SetSlipGrade(ctx, slip.ID, parlay.Lost, db.SlipGraded))
+
+	ds, err := eval.LoadDataset(ctx, store, eval.ReplayFilter{})
+	require.NoError(t, err)
+	require.Len(t, ds.Weeks, 1)
+	require.Len(t, ds.Weeks[0].Slips, 1)
+
+	replayed := ds.Weeks[0].Slips[0]
+	assert.Equal(t, parlay.Lost, replayed.Result)
+	require.Len(t, replayed.Legs, 4)
+	assert.Equal(t, parlay.Lost, replayed.Legs[0].Result)
+	assert.Equal(t, parlay.Pending, replayed.Legs[1].Result)
+	assert.Equal(t, parlay.Pending, replayed.Legs[2].Result)
+	assert.Equal(t, parlay.NeedsGrading, replayed.Legs[3].Result)
+
+	// CombinedOdds must only include counting settled legs (the single -110 Lost leg).
+	assert.InDelta(t, parlay.AmericanToDecimal(-110), replayed.CombinedOdds, 1e-9)
+	assert.Equal(t, 4, ds.Coverage.TotalLegs)
+	assert.Equal(t, 4, ds.Coverage.WithOdds)
+}
