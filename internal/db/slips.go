@@ -473,6 +473,54 @@ func (s *Store) NewestSlipForWeek(ctx context.Context, groupID, weekID int64) (S
 	return slip, nil
 }
 
+// RecentSlipRow pairs a slip with its week metadata for group overview listings.
+type RecentSlipRow struct {
+	Slip Slip
+	Week Week
+}
+
+// RecentSlipsForGroup returns up to limit of a group's most recent slips paired
+// with their week metadata, ordered by week_id DESC, id DESC.
+func (s *Store) RecentSlipsForGroup(ctx context.Context, groupID int64, limit int) ([]RecentSlipRow, error) {
+	if limit <= 0 {
+		return []RecentSlipRow{}, nil
+	}
+
+	rows, err := s.readConn().QueryContext(ctx, `
+		SELECT `+prefixedSlipColumns("s")+`,
+			wk.id, wk.season, wk.season_type, wk.week_num
+		FROM slips s
+		JOIN weeks wk ON wk.id = s.week_id
+		WHERE s.group_id = ?
+		ORDER BY s.week_id DESC, s.id DESC
+		LIMIT ?`, groupID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list recent slips for group %d: %w", groupID, err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	out := make([]RecentSlipRow, 0)
+	slips := make([]Slip, 0)
+	for rows.Next() {
+		row, err := scanGradedSlip(rows)
+		if err != nil {
+			return nil, fmt.Errorf("list recent slips for group %d: %w", groupID, err)
+		}
+		out = append(out, RecentSlipRow(row))
+		slips = append(slips, row.Slip)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list recent slips for group %d: %w", groupID, err)
+	}
+	if err := s.hydrateSlipsGameIDs(ctx, slips); err != nil {
+		return nil, fmt.Errorf("list recent slips for group %d: %w", groupID, err)
+	}
+	for i := range out {
+		out[i].Slip = slips[i]
+	}
+	return out, nil
+}
+
 // PreviousSlip returns the latest slip for a group in weekID or any earlier
 // week. It is the slip a create form copies its defaults from, so a second slip
 // in the same week copies that week's first slip. A group with no slip that old
