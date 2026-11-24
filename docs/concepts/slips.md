@@ -30,7 +30,7 @@ postseason), and a week number. Its id is `season*1000 + season_type*100 + week_
 season is `2026209`.
 
 A **slip** is one shared parlay inside a group and a week. Every slip has a **slate scope** (`thursday`, `sunday_main`,
-or `full_week`) that isolates its games and deadline. A week usually has one slip, but a group can make more, and a
+`weekend`, or `full_week`) that isolates its games and deadline. A week usually has one slip, but a group can make more, and a
 person can belong to several in the same week. The app tracks the picks. Each person places the bet at their own book
 with their own stake, and no money passes through the app.
 
@@ -38,7 +38,7 @@ with their own stake, and no money passes through the app.
 
 `GET /slips/{id}` is the hub. A step banner leads, then the slip header card, the members and their legs, the export card,
 the payout calculator, the **My wager** form (`slip-wager`), and the activity feed. The header shows the slip title,
-its scope badge (`Thursday Slate`, `Sunday Slate`, or `Full Week`), status, and a `+ New slip` link to
+its scope badge (`Thursday Slate`, `Sunday Slate`, `Weekend Slate`, or `Full Week`), status, and a `+ New slip` link to
 `/slips/new?week={id}`. On a single-slip week, `+ New slip` sits in the header metadata row. When a group has multiple
 slips in the active week, one horizontal sibling pill switcher bar (`[data-sibling-switcher]`) sits below the title
 with links to each sibling slip, their status summary (`(Locked)`, `(1/2 Picks)`, `(Won)`), and `+ New slip` as a
@@ -91,9 +91,11 @@ group member who is not on the slip sees `join`; a person outside the group gets
 
 ## Creating a slip
 
-Opening a group's week (`GET /groups/{id}/week`) switches the active group and ensures slips for active recurring
-schedules exist via `slips.EnsureWeekSlips`. The slate sync keeps that week current, so it is normally the week being
-played. If the group has no slips for the week, it shows the create-slip form. If exactly one slip exists, it redirects
+Opening a group's week (`GET /groups/{id}/week`) switches the active group and calls `slips.EnsureWeekSlips` to create
+slips for active recurring schedules. When the week already has stored games, `EnsureWeekSlips` skips any missing
+schedule whose `slate_scope` has no upcoming non-final game (`now < kickoff`), so playoff or completed weeks do not
+gain empty or dead slips; existing slips stay untouched, and cold weeks with no stored games still create every active
+schedule. If the group has no slips for the week, it shows the create-slip form. If one slip exists, it redirects
 directly to `/slips/{id}`. If multiple slips exist, it renders the multi-slip week hub with cards for each slip and a
 button to add a one-off slip.
 
@@ -115,7 +117,7 @@ The create screen adapts to whether the target week already has slips or stored 
   the latest stored week is refused.
 - Name defaults to the week label, `Week 9`, then `Week 9 #2`.
 - `slate_scope` defaults to `sunday_main`, with options for `Sunday Slate` (`sunday_main`), `Thursday Slate`
-  (`thursday`), and `Full Week` (`full_week`).
+  (`thursday`), `Weekend Slate` (`weekend`), and `Full Week` (`full_week`).
 - `legs_per_member` defaults to 2 and allows 1–5.
 - Members default to the previous slip's members.
 
@@ -132,6 +134,7 @@ Every slip belongs to a **slate scope** (`internal/db/slips.go`):
 | ----- | ----- | -------------- |
 | Thursday | `thursday` | Games kicking off on Thursday in Eastern time. |
 | Sunday Main | `sunday_main` | Games kicking off on Sunday or Monday in Eastern time (default). |
+| Weekend | `weekend` | Games kicking off on Saturday, Sunday, or Monday in Eastern time. |
 | Full Week | `full_week` | Every game in the week. |
 
 Scopes isolate deadlines and pick boundaries:
@@ -531,8 +534,8 @@ Thursday Slate slip and Sunday Slate slip) or as one-off slips.
 When a week has multiple slips:
 
 - **Week hub (`GET /groups/{id}/week`):** Renders a card for each slip in the week showing its name, scope badge
-  (`Thursday Slate`, `Sunday Slate`, `Full Week`), next-step banner summary, reader-localized deadline, and pick
-  progress, plus a button to "+ Add one-off slip".
+  (`Thursday Slate`, `Sunday Slate`, `Weekend Slate`, `Full Week`), next-step banner summary, reader-localized deadline,
+  and pick progress, plus a button to "+ Add one-off slip".
 - **Single sibling pill switcher (`GET /slips/{id}`):** The slip header card renders one horizontal pill bar below the
   title with links to each sibling slip, their status summary (`(Locked)`, `(1/2 Picks)`, `(Won)`), and `+ New slip` at
   the end. It updates live on `slip-updated`.

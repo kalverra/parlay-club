@@ -121,4 +121,4 @@ Risk: low (additive `weekend` scope and guard on empty/past schedules; covered b
 
 - [x] Add `SlateScopeWeekend` (`"weekend"`, matching Sat/Sun/Mon ET) in `internal/db/slips.go` (plus migration `0016_weekend_slate_scope.sql` if schema constraints restrict `slate_scope`) and expose it in recurring schedule forms in `internal/web/schedules.go` and `web/templates/week.html`, with tests.
 - [x] Update `slips.EnsureWeekSlips` in `internal/slips/slips.go` (and callers in `internal/web/home.go`) to load week games and skip auto-creating recurring slips when the stored week has no upcoming games matching the schedule's scope, with tests covering playoff weeks and completed weeks.
-- [ ] Docs: update `docs/concepts/slips.md` and `docs/concepts/groups.md` for `weekend` slate scope and schedule-aware `EnsureWeekSlips` skipping.
+- [x] Docs: update `docs/concepts/slips.md` and `docs/concepts/groups.md` for `weekend` slate scope and schedule-aware `EnsureWeekSlips` skipping.
