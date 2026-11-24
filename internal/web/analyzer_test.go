@@ -299,7 +299,7 @@ func TestSlipLegRowShowsModelOnlyForSpreadAndMoneyline(t *testing.T) {
 	assert.Contains(t, body, "nfelo 76%", "a moneyline shows the model's win probability")
 	assert.Contains(t, body, "nfelo +10.0", "an away spread flips to the away team's side")
 	assert.Equal(t, 2, strings.Count(body, "nfelo "), "a total gets no chip")
-	assert.Contains(t, body, `class="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-400"`,
+	assert.Contains(t, body, `class="mt-1 flex flex-wrap items-center gap-2 text-xs text-ink-muted"`,
 		"the chip shares the wrapping row beside the odds")
 }
 

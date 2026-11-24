@@ -154,7 +154,7 @@ Complexity: medium (migrates the primary daily screens—layout chrome, home, we
 Risk: low (presentational template updates verified by existing render, layout, slip, and pick tests).
 
 - [x] Migrate `web/templates/layout.html`, `home.html`, `week.html`, `avatar.html`, and `media.html` from hardcoded `slate`/`sky` utilities to semantic page-chrome and card tokens, keeping `internal/web/layout_test.go` and `routes_test.go` passing.
-- [ ] Migrate `web/templates/slip.html`, `pick.html`, and `partials.html` (Next banner, slip ticket card, member legs, mono odds chips, vote pills, analyzer heads-up, payout/wager, pick slate/detail/dock, and modal dialogs) to semantic tokens and component classes, update exact-class assertions in `internal/web/pick_test.go` and `analyzer_test.go`, and regenerate `web/static/app.css`.
+- [x] Migrate `web/templates/slip.html`, `pick.html`, and `partials.html` (Next banner, slip ticket card, member legs, mono odds chips, vote pills, analyzer heads-up, payout/wager, pick slate/detail/dock, and modal dialogs) to semantic tokens and component classes, update exact-class assertions in `internal/web/pick_test.go` and `analyzer_test.go`, and regenerate `web/static/app.css`.
 
 ### Phase 4: Migrate secondary screens and verify zero raw palette leakage
 
