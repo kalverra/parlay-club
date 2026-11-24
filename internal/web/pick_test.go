@@ -2279,7 +2279,9 @@ func TestPickBoardWiresSignalsBadgesSortAndHTMXSwaps(t *testing.T) {
 		assert.Contains(t, body, `flex-wrap gap-1.5`)
 		assert.Contains(t, body, `grid-cols-2`)
 		// Under SortMatchup, Khalil Shakir (Smash matchup) ranks before Keon Coleman.
-		assert.Less(t, strings.Index(body, "Khalil Shakir"), strings.Index(body, "Keon Coleman"))
+		_, cardsSection, foundSort := strings.Cut(body, ">Sort<")
+		require.True(t, foundSort)
+		assert.Less(t, strings.Index(cardsSection, "Khalil Shakir"), strings.Index(cardsSection, "Keon Coleman"))
 
 		// 2. HTMX POST /slips/{id}/legs from board returns pick-line-group with badge preserved.
 		form := url.Values{
@@ -3442,4 +3444,100 @@ func TestPickBoardRoleBumpFromRosterInjury(t *testing.T) {
 	body := html.UnescapeString(rec.Body.String())
 	assert.Contains(t, body, "Dawson Knox")
 	assert.Contains(t, body, "Role bump")
+}
+
+func TestPickBoardSurfacesAGradeCountsAndTopPlaysInGame(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	game1 := addGame(t, fixture, gameKickoff())
+	game2 := addSecondGame(t, fixture)
+	seedAGradeBoardForHubTest(t, fixture, game1)
+	addSpreadOdds(t, fixture.store, game2.ID, "CIN")
+
+	get := func(path string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
+		fixture.handler.ServeHTTP(rec, req)
+		return rec
+	}
+
+	// Pick board shows A-grade count on game1's slate card and "Top plays in this game"
+	// on game1's detail, while omitting the count on game2 (0 A-grade plays).
+	boardResp := get(fmt.Sprintf("/slips/%d/pick?game=%s", fixture.slip.ID, game1.ID))
+	require.Equal(t, http.StatusOK, boardResp.Code)
+	boardBody := boardResp.Body.String()
+	assert.Contains(t, boardBody, "data-game-a-grade-count")
+	assert.Contains(t, boardBody, "A-grade")
+	assert.Contains(t, boardBody, "Top plays in this game")
+	assert.Contains(t, boardBody, "data-highlight-leg")
+	assert.Contains(t, boardBody, "data-highlight-parlay")
+	assert.Contains(t, boardBody, "Add all 2")
+	assert.Contains(t, boardBody, fmt.Sprintf(`hx-post="/slips/%d/legs"`, fixture.slip.ID))
+	assert.Contains(t, boardBody, fmt.Sprintf(`hx-post="/slips/%d/legs/batch"`, fixture.slip.ID))
+	assert.Contains(t, boardBody, `name="from" value="pick"`)
+
+	// Slate partial also carries the A-grade count pill.
+	slateResp := get(fmt.Sprintf("/slips/%d/pick/slate", fixture.slip.ID))
+	require.Equal(t, http.StatusOK, slateResp.Code)
+	assert.Contains(t, slateResp.Body.String(), "data-game-a-grade-count")
+
+	// Detail partial for game1 shows "Top plays in this game"; game2 hides it.
+	detail1 := get(fmt.Sprintf("/slips/%d/pick/detail?game=%s", fixture.slip.ID, game1.ID))
+	require.Equal(t, http.StatusOK, detail1.Code)
+	assert.Contains(t, detail1.Body.String(), "Top plays in this game")
+
+	detail2 := get(fmt.Sprintf("/slips/%d/pick/detail?game=%s", fixture.slip.ID, game2.ID))
+	require.Equal(t, http.StatusOK, detail2.Code)
+	assert.NotContains(t, detail2.Body.String(), "Top plays in this game")
+
+	// Single-leg one-tap "+ Add" with from=pick returns #pick-body and leaves 1 slot open,
+	// disabling the 2-leg bulk button with "Needs 2 open slots".
+	addOne := postForm(t, fixture.handler, fmt.Sprintf("/slips/%d/legs", fixture.slip.ID), url.Values{
+		"from":        {"pick"},
+		"game":        {game1.ID},
+		"game_id":     {game1.ID},
+		"market_type": {"PASS_YDS"},
+		"team":        {"BUF"},
+		"player_name": {"Josh Allen"},
+		"player_id":   {"josh-allen"},
+		"side":        {"OVER"},
+		"line":        {"265.5"},
+		"odds":        {"-115"},
+	})
+	require.Equal(t, http.StatusOK, addOne.Code, addOne.Body.String())
+	assert.Contains(t, addOne.Header().Get("Hx-Trigger"), "tray-updated")
+	assert.Contains(t, addOne.Body.String(), `id="pick-body"`)
+	assert.Contains(t, addOne.Body.String(), "Top plays in this game")
+	assert.Contains(t, addOne.Body.String(), "Needs 2 open slots")
+	assert.NotContains(t, addOne.Body.String(), "Add all 2")
+
+	// Batch add on a fresh 2-slot slip fills both slots and hides the strip.
+	fixture2 := newSlipFixture(t, 2)
+	game1b := addGame(t, fixture2, gameKickoff())
+	seedAGradeBoardForHubTest(t, fixture2, game1b)
+
+	batchResp := postForm(t, fixture2.handler, fmt.Sprintf("/slips/%d/legs/batch", fixture2.slip.ID), url.Values{
+		"from":                 {"pick"},
+		"game":                 {game1b.ID},
+		"legs[0][game_id]":     {game1b.ID},
+		"legs[0][market_type]": {"PASS_YDS"},
+		"legs[0][team]":        {"BUF"},
+		"legs[0][player_name]": {"Josh Allen"},
+		"legs[0][player_id]":   {"josh-allen"},
+		"legs[0][side]":        {"OVER"},
+		"legs[0][line]":        {"265.5"},
+		"legs[0][odds]":        {"-115"},
+		"legs[1][game_id]":     {game1b.ID},
+		"legs[1][market_type]": {"RUSH_YDS"},
+		"legs[1][team]":        {"BUF"},
+		"legs[1][player_name]": {"James Cook"},
+		"legs[1][player_id]":   {"james-cook"},
+		"legs[1][side]":        {"OVER"},
+		"legs[1][line]":        {"65.5"},
+		"legs[1][odds]":        {"-115"},
+	})
+	require.Equal(t, http.StatusOK, batchResp.Code, batchResp.Body.String())
+	assert.Contains(t, batchResp.Body.String(), `id="pick-body"`)
+	assert.NotContains(t, batchResp.Body.String(), "Top plays in this game")
 }

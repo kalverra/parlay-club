@@ -82,6 +82,7 @@ type PickGameCardView struct {
 	Props           int
 	HasProps        bool
 	Unloaded        bool
+	AGradeCount     int
 	Href            string
 	PushURL         string
 	Active          bool
@@ -112,6 +113,7 @@ type PickDetailView struct {
 	Tabs            []PickChip
 	Sorts           []PickChip
 	Unloaded        bool
+	Highlights      HighlightsView
 	Lines           []PickLineGroupView
 	Players         []PickPlayerView
 	Empty           bool
@@ -536,11 +538,21 @@ func (h *slipHandlers) pickPageData(
 
 	slateStart := time.Now()
 	slateModel := board.BuildSlate(games, rows, roster, q)
-	slate := buildPickSlate(slip, slateModel, q)
+	var boardGames map[string]analyzer.Game
+	var boardStats map[string]analyzer.PlayerStats
+	var aGradeCounts map[string]int
+	if slip.Status == db.SlipOpen && len(rows) > 0 {
+		sigStart := time.Now()
+		boardGames, boardStats = h.loadBoardSignalsForRows(ctx, now, slip.WeekID, games, rows)
+		AddDBTiming(ctx, time.Since(sigStart))
+		aGradeCounts = aGradeCountsByGame(games, rows, boardGames, boardStats)
+	}
+	slate := buildPickSlate(slip, slateModel, q, aGradeCounts)
 	AddBoardTiming(ctx, time.Since(slateStart))
 	q.GameID = slateModel.ResolvedGameID
 
-	atLimit := len(mine) >= slip.LegsPerMember
+	remainingSlots := max(slip.LegsPerMember-len(mine), 0)
+	atLimit := remainingSlots == 0
 	body := PickBodyView{
 		SlipID:   slip.ID,
 		Search:   q.Q,
@@ -556,7 +568,10 @@ func (h *slipHandlers) pickPageData(
 			gamesByID[game.ID] = game
 		}
 		game := gamesByID[slateModel.OpenGame.ID]
-		detail := h.buildPickDetail(ctx, slip, game, *slateModel.OpenGame, rows, legs, q, now, atLimit)
+		detail := h.buildPickDetail(
+			ctx, slip, game, *slateModel.OpenGame, rows, legs, q, now,
+			atLimit, remainingSlots, boardGames, boardStats,
+		)
 		body.Detail = &detail
 		body.Category = detail.Category
 		body.Sort = detail.Sort
@@ -593,14 +608,29 @@ func (h *slipHandlers) pickSlateData(
 	if err != nil {
 		return PickSlateView{}, err
 	}
+	var legs []db.Leg
+	if slip.Status == db.SlipOpen {
+		legs, err = h.deps.Store.LegsForSlip(ctx, slip.ID)
+		if err != nil {
+			return PickSlateView{}, err
+		}
+	}
 	AddDBTiming(ctx, time.Since(dbStart))
 
-	_, homeBook, q := h.pickViewer(ctx, q)
+	user, homeBook, q := h.pickViewer(ctx, q)
+	mine := legsForUser(legs, user.ID)
 	now := q.Now
 
 	boardStart := time.Now()
-	rows := board.Build(games, odds, roster, homeBook, nil, now)
-	slate := buildPickSlate(slip, board.BuildSlate(games, rows, roster, q), q)
+	rows := board.Build(games, odds, roster, homeBook, mine, now)
+	var aGradeCounts map[string]int
+	if slip.Status == db.SlipOpen && len(rows) > 0 {
+		sigStart := time.Now()
+		boardGames, boardStats := h.loadBoardSignalsForRows(ctx, now, slip.WeekID, games, rows)
+		AddDBTiming(ctx, time.Since(sigStart))
+		aGradeCounts = aGradeCountsByGame(games, rows, boardGames, boardStats)
+	}
+	slate := buildPickSlate(slip, board.BuildSlate(games, rows, roster, q), q, aGradeCounts)
 	AddBoardTiming(ctx, time.Since(boardStart))
 	return slate, nil
 }
@@ -653,8 +683,19 @@ func (h *slipHandlers) pickDetailData(
 		return PickDetailView{}, false, nil
 	}
 
-	atLimit := len(mine) >= slip.LegsPerMember
-	detail := h.buildPickDetail(ctx, slip, game, openCards[0], rows, legs, q, now, atLimit)
+	remainingSlots := max(slip.LegsPerMember-len(mine), 0)
+	atLimit := remainingSlots == 0
+	var boardGames map[string]analyzer.Game
+	var boardStats map[string]analyzer.PlayerStats
+	if slip.Status == db.SlipOpen && remainingSlots > 0 && len(rows) > 0 {
+		sigStart := time.Now()
+		boardGames, boardStats = h.loadBoardSignalsForRows(ctx, now, slip.WeekID, gameSlice, rows)
+		AddDBTiming(ctx, time.Since(sigStart))
+	}
+	detail := h.buildPickDetail(
+		ctx, slip, game, openCards[0], rows, legs, q, now,
+		atLimit, remainingSlots, boardGames, boardStats,
+	)
 	return detail, true, nil
 }
 
@@ -674,6 +715,7 @@ func buildPickSlate(
 	slip db.Slip,
 	model board.Slate,
 	q board.Query,
+	aGradeCounts map[string]int,
 ) PickSlateView {
 	q.GameID = model.ResolvedGameID
 	slate := PickSlateView{
@@ -694,7 +736,9 @@ func buildPickSlate(
 		Detail:     model.ResolvedGameID != "",
 	}
 	for _, card := range model.Cards {
-		slate.Cards = append(slate.Cards, pickGameCardView(slip.ID, card, q))
+		view := pickGameCardView(slip.ID, card, q)
+		view.AGradeCount = aGradeCounts[card.ID]
+		slate.Cards = append(slate.Cards, view)
 	}
 	return slate
 }
@@ -709,6 +753,9 @@ func (h *slipHandlers) buildPickDetail(
 	q board.Query,
 	now time.Time,
 	atLimit bool,
+	remainingSlots int,
+	boardGames map[string]analyzer.Game,
+	boardStats map[string]analyzer.PlayerStats,
 ) PickDetailView {
 	dbStart := time.Now()
 	signals := h.boardSignalsForGame(ctx, slip.WeekID, game, legs, boardRowPlayerIDs(game.ID, rows))
@@ -731,6 +778,7 @@ func (h *slipHandlers) buildPickDetail(
 		slip.Status == db.SlipOpen,
 	)
 	detail.CanRefresh = slip.Status == db.SlipOpen
+	detail.Highlights = gameHighlightsView(slip, game.ID, rows, remainingSlots, boardGames, boardStats)
 	AddBoardTiming(ctx, time.Since(boardStart))
 	return detail
 }
@@ -1620,4 +1668,86 @@ func (h *slipHandlers) boardSignalsForGame(
 		signals.PlayerUsage = playerUsage
 	}
 	return signals
+}
+
+func (h *slipHandlers) loadBoardSignalsForRows(
+	ctx context.Context,
+	now time.Time,
+	weekID int64,
+	games []db.Game,
+	rows []board.Row,
+) (map[string]analyzer.Game, map[string]analyzer.PlayerStats) {
+	playerIDs := make([]string, 0, len(rows))
+	for _, row := range rows {
+		if row.PlayerID != "" {
+			playerIDs = append(playerIDs, row.PlayerID)
+		}
+	}
+	return analyzer.LoadBoardSignals(ctx, h.deps.Store, now, weekID, games, playerIDs)
+}
+
+func aGradeCountsByGame(
+	games []db.Game,
+	rows []board.Row,
+	boardGames map[string]analyzer.Game,
+	boardStats map[string]analyzer.PlayerStats,
+) map[string]int {
+	if len(games) == 0 || len(rows) == 0 || len(boardGames) == 0 {
+		return nil
+	}
+	rowsByGame := make(map[string][]board.Row, len(games))
+	for _, row := range rows {
+		if row.GameID != "" {
+			rowsByGame[row.GameID] = append(rowsByGame[row.GameID], row)
+		}
+	}
+	counts := make(map[string]int, len(games))
+	for _, game := range games {
+		gameRows := rowsByGame[game.ID]
+		if len(gameRows) == 0 {
+			continue
+		}
+		set := board.SelectHighlights(gameRows, boardGames, boardStats, board.HighlightOptions{
+			MaxLegs:       len(gameRows),
+			MaxParlays:    -1,
+			MaxPerPlayer:  -1,
+			ExcludePicked: true,
+		})
+		if len(set.Legs) > 0 {
+			counts[game.ID] = len(set.Legs)
+		}
+	}
+	return counts
+}
+
+func gameHighlightsView(
+	slip db.Slip,
+	gameID string,
+	rows []board.Row,
+	remainingSlots int,
+	boardGames map[string]analyzer.Game,
+	boardStats map[string]analyzer.PlayerStats,
+) HighlightsView {
+	if slip.Status != db.SlipOpen || remainingSlots <= 0 || len(rows) == 0 || len(boardGames) == 0 {
+		return HighlightsView{}
+	}
+	var gameRows []board.Row
+	for _, row := range rows {
+		if row.GameID == gameID {
+			gameRows = append(gameRows, row)
+		}
+	}
+	if len(gameRows) == 0 {
+		return HighlightsView{}
+	}
+	set := board.SelectHighlights(gameRows, boardGames, boardStats, board.HighlightOptions{
+		MaxLegs:       3,
+		MaxParlays:    1,
+		SameGameOnly:  true,
+		ExcludePicked: true,
+	})
+	view := highlightsView(set, remainingSlots)
+	view.SlipID = slip.ID
+	view.FromBoard = true
+	return view
 }
