@@ -1,7 +1,6 @@
 package web
 
 import (
-	"cmp"
 	"errors"
 	"fmt"
 	"net/http"
@@ -51,7 +50,6 @@ type GroupOverviewPage struct {
 	Record        GroupRecordSnapshot
 	RecentSlips   []RecentSlipCard
 	Schedules     []ScheduleView
-	SlateScopes   []SlateScopeOption
 	Members       []User
 }
 
@@ -243,7 +241,6 @@ func buildGroupOverviewPage(in groupOverviewInput) GroupOverviewPage {
 		Record:        buildGroupRecordSnapshot(in.RecordSeason, in.GradedSlips),
 		RecentSlips:   recent,
 		Schedules:     buildScheduleViews(in.Schedules),
-		SlateScopes:   defaultSlateScopeOptions(""),
 		Members:       members,
 	}
 }
@@ -254,6 +251,12 @@ func buildGroupRecordSnapshot(season int, gradedSlips []db.GradedSlip) GroupReco
 	if book.Pushes > 0 {
 		rec = fmt.Sprintf("%d-%d-%d", book.Wins, book.Losses, book.Pushes)
 	}
+	streak := "–"
+	if book.CurrentWin > 0 {
+		streak = fmt.Sprintf("W%d", book.CurrentWin)
+	} else if book.CurrentLoss > 0 {
+		streak = fmt.Sprintf("L%d", book.CurrentLoss)
+	}
 	return GroupRecordSnapshot{
 		HasSlips:   book.TotalSlips > 0,
 		Season:     season,
@@ -262,61 +265,8 @@ func buildGroupRecordSnapshot(season int, gradedSlips []db.GradedSlip) GroupReco
 		Losses:     book.Losses,
 		Pushes:     book.Pushes,
 		TotalSlips: book.TotalSlips,
-		Streak:     activeStreakLabel(gradedSlips),
+		Streak:     streak,
 	}
-}
-
-func activeStreakLabel(gradedSlips []db.GradedSlip) string {
-	ordered := make([]db.GradedSlip, 0, len(gradedSlips))
-	for _, gs := range gradedSlips {
-		if gs.Slip.Status != db.SlipGraded {
-			continue
-		}
-		if gs.Slip.Result != parlay.Won && gs.Slip.Result != parlay.Lost && gs.Slip.Result != parlay.Push {
-			continue
-		}
-		ordered = append(ordered, gs)
-	}
-	if len(ordered) == 0 {
-		return "–"
-	}
-	slices.SortFunc(ordered, func(a, b db.GradedSlip) int {
-		if c := cmp.Compare(a.Week.Season, b.Week.Season); c != 0 {
-			return c
-		}
-		if c := cmp.Compare(a.Week.SeasonType, b.Week.SeasonType); c != 0 {
-			return c
-		}
-		if c := cmp.Compare(a.Week.WeekNum, b.Week.WeekNum); c != 0 {
-			return c
-		}
-		if c := a.Slip.CreatedAt.Compare(b.Slip.CreatedAt); c != 0 {
-			return c
-		}
-		return cmp.Compare(a.Slip.ID, b.Slip.ID)
-	})
-
-	winStreak, lossStreak := 0, 0
-	for _, gs := range ordered {
-		switch gs.Slip.Result {
-		case parlay.Won:
-			winStreak++
-			lossStreak = 0
-		case parlay.Lost:
-			lossStreak++
-			winStreak = 0
-		case parlay.Push:
-			winStreak = 0
-			lossStreak = 0
-		}
-	}
-	if winStreak > 0 {
-		return fmt.Sprintf("W%d", winStreak)
-	}
-	if lossStreak > 0 {
-		return fmt.Sprintf("L%d", lossStreak)
-	}
-	return "–"
 }
 
 func recentSlipResult(slip db.Slip) (label, tone string) {

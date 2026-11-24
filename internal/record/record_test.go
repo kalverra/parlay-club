@@ -79,6 +79,8 @@ func TestBuildStreaksAndPushReset(t *testing.T) {
 	assert.Equal(t, 1, book.Pushes)
 	assert.Equal(t, 2, book.LongestWin)
 	assert.Equal(t, 3, book.LongestLoss)
+	assert.Equal(t, 0, book.CurrentWin)
+	assert.Equal(t, 3, book.CurrentLoss)
 	assert.InDelta(t, 0.0, book.UnitsPL, 1e-9)
 }
 

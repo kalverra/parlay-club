@@ -83,7 +83,7 @@ accept the shared invite. A forged group cookie still falls back to a real membe
 | Method + path             | Purpose                                                                                          |
 | ------------------------- | ------------------------------------------------------------------------------------------------ |
 | `GET /{$}`                | Landing page: one card per group; a person with one group is sent to that group's week            |
-| `GET /groups/{id}/week`   | Make the group active, ensure scheduled slips exist, then redirect to the slip (1 slip), render the week hub (>1 slips), or show create form (0 slips) |
+| `GET /groups/{id}/week`   | Make the group active, ensure scheduled slips exist, and render the per-group overview landing page |
 | `GET /games`              | 303 to the active group's week; the pick board owns the week                                     |
 | `GET /research`           | Research page: week games, player search, injury reports, and last-5 hit bars                     |
 | `GET /record`             | Season Record Book for the active group (optional `?season=`)                                    |
@@ -97,10 +97,11 @@ keeps a full page but leaves the bar; the hub links to the pick board, and pick 
 the tab becomes visible instead of holding a stream. A person in one group gets a 303 to `/groups/{id}/week`.
 
 `GET /groups/{id}/week` answers 404 for a group the person does not belong to, sets `pc_group`, and calls
-`slips.EnsureWeekSlips` to auto-generate slips for active recurring schedules. With zero slips for the week, it renders
-the create form. With exactly one slip, it 303s directly to `/slips/{id}`. With multiple slips, it renders the week hub
-(`week.html`) with cards for each slip (name, scope badge, next step, deadline, progress) and a button to add a one-off
-slip. It uses the same group-switch seam as a slip link from another group.
+`slips.EnsureWeekSlips` when an upcoming week exists to auto-generate slips for active recurring schedules. It always
+renders the per-group overview landing page (`week.html`): a hero with conditional spotlight cards for active or
+upcoming slips (ordered by urgency and deadline) or a quiet-state CTA to `/slips/new`, followed by the group record
+snapshot, recent slips, recurring schedules, and members strip. It uses the same group-switch seam as a slip link from
+another group.
 
 The slip handler file also serves `/me`, `/record`, and the slip and leg routes below. The pick board, Research, and
 Record Book are described below.
@@ -313,8 +314,8 @@ odds" button that posts `POST /slips/{id}/pick/refresh`, enforces group scope an
 not synced. A week with games but no odds says the lines have not synced once, above cards that carry no lines. Once
 every game has kicked off, the slate says picks are closed.
 
-`GET /games` uses the old Games link as a 303 to `/groups/{active}/week`, where the week route opens the group's newest
-slip. Without an active group it redirects to `/`.
+`GET /games` uses the old Games link as a 303 to `/groups/{active}/week`, where the week route renders the group's
+overview landing page. Without an active group it redirects to `/`.
 
 ### Game props
 
