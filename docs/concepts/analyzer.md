@@ -48,7 +48,7 @@ The dock and the tray inside its sheet refresh with the pick board on `tray-upda
 
 - **Form & usage (-20 to +15)**: recent L5 hit rate (+10), rising snap/target share (+5), teammate-out role bump (+5 when a same-position WR/TE/RB teammate is Out), L5 median trap (-15, softened to -5 with a same-position teammate Out), and shrinking role (-15).
 - **Matchup & environment (-20 to +15)**: weak opposing EPA defense (+10), tough matchup (-12), wind (-8 or -18), QB drag (-8), and fake weather (-3).
-- **Line & price (-20 to +10)**: nfelo spread cushion (+8), hook (-10, softened to -4 with cushion), total key number (-5), and heavy chalk (-10 to -18).
+- **Line & price (-20 to +15)**: nfelo spread cushion (+8), hook (-10, softened to -4 with cushion), total key number (-5), heavy chalk (-10 to -18), and sharp-book line/price comparisons (+8/+6 from Tier 1/2 sharp books or +5/+4 from market consensus when beating the line or de-vigged fair price; -8/-6 or -5/-4 when giving up line value or paying steep juice).
 
 The clamped 0–100 score maps to A (85–100), B (73–84), C (60–72), D (48–59), or F (0–47).
 
@@ -72,7 +72,7 @@ To avoid replaying SQLite on every page load without persisting derived tables, 
 
 ## Tone
 
-Warnings and grade summaries read like a sharp friend's heads-up: short, specific, and free of lectures. They name the people, the teams, and the numbers, and they suggest a better pick or a safer number. They never say "don't," and they never explain expected value. A warning on two people's legs names both owners, such as "Adam's BUF -7.5 + Sam's Josh Allen Over 245.5."
+Warnings and grade summaries read like a sharp friend's heads-up: short, specific, and free of lectures. They name the people, the teams, and the numbers, and they suggest a better pick or a safer number. They never say "don't," and they never explain expected value—even sharp-book price notes cite the actual sharp line or fair American odds (such as "Strong price at +105 vs. LowVig fair price near -108.") rather than "+EV %". A warning on two people's legs names both owners, such as "Adam's BUF -7.5 + Sam's Josh Allen Over 245.5."
 
 The tone rules live in `plan/analyzer.md`. Every message is checked against them before an analyzer change ships.
 
@@ -83,10 +83,10 @@ AnalyzeSlip, ScoreLeg, and ScoreSlip take three plain values:
 | Input | Fields the rules and scorer read |
 | ----- | -------------------------------- |
 | legs  | owner name, game, market, team, player, side, line, American odds |
-| games | home and away teams, indoor flag, weather (wind, gusts, precipitation, temperature), nfelo model (spread, win probability, QB adjustments), nflverse team EPA & pace, merged team injuries |
+| games | home and away teams, indoor flag, weather (wind, gusts, precipitation, temperature), nfelo model (spread, win probability, QB adjustments), nflverse team EPA & pace, merged team injuries, de-vigged sharp-book benchmarks |
 | stats | per-player ESPN game logs per market (most recent game first, this season only), ESPN position, and nflverse weekly snap/target/opportunity usage |
 
-`internal/analyzer` (`LoadSlipSignals`) builds games and stats from the week's games, stored player game logs, `roster_players`, `nfelo_games`, and nflverse tables when `internal/web` renders the panel or tray (with `LoadGameSignals` and `LoadPlayerResearchSignals` serving the pick board and player research). It keys the games map by the same GameID each leg carries, so no leg loses its game.
+`internal/analyzer` (`LoadSlipSignals`) builds games and stats from the week's games, stored odds, player game logs, `roster_players`, `nfelo_games`, and nflverse tables when `internal/web` renders the panel or tray (with `LoadGameSignals` and `LoadPlayerResearchSignals` serving the pick board and player research). It keys the games map by the same GameID each leg carries, so no leg loses its game.
 
 For team injuries, `LoadSlipSignals` (via `MergeGameInjuries` and `espn.MergeTeamInjuries`) merges `games.injuries_json` from ESPN's game summary with key-position injuries from `roster_players.injury_status`. Summary entries stay primary for their richer detail and 15-minute game-day refresh, while roster injuries backfill any key-position player truncated past ESPN's 5-per-team summary cap. `ScoreLeg` uses the merged `Game.Injuries` list and `PlayerStats.Position` for deterministic teammate-out grading.
 
@@ -96,6 +96,7 @@ External models and efficiency data are optional inputs, not requirements:
 
 - **nfelo**: `internal/analyzer` attaches it only when the game is SCHEDULED and a successful `nfelo:projections` fetch is under 72 hours old. Otherwise the model is nil and QB drag / model sentences stay quiet.
 - **nflverse**: `internal/analyzer` attaches HomeEPA, AwayEPA, and Usage only when `nflverse:season:{year}` is under 7 days old. Missing or stale nflverse rows leave those fields nil so nflverse warnings and EPA/usage grade factors fail soft.
+- **Sharp benchmarks**: LoadSlipSignals builds Game.Sharp in memory from current two-way odds rows in three tiers: Tier 1 (Pinnacle, Circa, Bookmaker), Tier 2 (LowVig, BetOnline), and Tier 3 (market consensus across at least 3 traditional sportsbooks quoting the same line, excluding DFS pick'em apps and peer-to-peer exchanges). One-sided markets (like anytime TD), unpaired quotes, and missing odds fail soft cleanly.
 
 The underlying rows come from [Data sources](../reference/data-sources.md) through [Data refresh](data-refresh.md).
 

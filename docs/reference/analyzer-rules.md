@@ -27,6 +27,7 @@ Rule IDs are stable across releases. A warning's severity is `Info`, `Warn`, or 
 - **Player stats**: `stats` maps ESPN athlete IDs to recent game logs per market, most recent first, and includes `Position` from `roster_players`. `internal/analyzer` (`LoadSlipSignals`) populates it from `player_gamelogs` for every matched `PlayerID` on the slip. An unmatched player, a missing game log, or a market with fewer than 3 games leaves player-stat rules quiet.
 - **Team injuries (roster + summary merge)**: `Game.Injuries` maps each team abbreviation to its merged injury list. `internal/analyzer` (`LoadSlipSignals` via `MergeGameInjuries` and `espn.MergeTeamInjuries`) combines `games.injuries_json` (ESPN summary, kept primary) with key-position injuries (`QB`, `RB`, `WR`, `TE`, `LT`, `C`, `CB`, `S`) from `roster_players.injury_status`, backfilling any player truncated past ESPN's 5-per-team summary cap.
 - **nflverse team EPA & player usage**: `Game.HomeEPA` and `Game.AwayEPA` hold league ranks (`1..32`, where `1` is the toughest defense, highest offense, fastest pace, or highest pass rate) for `DefPassEPAAllowedRank`, `DefRushEPAAllowedRank`, `OffPassEPARank`, `PlaysPerGameRank`, and `PassRateRank`. `PlayerStats.Usage` holds weekly `OffensePct`, `TargetShare`, `AirYardsShare`, `WOPR`, `Carries`, `Targets`, and `TotalEPA` (most recent first, requiring ≥ 3 weeks for usage rules). `internal/analyzer` attaches both only when `nflverse:season:{year}` is under 7 days old.
+- **Sharp-book benchmarks**: `Game.Sharp` maps `SharpKey` (`MarketType`, `Team`, normalized `PlayerName`, `Side`) to a de-vigged `SharpQuote` built by `BuildSharpBenchmarks` over `db.CurrentOdds`. Books are tiered: **Tier 1** (`Pinnacle`, `Circa`, `Bookmaker`), **Tier 2** (`LowVig`, `BetOnline`), and **Tier 3** (`market consensus` across `>= 3` traditional sportsbooks quoting the exact same line, excluding DFS pick'em apps and peer-to-peer exchanges). Two-way quotes are paired and de-vigged when overround falls in `[0.95, 1.25]`; one-sided markets (`ANYTIME_TD`) and unpaired quotes are skipped cleanly.
 - When a rule's legs belong to more than one person, the message names each owner.
 
 ## Rule Set A: Correlation
@@ -263,7 +264,7 @@ Every matched leg (not `OTHER`, with a valid `GameID` in the games map) starts a
 
 - **Form & Usage** (clamped to `-20` to `+15`)
 - **Matchup & Environment** (clamped to `-20` to `+15`)
-- **Line & Price** (clamped to `-20` to `+10`)
+- **Line & Price** (clamped to `-20` to `+15`)
 
 | Factor                 | Category              | Delta              | Trigger |
 | ---------------------- | --------------------- | ------------------ | ------- |
@@ -281,6 +282,19 @@ Every matched leg (not `OTHER`, with a valid `GameID` in the games map) starts a
 | `hook`                 | Line & Price          | `-10` (`-4` w/ cushion) | Spread sits on `-3.5`, `+2.5`, `-7.5`, or `+6.5`; softened to `-4` with `>= +2` nfelo cushion. |
 | `total_key_number`     | Line & Price          | `-5`               | Game total sits within `0.5` points of `37`, `41`, `43`, `44`, `47`, or `51`. |
 | `chalk`                | Line & Price          | `-10` to `-18`     | Odds `<= -230` scale linearly from `-10` at `-230` down to `-18` at `-500` or worse. |
+| `sharp_line_edge`      | Line & Price          | `+8` (`+5` consensus) | Line beats sharp bookmakers by at least `0.5` points (or `2.0` yards/attempts on `PASS_YDS`, `RUSH_YDS`, `REC_YDS`, `RUSH_ATT`). |
+| `sharp_line_fade`      | Line & Price          | `-8` (`-5` consensus) | Line trails sharp bookmakers by at least `0.5` points (or `2.0` yards/attempts on `PASS_YDS`, `RUSH_YDS`, `REC_YDS`, `RUSH_ATT`). |
+| `sharp_price_edge`     | Line & Price          | `+6` (`+4` consensus) | Retail odds pay at least `2.5` percentage points better than sharp de-vigged fair probability on the same line (or `ML`). |
+| `sharp_price_fade`     | Line & Price          | `-6` (`-4` consensus) | Retail odds carry at least `4.5` percentage points more juice than sharp de-vigged fair probability on the same line (or `ML`). |
+
+#### Sharp-book comparison details and copy
+
+When `Game.Sharp` has a benchmark for a leg, `scoreLineAndPrice` checks line differences first (when both the leg and benchmark have non-nil lines that differ) and falls back to price comparison when lines match within `1e-6` (or `ML` with a nil line):
+
+- **Line edge (`sharp_line_edge`)**: `"Getting BUF -2.5 while LowVig sits at -3.5."`
+- **Line fade (`sharp_line_fade`)**: `"LowVig sits at -2.5, so -3.5 gives up a full point."`
+- **Price edge (`sharp_price_edge`)**: `"Strong price at +105 vs. LowVig fair price near -108."`
+- **Price fade (`sharp_price_fade`)**: `"Steep price at -135 vs. LowVig fair price near -112."`
 
 ### Slip Scoring Factors (`ScoreSlip`)
 

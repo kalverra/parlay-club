@@ -200,5 +200,5 @@ present; bounded by deterministic unit/web tests and fail-soft thresholds)
 - [x] Wire `store.OddsForWeek` + `BuildSharpBenchmarks` into `LoadSlipSignals` in `internal/analyzer/signals.go`, add
       integration tests in `internal/analyzer/signals_test.go` and `internal/web/analyzer_test.go` verifying sharp
       factors render in the slip panel, pick tray, and `/analyzer/guide`.
-- [ ] Docs: update `docs/concepts/analyzer.md` and `docs/reference/analyzer-rules.md` with the sharp-book benchmark
+- [x] Docs: update `docs/concepts/analyzer.md` and `docs/reference/analyzer-rules.md` with the sharp-book benchmark
       tiers, thresholds, deltas, and sharp-friend copy, then run `good-vibes docs lint`.
