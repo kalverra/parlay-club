@@ -1015,3 +1015,86 @@ func TestResearchGameIncludesTruncatedRosterInjuries(t *testing.T) {
 	assert.Contains(t, body, "Dalton Kincaid")
 	assert.NotContains(t, body, "Depth Linebacker")
 }
+
+func TestResearchPlayerMarketTabResolvesOwnLine(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	game := addGame(t, fixture, gameKickoff())
+	handler := researchHandlerWithRefresher(t, fixture, fixture.user, &researchTestRefresher{})
+
+	now := time.Now().UTC()
+	require.NoError(t, fixture.store.UpsertRosterPlayers(t.Context(), []db.RosterPlayer{
+		{
+			AthleteID: "3918298",
+			Team:      "BUF",
+			FullName:  "Josh Allen",
+			Position:  "QB",
+			UpdatedAt: now,
+		},
+	}))
+	require.NoError(t, fixture.store.UpsertPlayerGameLog(t.Context(), db.PlayerGameLog{
+		AthleteID:   "3918298",
+		GamesPlayed: 5,
+		StatsJSON:   `{"PASS_YDS":[280,310,195,240,265],"RUSH_YDS":[45,30,55,20,40]}`,
+		UpdatedAt:   now,
+	}))
+
+	fetched := time.Date(2026, time.November, 9, 14, 0, 0, 0, time.UTC)
+	_, err := fixture.store.UpsertOdds(t.Context(), []db.Odds{
+		{
+			GameID:     game.ID,
+			Book:       "draftkings",
+			MarketType: "PASS_YDS",
+			Team:       "BUF",
+			PlayerName: "Josh Allen",
+			Side:       "OVER",
+			Line:       new(245.5),
+			Price:      -110,
+			FetchedAt:  fetched,
+		},
+		{
+			GameID:     game.ID,
+			Book:       "draftkings",
+			MarketType: "RUSH_YDS",
+			Team:       "BUF",
+			PlayerName: "Josh Allen",
+			Side:       "OVER",
+			Line:       new(42.5),
+			Price:      -110,
+			FetchedAt:  fetched,
+		},
+	})
+	require.NoError(t, err)
+
+	// Pass Yards tab: resolves 245.5 and tab links omit &line=.
+	reqPass := httptest.NewRequestWithContext(
+		t.Context(), http.MethodGet, "/research/players/3918298?market=PASS_YDS", nil,
+	)
+	recPass := httptest.NewRecorder()
+	handler.ServeHTTP(recPass, reqPass)
+	require.Equal(t, http.StatusOK, recPass.Code)
+	passBody := recPass.Body.String()
+	assert.Contains(t, passBody, `Target: <span class="font-semibold text-slate-200">245.5</span>`)
+	assert.Contains(t, passBody, `href="/research/players/3918298?market=RUSH_YDS"`)
+	assert.NotContains(t, passBody, `market=RUSH_YDS&amp;line=`)
+	assert.NotContains(t, passBody, `market=RUSH_YDS&line=`)
+
+	// Rush Yards tab: resolves its own 42.5 line instead of carrying 245.5.
+	reqRush := httptest.NewRequestWithContext(
+		t.Context(), http.MethodGet, "/research/players/3918298?market=RUSH_YDS", nil,
+	)
+	recRush := httptest.NewRecorder()
+	handler.ServeHTTP(recRush, reqRush)
+	require.Equal(t, http.StatusOK, recRush.Code)
+	assert.Contains(t, recRush.Body.String(), `Target: <span class="font-semibold text-slate-200">42.5</span>`)
+
+	// Explicit ?line= still overrides.
+	reqOverride := httptest.NewRequestWithContext(
+		t.Context(), http.MethodGet, "/research/players/3918298?market=RUSH_YDS&line=50.5", nil,
+	)
+	recOverride := httptest.NewRecorder()
+	handler.ServeHTTP(recOverride, reqOverride)
+	require.Equal(t, http.StatusOK, recOverride.Code)
+	assert.Contains(t, recOverride.Body.String(), `Target: <span class="font-semibold text-slate-200">50.5</span>`)
+}

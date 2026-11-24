@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/kalverra/parlay-club/internal/analyzer"
 	"github.com/kalverra/parlay-club/internal/db"
@@ -121,6 +122,7 @@ type PlayerResearchView struct {
 	HeadshotURL      string
 	Initials         string
 	TeamLogo         string
+	InjuryStatus     string
 	GamesPlayed      int
 	ActiveMarket     string
 	ActiveMarketName string
@@ -129,24 +131,70 @@ type PlayerResearchView struct {
 	LineStr          string
 	L5Median         string
 	SeasonMean       string
+	L5HitRate        string
+	SeasonHitRate    string
+	L5MinMax         string
 	SnapPct          string
 	TargetShare      string
 	WOPR             string
 	OppDefLabel      string
 	OppDefRank       string
 	Bars             []HitBarView
+	PlayerChart      BarChartView
+	OppDefenseTitle  string
+	OppOverallBadge  *DefRankBadge
+	OppPosBadge      *DefRankBadge
+	OppDefenseChart  *BarChartView
+	Matchup          *MatchupContextView
+	UsageTiles       []UsageTileView
 	AvailableMarkets []MarketOptionView
 }
 
-// HitBarView is one game's bar in the last-5 chart.
+// BarChartView holds a shared Last-5 bar chart with an optional dotted O/U line.
+type BarChartView struct {
+	HasLine bool
+	LineStr string
+	LinePct int
+	Bars    []HitBarView
+}
+
+// DefRankBadge is a color-tinted defense rank pill (#1-#10 tough, #11-#22 neutral, #23-#32 soft).
+type DefRankBadge struct {
+	Rank       int
+	Label      string
+	BadgeClass string
+}
+
+// MatchupContextView holds this week's game context for the player's team.
+type MatchupContextView struct {
+	GameID        string
+	Opponent      string
+	OpponentLabel string
+	OpponentLogo  string
+	Spread        string
+	GameTotal     string
+	Weather       string
+}
+
+// UsageTileView is one position-tailored stat tile in the research card.
+type UsageTileView struct {
+	Label string
+	Value string
+}
+
+// HitBarView is one game's bar in a last-5 chart.
 type HitBarView struct {
-	Index       int
-	Label       string
-	Value       float64
-	ValueStr    string
-	HeightPct   int
-	ResultClass string
-	ResultText  string
+	Index         int
+	Label         string
+	SubLabel      string
+	Value         float64
+	ValueStr      string
+	HeightPct     int
+	ResultClass   string
+	ResultText    string
+	OpponentLabel string
+	OverallDef    *DefRankBadge
+	PosDef        *DefRankBadge
 }
 
 // MarketOptionView is one selectable market for the athlete.
@@ -488,26 +536,34 @@ func (h *researchHandlers) loadPlayerResearch(
 	}
 
 	view := &PlayerResearchView{
-		AthleteID:   athleteID,
-		Name:        player.FullName,
-		Team:        player.Team,
-		Position:    player.Position,
-		HeadshotURL: player.HeadshotURL,
+		AthleteID:    athleteID,
+		Name:         player.FullName,
+		Team:         player.Team,
+		Position:     player.Position,
+		HeadshotURL:  player.HeadshotURL,
+		InjuryStatus: strings.TrimSpace(player.InjuryStatus),
 	}
 	if view.Name == "" {
 		view.Name = "Athlete #" + athleteID
 	}
 	view.Initials = Initials(view.Name)
-	if view.Team != "" {
-		if logos, err := h.deps.Store.TeamLogos(ctx); err == nil {
+
+	var logos map[string]string
+	if loadedLogos, err := h.deps.Store.TeamLogos(ctx); err == nil {
+		logos = loadedLogos
+		if view.Team != "" {
 			view.TeamLogo = logos[view.Team]
 		}
 	}
 
 	var markets map[string][]float64
+	var entries []espn.GameLogEntry
 	if logErr == nil {
 		view.GamesPlayed = gamelog.GamesPlayed
 		_ = json.Unmarshal([]byte(gamelog.StatsJSON), &markets)
+		if gamelog.GamesJSON != "" {
+			_ = json.Unmarshal([]byte(gamelog.GamesJSON), &entries)
+		}
 	}
 
 	activeMarket, comparisonLine := h.resolveMarketAndLine(
@@ -525,25 +581,101 @@ func (h *researchHandlers) loadPlayerResearch(
 		view.LineStr = formatNumber(*comparisonLine)
 	}
 
-	view.AvailableMarkets = buildMarketOptions(athleteID, markets, activeMarket, comparisonLine)
+	view.AvailableMarkets = buildMarketOptions(athleteID, markets, activeMarket)
+
+	h.populateMatchupContext(ctx, view, logos)
+	sig := h.populateNFLverseResearch(ctx, view, activeMarket, comparisonLine)
 
 	games := markets[activeMarket]
 	if len(games) > 0 {
-		view.Bars, view.L5Median, view.SeasonMean = buildHitBars(games, comparisonLine)
+		buildPlayerChart(view, games, entries, comparisonLine, sig)
 	}
-
-	h.populateNFLverseResearch(ctx, view, activeMarket)
 
 	return view, nil
 }
 
-// populateNFLverseResearch attaches L3 Snap %, Target share, WOPR, and opponent
-// defense EPA rank when fresh nflverse data exists for the latest week.
+// populateMatchupContext loads this week's opponent, cached spread/total, and
+// weather/indoor status for the player's team.
+func (h *researchHandlers) populateMatchupContext(
+	ctx context.Context,
+	view *PlayerResearchView,
+	logos map[string]string,
+) {
+	if view.Team == "" {
+		return
+	}
+	week, err := h.deps.Store.LatestWeek(ctx)
+	if err != nil {
+		return
+	}
+	weekGames, err := h.deps.Store.GamesForWeek(ctx, week.ID)
+	if err != nil {
+		return
+	}
+
+	var game *db.Game
+	var opp string
+	var isHome bool
+	for i := range weekGames {
+		g := &weekGames[i]
+		switch view.Team {
+		case g.HomeTeam:
+			game = g
+			opp = g.AwayTeam
+			isHome = true
+		case g.AwayTeam:
+			game = g
+			opp = g.HomeTeam
+			isHome = false
+		}
+		if game != nil {
+			break
+		}
+	}
+	if game == nil || opp == "" {
+		return
+	}
+
+	oppLabel := "@ " + opp
+	if isHome {
+		oppLabel = "vs " + opp
+	}
+	mc := &MatchupContextView{
+		GameID:        game.ID,
+		Opponent:      opp,
+		OpponentLabel: oppLabel,
+		OpponentLogo:  logos[opp],
+		Weather:       formatGameWeather(*game),
+	}
+
+	if oddsRows, err := h.deps.Store.OddsForGame(ctx, game.ID); err == nil {
+		for _, o := range oddsRows {
+			if o.Line == nil {
+				continue
+			}
+			if mc.Spread == "" && o.MarketType == "SPREAD" && o.Team == view.Team {
+				mc.Spread = formatSignedNumber(*o.Line)
+			}
+			if mc.GameTotal == "" && o.MarketType == "TOTAL" {
+				mc.GameTotal = formatNumber(*o.Line)
+			}
+			if mc.Spread != "" && mc.GameTotal != "" {
+				break
+			}
+		}
+	}
+
+	view.Matchup = mc
+}
+
+// populateNFLverseResearch attaches position-tailored usage tiles, opponent
+// defense ranks, and the opposing defense L5 chart when fresh nflverse data exists.
 func (h *researchHandlers) populateNFLverseResearch(
 	ctx context.Context,
 	view *PlayerResearchView,
 	activeMarket string,
-) {
+	comparisonLine *float64,
+) analyzer.PlayerResearchSignals {
 	sig := analyzer.LoadPlayerResearchSignals(
 		ctx, h.deps.Store, h.deps.now(), view.AthleteID, view.Team, view.Position, activeMarket,
 	)
@@ -560,6 +692,30 @@ func (h *researchHandlers) populateNFLverseResearch(
 		}
 		view.OppDefRank = fmt.Sprintf("#%d vs %s", sig.OppDefRank, sig.Opponent)
 	}
+
+	view.UsageTiles = buildUsageTiles(view.Position, sig, view.OppDefLabel, view.OppDefRank)
+
+	normPos := normalizeResearchPosition(view.Position)
+	if sig.Opponent != "" && normPos != "" && view.ActiveMarketName != "" {
+		view.OppDefenseTitle = fmt.Sprintf(
+			"%s Defense · Last 5 vs %s · %s",
+			sig.Opponent,
+			normPos,
+			view.ActiveMarketName,
+		)
+	}
+	if sig.OppOverallDefRank > 0 {
+		view.OppOverallBadge = newDefRankBadge(sig.OppOverallDefRank, fmt.Sprintf("Def #%d", sig.OppOverallDefRank))
+	}
+	if sig.OppPosDefRank > 0 && normPos != "" {
+		view.OppPosBadge = newDefRankBadge(sig.OppPosDefRank, fmt.Sprintf("vs %s #%d", normPos, sig.OppPosDefRank))
+	}
+	if len(sig.OppDefenseL5) > 0 {
+		chart := buildOppDefenseChart(sig.OppDefenseL5, comparisonLine)
+		view.OppDefenseChart = &chart
+	}
+
+	return sig
 }
 
 func (h *researchHandlers) resolveMarketAndLine(
@@ -577,23 +733,24 @@ func (h *researchHandlers) resolveMarketAndLine(
 		}
 	}
 
+	var legMarket string
+	var legLine *float64
 	if legIDStr != "" {
 		if legID, err := strconv.ParseInt(legIDStr, 10, 64); err == nil {
 			if leg, err := h.deps.Store.LegByID(ctx, legID); err == nil {
-				if activeMarket == "" && leg.MarketType != "" {
-					activeMarket = leg.MarketType
-				}
-				if comparisonLine == nil && leg.Line != nil {
-					comparisonLine = leg.Line
+				legMarket = leg.MarketType
+				legLine = leg.Line
+				if activeMarket == "" && legMarket != "" {
+					activeMarket = legMarket
 				}
 			}
 		}
 	}
 
-	if (activeMarket == "" || comparisonLine == nil) && (player.FullName != "" || athleteID != "") {
+	if activeMarket == "" && (player.FullName != "" || athleteID != "") {
 		prop, ok, err := h.deps.Store.LatestPropForPlayer(ctx, athleteID, player.FullName, player.Team)
 		if err == nil && ok {
-			if activeMarket == "" && prop.MarketType != "" {
+			if prop.MarketType != "" {
 				activeMarket = prop.MarketType
 			}
 			if comparisonLine == nil && prop.Line != nil {
@@ -603,34 +760,47 @@ func (h *researchHandlers) resolveMarketAndLine(
 	}
 
 	if activeMarket == "" && len(markets) > 0 {
-		standardOrder := []string{
-			"PASS_YDS", "RUSH_YDS", "REC_YDS", "RECEPTIONS",
-			"PASS_TDS", "RUSH_ATT", "ANYTIME_TD", "KICKER_PTS",
-		}
-		for _, m := range standardOrder {
-			if len(markets[m]) > 0 {
-				activeMarket = m
-				break
-			}
-		}
-		if activeMarket == "" {
-			for m := range markets {
-				if len(markets[m]) > 0 {
-					activeMarket = m
-					break
-				}
-			}
+		activeMarket = defaultResearchMarket(markets)
+	}
+
+	if comparisonLine == nil && legLine != nil && (legMarket == "" || legMarket == activeMarket) {
+		comparisonLine = legLine
+	}
+
+	if comparisonLine == nil && activeMarket != "" && (player.FullName != "" || athleteID != "") {
+		prop, ok, err := h.deps.Store.LatestPropForPlayerMarket(
+			ctx, athleteID, player.FullName, player.Team, activeMarket,
+		)
+		if err == nil && ok && prop.Line != nil {
+			comparisonLine = prop.Line
 		}
 	}
 
 	return activeMarket, comparisonLine
 }
 
+func defaultResearchMarket(markets map[string][]float64) string {
+	standardOrder := []string{
+		"PASS_YDS", "RUSH_YDS", "REC_YDS", "RECEPTIONS",
+		"PASS_TDS", "RUSH_ATT", "ANYTIME_TD", "KICKER_PTS",
+	}
+	for _, m := range standardOrder {
+		if len(markets[m]) > 0 {
+			return m
+		}
+	}
+	for m, vals := range markets {
+		if len(vals) > 0 {
+			return m
+		}
+	}
+	return ""
+}
+
 func buildMarketOptions(
 	athleteID string,
 	markets map[string][]float64,
 	activeMarket string,
-	comparisonLine *float64,
 ) []MarketOptionView {
 	standardMarkets := []string{
 		"PASS_YDS", "PASS_TDS", "RUSH_YDS", "RUSH_ATT",
@@ -642,9 +812,6 @@ func buildMarketOptions(
 			continue
 		}
 		href := fmt.Sprintf("/research/players/%s?market=%s", athleteID, m)
-		if comparisonLine != nil {
-			href += fmt.Sprintf("&line=%g", *comparisonLine)
-		}
 		label := db.MarketLabel(m)
 		if label == "" {
 			label = m
@@ -659,23 +826,112 @@ func buildMarketOptions(
 	return options
 }
 
-func buildHitBars(games []float64, comparisonLine *float64) ([]HitBarView, string, string) {
+func buildPlayerChart(
+	view *PlayerResearchView,
+	games []float64,
+	entries []espn.GameLogEntry,
+	comparisonLine *float64,
+	sig analyzer.PlayerResearchSignals,
+) {
 	l5Len := min(5, len(games))
 	l5 := games[:l5Len]
-	median := analyzer.Median(l5)
-	mean := analyzer.Mean(games)
-	l5Median := formatNumber(median)
-	seasonMean := fmt.Sprintf("%.1f", mean)
+	view.L5Median = formatNumber(analyzer.Median(l5))
+	view.SeasonMean = fmt.Sprintf("%.1f", analyzer.Mean(games))
 
-	chronological := make([]float64, len(l5))
-	for i := range l5 {
-		chronological[i] = l5[len(l5)-1-i]
-	}
-
-	maxVal := 0.0
-	for _, v := range chronological {
+	minVal, maxVal := l5[0], l5[0]
+	for _, v := range l5[1:] {
+		if v < minVal {
+			minVal = v
+		}
 		if v > maxVal {
 			maxVal = v
+		}
+	}
+	view.L5MinMax = fmt.Sprintf("%s–%s", formatNumber(minVal), formatNumber(maxVal))
+
+	if comparisonLine != nil {
+		l5Hits := 0
+		for _, v := range l5 {
+			if v > *comparisonLine {
+				l5Hits++
+			}
+		}
+		view.L5HitRate = fmt.Sprintf("%d/%d", l5Hits, l5Len)
+
+		seasonHits := 0
+		for _, v := range games {
+			if v > *comparisonLine {
+				seasonHits++
+			}
+		}
+		view.SeasonHitRate = fmt.Sprintf("%d/%d", seasonHits, len(games))
+	}
+
+	fallbackLabels := []string{"L5", "L4", "L3", "L2", "Last"}
+	if l5Len < 5 {
+		fallbackLabels = fallbackLabels[5-l5Len:]
+	}
+
+	normPos := normalizeResearchPosition(view.Position)
+	rawBars := make([]HitBarView, 0, l5Len)
+	for i := range l5Len {
+		srcIdx := l5Len - 1 - i
+		val := l5[srcIdx]
+		bar := HitBarView{
+			Index:    i + 1,
+			Label:    fallbackLabels[i],
+			Value:    val,
+			ValueStr: formatNumber(val),
+		}
+		if srcIdx < len(entries) {
+			entry := entries[srcIdx]
+			if oppLabel := formatEntryOpponent(entry); oppLabel != "" {
+				bar.OpponentLabel = oppLabel
+				bar.Label = oppLabel
+			}
+			if entry.Opponent != "" {
+				if prof := sig.TeamDefProfiles[entry.Opponent]; prof != nil && prof.DefOverallEPARank > 0 {
+					bar.OverallDef = newDefRankBadge(
+						prof.DefOverallEPARank,
+						fmt.Sprintf("Def #%d", prof.DefOverallEPARank),
+					)
+				}
+				if posRank, ok := sig.PosDefRanks[entry.Opponent]; ok && posRank > 0 && normPos != "" {
+					bar.PosDef = newDefRankBadge(posRank, fmt.Sprintf("vs %s #%d", normPos, posRank))
+				}
+			}
+		}
+		rawBars = append(rawBars, bar)
+	}
+
+	chart := buildBarChart(rawBars, comparisonLine)
+	view.PlayerChart = chart
+	view.Bars = chart.Bars
+}
+
+func buildOppDefenseChart(games []analyzer.OppDefenseGame, comparisonLine *float64) BarChartView {
+	rawBars := make([]HitBarView, 0, len(games))
+	for i, g := range games {
+		subLabel := fmt.Sprintf("W%d", g.WeekNum)
+		if g.Team != "" {
+			subLabel = fmt.Sprintf("%s · W%d", g.Team, g.WeekNum)
+		}
+		rawBars = append(rawBars, HitBarView{
+			Index:    i + 1,
+			Label:    abbreviatePlayerName(g.PlayerName),
+			SubLabel: subLabel,
+			Value:    g.Value,
+			ValueStr: formatNumber(g.Value),
+		})
+	}
+	return buildBarChart(rawBars, comparisonLine)
+}
+
+func buildBarChart(bars []HitBarView, comparisonLine *float64) BarChartView {
+	maxVal := 0.0
+	for _, b := range bars {
+		if b.Value > maxVal {
+			maxVal = b.Value
 		}
 	}
 	if comparisonLine != nil && *comparisonLine > maxVal {
@@ -685,30 +941,17 @@ func buildHitBars(games []float64, comparisonLine *float64) ([]HitBarView, strin
 		maxVal = 1
 	}
 
-	labels := []string{"L5", "L4", "L3", "L2", "Last"}
-	if len(chronological) < 5 {
-		labels = labels[5-len(chronological):]
-	}
-
-	bars := make([]HitBarView, 0, len(chronological))
-	for i, val := range chronological {
-		pct := int(math.Round((val / maxVal) * 100))
-		pct = max(10, min(100, pct))
-
-		bar := HitBarView{
-			Index:     i + 1,
-			Label:     labels[i],
-			Value:     val,
-			ValueStr:  formatNumber(val),
-			HeightPct: pct,
-		}
+	out := make([]HitBarView, len(bars))
+	for i, bar := range bars {
+		pct := int(math.Round((bar.Value / maxVal) * 100))
+		bar.HeightPct = max(0, min(100, pct))
 
 		if comparisonLine != nil {
 			switch {
-			case val > *comparisonLine:
+			case bar.Value > *comparisonLine:
 				bar.ResultClass = "bg-emerald-500 border-emerald-400 text-emerald-300"
 				bar.ResultText = "OVER"
-			case val < *comparisonLine:
+			case bar.Value < *comparisonLine:
 				bar.ResultClass = "bg-rose-500 border-rose-400 text-rose-300"
 				bar.ResultText = "UNDER"
 			default:
@@ -718,11 +961,150 @@ func buildHitBars(games []float64, comparisonLine *float64) ([]HitBarView, strin
 		} else {
 			bar.ResultClass = "bg-sky-500 border-sky-400 text-sky-300"
 		}
-
-		bars = append(bars, bar)
+		out[i] = bar
 	}
 
-	return bars, l5Median, seasonMean
+	chart := BarChartView{Bars: out}
+	if comparisonLine != nil {
+		linePct := int(math.Round((*comparisonLine / maxVal) * 100))
+		chart.HasLine = true
+		chart.LineStr = formatNumber(*comparisonLine)
+		chart.LinePct = max(0, min(100, linePct))
+	}
+	return chart
+}
+
+func buildUsageTiles(
+	position string,
+	sig analyzer.PlayerResearchSignals,
+	oppDefLabel, oppDefRank string,
+) []UsageTileView {
+	if !sig.HasUsage && sig.OppDefRank <= 0 {
+		return nil
+	}
+
+	normPos := normalizeResearchPosition(position)
+	if sig.HasUsage {
+		switch normPos {
+		case "QB":
+			label := oppDefLabel
+			if label == "" {
+				label = "Opp Def"
+			}
+			rank := oppDefRank
+			if rank == "" {
+				rank = "--"
+			}
+			return []UsageTileView{
+				{Label: "Pass Att/g (L3)", Value: fmt.Sprintf("%.1f", sig.PassAttPerGame)},
+				{Label: "EPA/g (L3)", Value: fmt.Sprintf("%.1f", sig.EPAPerGame)},
+				{Label: "Rush Att/g (L3)", Value: fmt.Sprintf("%.1f", sig.CarriesPerGame)},
+				{Label: label, Value: rank},
+			}
+		case "RB":
+			return []UsageTileView{
+				{Label: "Snap % (L3)", Value: fmt.Sprintf("%.0f%%", sig.SnapPct*100)},
+				{Label: "Carries/g (L3)", Value: fmt.Sprintf("%.1f", sig.CarriesPerGame)},
+				{Label: "Targets/g (L3)", Value: fmt.Sprintf("%.1f", sig.TargetsPerGame)},
+				{Label: "RZ Opps/g", Value: fmt.Sprintf("%.1f", sig.RZOppsPerGame)},
+			}
+		case "WR", "TE":
+			return []UsageTileView{
+				{Label: "Snap % (L3)", Value: fmt.Sprintf("%.0f%%", sig.SnapPct*100)},
+				{Label: "Target share", Value: fmt.Sprintf("%.1f%%", sig.TargetShare*100)},
+				{Label: "Air Yards %", Value: fmt.Sprintf("%.1f%%", sig.AirYardsShare*100)},
+				{Label: "WOPR", Value: fmt.Sprintf("%.2f", sig.WOPR)},
+			}
+		}
+	}
+
+	var tiles []UsageTileView
+	if sig.HasUsage && sig.SnapPct > 0 {
+		tiles = append(tiles, UsageTileView{Label: "Snap % (L3)", Value: fmt.Sprintf("%.0f%%", sig.SnapPct*100)})
+	}
+	if sig.OppDefRank > 0 {
+		label := oppDefLabel
+		if label == "" {
+			label = "Opp Def"
+		}
+		tiles = append(tiles, UsageTileView{Label: label, Value: oppDefRank})
+	}
+	return tiles
+}
+
+func newDefRankBadge(rank int, label string) *DefRankBadge {
+	if rank <= 0 {
+		return nil
+	}
+	badgeClass := "border-slate-700 bg-slate-800/80 text-slate-300"
+	switch {
+	case rank <= 10:
+		badgeClass = "border-rose-700/60 bg-rose-950/50 text-rose-300"
+	case rank >= 23:
+		badgeClass = "border-emerald-700/60 bg-emerald-950/50 text-emerald-300"
+	}
+	return &DefRankBadge{
+		Rank:       rank,
+		Label:      label,
+		BadgeClass: badgeClass,
+	}
+}
+
+func formatEntryOpponent(entry espn.GameLogEntry) string {
+	opp := strings.TrimSpace(entry.Opponent)
+	if opp == "" {
+		return ""
+	}
+	atVs := strings.TrimSpace(entry.AtVs)
+	switch atVs {
+	case "":
+		return opp
+	case "@":
+		return "@" + opp
+	default:
+		return atVs + " " + opp
+	}
+}
+
+func formatGameWeather(game db.Game) string {
+	if game.Indoor {
+		return "Indoor"
+	}
+	var parts []string
+	if game.TempF != nil {
+		parts = append(parts, fmt.Sprintf("%.0f°F", *game.TempF))
+	}
+	if game.WindMPH != nil {
+		parts = append(parts, fmt.Sprintf("%.0f mph", *game.WindMPH))
+	}
+	return strings.Join(parts, " · ")
+}
+
+func normalizeResearchPosition(position string) string {
+	pos := strings.ToUpper(strings.TrimSpace(position))
+	if pos == "FB" || pos == "HB" {
+		return "RB"
+	}
+	return pos
+}
+
+func abbreviatePlayerName(name string) string {
+	parts := strings.Fields(name)
+	if len(parts) == 0 {
+		return ""
+	}
+	if len(parts) == 1 {
+		return parts[0]
+	}
+	r, _ := utf8.DecodeRuneInString(parts[0])
+	return fmt.Sprintf("%c. %s", r, strings.Join(parts[1:], " "))
+}
+
+func formatSignedNumber(val float64) string {
+	if val > 0 {
+		return "+" + formatNumber(val)
+	}
+	return formatNumber(val)
 }
 
 func (h *researchHandlers) page(r *http.Request) Page {
