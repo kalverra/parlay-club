@@ -59,6 +59,10 @@ const (
 	ruleTeammateOutBump  = "teammate_out_bump"
 	ruleFavorableMatchup = "favorable_matchup"
 	ruleNfeloCushion     = "nfelo_cushion"
+	ruleSharpLineEdge    = "sharp_line_edge"
+	ruleSharpLineFade    = "sharp_line_fade"
+	ruleSharpPriceEdge   = "sharp_price_edge"
+	ruleSharpPriceFade   = "sharp_price_fade"
 	ruleParlayDrag       = "parlay_drag"
 	ruleChalkDrag        = "chalk_drag"
 )

@@ -1,6 +1,7 @@
 package analyzer_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -1822,5 +1823,289 @@ func TestScoreLegTeammateOut(t *testing.T) {
 		require.Len(t, got.Factors, 1)
 		assert.Equal(t, "teammate_out_bump", got.Factors[0].Rule)
 		assert.Equal(t, 5, got.Factors[0].Delta)
+	})
+}
+
+func TestScoreLegSharpBenchmarks(t *testing.T) {
+	t.Parallel()
+
+	assertFriendlyTone := func(t *testing.T, text string) {
+		t.Helper()
+		lower := strings.ToLower(text)
+		assert.NotContains(t, lower, "+ev")
+		assert.NotContains(t, lower, "expected value")
+		assert.NotContains(t, lower, "roi")
+		for tok := range strings.FieldsSeq(lower) {
+			trimmed := strings.Trim(tok, ".,:;!?()[]\"'")
+			assert.NotEqual(t, "ev", trimmed, "unexpected EV jargon in %q", text)
+		}
+	}
+
+	sharpGames := func(quotes map[analyzer.SharpKey]analyzer.SharpQuote, nfelo *analyzer.Nfelo) map[string]analyzer.Game {
+		return map[string]analyzer.Game{
+			"buf-mia": {
+				ID:    "buf-mia",
+				Home:  "MIA",
+				Away:  "BUF",
+				Nfelo: nfelo,
+				Sharp: quotes,
+			},
+		}
+	}
+
+	t.Run("nil or missing sharp quote fails soft", func(t *testing.T) {
+		t.Parallel()
+		l := leg(1, "Adam", "buf-mia", "SPREAD", "BUF", "", "TEAM", new(-2.5), -110)
+		withoutSharp := analyzer.ScoreLeg(l, games(), nil)
+		assert.Equal(t, 75, withoutSharp.Score)
+		assert.Empty(t, withoutSharp.Factors)
+
+		otherKey := sharpGames(map[analyzer.SharpKey]analyzer.SharpQuote{
+			{MarketType: "TOTAL", Side: "OVER"}: {
+				Line: new(44.5), FairProb: 0.5, FairAmerican: -100, Source: "LowVig", Tier: 2,
+			},
+		}, nil)
+		withOtherKey := analyzer.ScoreLeg(l, otherKey, nil)
+		assert.Equal(t, withoutSharp, withOtherKey)
+	})
+
+	t.Run("sharp_line_edge across spread, total, and tier 3 consensus", func(t *testing.T) {
+		t.Parallel()
+		gs := sharpGames(map[analyzer.SharpKey]analyzer.SharpQuote{
+			{MarketType: "SPREAD", Team: "BUF", Side: "TEAM"}: {
+				Line: new(-3.5), FairProb: 0.5, FairAmerican: -100, Source: "LowVig", Tier: 2,
+			},
+			{MarketType: "TOTAL", Side: "OVER"}: {
+				Line: new(44.5), FairProb: 0.5, FairAmerican: -100, Source: "Pinnacle", Tier: 1,
+			},
+			{MarketType: "TOTAL", Side: "UNDER"}: {
+				Line: new(48.5), FairProb: 0.5, FairAmerican: -100, Source: "market consensus", Tier: 3,
+			},
+		}, nil)
+
+		spreadEdge := analyzer.ScoreLeg(
+			leg(1, "Adam", "buf-mia", "SPREAD", "BUF", "", "TEAM", new(-2.5), -110),
+			gs, nil,
+		)
+		assert.Equal(t, 83, spreadEdge.Score)
+		require.Len(t, spreadEdge.Factors, 1)
+		assert.Equal(t, "sharp_line_edge", spreadEdge.Factors[0].Rule)
+		assert.Equal(t, 8, spreadEdge.Factors[0].Delta)
+		assert.Equal(t, "Getting BUF -2.5 while LowVig sits at -3.5.", spreadEdge.Factors[0].Detail)
+		assertFriendlyTone(t, spreadEdge.Factors[0].Detail)
+
+		totalOverEdge := analyzer.ScoreLeg(
+			leg(2, "Adam", "buf-mia", "TOTAL", "", "", "OVER", new(43.5), -110),
+			gs, nil,
+		)
+		// Total 43.5 is also near key number 43 (-5), so net +3 -> 78.
+		assert.Equal(t, 78, totalOverEdge.Score)
+		require.Len(t, totalOverEdge.Factors, 2)
+		assert.Equal(t, "sharp_line_edge", totalOverEdge.Factors[1].Rule)
+		assert.Equal(t, 8, totalOverEdge.Factors[1].Delta)
+		assertFriendlyTone(t, totalOverEdge.Factors[1].Detail)
+
+		totalUnderConsensus := analyzer.ScoreLeg(
+			leg(3, "Adam", "buf-mia", "TOTAL", "", "", "UNDER", new(49.5), -110),
+			gs, nil,
+		)
+		assert.Equal(t, 80, totalUnderConsensus.Score)
+		require.Len(t, totalUnderConsensus.Factors, 1)
+		assert.Equal(t, "sharp_line_edge", totalUnderConsensus.Factors[0].Rule)
+		assert.Equal(t, 5, totalUnderConsensus.Factors[0].Delta)
+		assert.Contains(t, totalUnderConsensus.Factors[0].Detail, "market consensus")
+		assertFriendlyTone(t, totalUnderConsensus.Factors[0].Detail)
+	})
+
+	t.Run("sharp_line_fade across spread and tier 3 consensus", func(t *testing.T) {
+		t.Parallel()
+		gs := sharpGames(map[analyzer.SharpKey]analyzer.SharpQuote{
+			{MarketType: "SPREAD", Team: "BUF", Side: "TEAM"}: {
+				Line: new(-2.5), FairProb: 0.5, FairAmerican: -100, Source: "LowVig", Tier: 2,
+			},
+			{MarketType: "TEAM_TOTAL", Team: "BUF", Side: "OVER"}: {
+				Line: new(23.5), FairProb: 0.5, FairAmerican: -100, Source: "market consensus", Tier: 3,
+			},
+		}, nil)
+
+		spreadFade := analyzer.ScoreLeg(
+			leg(1, "Adam", "buf-mia", "SPREAD", "BUF", "", "TEAM", new(-3.5), -110),
+			gs, nil,
+		)
+		// -3.5 is on hook (-10) + sharp_line_fade (-8) = -18 -> 57.
+		assert.Equal(t, 57, spreadFade.Score)
+		require.Len(t, spreadFade.Factors, 2)
+		assert.Equal(t, "sharp_line_fade", spreadFade.Factors[1].Rule)
+		assert.Equal(t, -8, spreadFade.Factors[1].Delta)
+		assert.Equal(t, "LowVig sits at -2.5, so -3.5 gives up a full point.", spreadFade.Factors[1].Detail)
+		assertFriendlyTone(t, spreadFade.Factors[1].Detail)
+
+		ttFade := analyzer.ScoreLeg(
+			leg(2, "Adam", "buf-mia", "TEAM_TOTAL", "BUF", "", "OVER", new(24.0), -110),
+			gs, nil,
+		)
+		assert.Equal(t, 70, ttFade.Score)
+		require.Len(t, ttFade.Factors, 1)
+		assert.Equal(t, "sharp_line_fade", ttFade.Factors[0].Rule)
+		assert.Equal(t, -5, ttFade.Factors[0].Delta)
+		assertFriendlyTone(t, ttFade.Factors[0].Detail)
+	})
+
+	t.Run("player prop thresholds and name normalization", func(t *testing.T) {
+		t.Parallel()
+		gs := sharpGames(map[analyzer.SharpKey]analyzer.SharpQuote{
+			{MarketType: "PASS_YDS", Team: "BUF", PlayerName: "josh allen", Side: "OVER"}: {
+				Line: new(265.5), FairProb: 0.5, FairAmerican: -100, Source: "Pinnacle", Tier: 1,
+			},
+			{MarketType: "REC_YDS", Team: "MIA", PlayerName: "marvin harrison", Side: "OVER"}: {
+				Line: new(65.5), FairProb: 0.5, FairAmerican: -100, Source: "LowVig", Tier: 2,
+			},
+			{MarketType: "RECEPTIONS", Team: "BUF", PlayerName: "khalil shakir", Side: "OVER"}: {
+				Line: new(5.5), FairProb: 0.5, FairAmerican: -100, Source: "LowVig", Tier: 2,
+			},
+		}, nil)
+
+		// 1.5 yards difference on PASS_YDS is below the 2.0 yardage threshold.
+		smallDiff := analyzer.ScoreLeg(
+			leg(1, "Adam", "buf-mia", "PASS_YDS", "BUF", "Josh Allen", "OVER", new(264.0), -110),
+			gs, nil,
+		)
+		assert.Equal(t, 75, smallDiff.Score)
+		assert.Empty(t, smallDiff.Factors)
+
+		// 2.0 yards edge on PASS_YDS triggers sharp_line_edge.
+		twoYardEdge := analyzer.ScoreLeg(
+			leg(2, "Adam", "buf-mia", "PASS_YDS", "BUF", "Josh Allen", "OVER", new(263.5), -110),
+			gs, nil,
+		)
+		assert.Equal(t, 83, twoYardEdge.Score)
+		require.Len(t, twoYardEdge.Factors, 1)
+		assert.Equal(t, "sharp_line_edge", twoYardEdge.Factors[0].Rule)
+
+		// 2.5 yards fade with Jr. suffix normalization on REC_YDS triggers sharp_line_fade.
+		suffixFade := analyzer.ScoreLeg(
+			leg(3, "Adam", "buf-mia", "REC_YDS", "MIA", "Marvin Harrison Jr.", "OVER", new(68.0), -110),
+			gs, nil,
+		)
+		assert.Equal(t, 67, suffixFade.Score)
+		require.Len(t, suffixFade.Factors, 1)
+		assert.Equal(t, "sharp_line_fade", suffixFade.Factors[0].Rule)
+		assert.Contains(t, suffixFade.Factors[0].Detail, "2.5 yards")
+		assertFriendlyTone(t, suffixFade.Factors[0].Detail)
+
+		// 0.5 receptions edge triggers sharp_line_edge (non-yardage threshold = 0.5).
+		recEdge := analyzer.ScoreLeg(
+			leg(4, "Adam", "buf-mia", "RECEPTIONS", "BUF", "Khalil Shakir", "OVER", new(5.0), -110),
+			gs, nil,
+		)
+		assert.Equal(t, 83, recEdge.Score)
+		require.Len(t, recEdge.Factors, 1)
+		assert.Equal(t, "sharp_line_edge", recEdge.Factors[0].Rule)
+	})
+
+	t.Run("sharp_price_edge, sharp_price_fade, and normal vig tolerance", func(t *testing.T) {
+		t.Parallel()
+		gs := sharpGames(map[analyzer.SharpKey]analyzer.SharpQuote{
+			{MarketType: "ML", Team: "BUF", Side: "TEAM"}: {
+				FairProb: 0.52, FairAmerican: -108, Source: "LowVig", Tier: 2,
+			},
+			{MarketType: "SPREAD", Team: "MIA", Side: "TEAM"}: {
+				Line: new(2.5), FairProb: 0.528, FairAmerican: -112, Source: "LowVig", Tier: 2,
+			},
+			{MarketType: "TOTAL", Side: "OVER"}: {
+				Line: new(45.5), FairProb: 0.50, FairAmerican: -100, Source: "LowVig", Tier: 2,
+			},
+			{MarketType: "ML", Team: "MIA", Side: "TEAM"}: {
+				FairProb: 0.48, FairAmerican: 108, Source: "market consensus", Tier: 3,
+			},
+		}, nil)
+
+		// +105 vs 52% fair (-108) -> +3.22 pp edge -> sharp_price_edge (+6).
+		priceEdge := analyzer.ScoreLeg(
+			leg(1, "Adam", "buf-mia", "ML", "BUF", "", "TEAM", nil, +105),
+			gs, nil,
+		)
+		assert.Equal(t, 81, priceEdge.Score)
+		require.Len(t, priceEdge.Factors, 1)
+		assert.Equal(t, "sharp_price_edge", priceEdge.Factors[0].Rule)
+		assert.Equal(t, 6, priceEdge.Factors[0].Delta)
+		assert.Equal(t, "Strong price at +105 vs. LowVig fair price near -108.", priceEdge.Factors[0].Detail)
+		assertFriendlyTone(t, priceEdge.Factors[0].Detail)
+
+		// -135 vs 52.8% fair (-112) -> -4.65 pp edge -> sharp_price_fade (-6).
+		// Note MIA +2.5 is also a hook (-10) -> 75 - 10 - 6 = 59.
+		priceFade := analyzer.ScoreLeg(
+			leg(2, "Adam", "buf-mia", "SPREAD", "MIA", "", "TEAM", new(2.5), -135),
+			gs, nil,
+		)
+		assert.Equal(t, 59, priceFade.Score)
+		require.Len(t, priceFade.Factors, 2)
+		assert.Equal(t, "sharp_price_fade", priceFade.Factors[1].Rule)
+		assert.Equal(t, -6, priceFade.Factors[1].Delta)
+		assert.Equal(t, "Steep price at -135 vs. LowVig fair price near -112.", priceFade.Factors[1].Detail)
+		assertFriendlyTone(t, priceFade.Factors[1].Detail)
+
+		// Standard -110 retail vs 50% fair (-0.0238 edge) is inside -0.045 and must NOT penalize.
+		normalVig := analyzer.ScoreLeg(
+			leg(3, "Adam", "buf-mia", "TOTAL", "", "", "OVER", new(45.5), -110),
+			gs, nil,
+		)
+		assert.Equal(t, 75, normalVig.Score)
+		assert.Empty(t, normalVig.Factors)
+
+		// Tier 3 consensus price edge awards +4.
+		tier3Edge := analyzer.ScoreLeg(
+			leg(4, "Adam", "buf-mia", "ML", "MIA", "", "TEAM", nil, +125),
+			gs, nil,
+		)
+		assert.Equal(t, 79, tier3Edge.Score)
+		require.Len(t, tier3Edge.Factors, 1)
+		assert.Equal(t, "sharp_price_edge", tier3Edge.Factors[0].Rule)
+		assert.Equal(t, 4, tier3Edge.Factors[0].Delta)
+		assertFriendlyTone(t, tier3Edge.Factors[0].Detail)
+	})
+
+	t.Run("linePriceMax 15 clamps nfelo_cushion plus sharp_line_edge", func(t *testing.T) {
+		t.Parallel()
+		gs := sharpGames(
+			map[analyzer.SharpKey]analyzer.SharpQuote{
+				{MarketType: "SPREAD", Team: "BUF", Side: "TEAM"}: {
+					Line: new(-3.5), FairProb: 0.5, FairAmerican: -100, Source: "Pinnacle", Tier: 1,
+				},
+			},
+			// Home is MIA; HomeSpread +5.5 means BUF model spread is -5.5 (cushion = -2.5 - (-5.5) = +3.0 >= 2).
+			&analyzer.Nfelo{HomeSpread: 5.5},
+		)
+
+		got := analyzer.ScoreLeg(
+			leg(1, "Adam", "buf-mia", "SPREAD", "BUF", "", "TEAM", new(-2.5), -110),
+			gs, nil,
+		)
+		// nfelo_cushion (+8) + sharp_line_edge (+8) = +16, clamped to LinePriceMax (+15) -> 75 + 15 = 90.
+		assert.Equal(t, 90, got.Score)
+		require.Len(t, got.Factors, 2)
+		assert.Equal(t, "nfelo_cushion", got.Factors[0].Rule)
+		assert.Equal(t, 8, got.Factors[0].Delta)
+		assert.Equal(t, "sharp_line_edge", got.Factors[1].Rule)
+		assert.Equal(t, 7, got.Factors[1].Delta)
+	})
+
+	t.Run("GradeRubric registers all sharp factors with friendly tone", func(t *testing.T) {
+		t.Parallel()
+		doc := analyzer.GradeRubric()
+		byRule := make(map[string]analyzer.FactorDoc, len(doc.LegFactors))
+		for _, f := range doc.LegFactors {
+			byRule[f.Rule] = f
+		}
+		for _, id := range []string{"sharp_line_edge", "sharp_line_fade", "sharp_price_edge", "sharp_price_fade"} {
+			f, ok := byRule[id]
+			require.True(t, ok, "missing GradeRubric factor %s", id)
+			assert.Equal(t, "Line & Price", f.Category)
+			assert.NotEmpty(t, f.Label)
+			assert.NotEmpty(t, f.Delta)
+			assert.NotEmpty(t, f.Description)
+			assertFriendlyTone(t, f.Label)
+			assertFriendlyTone(t, f.Description)
+		}
 	})
 }

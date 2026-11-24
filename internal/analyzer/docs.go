@@ -356,6 +356,34 @@ func GradeRubricFor(r Rubric) RubricDoc {
 					formatSignedDelta(r.ChalkMax),
 				),
 			},
+			{
+				Rule:        ruleSharpLineEdge,
+				Category:    "Line & Price",
+				Label:       "Sharp line edge",
+				Delta:       "+8 (+5 consensus)",
+				Description: "Line beats sharp bookmakers by at least 0.5 points (or 2.0 yards/attempts on volume props).",
+			},
+			{
+				Rule:        ruleSharpLineFade,
+				Category:    "Line & Price",
+				Label:       "Sharp line fade",
+				Delta:       "-8 (-5 consensus)",
+				Description: "Line trails sharp bookmakers by at least 0.5 points (or 2.0 yards/attempts on volume props).",
+			},
+			{
+				Rule:        ruleSharpPriceEdge,
+				Category:    "Line & Price",
+				Label:       "Sharp price edge",
+				Delta:       "+6 (+4 consensus)",
+				Description: "Retail odds pay at least 2.5 percentage points better than sharp de-vigged fair price on the same line.",
+			},
+			{
+				Rule:        ruleSharpPriceFade,
+				Category:    "Line & Price",
+				Label:       "Steep price vs. sharp",
+				Delta:       "-6 (-4 consensus)",
+				Description: "Retail odds carry at least 4.5 percentage points more juice than sharp de-vigged fair price on the same line.",
+			},
 		},
 		SlipFactors: []FactorDoc{
 			{
