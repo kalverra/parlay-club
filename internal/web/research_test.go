@@ -378,7 +378,7 @@ func TestResearchPlayerHandler(t *testing.T) {
 	handler.ServeHTTP(recLeg, reqLeg)
 	assert.Equal(t, http.StatusOK, recLeg.Code)
 	bodyLeg := recLeg.Body.String()
-	assert.Contains(t, bodyLeg, "Target: <span class=\"font-semibold text-slate-200\">270</span>")
+	assert.Contains(t, bodyLeg, `Target: <span class="font-mono font-semibold tabular-nums text-ink">270</span>`)
 
 	// 4. Test comparison line resolved from latest prop in odds
 	oddsFetched := time.Date(2026, time.November, 9, 14, 0, 0, 0, time.UTC)
@@ -407,7 +407,7 @@ func TestResearchPlayerHandler(t *testing.T) {
 	handler.ServeHTTP(recOdds, reqOdds)
 	assert.Equal(t, http.StatusOK, recOdds.Code)
 	bodyOdds := recOdds.Body.String()
-	assert.Contains(t, bodyOdds, "Target: <span class=\"font-semibold text-slate-200\">245.5</span>")
+	assert.Contains(t, bodyOdds, `Target: <span class="font-mono font-semibold tabular-nums text-ink">245.5</span>`)
 }
 
 func TestResearchMatchesHandler(t *testing.T) {
@@ -1072,7 +1072,7 @@ func TestResearchPlayerMarketTabResolvesOwnLine(t *testing.T) {
 	handler.ServeHTTP(recPass, reqPass)
 	require.Equal(t, http.StatusOK, recPass.Code)
 	passBody := recPass.Body.String()
-	assert.Contains(t, passBody, `Target: <span class="font-semibold text-slate-200">245.5</span>`)
+	assert.Contains(t, passBody, `Target: <span class="font-mono font-semibold tabular-nums text-ink">245.5</span>`)
 	assert.Contains(t, passBody, `href="/research/players/3918298?market=RUSH_YDS"`)
 	assert.NotContains(t, passBody, `market=RUSH_YDS&amp;line=`)
 	assert.NotContains(t, passBody, `market=RUSH_YDS&line=`)
@@ -1084,7 +1084,11 @@ func TestResearchPlayerMarketTabResolvesOwnLine(t *testing.T) {
 	recRush := httptest.NewRecorder()
 	handler.ServeHTTP(recRush, reqRush)
 	require.Equal(t, http.StatusOK, recRush.Code)
-	assert.Contains(t, recRush.Body.String(), `Target: <span class="font-semibold text-slate-200">42.5</span>`)
+	assert.Contains(
+		t,
+		recRush.Body.String(),
+		`Target: <span class="font-mono font-semibold tabular-nums text-ink">42.5</span>`,
+	)
 
 	// Explicit ?line= still overrides.
 	reqOverride := httptest.NewRequestWithContext(
@@ -1093,7 +1097,11 @@ func TestResearchPlayerMarketTabResolvesOwnLine(t *testing.T) {
 	recOverride := httptest.NewRecorder()
 	handler.ServeHTTP(recOverride, reqOverride)
 	require.Equal(t, http.StatusOK, recOverride.Code)
-	assert.Contains(t, recOverride.Body.String(), `Target: <span class="font-semibold text-slate-200">50.5</span>`)
+	assert.Contains(
+		t,
+		recOverride.Body.String(),
+		`Target: <span class="font-mono font-semibold tabular-nums text-ink">50.5</span>`,
+	)
 }
 
 func TestResearchPlayerRichChartsAndMatchupContext(t *testing.T) {
@@ -1253,8 +1261,8 @@ func TestResearchPlayerRichChartsAndMatchupContext(t *testing.T) {
 	// Injury badge & phone-first matchup strip.
 	assert.Contains(t, body, "Questionable")
 	assert.Contains(t, body, "vs MIA")
-	assert.Contains(t, body, "Spread <span class=\"font-semibold text-slate-100\">-3.5</span>")
-	assert.Contains(t, body, "O/U <span class=\"font-semibold text-slate-100\">48.5</span>")
+	assert.Contains(t, body, `Spread <span class="font-mono font-semibold tabular-nums text-ink">-3.5</span>`)
+	assert.Contains(t, body, `O/U <span class="font-mono font-semibold tabular-nums text-ink">48.5</span>`)
 	assert.Contains(t, body, "42°F · 14 mph")
 
 	// Hit-rate & L5 range tiles.
@@ -1276,7 +1284,7 @@ func TestResearchPlayerRichChartsAndMatchupContext(t *testing.T) {
 	assert.Contains(t, body, "0.62")
 
 	// Dotted O/U reference line appears on both charts (player L5 + opp defense L5).
-	assert.Equal(t, 2, strings.Count(body, "border-dashed border-amber-300/80"))
+	assert.Equal(t, 2, strings.Count(body, "border-dashed border-warning"))
 	assert.Equal(t, 2, strings.Count(body, "O/U 74.5"))
 
 	// Player L5 bar opponent labels and defense-rank badges.

@@ -3,7 +3,7 @@
   <div class="flex items-center justify-between">
     <h1 class="text-xl font-semibold">Research</h1>
     {{if .WeekLabel}}
-      <span class="text-xs font-medium text-slate-400">{{.WeekLabel}}</span>
+      <span class="text-xs font-medium text-page-muted">{{.WeekLabel}}</span>
     {{end}}
   </div>
 
@@ -11,10 +11,10 @@
     <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
       <!-- Game selector -->
       <div>
-        <label for="research-game" class="block text-xs font-medium text-slate-400 mb-1">Game</label>
+        <label for="research-game" class="block text-xs font-medium text-page-muted mb-1">Game</label>
         <select
           id="research-game"
-          class="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-100"
+          class="w-full rounded-lg border border-line-strong bg-surface px-3 py-2 text-sm text-ink focus:border-accent focus:outline-none"
           onchange="if(this.value){window.location.href='/research?game_id='+encodeURIComponent(this.value)}"
         >
           <option value="">Select a game...</option>
@@ -26,10 +26,10 @@
 
       <!-- Player selector -->
       <div>
-        <label for="research-player" class="block text-xs font-medium text-slate-400 mb-1">Player</label>
+        <label for="research-player" class="block text-xs font-medium text-page-muted mb-1">Player</label>
         <select
           id="research-player"
-          class="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-100"
+          class="w-full rounded-lg border border-line-strong bg-surface px-3 py-2 text-sm text-ink focus:border-accent focus:outline-none"
           onchange="if(this.value){window.location.href='/research?player_id='+encodeURIComponent(this.value)}"
         >
           <option value="">Select a player...</option>
@@ -49,7 +49,7 @@
     {{else if .PlayerResearch}}
       {{template "research-player" .PlayerResearch}}
     {{else}}
-      <p class="rounded-xl border border-dashed border-slate-700 bg-slate-900 p-4 text-sm text-slate-400">
+      <p class="ui-card border-dashed p-4 text-sm text-ink-muted">
         Player and game research shows up here.
       </p>
     {{end}}
