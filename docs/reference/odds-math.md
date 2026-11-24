@@ -95,13 +95,9 @@ stake + stake × (D − 1) × (1 + boost/100)
 
 ### Implied probability
 
-`ImpliedProb` converts an American price `a` to its raw implied probability using `AmericanToDecimal(a)`:
-
-```text
-p = 1 / AmericanToDecimal(a)
-```
-
-An invalid price of `0` returns `0`.
+`DecimalImpliedProb(decimal float64)` returns the raw implied probability (`1 / decimal`) for decimal odds greater than
+`1`, or `0` for non-betting values (`decimal <= 1`, `NaN`, or `Inf`). `ImpliedProb(american int)` delegates to
+`DecimalImpliedProb(AmericanToDecimal(american))`, returning `0` for an invalid price of `0`.
 
 | American | Implied probability |
 | -------- | ------------------- |
@@ -109,6 +105,22 @@ An invalid price of `0` returns `0`.
 | `+100`   | `0.5000`            |
 | `+150`   | `0.4000`            |
 | `-200`   | `0.6667…` (`2/3`)   |
+
+For parlays, `DecimalImpliedProb(CombinedOdds(legs))` yields `1 / combined` (the product of counting legs' raw implied
+probabilities) and returns `0` when no legs count (`CombinedOdds` returns `1`).
+
+### Implied chance display
+
+`internal/web` formats raw implied probabilities with `formatImpliedChance` as compact percentages beside American and
+parlay odds:
+
+| Condition (`pct = prob × 100`)     | Output    | Examples                          |
+| ---------------------------------- | --------- | --------------------------------- |
+| `prob <= 0`, `>= 1`, `NaN`, `Inf`  | `""`      | Empty or all-voided slip (omitted) |
+| `pct < 0.1`                        | `"<0.1%"` | `+200000` long-shot parlay        |
+| `round(pct × 10) < 100`            | `"%.1f%"` | `+1200` → `"7.7%"` (`9.96%` → `"10%"`) |
+| `round(pct) >= 100`                | `">99%"`  | `-50000` extreme heavy favorite   |
+| Otherwise (`10` to `99`)           | `"%.0f%"` | `-110` → `"52%"`, `+150` → `"40%"` |
 
 ### Two-way de-vigging
 
@@ -139,17 +151,20 @@ shading. Invalid inputs (`retailAmerican == 0` or `fairProb` outside `(0, 1)`) r
 
 ## Where it shows up
 
-The Slip tab uses reference odds and `Payout` for its payout calculator. Quick-add pills prefill the user's home-book
-price, or the median across all books when the user has no home book or no price there. The record book uses the same
-profit term, `stake × (D − 1) × (1 + boost/100)`, for dollar P/L on slips where a person logged a wager.
+The Slip tab uses reference odds and `Payout` for its payout calculator, and displays `formatImpliedChance` (via
+`ImpliedProb` and `DecimalImpliedProb`) on leg rows, payout combined/reference odds, and A-grade highlights. Quick-add
+pills prefill the user's home-book price, or the median across all books when the user has no home book or no price
+there. The record book uses the same profit term, `stake × (D − 1) × (1 + boost/100)`, for dollar P/L on slips where
+a person logged a wager.
 
 ## API
 
-| Function                                                    | Returns                                                 |
-| ----------------------------------------------------------- | ------------------------------------------------------- |
-| `AmericanToDecimal(american int) float64`                   | Decimal price, or `0` for an invalid price.             |
-| `DecimalToAmerican(decimal float64) int`                    | Rounded American price, or `0` for `d ≤ 1`.             |
-| `ImpliedProb(american int) float64`                         | Raw implied probability in `(0, 1)`, or `0` for `0`.    |
+| Function                                                    | Returns                                                         |
+| ----------------------------------------------------------- | --------------------------------------------------------------- |
+| `AmericanToDecimal(american int) float64`                   | Decimal price, or `0` for an invalid price.                     |
+| `DecimalToAmerican(decimal float64) int`                    | Rounded American price, or `0` for `d ≤ 1`.                     |
+| `DecimalImpliedProb(decimal float64) float64`               | Raw implied probability in `(0, 1)`, or `0` for `d ≤ 1`, `NaN`, or `Inf`. |
+| `ImpliedProb(american int) float64`                         | Raw implied probability in `(0, 1)`, or `0` for `0`.            |
 | `DevigTwoWay(priceA, priceB int) (float64, float64, bool)`  | Fair probabilities `(probA, probB)` and `ok`.           |
 | `PriceEdge(retailAmerican int, fairProb float64) float64`   | `fairProb - ImpliedProb(retailAmerican)`, or `0`.       |
 | `CombinedOdds(legs []Leg) float64`                          | Product of counting leg decimals, or `1`.               |
