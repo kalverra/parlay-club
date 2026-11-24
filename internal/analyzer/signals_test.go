@@ -833,3 +833,122 @@ func TestLoadSlipSignalsPopulatesSharpBenchmarks(t *testing.T) {
 	assert.Empty(t, emptyGames)
 	assert.Nil(t, emptyStats)
 }
+
+func TestLoadBoardSignals(t *testing.T) {
+	t.Parallel()
+
+	store := openSignalTestStore(t)
+	now := time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC)
+
+	week, err := store.UpsertWeek(t.Context(), 2026, nflverse.SeasonTypeRegular, 6)
+	require.NoError(t, err)
+
+	summaryJSON := `[{
+		"team": {"id": "2", "displayName": "Buffalo Bills", "abbreviation": "BUF"},
+		"injuries": [{
+			"status": "Out",
+			"athlete": {"id": "101", "fullName": "Keon Coleman", "position": {"abbreviation": "WR"}},
+			"details": {"type": "Wrist", "detail": "Out"}
+		}]
+	}]`
+	g1, err := store.UpsertGame(t.Context(), db.Game{
+		ID:       "g1",
+		WeekID:   week.ID,
+		HomeTeam: "BUF",
+		AwayTeam: "MIA",
+		Kickoff:  now.Add(48 * time.Hour),
+		Status:   db.GameScheduled,
+	})
+	require.NoError(t, err)
+	g1.InjuriesJSON = &summaryJSON
+
+	_, err = store.UpsertNfeloGames(t.Context(), []db.NfeloGame{
+		{GameID: "g1", HomeSpread: -5.5, HomeWinProb: 0.68, UpdatedAt: now},
+	})
+	require.NoError(t, err)
+	_, err = store.UpsertNFLverseTeamWeeks(t.Context(), []db.NFLverseTeamWeek{
+		{
+			Season:     2026,
+			SeasonType: nflverse.SeasonTypeRegular,
+			WeekNum:    5,
+			Team:       "BUF",
+			OffPassEPA: 0.22,
+			UpdatedAt:  now,
+		},
+		{
+			Season:            2026,
+			SeasonType:        nflverse.SeasonTypeRegular,
+			WeekNum:           5,
+			Team:              "MIA",
+			DefPassEPAAllowed: 0.24,
+			UpdatedAt:         now,
+		},
+	})
+	require.NoError(t, err)
+	_, err = store.UpsertNFLversePlayerWeeks(t.Context(), []db.NFLversePlayerWeek{
+		{
+			ESPNID: "p1", Season: 2026, SeasonType: nflverse.SeasonTypeRegular,
+			WeekNum: 5, Team: "BUF", OffensePct: 0.90, TargetShare: 0.28, WOPR: 0.62, UpdatedAt: now,
+		},
+		{
+			ESPNID: "p1", Season: 2026, SeasonType: nflverse.SeasonTypeRegular,
+			WeekNum: 4, Team: "BUF", OffensePct: 0.85, TargetShare: 0.24, WOPR: 0.55, UpdatedAt: now,
+		},
+		{
+			ESPNID: "p1", Season: 2026, SeasonType: nflverse.SeasonTypeRegular,
+			WeekNum: 3, Team: "BUF", OffensePct: 0.80, TargetShare: 0.22, WOPR: 0.51, UpdatedAt: now,
+		},
+	})
+	require.NoError(t, err)
+	require.NoError(t, store.UpsertRosterPlayers(t.Context(), []db.RosterPlayer{
+		{
+			AthleteID: "p1", Team: "BUF", ESPNTeamID: "2",
+			FullName: "Khalil Shakir", NormName: "khalil shakir", Position: "WR",
+			UpdatedAt: now,
+		},
+	}))
+	require.NoError(t, store.UpsertPlayerGameLog(t.Context(), db.PlayerGameLog{
+		AthleteID:   "p1",
+		GamesPlayed: 3,
+		StatsJSON:   `{"REC_YDS":[82,74,61]}`,
+		UpdatedAt:   now,
+	}))
+	_, err = store.UpsertOdds(t.Context(), []db.Odds{
+		{
+			GameID: g1.ID, Book: "lowvig", MarketType: "SPREAD", Team: "BUF", Side: "TEAM",
+			Line: new(-3.5), Price: -110, FetchedAt: now,
+		},
+		{
+			GameID: g1.ID, Book: "lowvig", MarketType: "SPREAD", Team: "MIA", Side: "TEAM",
+			Line: new(3.5), Price: -110, FetchedAt: now,
+		},
+	})
+	require.NoError(t, err)
+	require.NoError(t, store.RecordSync(t.Context(), analyzer.NfeloSource, now.Add(-12*time.Hour), nil))
+	require.NoError(t, store.RecordSync(t.Context(), analyzer.NFLverseSource(2026), now.Add(-24*time.Hour), nil))
+
+	// Duplicate and empty playerIDs should be deduplicated and ignored cleanly.
+	gamesByID, stats := analyzer.LoadBoardSignals(
+		t.Context(), store, now, week.ID, []db.Game{g1}, []string{"", "p1", "p1", "unknown"},
+	)
+	require.Contains(t, gamesByID, "g1")
+	require.NotNil(t, gamesByID["g1"].Nfelo)
+	assert.InDelta(t, -5.5, gamesByID["g1"].Nfelo.HomeSpread, 1e-9)
+	assert.NotNil(t, gamesByID["g1"].HomeEPA)
+	assert.NotNil(t, gamesByID["g1"].AwayEPA)
+	require.Len(t, gamesByID["g1"].Injuries["BUF"], 1)
+	assert.Contains(t, gamesByID["g1"].Sharp, analyzer.SharpKey{MarketType: "SPREAD", Team: "BUF", Side: "TEAM"})
+
+	require.Contains(t, stats, "p1")
+	assert.NotContains(t, stats, "unknown")
+	assert.NotContains(t, stats, "")
+	assert.Equal(t, "WR", stats["p1"].Position)
+	assert.Equal(t, []float64{82, 74, 61}, stats["p1"].Games["REC_YDS"])
+	require.NotNil(t, stats["p1"].Usage)
+	assert.InDelta(t, 0.56, stats["p1"].Usage.Last3WOPR, 1e-9)
+
+	// Empty inputs fail soft.
+	emptyGames, emptyStats := analyzer.LoadBoardSignals(t.Context(), store, now, week.ID, nil, nil)
+	assert.Empty(t, emptyGames)
+	assert.Nil(t, emptyStats)
+}

@@ -181,7 +181,7 @@ Complexity: medium (requires batched board-wide signal loading, bounded combinat
 and deterministic deduplication) Risk: low (pure package additions with unit tests and benchmarks; no UI or route
 changes yet)
 
-- [ ] Add `LoadBoardSignals` to `internal/analyzer/signals.go` (sharing internal helpers with `LoadSlipSignals`) with
+- [x] Add `LoadBoardSignals` to `internal/analyzer/signals.go` (sharing internal helpers with `LoadSlipSignals`) with
       tests in `internal/analyzer/signals_test.go`.
 - [ ] Implement `RowToAnalyzerLeg`, `LegHighlight`, `ParlayHighlight`, and `SelectHighlights` in
       `internal/board/highlights.go` with unit tests and a full-slate benchmark in `internal/board/highlights_test.go`.
