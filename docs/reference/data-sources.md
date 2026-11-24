@@ -93,8 +93,10 @@ With no params it returns the current week. For a specific week: `?seasontype={2
   `https://site.web.api.espn.com/apis/common/v3/sports/football/nfl`).
 - The parser matches header names dynamically (`names` and category-scoped `labels`, never positional indices).
 - Walks regular-season and postseason event rows for the current season, most recent first.
-- Counts `GamesPlayed` and populates `Markets map[string][]float64` for `PASS_YDS`, `PASS_TDS`, `RUSH_YDS`, `RUSH_ATT`,
-  `REC_YDS`, `RECEPTIONS`, `ANYTIME_TD` (rushing + receiving + return TDs), and `KICKER_PTS` (`FG made * 3 + XP made`).
+- Counts `GamesPlayed`, populates `Markets map[string][]float64` for `PASS_YDS`, `PASS_TDS`, `RUSH_YDS`, `RUSH_ATT`,
+  `REC_YDS`, `RECEPTIONS`, `ANYTIME_TD` (rushing + receiving + return TDs), and `KICKER_PTS` (`FG made * 3 + XP made`),
+  and decodes the top-level `events` map into `Entries []GameLogEntry` (`EventID`, `Week`, `Opponent`, `AtVs`,
+  `Result`, `Score`) aligned 1:1 with `Markets` and persisted in `player_gamelogs.games_json`.
 
 ## Open-Meteo (free, no auth)
 
@@ -370,7 +372,7 @@ missing required column or non-numeric cell is an error.
 | --- | --- | --- |
 | `Players(ctx)` | `GET /players/players.csv` | Maps `gsis_id`, `pfr_id`, and `espn_id` (plus `display_name`, `latest_team`, `position`); skips rows missing `gsis_id` or `espn_id`. |
 | `TeamStats(ctx, season)` | `GET /stats_team/stats_team_week_{season}.csv` | Reads `season`, `week`, `season_type`, `team`, `opponent_team`, `passing_epa`, `rushing_epa`, `attempts`, `carries`, `passing_yards`, `rushing_yards`, and joins each game's opponent row onto `OppPassingEPA`, `OppRushingEPA`, `OppAttempts`, `OppCarries`, `OppPassingYards`, and `OppRushingYards`. |
-| `PlayerStats(ctx, season)` | `GET /stats_player/stats_player_week_{season}.csv` | Reads `player_id` (GSIS ID), `team`, `season`, `week`, `season_type`, `target_share`, `air_yards_share`, `wopr`, `passing_epa`, `rushing_epa`, `receiving_epa`, `targets`, `carries`, `receptions`, and yard/TD counts; skips rows missing identity cells and defaults blank/`NA` optional stat cells to `0`. |
+| `PlayerStats(ctx, season)` | `GET /stats_player/stats_player_week_{season}.csv` | Reads `player_id` (GSIS ID), `player_display_name` (falling back to `player_name`), `position` (`FB`/`HB` normalized to `RB`), `team`, `opponent_team` (mapped via `mapTeam`), `season`, `week`, `season_type`, `target_share`, `air_yards_share`, `wopr`, `passing_epa`, `rushing_epa`, `receiving_epa`, `targets`, `carries`, `attempts`, `receptions`, yard/TD counts (`passing_*`, `rushing_*`, `receiving_*`), `fg_made`, and `pat_made` (stored as `kicker_pts = 3*fg_made + pat_made`); skips rows missing identity cells and defaults blank/`NA` optional stat cells to `0`. |
 | `SnapCounts(ctx, season)` | `GET /snap_counts/snap_counts_{season}.csv` | Reads `pfr_player_id`, `player`, `team`, `season`, `game_type` (`REG`, `POST`, `WC`, `DIV`, `CON`, `SB`, `PRE`), `week`, `offense_snaps`, and `offense_pct`. |
 
 - Season types normalize to ESPN integers: `PRE` → `1`, `REG` → `2`, and `POST`/`WC`/`DIV`/`CON`/`SB` → `3`.
