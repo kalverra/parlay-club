@@ -281,6 +281,103 @@ func (s *Service) AddLeg(ctx context.Context, actorID int64, leg db.Leg) (db.Leg
 	return created, nil
 }
 
+// AddLegs atomically adds a batch of picks for the acting member. It requires
+// the slip to be OPEN and the member unlocked, skips selections already on the
+// member's slip (and duplicates within the batch), checks remaining capacity,
+// validates kickoff/scope for each new leg, and publishes one slip-updated
+// notification if any legs were inserted.
+func (s *Service) AddLegs(
+	ctx context.Context,
+	actorID, slipID int64,
+	legs []db.Leg,
+) ([]db.Leg, error) {
+	if len(legs) == 0 {
+		return nil, nil
+	}
+	now := s.now()
+	var created []db.Leg
+	err := s.store.Tx(ctx, func(tx *db.Store) error {
+		slip, actor, _, err := loadSlip(ctx, tx, slipID, actorID)
+		if err != nil {
+			return err
+		}
+		if slip.Status != db.SlipOpen {
+			return ErrSlipNotOpen
+		}
+		if actor.LockedAt != nil {
+			return ErrLockedIn
+		}
+
+		existing, err := tx.LegsForSlip(ctx, slipID)
+		if err != nil {
+			return err
+		}
+		var mine []db.Leg
+		for _, leg := range existing {
+			if leg.UserID == actorID {
+				mine = append(mine, leg)
+			}
+		}
+
+		toInsert := make([]db.Leg, 0, len(legs))
+		for _, candidate := range legs {
+			if hasSameLegPick(mine, candidate) || hasSameLegPick(toInsert, candidate) {
+				continue
+			}
+			toInsert = append(toInsert, candidate)
+		}
+		if len(toInsert) == 0 {
+			return nil
+		}
+		if len(mine)+len(toInsert) > slip.LegsPerMember {
+			return ErrLegLimit
+		}
+
+		created = make([]db.Leg, 0, len(toInsert))
+		for _, leg := range toInsert {
+			if err := checkKickoff(ctx, tx, slip, leg.GameID, now); err != nil {
+				return err
+			}
+			leg.SlipID = slipID
+			leg.UserID = actorID
+			inserted, err := tx.CreateLeg(ctx, leg)
+			if err != nil {
+				return err
+			}
+			created = append(created, inserted)
+			if _, err := tx.AddActivity(ctx, slipID, &actorID,
+				fmt.Sprintf("%s added %s", actor.User.Name, inserted.Selection)); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("add legs to slip %d: %w", slipID, err)
+	}
+	if len(created) > 0 {
+		s.notify(slipID)
+	}
+	return created, nil
+}
+
+func hasSameLegPick(existing []db.Leg, candidate db.Leg) bool {
+	for _, leg := range existing {
+		if sameLegPick(leg, candidate) {
+			return true
+		}
+	}
+	return false
+}
+
+func sameLegPick(a, b db.Leg) bool {
+	if db.StringValue(a.GameID) != "" || db.StringValue(b.GameID) != "" {
+		return db.SameSelection(db.LegSelection(a), db.LegSelection(b))
+	}
+	return a.MarketType == b.MarketType &&
+		strings.EqualFold(strings.TrimSpace(a.Selection), strings.TrimSpace(b.Selection))
+}
+
 // SetLegResult records one leg's result by hand. Any slip member can grade any
 // leg, including one that was already graded. The leg records the acting member
 // as its grader, the slip's result and status are recomputed from every leg,

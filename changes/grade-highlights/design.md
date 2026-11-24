@@ -192,7 +192,7 @@ Complexity: medium (wires board highlights into the hub render path and adds tra
 capacity validation and SSE updates) Risk: low (additive UI strip that fails soft when empty and reuses slip
 lock/capacity invariants)
 
-- [ ] Add `POST /slips/{id}/legs/batch` in `internal/web/slips.go` and `internal/web/routes.go` for atomic combo
+- [x] Add `POST /slips/{id}/legs/batch` in `internal/web/slips.go` and `internal/web/routes.go` for atomic combo
       insertion with capacity/duplicate checks and `slip-updated` broadcast, plus handler tests in
       `internal/web/slips_test.go`.
 - [ ] Wire `LoadBoardSignals` and `board.SelectHighlights` into the hub render path (`internal/web/slips.go` +

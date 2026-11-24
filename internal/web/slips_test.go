@@ -1335,3 +1335,201 @@ func TestSlipPanelRendersGradedByAndNeedsGradingAmberChip(t *testing.T) {
 	assert.NotContains(t, overrideBody, "Needs grading")
 	assert.NotContains(t, overrideBody, "border-amber-700 bg-amber-950 text-amber-300")
 }
+
+func TestAddLegsBatchInsertsAtomicallyAndPublishesSlipUpdated(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	game := addGame(t, fixture, gameKickoff())
+	server := httptest.NewServer(fixture.handler)
+	t.Cleanup(server.Close)
+
+	eventsURL := fmt.Sprintf("%s/slips/%d/events", server.URL, fixture.slip.ID)
+	streamReq, err := http.NewRequestWithContext(t.Context(), http.MethodGet, eventsURL, nil)
+	require.NoError(t, err)
+	streamResp, err := server.Client().Do(streamReq)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, streamResp.StatusCode)
+	t.Cleanup(func() { assert.NoError(t, streamResp.Body.Close()) })
+
+	form := url.Values{
+		"legs[0][game_id]":     {game.ID},
+		"legs[0][market_type]": {"PASS_YDS"},
+		"legs[0][team]":        {"BUF"},
+		"legs[0][player_name]": {"Josh Allen"},
+		"legs[0][side]":        {"OVER"},
+		"legs[0][line]":        {"245.5"},
+		"legs[0][odds]":        {"-110"},
+		"legs[1][game_id]":     {game.ID},
+		"legs[1][market_type]": {"TOTAL"},
+		"legs[1][side]":        {"OVER"},
+		"legs[1][line]":        {"47.5"},
+		"legs[1][odds]":        {"-105"},
+	}
+	req, err := http.NewRequestWithContext(
+		t.Context(),
+		http.MethodPost,
+		fmt.Sprintf("%s/slips/%d/legs/batch", server.URL, fixture.slip.ID),
+		strings.NewReader(form.Encode()),
+	)
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Hx-Request", "true")
+
+	resp, err := server.Client().Do(req)
+	require.NoError(t, err)
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+
+	assert.Equal(t, "slip-updated", resp.Header.Get("Hx-Trigger"))
+	assert.Contains(t, string(body), "Josh Allen")
+	assert.Contains(t, string(body), "Over 47.5")
+
+	legs, err := fixture.store.LegsForSlip(t.Context(), fixture.slip.ID)
+	require.NoError(t, err)
+	require.Len(t, legs, 2)
+
+	assert.Equal(t, "slip-updated", waitForEvent(t, streamResp.Body))
+}
+
+func TestAddLegsBatchSkipsDuplicatesAndChecksCapacity(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	game := addGame(t, fixture, gameKickoff())
+
+	// Seed 1 existing leg on the viewer's slip (1 of 2 slots used).
+	first := postForm(t, fixture.handler, fmt.Sprintf("/slips/%d/legs", fixture.slip.ID), url.Values{
+		"game_id":     {game.ID},
+		"market_type": {"ML"},
+		"team":        {"BUF"},
+		"side":        {"TEAM"},
+		"odds":        {"-110"},
+	})
+	require.Equal(t, http.StatusOK, first.Code, first.Body.String())
+
+	// Over-capacity: 2 new legs when only 1 slot remains -> 422, 0 legs added.
+	overCap := postForm(t, fixture.handler, fmt.Sprintf("/slips/%d/legs/batch", fixture.slip.ID), url.Values{
+		"legs[0][game_id]":     {game.ID},
+		"legs[0][market_type]": {"SPREAD"},
+		"legs[0][team]":        {"BUF"},
+		"legs[0][side]":        {"TEAM"},
+		"legs[0][line]":        {"-3.5"},
+		"legs[0][odds]":        {"-110"},
+		"legs[1][game_id]":     {game.ID},
+		"legs[1][market_type]": {"TOTAL"},
+		"legs[1][side]":        {"OVER"},
+		"legs[1][line]":        {"47.5"},
+		"legs[1][odds]":        {"-110"},
+	})
+	assert.Equal(t, http.StatusUnprocessableEntity, overCap.Code)
+	assert.Contains(t, overCap.Body.String(), "you've already added all your legs")
+
+	legs, err := fixture.store.LegsForSlip(t.Context(), fixture.slip.ID)
+	require.NoError(t, err)
+	require.Len(t, legs, 1, "atomic failure must not insert partial legs")
+
+	// Duplicate + 1 new leg: duplicate BUF ML is skipped, so 1 new leg fits in remaining slot.
+	withDup := postForm(t, fixture.handler, fmt.Sprintf("/slips/%d/legs/batch", fixture.slip.ID), url.Values{
+		"legs[0][game_id]":     {game.ID},
+		"legs[0][market_type]": {"ML"},
+		"legs[0][team]":        {"BUF"},
+		"legs[0][side]":        {"TEAM"},
+		"legs[0][odds]":        {"-120"},
+		"legs[1][game_id]":     {game.ID},
+		"legs[1][market_type]": {"TOTAL"},
+		"legs[1][side]":        {"OVER"},
+		"legs[1][line]":        {"47.5"},
+		"legs[1][odds]":        {"-110"},
+	})
+	require.Equal(t, http.StatusOK, withDup.Code, withDup.Body.String())
+
+	legs, err = fixture.store.LegsForSlip(t.Context(), fixture.slip.ID)
+	require.NoError(t, err)
+	require.Len(t, legs, 2)
+}
+
+func TestAddLegsBatchAtomicRollbackOnKickoffAndValidation(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	upcoming := addGame(t, fixture, gameKickoff())
+	started, err := fixture.store.UpsertGame(t.Context(), db.Game{
+		ID:         "started-batch-game",
+		WeekID:     fixture.week.ID,
+		HomeTeam:   "NE",
+		AwayTeam:   "NYJ",
+		HomeESPNID: "17",
+		AwayESPNID: "20",
+		Kickoff:    time.Now().UTC().Add(-time.Hour).Truncate(time.Second),
+		Status:     db.GameScheduled,
+		UpdatedAt:  time.Now().UTC(),
+	})
+	require.NoError(t, err)
+
+	// One valid upcoming leg + one kicked-off leg -> 422, neither inserted.
+	resp := postForm(t, fixture.handler, fmt.Sprintf("/slips/%d/legs/batch", fixture.slip.ID), url.Values{
+		"legs[0][game_id]":     {upcoming.ID},
+		"legs[0][market_type]": {"ML"},
+		"legs[0][team]":        {"BUF"},
+		"legs[0][side]":        {"TEAM"},
+		"legs[0][odds]":        {"-110"},
+		"legs[1][game_id]":     {started.ID},
+		"legs[1][market_type]": {"ML"},
+		"legs[1][team]":        {"NE"},
+		"legs[1][side]":        {"TEAM"},
+		"legs[1][odds]":        {"-110"},
+	})
+	assert.Equal(t, http.StatusUnprocessableEntity, resp.Code)
+	assert.Contains(t, resp.Body.String(), "that game already kicked off")
+
+	legs, err := fixture.store.LegsForSlip(t.Context(), fixture.slip.ID)
+	require.NoError(t, err)
+	assert.Empty(t, legs)
+
+	// Empty batch -> 422.
+	empty := postForm(t, fixture.handler, fmt.Sprintf("/slips/%d/legs/batch", fixture.slip.ID), url.Values{})
+	assert.Equal(t, http.StatusUnprocessableEntity, empty.Code)
+}
+
+func TestAddLegsBatchRefusesLockedMemberAndSupportsBoardPartial(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	game := addGame(t, fixture, gameKickoff())
+
+	// Board partial mode returns #pick-body and triggers tray-updated, slip-updated.
+	boardResp := postForm(t, fixture.handler, fmt.Sprintf("/slips/%d/legs/batch", fixture.slip.ID), url.Values{
+		"from":                 {"board"},
+		"legs[0][game_id]":     {game.ID},
+		"legs[0][market_type]": {"ML"},
+		"legs[0][team]":        {"BUF"},
+		"legs[0][side]":        {"TEAM"},
+		"legs[0][odds]":        {"-110"},
+		"legs[1][game_id]":     {game.ID},
+		"legs[1][market_type]": {"TOTAL"},
+		"legs[1][side]":        {"OVER"},
+		"legs[1][line]":        {"47.5"},
+		"legs[1][odds]":        {"-110"},
+	})
+	require.Equal(t, http.StatusOK, boardResp.Code, boardResp.Body.String())
+	assert.Equal(t, "tray-updated, slip-updated", boardResp.Header().Get("Hx-Trigger"))
+	assert.Contains(t, boardResp.Body.String(), `id="pick-body"`)
+
+	// Lock the member in; subsequent batch add is refused with 422.
+	lockResp := postForm(t, fixture.handler, fmt.Sprintf("/slips/%d/lock", fixture.slip.ID), url.Values{})
+	require.Equal(t, http.StatusOK, lockResp.Code, lockResp.Body.String())
+
+	lockedResp := postForm(t, fixture.handler, fmt.Sprintf("/slips/%d/legs/batch", fixture.slip.ID), url.Values{
+		"legs[0][game_id]":     {game.ID},
+		"legs[0][market_type]": {"SPREAD"},
+		"legs[0][team]":        {"BUF"},
+		"legs[0][side]":        {"TEAM"},
+		"legs[0][line]":        {"-3.5"},
+		"legs[0][odds]":        {"-110"},
+	})
+	assert.Equal(t, http.StatusUnprocessableEntity, lockedResp.Code)
+	assert.Contains(t, lockedResp.Body.String(), "the slip is locked")
+}

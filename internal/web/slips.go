@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -98,6 +99,7 @@ func (h *slipHandlers) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /slips/{id}/members/{userID}", h.removeMember)
 	mux.HandleFunc("PATCH /slips/{id}", h.updateSlip)
 	mux.HandleFunc("POST /slips/{id}/legs", h.addLeg)
+	mux.HandleFunc("POST /slips/{id}/legs/batch", h.addLegsBatch)
 	mux.HandleFunc("GET /legs/{id}/edit", h.editLegForm)
 	mux.HandleFunc("PUT /legs/{id}", h.updateLeg)
 	mux.HandleFunc("PUT /legs/{id}/result", h.setLegResult)
@@ -838,6 +840,48 @@ func (h *slipHandlers) addLeg(w http.ResponseWriter, r *http.Request) {
 		h.renderPartial(w, "leg-added", LegAddedView{Selection: created.Selection})
 		return
 	}
+	h.renderPanel(w, r, slip)
+}
+
+// addLegsBatch atomically adds a combo of legs from indexed form fields
+// (legs[0][...], legs[1][...], ...), skipping selections already on the
+// viewer's slip and refusing when remaining capacity is insufficient.
+func (h *slipHandlers) addLegsBatch(w http.ResponseWriter, r *http.Request) {
+	slip, user, _, ok := h.loadSlip(w, r, r.PathValue("id"))
+	if !ok {
+		return
+	}
+	legs, valid := h.legsFromBatchForm(w, r, slip.ID)
+	if !valid {
+		return
+	}
+
+	if _, err := h.deps.Slips.AddLegs(r.Context(), user.ID, slip.ID, legs); err != nil {
+		h.respondError(w, err)
+		return
+	}
+
+	switch r.PostForm.Get("from") {
+	case "board", "pick":
+		data, err := h.pickPageData(r.Context(), slip, pickQuery(r, h.deps.now()))
+		if err != nil {
+			h.serverError(w, err)
+			return
+		}
+		w.Header().Set("Hx-Trigger", "tray-updated, slip-updated")
+		h.renderPartialCtx(r.Context(), w, "pick-body", data.Body)
+		return
+	case "dock":
+		dock, err := h.pickDockData(r.Context(), slip)
+		if err != nil {
+			h.serverError(w, err)
+			return
+		}
+		w.Header().Set("Hx-Trigger", "tray-updated, board-updated, slip-updated")
+		h.renderPartial(w, "pick-dock", dock)
+		return
+	}
+	w.Header().Set("Hx-Trigger", "slip-updated")
 	h.renderPanel(w, r, slip)
 }
 
@@ -2115,13 +2159,80 @@ func (h *slipHandlers) legFromForm(w http.ResponseWriter, r *http.Request, slipI
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return db.Leg{}, false
 	}
+	return h.legFromValues(r.Context(), w, slipID, r.PostForm.Get)
+}
 
-	market := strings.ToUpper(strings.TrimSpace(r.PostForm.Get("market_type")))
+// legsFromBatchForm reads indexed legs[i][field] form entries or writes a 422
+// and returns false.
+func (h *slipHandlers) legsFromBatchForm(
+	w http.ResponseWriter,
+	r *http.Request,
+	slipID int64,
+) ([]db.Leg, bool) {
+	if err := readForm(w, r); err != nil {
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return nil, false
+	}
+	indices := parseBatchLegIndices(r.PostForm)
+	if len(indices) == 0 {
+		h.writeFormError(w, "Add a selection.")
+		return nil, false
+	}
+	legs := make([]db.Leg, 0, len(indices))
+	for _, idx := range indices {
+		prefix := fmt.Sprintf("legs[%d][", idx)
+		leg, ok := h.legFromValues(r.Context(), w, slipID, func(field string) string {
+			return r.PostForm.Get(prefix + field + "]")
+		})
+		if !ok {
+			return nil, false
+		}
+		legs = append(legs, leg)
+	}
+	return legs, true
+}
+
+func parseBatchLegIndices(values url.Values) []int {
+	seen := make(map[int]struct{})
+	for key := range values {
+		if !strings.HasPrefix(key, "legs[") {
+			continue
+		}
+		rest := key[len("legs["):]
+		closeIdx := strings.IndexByte(rest, ']')
+		if closeIdx <= 0 {
+			continue
+		}
+		fieldPart := rest[closeIdx+1:]
+		if !strings.HasPrefix(fieldPart, "[") || !strings.HasSuffix(fieldPart, "]") {
+			continue
+		}
+		idx, err := strconv.Atoi(rest[:closeIdx])
+		if err != nil || idx < 0 {
+			continue
+		}
+		seen[idx] = struct{}{}
+	}
+	indices := make([]int, 0, len(seen))
+	for idx := range seen {
+		indices = append(indices, idx)
+	}
+	slices.Sort(indices)
+	return indices
+}
+
+func (h *slipHandlers) legFromValues(
+	ctx context.Context,
+	w http.ResponseWriter,
+	slipID int64,
+	get func(string) string,
+) (db.Leg, bool) {
+	market := strings.ToUpper(strings.TrimSpace(get("market_type")))
 	if market == "" {
 		market = "OTHER"
 	}
 	odds := 0
-	if raw := strings.TrimSpace(r.PostForm.Get("odds")); raw != "" {
+	if raw := strings.TrimSpace(get("odds")); raw != "" {
 		parsed, err := strconv.Atoi(raw)
 		if err != nil {
 			h.writeFormError(w, "Odds need to be a number.")
@@ -2129,18 +2240,18 @@ func (h *slipHandlers) legFromForm(w http.ResponseWriter, r *http.Request, slipI
 		}
 		odds = parsed
 	}
-	line, ok := optionalFloat(w, r.PostForm.Get("line"))
+	line, ok := optionalFloat(w, get("line"))
 	if !ok {
 		return db.Leg{}, false
 	}
 
-	selection := strings.TrimSpace(r.PostForm.Get("selection"))
+	selection := strings.TrimSpace(get("selection"))
 	if selection == "" {
 		selection = db.BuildLegSelection(
 			market,
-			r.PostForm.Get("team"),
-			r.PostForm.Get("player_name"),
-			r.PostForm.Get("side"),
+			get("team"),
+			get("player_name"),
+			get("side"),
 			line,
 		)
 	}
@@ -2154,12 +2265,12 @@ func (h *slipHandlers) legFromForm(w http.ResponseWriter, r *http.Request, slipI
 		MarketType: market,
 		Selection:  selection,
 		Odds:       odds,
-		Team:       db.OptionalString(r.PostForm.Get("team")),
-		PlayerName: db.OptionalString(r.PostForm.Get("player_name")),
-		PlayerID:   db.OptionalString(r.PostForm.Get("player_id")),
-		Side:       db.OptionalString(strings.ToUpper(strings.TrimSpace(r.PostForm.Get("side")))),
+		Team:       db.OptionalString(get("team")),
+		PlayerName: db.OptionalString(get("player_name")),
+		PlayerID:   db.OptionalString(get("player_id")),
+		Side:       db.OptionalString(strings.ToUpper(strings.TrimSpace(get("side")))),
 		Line:       line,
-		GameID:     db.OptionalString(r.PostForm.Get("game_id")),
+		GameID:     db.OptionalString(get("game_id")),
 	}
 	if market == "ANYTIME_TD" && leg.Side == nil {
 		side := "YES"
@@ -2169,9 +2280,9 @@ func (h *slipHandlers) legFromForm(w http.ResponseWriter, r *http.Request, slipI
 	hasPlayer := leg.PlayerName != nil && *leg.PlayerName != ""
 	hasGame := leg.GameID != nil && *leg.GameID != ""
 	if (isPlayerMarket(market) || hasPlayer) && hasGame && hasPlayer && h.deps.Store != nil {
-		if game, err := h.deps.Store.GameByID(r.Context(), *leg.GameID); err == nil {
+		if game, err := h.deps.Store.GameByID(ctx, *leg.GameID); err == nil {
 			athleteID, team, err := h.deps.Store.ResolvePlayerMatch(
-				r.Context(),
+				ctx,
 				*leg.PlayerName,
 				game.HomeTeam,
 				game.AwayTeam,
