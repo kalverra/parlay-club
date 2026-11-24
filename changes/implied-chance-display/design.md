@@ -108,7 +108,7 @@ Complexity: low (pure math helper, formatting function, and mechanical view/temp
 Risk: low (read-only display addition with no persistence or payout changes, fully covered by deterministic unit and handler tests)
 
 - [x] Add `parlay.DecimalImpliedProb` in `internal/parlay` (with `ImpliedProb` delegating to it) and `formatImpliedChance` in `internal/web`, with unit tests covering standard prices, pushed/voided combined odds, and formatting boundaries (`<0.1%`, `0.1%`–`9.9%`, `10%`–`99%`, `>99%`, and empty/invalid inputs).
-- [ ] Populate and render implied percentage chances on slip hub leg rows (`LegView`), the payout calculator (`PayoutView` combined and reference odds), and A-grade highlights (`LegHighlightView` and `ParlayHighlightView`) in `internal/web/slips.go` and `web/templates/partials.html`, with handler tests verifying rendered output and empty/all-voided omission.
+- [x] Populate and render implied percentage chances on slip hub leg rows (`LegView`), the payout calculator (`PayoutView` combined and reference odds), and A-grade highlights (`LegHighlightView` and `ParlayHighlightView`) in `internal/web/slips.go` and `web/templates/partials.html`, with handler tests verifying rendered output and empty/all-voided omission.
 - [ ] Docs: update `docs/reference/odds-math.md` for `DecimalImpliedProb` and implied chance display, and update `docs/concepts/slips.md` for slip hub leg, payout, and highlight implied chances.
 
 ### Phase 2: Pick board, dock, and tray display
