@@ -159,7 +159,7 @@ and legacy scopes)
 - [x] Add migration `0017_slip_games.sql`, `SlateScopeCustom`, `ErrSlipGamesRequired`, `Slip.GameIDs` hydration,
       `CreateSlip` custom-game persistence, and `Store.UpcomingWeeks(ctx, now)` in `internal/db/slips.go` and
       `internal/db/weeks.go`, with store tests.
-- [ ] Add `slips.FilterGamesForSlip(games, slip)` in `internal/slips/next.go`, switch `NextStep`,
+- [x] Add `slips.FilterGamesForSlip(games, slip)` in `internal/slips/next.go`, switch `NextStep`,
       `internal/web/pick.go`, and `internal/web/slips.go` leg validation/pickers to use it, and add `"N Games"` scope
       badge formatting, with unit and handler tests.
 
