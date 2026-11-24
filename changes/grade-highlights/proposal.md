@@ -1,6 +1,6 @@
 ---
 slug: grade-highlights
-status: designed
+status: implementing
 created: "2026-11-23"
 accepted_by:
     - Adam Hamrick

@@ -2145,7 +2145,15 @@ func TestScoreLegSharpBenchmarks(t *testing.T) {
 		}
 
 		spreadGrade := analyzer.ScoreLegWithRubric(
-			analyzer.Leg{ID: 1, GameID: "buf-mia", Market: "SPREAD", Team: "BUF", Side: "TEAM", Line: new(-2.5), Odds: -110},
+			analyzer.Leg{
+				ID:     1,
+				GameID: "buf-mia",
+				Market: "SPREAD",
+				Team:   "BUF",
+				Side:   "TEAM",
+				Line:   new(-2.5),
+				Odds:   -110,
+			},
 			games,
 			nil,
 			custom,

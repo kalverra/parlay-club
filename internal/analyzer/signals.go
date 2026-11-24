@@ -415,11 +415,36 @@ func LoadSlipSignals(
 	games []db.Game,
 	legs []db.Leg,
 ) (map[string]Game, map[string]PlayerStats) {
+	return loadSignals(ctx, store, now, weekID, games, DistinctLegPlayerIDs(legs))
+}
+
+// LoadBoardSignals loads fresh nfelo projections, fresh nflverse team EPA/pace
+// profiles, nflverse player usage, merged team injuries, roster positions,
+// player_gamelogs, and sharp bookmaker benchmarks from stored odds for a
+// board's games and playerIDs. Missing or stale sources fail soft.
+func LoadBoardSignals(
+	ctx context.Context,
+	store *db.Store,
+	now time.Time,
+	weekID int64,
+	games []db.Game,
+	playerIDs []string,
+) (map[string]Game, map[string]PlayerStats) {
+	return loadSignals(ctx, store, now, weekID, games, distinctNonEmptyIDs(playerIDs))
+}
+
+func loadSignals(
+	ctx context.Context,
+	store *db.Store,
+	now time.Time,
+	weekID int64,
+	games []db.Game,
+	athleteIDs []string,
+) (map[string]Game, map[string]PlayerStats) {
 	nfelo := loadFreshNfelo(ctx, store, now, games)
 
 	var teamEPA map[string]*TeamDefenseProfile
 	var usageByPlayer map[string]*PlayerUsage
-	athleteIDs := DistinctLegPlayerIDs(legs)
 
 	if week, err := store.WeekByID(ctx, weekID); err == nil {
 		if profiles, fresh := LoadFreshTeamProfiles(ctx, store, now, week); fresh {
@@ -615,6 +640,22 @@ func DistinctLegPlayerIDs(legs []db.Leg) []string {
 		athleteIDs = append(athleteIDs, id)
 	}
 	return athleteIDs
+}
+
+func distinctNonEmptyIDs(ids []string) []string {
+	seen := make(map[string]struct{}, len(ids))
+	var out []string
+	for _, id := range ids {
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out
 }
 
 func distinctGameTeams(games []db.Game) []string {
