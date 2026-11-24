@@ -979,21 +979,21 @@
 
 {{define "research-game"}}
 <div class="space-y-4">
-  <div class="rounded-xl border border-slate-800 bg-slate-900 p-4">
+  <div class="ui-card p-4">
     <div class="flex min-w-0 items-center gap-2">
       {{template "matchup-logos" (dict "AwayURL" .AwayLogo "HomeURL" .HomeLogo "Size" "h-6 w-6")}}
-      <h2 class="min-w-0 truncate text-lg font-semibold">{{.GameTitle}}</h2>
+      <h2 class="min-w-0 truncate text-lg font-semibold text-ink">{{.GameTitle}}</h2>
     </div>
 
     <!-- Injuries -->
     <div class="mt-4">
-      <h3 class="text-xs font-semibold uppercase tracking-wide text-slate-400">Key Injuries</h3>
+      <h3 class="text-xs font-semibold uppercase tracking-wide text-ink-muted">Key Injuries</h3>
       <div class="mt-2 space-y-3">
         {{range .Injuries}}
-          <div class="rounded-lg border border-slate-800 bg-slate-950/40 p-3">
+          <div class="rounded-lg border border-line bg-surface-2 p-3">
             <div class="flex items-center gap-2">
               {{template "team-logo" (dict "URL" .LogoURL "Size" "h-4 w-4")}}
-              <h4 class="text-xs font-medium text-slate-300">{{.Team}}</h4>
+              <h4 class="text-xs font-medium text-ink">{{.Team}}</h4>
             </div>
             {{if .Injuries}}
               <ul class="mt-2 space-y-1.5">
@@ -1001,60 +1001,60 @@
                   <li class="flex items-center justify-between gap-2 text-xs">
                     <div class="flex min-w-0 items-center gap-2">
                       {{template "player-portrait" (dict "URL" .HeadshotURL "Initials" .Initials "Size" "h-6 w-6" "TextSize" "text-[10px]")}}
-                      <span class="shrink-0 rounded bg-slate-800 px-1.5 py-0.5 text-[10px] font-semibold text-slate-300">{{.Position}}</span>
+                      <span class="shrink-0 rounded border border-line bg-surface px-1.5 py-0.5 text-[10px] font-semibold text-ink-muted">{{.Position}}</span>
                       {{if .AthleteID}}
-                        <a href="/research?player_id={{.AthleteID}}" class="min-w-0 truncate font-medium text-slate-200 hover:text-sky-400">{{.FullName}}</a>
+                        <a href="/research?player_id={{.AthleteID}}" class="min-w-0 truncate font-medium text-ink hover:underline">{{.FullName}}</a>
                       {{else}}
-                        <span class="min-w-0 truncate font-medium text-slate-200">{{.FullName}}</span>
+                        <span class="min-w-0 truncate font-medium text-ink">{{.FullName}}</span>
                       {{end}}
                     </div>
-                    <div class="flex shrink-0 items-center gap-2 text-right text-slate-400">
-                      {{if .Detail}}<span class="text-[11px] text-slate-500">{{.Detail}}</span>{{end}}
-                      <span class="rounded px-1.5 py-0.5 text-[10px] font-medium bg-amber-950/60 text-amber-300 border border-amber-800/60">{{.Status}}</span>
+                    <div class="flex shrink-0 items-center gap-2 text-right text-ink-muted">
+                      {{if .Detail}}<span class="text-[11px] text-ink-subtle">{{.Detail}}</span>{{end}}
+                      <span class="rounded border border-warning bg-warning-soft px-1.5 py-0.5 text-[10px] font-medium text-warning-ink">{{.Status}}</span>
                     </div>
                   </li>
                 {{end}}
               </ul>
             {{else}}
-              <p class="mt-1 text-xs text-slate-500">No key injuries reported.</p>
+              <p class="mt-1 text-xs text-ink-subtle">No key injuries reported.</p>
             {{end}}
           </div>
         {{else}}
-          <p class="text-xs text-slate-500">No injury reports available.</p>
+          <p class="text-xs text-ink-subtle">No injury reports available.</p>
         {{end}}
       </div>
     </div>
 
     <!-- Player Matches -->
-    <div class="mt-6 border-t border-slate-800 pt-4">
+    <div class="mt-6 border-t border-line pt-4">
       <div class="flex items-center justify-between">
         <div>
-          <h3 class="text-xs font-semibold uppercase tracking-wide text-slate-400">Player Matches</h3>
-          <p class="text-xs text-slate-500">Resolve sportsbook prop player names to ESPN roster athletes.</p>
+          <h3 class="text-xs font-semibold uppercase tracking-wide text-ink-muted">Player Matches</h3>
+          <p class="text-xs text-ink-subtle">Resolve sportsbook prop player names to ESPN roster athletes.</p>
         </div>
       </div>
 
       {{if .Matches}}
         <div class="mt-3 space-y-2">
           {{range .Matches}}
-            <div class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-800 bg-slate-950/40 px-3 py-2 text-xs">
+            <div class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-line bg-surface-2 px-3 py-2 text-xs">
               <div class="min-w-0">
-                <span class="font-medium text-slate-200">{{.OddsName}}</span>
-                {{if .Team}}<span class="text-slate-500">({{.Team}})</span>{{end}}
+                <span class="font-medium text-ink">{{.OddsName}}</span>
+                {{if .Team}}<span class="text-ink-subtle">({{.Team}})</span>{{end}}
               </div>
               <div class="flex shrink-0 items-center gap-2">
                 {{if .Matched}}
                   {{template "player-portrait" (dict "URL" .HeadshotURL "Initials" .Initials "Size" "h-6 w-6" "TextSize" "text-[10px]")}}
-                  <span class="text-slate-400">
-                    &rarr; <a href="/research?player_id={{.ESPNAthleteID}}" class="text-sky-400 hover:underline">{{.AthleteName}} ({{.Position}})</a>
+                  <span class="text-ink-muted">
+                    &rarr; <a href="/research?player_id={{.ESPNAthleteID}}" class="font-medium text-ink underline hover:text-ink-muted">{{.AthleteName}} ({{.Position}})</a>
                   </span>
                   {{if .Manual}}
-                    <span class="rounded bg-sky-950 border border-sky-800 px-1.5 py-0.5 text-[10px] font-semibold text-sky-300">Manual</span>
+                    <span class="rounded border border-accent bg-accent-soft px-1.5 py-0.5 text-[10px] font-semibold text-ink">Manual</span>
                   {{else}}
-                    <span class="rounded bg-slate-800 px-1.5 py-0.5 text-[10px] text-slate-400">Auto</span>
+                    <span class="rounded border border-line bg-surface px-1.5 py-0.5 text-[10px] text-ink-muted">Auto</span>
                   {{end}}
                 {{else}}
-                  <span class="rounded bg-amber-950 border border-amber-800 px-1.5 py-0.5 text-[10px] font-semibold text-amber-300">Unmatched</span>
+                  <span class="rounded border border-warning bg-warning-soft px-1.5 py-0.5 text-[10px] font-semibold text-warning-ink">Unmatched</span>
                 {{end}}
               </div>
             </div>
@@ -1067,17 +1067,17 @@
           method="POST"
           hx-post="/research/matches"
           hx-target="#research-panel"
-          class="mt-4 rounded-lg border border-slate-800 bg-slate-950/60 p-3 space-y-3"
+          class="mt-4 rounded-lg border border-line bg-surface-2 p-3 space-y-3"
         >
           <input type="hidden" name="game_id" value="{{.GameID}}">
-          <p class="text-xs font-semibold text-slate-300">Manual match fix</p>
+          <p class="text-xs font-semibold text-ink">Manual match fix</p>
           <div class="grid grid-cols-1 gap-2 sm:grid-cols-3">
             <div>
-              <label for="match-odds-name" class="block text-[11px] text-slate-400 mb-1">Prop Name</label>
+              <label for="match-odds-name" class="block text-[11px] text-ink-muted mb-1">Prop Name</label>
               <select
                 id="match-odds-name"
                 name="odds_name"
-                class="w-full rounded-md border border-slate-700 bg-slate-800 px-2.5 py-1.5 text-xs text-slate-200"
+                class="w-full rounded-md border border-line-strong bg-surface px-2.5 py-1.5 text-xs text-ink"
                 required
               >
                 <option value="">Select prop player...</option>
@@ -1087,11 +1087,11 @@
               </select>
             </div>
             <div>
-              <label for="match-team" class="block text-[11px] text-slate-400 mb-1">Team</label>
+              <label for="match-team" class="block text-[11px] text-ink-muted mb-1">Team</label>
               <select
                 id="match-team"
                 name="team"
-                class="w-full rounded-md border border-slate-700 bg-slate-800 px-2.5 py-1.5 text-xs text-slate-200"
+                class="w-full rounded-md border border-line-strong bg-surface px-2.5 py-1.5 text-xs text-ink"
                 required
               >
                 {{if .AwayTeam}}<option value="{{.AwayTeam}}">{{.AwayTeam}}</option>{{end}}
@@ -1099,11 +1099,11 @@
               </select>
             </div>
             <div>
-              <label for="match-athlete" class="block text-[11px] text-slate-400 mb-1">ESPN Athlete</label>
+              <label for="match-athlete" class="block text-[11px] text-ink-muted mb-1">ESPN Athlete</label>
               <select
                 id="match-athlete"
                 name="athlete_id"
-                class="w-full rounded-md border border-slate-700 bg-slate-800 px-2.5 py-1.5 text-xs text-slate-200"
+                class="w-full rounded-md border border-line-strong bg-surface px-2.5 py-1.5 text-xs text-ink"
                 required
               >
                 <option value="">Select athlete...</option>
@@ -1115,13 +1115,13 @@
           </div>
           <button
             type="submit"
-            class="rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-sky-500"
+            class="rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-accent-ink hover:opacity-90"
           >
             Save match
           </button>
         </form>
       {{else}}
-        <p class="mt-2 text-xs text-slate-500">No prop players available for this game yet.</p>
+        <p class="mt-2 text-xs text-ink-subtle">No prop players available for this game yet.</p>
       {{end}}
     </div>
   </div>
@@ -1130,14 +1130,14 @@
 
 {{define "research-player"}}
 <div class="space-y-4">
-  <div class="rounded-xl border border-slate-800 bg-slate-900 p-4">
+  <div class="ui-card p-4">
     <!-- Header -->
     <div class="flex items-start justify-between gap-3">
       <div class="flex min-w-0 items-center gap-3">
         {{template "player-portrait" (dict "URL" .HeadshotURL "Initials" .Initials "Size" "h-12 w-12" "TextSize" "text-sm")}}
         <div class="min-w-0">
-          <h2 class="truncate text-lg font-semibold">{{.Name}}</h2>
-          <p class="mt-0.5 flex items-center gap-1.5 text-xs text-slate-400">
+          <h2 class="truncate text-lg font-semibold text-ink">{{.Name}}</h2>
+          <p class="mt-0.5 flex items-center gap-1.5 text-xs text-ink-muted">
             {{template "team-logo" (dict "URL" .TeamLogo "Size" "h-4 w-4")}}
             <span>{{if .Team}}{{.Team}}{{end}}{{if and .Team .Position}} &middot; {{end}}{{if .Position}}{{.Position}}{{end}}</span>
           </p>
@@ -1145,11 +1145,11 @@
       </div>
       <div class="flex shrink-0 items-center gap-1.5">
         {{if .InjuryStatus}}
-          <span class="rounded-full border border-rose-700/70 bg-rose-950/60 px-2.5 py-1 text-xs font-semibold text-rose-300">
+          <span class="rounded-full border border-danger bg-danger-soft px-2.5 py-1 text-xs font-semibold text-danger-ink">
             {{.InjuryStatus}}
           </span>
         {{end}}
-        <div class="rounded-full border border-slate-700 bg-slate-800 px-2.5 py-1 text-xs font-medium text-slate-300">
+        <div class="rounded-full border border-line-strong bg-surface-2 px-2.5 py-1 font-mono text-xs font-medium tabular-nums text-ink-muted">
           {{.GamesPlayed}} GP
         </div>
       </div>
@@ -1157,51 +1157,51 @@
 
     <!-- Phone-first matchup context strip -->
     {{if .Matchup}}
-      <div class="mt-3 flex flex-wrap items-center gap-x-2.5 gap-y-1 rounded-lg border border-slate-800 bg-slate-950/50 px-3 py-2 text-xs text-slate-300">
-        <div class="flex items-center gap-1.5 font-semibold text-slate-100">
+      <div class="mt-3 flex flex-wrap items-center gap-x-2.5 gap-y-1 rounded-lg border border-line bg-surface-2 px-3 py-2 text-xs text-ink-muted">
+        <div class="flex items-center gap-1.5 font-semibold text-ink">
           {{template "team-logo" (dict "URL" .Matchup.OpponentLogo "Size" "h-4 w-4")}}
           <span>{{.Matchup.OpponentLabel}}</span>
         </div>
         {{if or .Matchup.Spread .Matchup.GameTotal}}
-          <span class="text-slate-600">&middot;</span>
+          <span class="text-ink-subtle">&middot;</span>
           <span>
-            {{if .Matchup.Spread}}Spread <span class="font-semibold text-slate-100">{{.Matchup.Spread}}</span>{{end}}
+            {{if .Matchup.Spread}}Spread <span class="font-mono font-semibold tabular-nums text-ink">{{.Matchup.Spread}}</span>{{end}}
             {{if and .Matchup.Spread .Matchup.GameTotal}} &middot; {{end}}
-            {{if .Matchup.GameTotal}}O/U <span class="font-semibold text-slate-100">{{.Matchup.GameTotal}}</span>{{end}}
+            {{if .Matchup.GameTotal}}O/U <span class="font-mono font-semibold tabular-nums text-ink">{{.Matchup.GameTotal}}</span>{{end}}
           </span>
         {{end}}
         {{if .Matchup.Weather}}
-          <span class="text-slate-600">&middot;</span>
-          <span class="text-slate-400">{{.Matchup.Weather}}</span>
+          <span class="text-ink-subtle">&middot;</span>
+          <span class="text-ink-muted">{{.Matchup.Weather}}</span>
         {{end}}
       </div>
     {{end}}
 
     <!-- Callout stat, hit-rate, and range tiles -->
     <div class="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
-      <div class="rounded-lg border border-slate-800 bg-slate-950/40 p-2.5 text-center">
-        <p class="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Line</p>
-        <p class="mt-1 text-base font-bold text-slate-100">{{if .HasLine}}{{.LineStr}}{{else}}--{{end}}</p>
+      <div class="rounded-lg border border-line bg-surface-2 p-2.5 text-center">
+        <p class="text-[10px] font-semibold uppercase tracking-wide text-ink-muted">Line</p>
+        <p class="mt-1 font-mono text-base font-bold tabular-nums text-ink">{{if .HasLine}}{{.LineStr}}{{else}}--{{end}}</p>
       </div>
-      <div class="rounded-lg border border-slate-800 bg-slate-950/40 p-2.5 text-center">
-        <p class="text-[10px] font-semibold uppercase tracking-wide text-slate-400">L5 Median</p>
-        <p class="mt-1 text-base font-bold text-slate-100">{{if .L5Median}}{{.L5Median}}{{else}}--{{end}}</p>
+      <div class="rounded-lg border border-line bg-surface-2 p-2.5 text-center">
+        <p class="text-[10px] font-semibold uppercase tracking-wide text-ink-muted">L5 Median</p>
+        <p class="mt-1 font-mono text-base font-bold tabular-nums text-ink">{{if .L5Median}}{{.L5Median}}{{else}}--{{end}}</p>
       </div>
-      <div class="rounded-lg border border-slate-800 bg-slate-950/40 p-2.5 text-center">
-        <p class="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Season Mean</p>
-        <p class="mt-1 text-base font-bold text-slate-100">{{if .SeasonMean}}{{.SeasonMean}}{{else}}--{{end}}</p>
+      <div class="rounded-lg border border-line bg-surface-2 p-2.5 text-center">
+        <p class="text-[10px] font-semibold uppercase tracking-wide text-ink-muted">Season Mean</p>
+        <p class="mt-1 font-mono text-base font-bold tabular-nums text-ink">{{if .SeasonMean}}{{.SeasonMean}}{{else}}--{{end}}</p>
       </div>
-      <div class="rounded-lg border border-slate-800 bg-slate-950/40 p-2.5 text-center">
-        <p class="text-[10px] font-semibold uppercase tracking-wide text-slate-400">L5 Hit</p>
-        <p class="mt-1 text-base font-bold text-slate-100">{{if .L5HitRate}}{{.L5HitRate}}{{else}}--{{end}}</p>
+      <div class="rounded-lg border border-line bg-surface-2 p-2.5 text-center">
+        <p class="text-[10px] font-semibold uppercase tracking-wide text-ink-muted">L5 Hit</p>
+        <p class="mt-1 font-mono text-base font-bold tabular-nums text-ink">{{if .L5HitRate}}{{.L5HitRate}}{{else}}--{{end}}</p>
       </div>
-      <div class="rounded-lg border border-slate-800 bg-slate-950/40 p-2.5 text-center">
-        <p class="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Season Hit</p>
-        <p class="mt-1 text-base font-bold text-slate-100">{{if .SeasonHitRate}}{{.SeasonHitRate}}{{else}}--{{end}}</p>
+      <div class="rounded-lg border border-line bg-surface-2 p-2.5 text-center">
+        <p class="text-[10px] font-semibold uppercase tracking-wide text-ink-muted">Season Hit</p>
+        <p class="mt-1 font-mono text-base font-bold tabular-nums text-ink">{{if .SeasonHitRate}}{{.SeasonHitRate}}{{else}}--{{end}}</p>
       </div>
-      <div class="rounded-lg border border-slate-800 bg-slate-950/40 p-2.5 text-center">
-        <p class="text-[10px] font-semibold uppercase tracking-wide text-slate-400">L5 Range</p>
-        <p class="mt-1 text-base font-bold text-slate-100">{{if .L5MinMax}}{{.L5MinMax}}{{else}}--{{end}}</p>
+      <div class="rounded-lg border border-line bg-surface-2 p-2.5 text-center">
+        <p class="text-[10px] font-semibold uppercase tracking-wide text-ink-muted">L5 Range</p>
+        <p class="mt-1 font-mono text-base font-bold tabular-nums text-ink">{{if .L5MinMax}}{{.L5MinMax}}{{else}}--{{end}}</p>
       </div>
     </div>
 
@@ -1209,9 +1209,9 @@
     {{if .UsageTiles}}
       <div class="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
         {{range .UsageTiles}}
-          <div class="rounded-lg border border-slate-800 bg-slate-950/40 p-2.5 text-center">
-            <p class="text-[10px] font-semibold uppercase tracking-wide text-slate-400">{{.Label}}</p>
-            <p class="mt-1 text-base font-bold text-slate-100">{{.Value}}</p>
+          <div class="rounded-lg border border-line bg-surface-2 p-2.5 text-center">
+            <p class="text-[10px] font-semibold uppercase tracking-wide text-ink-muted">{{.Label}}</p>
+            <p class="mt-1 font-mono text-base font-bold tabular-nums text-ink">{{.Value}}</p>
           </div>
         {{end}}
       </div>
@@ -1225,7 +1225,7 @@
             href="{{.Href}}"
             hx-get="{{.Href}}"
             hx-target="#research-panel"
-            class="rounded-full px-3 py-1 text-xs font-medium {{if .Active}}bg-sky-600 text-white{{else}}border border-slate-700 bg-slate-800 text-slate-300 hover:bg-slate-700{{end}}"
+            class="rounded-full px-3 py-1 text-xs font-medium {{if .Active}}bg-accent text-accent-ink{{else}}border border-line-strong bg-surface-2 text-ink hover:bg-surface{{end}}"
           >
             {{.Label}}
           </a>
@@ -1234,27 +1234,27 @@
     {{end}}
 
     <!-- Player Last-5 Hit Bars -->
-    <div class="mt-4 border-t border-slate-800 pt-4">
+    <div class="mt-4 border-t border-line pt-4">
       <div class="flex items-center justify-between gap-2">
-        <h3 class="text-xs font-semibold uppercase tracking-wide text-slate-400">
+        <h3 class="text-xs font-semibold uppercase tracking-wide text-ink-muted">
           Last 5 Games · {{.ActiveMarketName}}
         </h3>
         {{if .HasLine}}
-          <span class="shrink-0 text-xs text-slate-400">
-            Target: <span class="font-semibold text-slate-200">{{.LineStr}}</span>
+          <span class="shrink-0 text-xs text-ink-muted">
+            Target: <span class="font-mono font-semibold tabular-nums text-ink">{{.LineStr}}</span>
           </span>
         {{end}}
       </div>
 
       {{if .PlayerChart.Bars}}
-        <div class="mt-3 rounded-lg border border-slate-800 bg-slate-950/60 px-2 pt-6 pb-2 sm:px-3">
+        <div class="mt-3 rounded-lg border border-line bg-surface-2 px-2 pt-6 pb-2 sm:px-3">
           <div class="relative h-40">
             {{if .PlayerChart.HasLine}}
               <div
-                class="pointer-events-none absolute inset-x-0 z-10 border-t-2 border-dashed border-amber-300/80"
+                class="pointer-events-none absolute inset-x-0 z-10 border-t-2 border-dashed border-warning"
                 style="bottom: {{.PlayerChart.LinePct}}%;"
               >
-                <span class="absolute right-1 -top-4 rounded bg-slate-950/90 px-1 text-[10px] font-semibold text-amber-300">
+                <span class="absolute right-1 -top-4 rounded border border-warning bg-warning-soft px-1 font-mono text-[10px] font-semibold tabular-nums text-warning-ink">
                   O/U {{.PlayerChart.LineStr}}
                 </span>
               </div>
@@ -1266,7 +1266,7 @@
                     class="relative w-full rounded-t-md border-t-2 {{.ResultClass}}"
                     style="height: {{.HeightPct}}%; min-height: 2px;"
                   >
-                    <span class="pointer-events-none absolute inset-x-0 -top-5 text-center text-[11px] font-bold text-slate-200">
+                    <span class="pointer-events-none absolute inset-x-0 -top-5 text-center font-mono text-[11px] font-bold tabular-nums text-ink">
                       {{.ValueStr}}
                     </span>
                   </div>
@@ -1279,11 +1279,11 @@
             {{range .PlayerChart.Bars}}
               <div class="flex min-w-0 flex-1 flex-col items-center gap-0.5 text-center">
                 {{if .ResultText}}
-                  <span class="text-[10px] font-semibold leading-tight {{if eq .ResultText "OVER"}}text-emerald-400{{else if eq .ResultText "UNDER"}}text-rose-400{{else}}text-amber-400{{end}}">
+                  <span class="text-[10px] font-semibold leading-tight {{if eq .ResultText "OVER"}}text-positive-ink{{else if eq .ResultText "UNDER"}}text-danger-ink{{else}}text-warning-ink{{end}}">
                     {{.ResultText}}
                   </span>
                 {{end}}
-                <span class="max-w-full truncate text-[10px] font-medium text-slate-300">{{.Label}}</span>
+                <span class="max-w-full truncate text-[10px] font-medium text-ink">{{.Label}}</span>
                 {{if .OverallDef}}
                   <span class="max-w-full truncate rounded border px-1 py-0.5 text-[9px] font-semibold leading-none {{.OverallDef.BadgeClass}}">
                     {{.OverallDef.Label}}
@@ -1298,20 +1298,20 @@
             {{end}}
           </div>
         </div>
-        <div class="mt-2 flex items-center justify-between px-1 text-[11px] text-slate-500">
+        <div class="mt-2 flex items-center justify-between px-1 text-[11px] text-ink-subtle">
           <span>Oldest (L5)</span>
           <span>Latest (L1)</span>
         </div>
       {{else}}
-        <p class="mt-2 text-xs text-slate-500">No game log stats available for this market.</p>
+        <p class="mt-2 text-xs text-ink-subtle">No game log stats available for this market.</p>
       {{end}}
     </div>
 
     <!-- Opposing Defense Last-5 Chart -->
     {{if .OppDefenseChart}}
-      <div class="mt-4 border-t border-slate-800 pt-4">
+      <div class="mt-4 border-t border-line pt-4">
         <div class="flex flex-wrap items-center justify-between gap-2">
-          <h3 class="text-xs font-semibold uppercase tracking-wide text-slate-400">
+          <h3 class="text-xs font-semibold uppercase tracking-wide text-ink-muted">
             {{.OppDefenseTitle}}
           </h3>
           {{if or .OppOverallBadge .OppPosBadge}}
@@ -1330,14 +1330,14 @@
           {{end}}
         </div>
 
-        <div class="mt-3 rounded-lg border border-slate-800 bg-slate-950/60 px-2 pt-6 pb-2 sm:px-3">
+        <div class="mt-3 rounded-lg border border-line bg-surface-2 px-2 pt-6 pb-2 sm:px-3">
           <div class="relative h-40">
             {{if .OppDefenseChart.HasLine}}
               <div
-                class="pointer-events-none absolute inset-x-0 z-10 border-t-2 border-dashed border-amber-300/80"
+                class="pointer-events-none absolute inset-x-0 z-10 border-t-2 border-dashed border-warning"
                 style="bottom: {{.OppDefenseChart.LinePct}}%;"
               >
-                <span class="absolute right-1 -top-4 rounded bg-slate-950/90 px-1 text-[10px] font-semibold text-amber-300">
+                <span class="absolute right-1 -top-4 rounded border border-warning bg-warning-soft px-1 font-mono text-[10px] font-semibold tabular-nums text-warning-ink">
                   O/U {{.OppDefenseChart.LineStr}}
                 </span>
               </div>
@@ -1349,7 +1349,7 @@
                     class="relative w-full rounded-t-md border-t-2 {{.ResultClass}}"
                     style="height: {{.HeightPct}}%; min-height: 2px;"
                   >
-                    <span class="pointer-events-none absolute inset-x-0 -top-5 text-center text-[11px] font-bold text-slate-200">
+                    <span class="pointer-events-none absolute inset-x-0 -top-5 text-center font-mono text-[11px] font-bold tabular-nums text-ink">
                       {{.ValueStr}}
                     </span>
                   </div>
@@ -1362,19 +1362,19 @@
             {{range .OppDefenseChart.Bars}}
               <div class="flex min-w-0 flex-1 flex-col items-center gap-0.5 text-center">
                 {{if .ResultText}}
-                  <span class="text-[10px] font-semibold leading-tight {{if eq .ResultText "OVER"}}text-emerald-400{{else if eq .ResultText "UNDER"}}text-rose-400{{else}}text-amber-400{{end}}">
+                  <span class="text-[10px] font-semibold leading-tight {{if eq .ResultText "OVER"}}text-positive-ink{{else if eq .ResultText "UNDER"}}text-danger-ink{{else}}text-warning-ink{{end}}">
                     {{.ResultText}}
                   </span>
                 {{end}}
-                <span class="max-w-full truncate text-[10px] font-medium text-slate-300">{{.Label}}</span>
+                <span class="max-w-full truncate text-[10px] font-medium text-ink">{{.Label}}</span>
                 {{if .SubLabel}}
-                  <span class="max-w-full truncate text-[10px] text-slate-500">{{.SubLabel}}</span>
+                  <span class="max-w-full truncate text-[10px] text-ink-subtle">{{.SubLabel}}</span>
                 {{end}}
               </div>
             {{end}}
           </div>
         </div>
-        <div class="mt-2 flex items-center justify-between px-1 text-[11px] text-slate-500">
+        <div class="mt-2 flex items-center justify-between px-1 text-[11px] text-ink-subtle">
           <span>Oldest</span>
           <span>Latest</span>
         </div>

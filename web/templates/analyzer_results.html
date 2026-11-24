@@ -2,23 +2,23 @@
 <section class="space-y-6 pb-8">
   <div class="space-y-3">
     {{if .BackURL}}
-      <a href="{{.BackURL}}" class="inline-flex items-center gap-1 text-xs font-medium text-sky-400 hover:underline">
+      <a href="{{.BackURL}}" class="inline-flex items-center gap-1 text-xs font-medium text-page-muted hover:text-page-ink hover:underline">
         &larr; Back
       </a>
     {{end}}
 
     <div class="flex flex-wrap items-start justify-between gap-3">
       <div class="space-y-1">
-        <h1 class="text-xl font-semibold text-slate-100">Grading Results</h1>
+        <h1 class="text-xl font-semibold">Grading Results</h1>
         {{if .HasGroup}}
-          <p class="text-sm text-slate-400">
+          <p class="text-sm text-page-muted">
             {{.GroupName}} &middot; {{.SeasonLabel}}
           </p>
         {{end}}
       </div>
       <a
         href="{{.GuideURL}}"
-        class="inline-flex items-center rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs font-medium text-slate-200 hover:border-slate-500"
+        class="inline-flex items-center rounded-lg border border-line-strong bg-surface px-3 py-1.5 text-xs font-medium text-ink hover:bg-surface-2"
       >
         How grading works
       </a>
@@ -29,7 +29,7 @@
         {{range .Seasons}}
           <a
             href="{{.URL}}"
-            class="rounded-full border px-3 py-1 text-xs font-medium {{if .Current}}border-sky-500 bg-sky-950/70 text-sky-200{{else}}border-slate-700 bg-slate-900 text-slate-300 hover:border-slate-500{{end}}"
+            class="rounded-full border px-3 py-1 text-xs font-medium {{if .Current}}border-accent bg-accent text-accent-ink{{else}}border-line-strong bg-surface text-ink hover:bg-surface-2{{end}}"
           >
             {{.Label}}
           </a>
@@ -38,11 +38,11 @@
 
       {{if gt (len .Rubrics) 1}}
         <div class="flex flex-wrap items-center gap-2 text-xs">
-          <span class="text-slate-400">Rubric:</span>
+          <span class="text-page-muted">Rubric:</span>
           {{range .Rubrics}}
             <a
               href="{{.URL}}"
-              class="rounded-full border px-2.5 py-0.5 font-medium {{if .Current}}border-emerald-500 bg-emerald-950/70 text-emerald-200{{else}}border-slate-700 bg-slate-900 text-slate-300 hover:border-slate-500{{end}}"
+              class="rounded-full border px-2.5 py-0.5 font-medium {{if .Current}}border-positive bg-positive-soft text-positive-ink{{else}}border-line-strong bg-surface text-ink hover:bg-surface-2{{end}}"
             >
               {{.Name}}{{if .Active}} (active){{end}}
             </a>
@@ -53,54 +53,54 @@
   </div>
 
   {{if not .HasGroup}}
-    <p class="rounded-xl border border-dashed border-slate-700 bg-slate-900 p-4 text-sm text-slate-400">
+    <p class="ui-card border-dashed p-4 text-sm text-ink-muted">
       Join or create a group to see its grading calibration results.
     </p>
   {{else if not .HasData}}
-    <p class="rounded-xl border border-dashed border-slate-700 bg-slate-900 p-4 text-sm text-slate-400">
+    <p class="ui-card border-dashed p-4 text-sm text-ink-muted">
       No settled slips yet for {{.SeasonLabel}}. Once a slip finishes grading, your group&rsquo;s A&ndash;F calibration and factor results will show up here.
     </p>
   {{else}}
-    <section class="space-y-3 rounded-xl border border-slate-800 bg-slate-900 p-4">
+    <section class="ui-card space-y-3 p-4">
       <div class="flex flex-wrap items-center justify-between gap-2">
-        <h2 class="text-base font-semibold text-slate-100">Leg Calibration (A&ndash;F)</h2>
-        <span class="rounded-full border px-2.5 py-0.5 text-xs font-medium {{if .Monotonic}}border-emerald-700 bg-emerald-950/60 text-emerald-300{{else}}border-slate-700 bg-slate-950 text-slate-300{{end}}">
+        <h2 class="text-base font-semibold text-ink">Leg Calibration (A&ndash;F)</h2>
+        <span class="rounded-full border px-2.5 py-0.5 text-xs font-medium {{if .Monotonic}}border-positive bg-positive-soft text-positive-ink{{else}}border-line-strong bg-surface-2 text-ink-muted{{end}}">
           {{.MonotonicStatus}}
         </span>
       </div>
 
       <div class="space-y-2 sm:hidden">
         {{range .LegBands}}
-          <div class="rounded-lg border border-slate-800 bg-slate-950/70 p-3 space-y-2">
+          <div class="rounded-lg border border-line bg-surface-2 p-3 space-y-2">
             <div class="flex items-center justify-between gap-2">
               <span class="rounded-full border px-2 py-0.5 text-xs font-semibold {{.Class}}">{{.Band}}</span>
-              <span class="text-xs font-medium tabular-nums text-slate-300">{{.Record}}</span>
+              <span class="font-mono text-xs font-medium tabular-nums text-ink-muted">{{.Record}}</span>
             </div>
             <div class="grid grid-cols-4 gap-2 text-xs">
               <div>
-                <p class="text-slate-500">Hit %</p>
-                <p class="mt-0.5 font-semibold tabular-nums text-slate-100">{{.HitPct}}</p>
+                <p class="text-ink-subtle">Hit %</p>
+                <p class="mt-0.5 font-mono font-semibold tabular-nums text-ink">{{.HitPct}}</p>
               </div>
               <div>
-                <p class="text-slate-500">Implied</p>
-                <p class="mt-0.5 font-semibold tabular-nums text-slate-300">{{.ImpliedPct}}</p>
+                <p class="text-ink-subtle">Implied</p>
+                <p class="mt-0.5 font-mono font-semibold tabular-nums text-ink-muted">{{.ImpliedPct}}</p>
               </div>
               <div>
-                <p class="text-slate-500">Lift</p>
-                <p class="mt-0.5 font-semibold tabular-nums {{if .LiftPositive}}text-emerald-400{{else if .LiftNegative}}text-rose-400{{else}}text-slate-200{{end}}">{{.Lift}}</p>
+                <p class="text-ink-subtle">Lift</p>
+                <p class="mt-0.5 font-mono font-semibold tabular-nums {{if .LiftPositive}}text-positive-ink{{else if .LiftNegative}}text-danger-ink{{else}}text-ink{{end}}">{{.Lift}}</p>
               </div>
               <div>
-                <p class="text-slate-500">Flat ROI</p>
-                <p class="mt-0.5 font-semibold tabular-nums {{if .ROIPositive}}text-emerald-400{{else if .ROINegative}}text-rose-400{{else}}text-slate-200{{end}}">{{.FlatROI}}</p>
+                <p class="text-ink-subtle">Flat ROI</p>
+                <p class="mt-0.5 font-mono font-semibold tabular-nums {{if .ROIPositive}}text-positive-ink{{else if .ROINegative}}text-danger-ink{{else}}text-ink{{end}}">{{.FlatROI}}</p>
               </div>
             </div>
           </div>
         {{end}}
       </div>
 
-      <div class="hidden sm:block overflow-x-auto rounded-lg border border-slate-800 bg-slate-950/60">
+      <div class="hidden sm:block overflow-x-auto rounded-lg border border-line bg-surface-2">
         <table class="w-full text-left text-xs">
-          <thead class="border-b border-slate-800 text-slate-400">
+          <thead class="border-b border-line text-ink-muted">
             <tr>
               <th class="px-3 py-2.5">Grade</th>
               <th class="px-3 py-2.5 text-right">W-L-P</th>
@@ -110,17 +110,17 @@
               <th class="px-3 py-2.5 text-right">Flat ROI</th>
             </tr>
           </thead>
-          <tbody class="divide-y divide-slate-800/80">
+          <tbody class="divide-y divide-line">
             {{range .LegBands}}
               <tr>
                 <td class="px-3 py-2">
                   <span class="rounded-full border px-2 py-0.5 text-xs font-semibold {{.Class}}">{{.Band}}</span>
                 </td>
-                <td class="px-3 py-2 text-right tabular-nums text-slate-200">{{.Record}}</td>
-                <td class="px-3 py-2 text-right font-semibold tabular-nums text-slate-100">{{.HitPct}}</td>
-                <td class="px-3 py-2 text-right tabular-nums text-slate-400">{{.ImpliedPct}}</td>
-                <td class="px-3 py-2 text-right font-semibold tabular-nums {{if .LiftPositive}}text-emerald-400{{else if .LiftNegative}}text-rose-400{{else}}text-slate-200{{end}}">{{.Lift}}</td>
-                <td class="px-3 py-2 text-right font-semibold tabular-nums {{if .ROIPositive}}text-emerald-400{{else if .ROINegative}}text-rose-400{{else}}text-slate-200{{end}}">{{.FlatROI}}</td>
+                <td class="px-3 py-2 text-right font-mono tabular-nums text-ink-muted">{{.Record}}</td>
+                <td class="px-3 py-2 text-right font-mono font-semibold tabular-nums text-ink">{{.HitPct}}</td>
+                <td class="px-3 py-2 text-right font-mono tabular-nums text-ink-muted">{{.ImpliedPct}}</td>
+                <td class="px-3 py-2 text-right font-mono font-semibold tabular-nums {{if .LiftPositive}}text-positive-ink{{else if .LiftNegative}}text-danger-ink{{else}}text-ink{{end}}">{{.Lift}}</td>
+                <td class="px-3 py-2 text-right font-mono font-semibold tabular-nums {{if .ROIPositive}}text-positive-ink{{else if .ROINegative}}text-danger-ink{{else}}text-ink{{end}}">{{.FlatROI}}</td>
               </tr>
             {{end}}
           </tbody>
@@ -128,41 +128,41 @@
       </div>
     </section>
 
-    <section class="space-y-3 rounded-xl border border-slate-800 bg-slate-900 p-4">
-      <h2 class="text-base font-semibold text-slate-100">Slip Calibration (A&ndash;F)</h2>
+    <section class="ui-card space-y-3 p-4">
+      <h2 class="text-base font-semibold text-ink">Slip Calibration (A&ndash;F)</h2>
 
       <div class="space-y-2 sm:hidden">
         {{range .SlipBands}}
-          <div class="rounded-lg border border-slate-800 bg-slate-950/70 p-3 space-y-2">
+          <div class="rounded-lg border border-line bg-surface-2 p-3 space-y-2">
             <div class="flex items-center justify-between gap-2">
               <span class="rounded-full border px-2 py-0.5 text-xs font-semibold {{.Class}}">{{.Band}}</span>
-              <span class="text-xs font-medium tabular-nums text-slate-300">{{.Record}}</span>
+              <span class="font-mono text-xs font-medium tabular-nums text-ink-muted">{{.Record}}</span>
             </div>
             <div class="grid grid-cols-4 gap-2 text-xs">
               <div>
-                <p class="text-slate-500">Hit %</p>
-                <p class="mt-0.5 font-semibold tabular-nums text-slate-100">{{.HitPct}}</p>
+                <p class="text-ink-subtle">Hit %</p>
+                <p class="mt-0.5 font-mono font-semibold tabular-nums text-ink">{{.HitPct}}</p>
               </div>
               <div>
-                <p class="text-slate-500">Implied</p>
-                <p class="mt-0.5 font-semibold tabular-nums text-slate-300">{{.ImpliedPct}}</p>
+                <p class="text-ink-subtle">Implied</p>
+                <p class="mt-0.5 font-mono font-semibold tabular-nums text-ink-muted">{{.ImpliedPct}}</p>
               </div>
               <div>
-                <p class="text-slate-500">Lift</p>
-                <p class="mt-0.5 font-semibold tabular-nums {{if .LiftPositive}}text-emerald-400{{else if .LiftNegative}}text-rose-400{{else}}text-slate-200{{end}}">{{.Lift}}</p>
+                <p class="text-ink-subtle">Lift</p>
+                <p class="mt-0.5 font-mono font-semibold tabular-nums {{if .LiftPositive}}text-positive-ink{{else if .LiftNegative}}text-danger-ink{{else}}text-ink{{end}}">{{.Lift}}</p>
               </div>
               <div>
-                <p class="text-slate-500">Flat ROI</p>
-                <p class="mt-0.5 font-semibold tabular-nums {{if .ROIPositive}}text-emerald-400{{else if .ROINegative}}text-rose-400{{else}}text-slate-200{{end}}">{{.FlatROI}}</p>
+                <p class="text-ink-subtle">Flat ROI</p>
+                <p class="mt-0.5 font-mono font-semibold tabular-nums {{if .ROIPositive}}text-positive-ink{{else if .ROINegative}}text-danger-ink{{else}}text-ink{{end}}">{{.FlatROI}}</p>
               </div>
             </div>
           </div>
         {{end}}
       </div>
 
-      <div class="hidden sm:block overflow-x-auto rounded-lg border border-slate-800 bg-slate-950/60">
+      <div class="hidden sm:block overflow-x-auto rounded-lg border border-line bg-surface-2">
         <table class="w-full text-left text-xs">
-          <thead class="border-b border-slate-800 text-slate-400">
+          <thead class="border-b border-line text-ink-muted">
             <tr>
               <th class="px-3 py-2.5">Grade</th>
               <th class="px-3 py-2.5 text-right">W-L-P</th>
@@ -172,17 +172,17 @@
               <th class="px-3 py-2.5 text-right">Flat ROI</th>
             </tr>
           </thead>
-          <tbody class="divide-y divide-slate-800/80">
+          <tbody class="divide-y divide-line">
             {{range .SlipBands}}
               <tr>
                 <td class="px-3 py-2">
                   <span class="rounded-full border px-2 py-0.5 text-xs font-semibold {{.Class}}">{{.Band}}</span>
                 </td>
-                <td class="px-3 py-2 text-right tabular-nums text-slate-200">{{.Record}}</td>
-                <td class="px-3 py-2 text-right font-semibold tabular-nums text-slate-100">{{.HitPct}}</td>
-                <td class="px-3 py-2 text-right tabular-nums text-slate-400">{{.ImpliedPct}}</td>
-                <td class="px-3 py-2 text-right font-semibold tabular-nums {{if .LiftPositive}}text-emerald-400{{else if .LiftNegative}}text-rose-400{{else}}text-slate-200{{end}}">{{.Lift}}</td>
-                <td class="px-3 py-2 text-right font-semibold tabular-nums {{if .ROIPositive}}text-emerald-400{{else if .ROINegative}}text-rose-400{{else}}text-slate-200{{end}}">{{.FlatROI}}</td>
+                <td class="px-3 py-2 text-right font-mono tabular-nums text-ink-muted">{{.Record}}</td>
+                <td class="px-3 py-2 text-right font-mono font-semibold tabular-nums text-ink">{{.HitPct}}</td>
+                <td class="px-3 py-2 text-right font-mono tabular-nums text-ink-muted">{{.ImpliedPct}}</td>
+                <td class="px-3 py-2 text-right font-mono font-semibold tabular-nums {{if .LiftPositive}}text-positive-ink{{else if .LiftNegative}}text-danger-ink{{else}}text-ink{{end}}">{{.Lift}}</td>
+                <td class="px-3 py-2 text-right font-mono font-semibold tabular-nums {{if .ROIPositive}}text-positive-ink{{else if .ROINegative}}text-danger-ink{{else}}text-ink{{end}}">{{.FlatROI}}</td>
               </tr>
             {{end}}
           </tbody>
@@ -190,21 +190,21 @@
       </div>
     </section>
 
-    <section class="space-y-3 rounded-xl border border-slate-800 bg-slate-900 p-4">
-      <h2 class="text-base font-semibold text-slate-100">Rubric Comparison</h2>
+    <section class="ui-card space-y-3 p-4">
+      <h2 class="text-base font-semibold text-ink">Rubric Comparison</h2>
       {{if not .ShowRubricDiffs}}
-        <p class="text-xs text-slate-400">
-          Side-by-side comparison appears automatically when additional rubrics are registered alongside <code class="text-slate-200">{{.SelectedRubric}}</code>.
+        <p class="text-xs text-ink-muted">
+          Side-by-side comparison appears automatically when additional rubrics are registered alongside <code class="font-mono text-ink">{{.SelectedRubric}}</code>.
         </p>
       {{else}}
         {{range .Diffs}}
           <div class="space-y-3">
-            <h3 class="text-xs font-semibold uppercase tracking-wide text-slate-400">
+            <h3 class="text-xs font-semibold uppercase tracking-wide text-ink-muted">
               {{.BaselineName}} &rarr; {{.CandidateName}} (Leg Bands)
             </h3>
-            <div class="overflow-x-auto rounded-lg border border-slate-800 bg-slate-950/60">
+            <div class="overflow-x-auto rounded-lg border border-line bg-surface-2">
               <table class="w-full text-left text-xs">
-                <thead class="border-b border-slate-800 text-slate-400">
+                <thead class="border-b border-line text-ink-muted">
                   <tr>
                     <th class="px-3 py-2">Grade</th>
                     <th class="px-3 py-2 text-right">Decided</th>
@@ -213,16 +213,16 @@
                     <th class="px-3 py-2 text-right">ROI &Delta;</th>
                   </tr>
                 </thead>
-                <tbody class="divide-y divide-slate-800/80">
+                <tbody class="divide-y divide-line">
                   {{range .LegBandDiffs}}
                     <tr>
                       <td class="px-3 py-2">
                         <span class="rounded-full border px-2 py-0.5 text-xs font-semibold {{.Class}}">{{.Band}}</span>
                       </td>
-                      <td class="px-3 py-2 text-right tabular-nums text-slate-300">{{.SampleChange}}</td>
-                      <td class="px-3 py-2 text-right font-semibold tabular-nums {{if .WinPositive}}text-emerald-400{{else if .WinNegative}}text-rose-400{{else}}text-slate-200{{end}}">{{.WinRateDelta}}</td>
-                      <td class="px-3 py-2 text-right font-semibold tabular-nums {{if .LiftPositive}}text-emerald-400{{else if .LiftNegative}}text-rose-400{{else}}text-slate-200{{end}}">{{.LiftDelta}}</td>
-                      <td class="px-3 py-2 text-right font-semibold tabular-nums {{if .ROIPositive}}text-emerald-400{{else if .ROINegative}}text-rose-400{{else}}text-slate-200{{end}}">{{.FlatROIDelta}}</td>
+                      <td class="px-3 py-2 text-right font-mono tabular-nums text-ink-muted">{{.SampleChange}}</td>
+                      <td class="px-3 py-2 text-right font-mono font-semibold tabular-nums {{if .WinPositive}}text-positive-ink{{else if .WinNegative}}text-danger-ink{{else}}text-ink{{end}}">{{.WinRateDelta}}</td>
+                      <td class="px-3 py-2 text-right font-mono font-semibold tabular-nums {{if .LiftPositive}}text-positive-ink{{else if .LiftNegative}}text-danger-ink{{else}}text-ink{{end}}">{{.LiftDelta}}</td>
+                      <td class="px-3 py-2 text-right font-mono font-semibold tabular-nums {{if .ROIPositive}}text-positive-ink{{else if .ROINegative}}text-danger-ink{{else}}text-ink{{end}}">{{.FlatROIDelta}}</td>
                     </tr>
                   {{end}}
                 </tbody>
@@ -230,14 +230,14 @@
             </div>
             {{if .Migrations}}
               <div class="space-y-1.5">
-                <p class="text-xs font-medium text-slate-400">Notable band migrations</p>
+                <p class="text-xs font-medium text-ink-muted">Notable band migrations</p>
                 <div class="flex flex-wrap gap-2">
                   {{range .Migrations}}
-                    <span class="inline-flex items-center gap-1.5 rounded-lg border border-slate-800 bg-slate-950/70 px-2.5 py-1 text-xs text-slate-300">
+                    <span class="inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface-2 px-2.5 py-1 text-xs text-ink">
                       <span class="rounded-full border px-1.5 py-0.2 text-[11px] font-semibold {{.FromClass}}">{{.FromBand}}</span>
                       &rarr;
                       <span class="rounded-full border px-1.5 py-0.2 text-[11px] font-semibold {{.ToClass}}">{{.ToBand}}</span>
-                      <span class="tabular-nums text-slate-400">{{.Total}} ({{.Record}}, {{.HitPct}})</span>
+                      <span class="font-mono tabular-nums text-ink-muted">{{.Total}} ({{.Record}}, {{.HitPct}})</span>
                     </span>
                   {{end}}
                 </div>
@@ -248,43 +248,43 @@
       {{end}}
     </section>
 
-    <section class="space-y-3 rounded-xl border border-slate-800 bg-slate-900 p-4">
-      <h2 class="text-base font-semibold text-slate-100">Week-over-Week Progression</h2>
+    <section class="ui-card space-y-3 p-4">
+      <h2 class="text-base font-semibold text-ink">Week-over-Week Progression</h2>
       {{if not .Weekly}}
-        <p class="text-xs text-slate-400">No weekly summaries available yet.</p>
+        <p class="text-xs text-ink-muted">No weekly summaries available yet.</p>
       {{else}}
         <div class="space-y-2 sm:hidden">
           {{range .Weekly}}
-            <div class="rounded-lg border border-slate-800 bg-slate-950/70 p-3 space-y-2">
+            <div class="rounded-lg border border-line bg-surface-2 p-3 space-y-2">
               <div class="flex items-center justify-between gap-2">
-                <span class="text-xs font-semibold text-slate-100">{{.Label}}</span>
-                <span class="text-xs tabular-nums text-slate-400">{{.DecidedLegs}} decided</span>
+                <span class="text-xs font-semibold text-ink">{{.Label}}</span>
+                <span class="font-mono text-xs tabular-nums text-ink-muted">{{.DecidedLegs}} decided</span>
               </div>
               <div class="grid grid-cols-3 gap-2 text-xs">
                 <div>
-                  <p class="text-slate-500">Hit %</p>
-                  <p class="mt-0.5 font-semibold tabular-nums text-slate-100">{{.HitPct}}</p>
+                  <p class="text-ink-subtle">Hit %</p>
+                  <p class="mt-0.5 font-mono font-semibold tabular-nums text-ink">{{.HitPct}}</p>
                 </div>
                 <div>
-                  <p class="text-slate-500">Lift</p>
-                  <p class="mt-0.5 font-semibold tabular-nums {{if .LiftPos}}text-emerald-400{{else if .LiftNeg}}text-rose-400{{else}}text-slate-200{{end}}">{{.Lift}}</p>
+                  <p class="text-ink-subtle">Lift</p>
+                  <p class="mt-0.5 font-mono font-semibold tabular-nums {{if .LiftPos}}text-positive-ink{{else if .LiftNeg}}text-danger-ink{{else}}text-ink{{end}}">{{.Lift}}</p>
                 </div>
                 <div>
-                  <p class="text-slate-500">Flat ROI</p>
-                  <p class="mt-0.5 font-semibold tabular-nums {{if .ROIPos}}text-emerald-400{{else if .ROINeg}}text-rose-400{{else}}text-slate-200{{end}}">{{.FlatROI}}</p>
+                  <p class="text-ink-subtle">Flat ROI</p>
+                  <p class="mt-0.5 font-mono font-semibold tabular-nums {{if .ROIPos}}text-positive-ink{{else if .ROINeg}}text-danger-ink{{else}}text-ink{{end}}">{{.FlatROI}}</p>
                 </div>
               </div>
-              <div class="flex items-center justify-between gap-2 border-t border-slate-800 pt-2 text-[11px] text-slate-400">
-                <span>A/B: <span class="text-slate-200 tabular-nums">{{.ABSummary}}</span></span>
-                <span>C&ndash;F: <span class="text-slate-200 tabular-nums">{{.CFSummary}}</span></span>
+              <div class="flex items-center justify-between gap-2 border-t border-line pt-2 text-[11px] text-ink-muted">
+                <span>A/B: <span class="font-mono text-ink tabular-nums">{{.ABSummary}}</span></span>
+                <span>C&ndash;F: <span class="font-mono text-ink tabular-nums">{{.CFSummary}}</span></span>
               </div>
             </div>
           {{end}}
         </div>
 
-        <div class="hidden sm:block overflow-x-auto rounded-lg border border-slate-800 bg-slate-950/60">
+        <div class="hidden sm:block overflow-x-auto rounded-lg border border-line bg-surface-2">
           <table class="w-full text-left text-xs">
-            <thead class="border-b border-slate-800 text-slate-400">
+            <thead class="border-b border-line text-ink-muted">
               <tr>
                 <th class="px-3 py-2.5">Week</th>
                 <th class="px-3 py-2.5 text-right">Legs</th>
@@ -295,16 +295,16 @@
                 <th class="px-3 py-2.5 text-right">C&ndash;F</th>
               </tr>
             </thead>
-            <tbody class="divide-y divide-slate-800/80">
+            <tbody class="divide-y divide-line">
               {{range .Weekly}}
                 <tr>
-                  <td class="px-3 py-2 font-medium text-slate-100">{{.Label}}</td>
-                  <td class="px-3 py-2 text-right tabular-nums text-slate-300">{{.DecidedLegs}}</td>
-                  <td class="px-3 py-2 text-right font-semibold tabular-nums text-slate-100">{{.HitPct}}</td>
-                  <td class="px-3 py-2 text-right font-semibold tabular-nums {{if .LiftPos}}text-emerald-400{{else if .LiftNeg}}text-rose-400{{else}}text-slate-200{{end}}">{{.Lift}}</td>
-                  <td class="px-3 py-2 text-right font-semibold tabular-nums {{if .ROIPos}}text-emerald-400{{else if .ROINeg}}text-rose-400{{else}}text-slate-200{{end}}">{{.FlatROI}}</td>
-                  <td class="px-3 py-2 text-right tabular-nums text-slate-300">{{.ABSummary}}</td>
-                  <td class="px-3 py-2 text-right tabular-nums text-slate-300">{{.CFSummary}}</td>
+                  <td class="px-3 py-2 font-medium text-ink">{{.Label}}</td>
+                  <td class="px-3 py-2 text-right font-mono tabular-nums text-ink-muted">{{.DecidedLegs}}</td>
+                  <td class="px-3 py-2 text-right font-mono font-semibold tabular-nums text-ink">{{.HitPct}}</td>
+                  <td class="px-3 py-2 text-right font-mono font-semibold tabular-nums {{if .LiftPos}}text-positive-ink{{else if .LiftNeg}}text-danger-ink{{else}}text-ink{{end}}">{{.Lift}}</td>
+                  <td class="px-3 py-2 text-right font-mono font-semibold tabular-nums {{if .ROIPos}}text-positive-ink{{else if .ROINeg}}text-danger-ink{{else}}text-ink{{end}}">{{.FlatROI}}</td>
+                  <td class="px-3 py-2 text-right font-mono tabular-nums text-ink-muted">{{.ABSummary}}</td>
+                  <td class="px-3 py-2 text-right font-mono tabular-nums text-ink-muted">{{.CFSummary}}</td>
                 </tr>
               {{end}}
             </tbody>
@@ -313,43 +313,43 @@
       {{end}}
     </section>
 
-    <section class="space-y-3 rounded-xl border border-slate-800 bg-slate-900 p-4">
-      <h2 class="text-base font-semibold text-slate-100">Factor Attribution</h2>
+    <section class="ui-card space-y-3 p-4">
+      <h2 class="text-base font-semibold text-ink">Factor Attribution</h2>
       {{if not .Factors}}
-        <p class="text-xs text-slate-400">No scoring factors triggered on the settled legs in this view yet.</p>
+        <p class="text-xs text-ink-muted">No scoring factors triggered on the settled legs in this view yet.</p>
       {{else}}
         <div class="space-y-2 sm:hidden">
           {{range .Factors}}
-            <div class="rounded-lg border border-slate-800 bg-slate-950/70 p-3 space-y-2">
+            <div class="rounded-lg border border-line bg-surface-2 p-3 space-y-2">
               <div class="flex items-start justify-between gap-2">
-                <p class="text-xs font-semibold text-slate-100">{{.Label}}</p>
-                <span class="shrink-0 text-xs font-semibold tabular-nums {{if .DeltaPos}}text-emerald-400{{else if .DeltaNeg}}text-rose-400{{else}}text-slate-300{{end}}">{{.AvgDelta}}</span>
+                <p class="text-xs font-semibold text-ink">{{.Label}}</p>
+                <span class="shrink-0 font-mono text-xs font-semibold tabular-nums {{if .DeltaPos}}text-positive-ink{{else if .DeltaNeg}}text-danger-ink{{else}}text-ink-muted{{end}}">{{.AvgDelta}}</span>
               </div>
               <div class="grid grid-cols-4 gap-2 text-xs">
                 <div>
-                  <p class="text-slate-500">N</p>
-                  <p class="mt-0.5 font-semibold tabular-nums text-slate-200">{{.Count}}</p>
+                  <p class="text-ink-subtle">N</p>
+                  <p class="mt-0.5 font-mono font-semibold tabular-nums text-ink">{{.Count}}</p>
                 </div>
                 <div>
-                  <p class="text-slate-500">W-L</p>
-                  <p class="mt-0.5 font-semibold tabular-nums text-slate-200">{{.Record}}</p>
+                  <p class="text-ink-subtle">W-L</p>
+                  <p class="mt-0.5 font-mono font-semibold tabular-nums text-ink">{{.Record}}</p>
                 </div>
                 <div>
-                  <p class="text-slate-500">Hit %</p>
-                  <p class="mt-0.5 font-semibold tabular-nums text-slate-100">{{.HitPct}}</p>
+                  <p class="text-ink-subtle">Hit %</p>
+                  <p class="mt-0.5 font-mono font-semibold tabular-nums text-ink">{{.HitPct}}</p>
                 </div>
                 <div>
-                  <p class="text-slate-500">Lift</p>
-                  <p class="mt-0.5 font-semibold tabular-nums {{if .LiftPositive}}text-emerald-400{{else if .LiftNegative}}text-rose-400{{else}}text-slate-200{{end}}">{{.Lift}}</p>
+                  <p class="text-ink-subtle">Lift</p>
+                  <p class="mt-0.5 font-mono font-semibold tabular-nums {{if .LiftPositive}}text-positive-ink{{else if .LiftNegative}}text-danger-ink{{else}}text-ink{{end}}">{{.Lift}}</p>
                 </div>
               </div>
             </div>
           {{end}}
         </div>
 
-        <div class="hidden sm:block overflow-x-auto rounded-lg border border-slate-800 bg-slate-950/60">
+        <div class="hidden sm:block overflow-x-auto rounded-lg border border-line bg-surface-2">
           <table class="w-full text-left text-xs">
-            <thead class="border-b border-slate-800 text-slate-400">
+            <thead class="border-b border-line text-ink-muted">
               <tr>
                 <th class="px-3 py-2.5">Factor</th>
                 <th class="px-3 py-2.5 text-right">N</th>
@@ -359,15 +359,15 @@
                 <th class="px-3 py-2.5 text-right">Avg &Delta;</th>
               </tr>
             </thead>
-            <tbody class="divide-y divide-slate-800/80">
+            <tbody class="divide-y divide-line">
               {{range .Factors}}
                 <tr>
-                  <td class="px-3 py-2 font-medium text-slate-100">{{.Label}}</td>
-                  <td class="px-3 py-2 text-right tabular-nums text-slate-300">{{.Count}}</td>
-                  <td class="px-3 py-2 text-right tabular-nums text-slate-300">{{.Record}}</td>
-                  <td class="px-3 py-2 text-right font-semibold tabular-nums text-slate-100">{{.HitPct}}</td>
-                  <td class="px-3 py-2 text-right font-semibold tabular-nums {{if .LiftPositive}}text-emerald-400{{else if .LiftNegative}}text-rose-400{{else}}text-slate-200{{end}}">{{.Lift}}</td>
-                  <td class="px-3 py-2 text-right font-semibold tabular-nums {{if .DeltaPos}}text-emerald-400{{else if .DeltaNeg}}text-rose-400{{else}}text-slate-200{{end}}">{{.AvgDelta}}</td>
+                  <td class="px-3 py-2 font-medium text-ink">{{.Label}}</td>
+                  <td class="px-3 py-2 text-right font-mono tabular-nums text-ink-muted">{{.Count}}</td>
+                  <td class="px-3 py-2 text-right font-mono tabular-nums text-ink-muted">{{.Record}}</td>
+                  <td class="px-3 py-2 text-right font-mono font-semibold tabular-nums text-ink">{{.HitPct}}</td>
+                  <td class="px-3 py-2 text-right font-mono font-semibold tabular-nums {{if .LiftPositive}}text-positive-ink{{else if .LiftNegative}}text-danger-ink{{else}}text-ink{{end}}">{{.Lift}}</td>
+                  <td class="px-3 py-2 text-right font-mono font-semibold tabular-nums {{if .DeltaPos}}text-positive-ink{{else if .DeltaNeg}}text-danger-ink{{else}}text-ink{{end}}">{{.AvgDelta}}</td>
                 </tr>
               {{end}}
             </tbody>
@@ -377,43 +377,43 @@
     </section>
 
     {{if .SlipFactors}}
-      <section class="space-y-3 rounded-xl border border-slate-800 bg-slate-900 p-4">
+      <section class="ui-card space-y-3 p-4">
         <div class="flex flex-wrap items-center justify-between gap-2">
-          <h2 class="text-base font-semibold text-slate-100">Slip Factor Attribution</h2>
-          <span class="text-xs text-slate-400">Parlay-level rules</span>
+          <h2 class="text-base font-semibold text-ink">Slip Factor Attribution</h2>
+          <span class="text-xs text-ink-muted">Parlay-level rules</span>
         </div>
         <div class="space-y-2 sm:hidden">
           {{range .SlipFactors}}
-            <div class="rounded-lg border border-slate-800 bg-slate-950/70 p-3 space-y-2">
+            <div class="rounded-lg border border-line bg-surface-2 p-3 space-y-2">
               <div class="flex items-start justify-between gap-2">
-                <p class="text-xs font-semibold text-slate-100">{{.Label}}</p>
-                <span class="shrink-0 text-xs font-semibold tabular-nums {{if .DeltaPos}}text-emerald-400{{else if .DeltaNeg}}text-rose-400{{else}}text-slate-300{{end}}">{{.AvgDelta}}</span>
+                <p class="text-xs font-semibold text-ink">{{.Label}}</p>
+                <span class="shrink-0 font-mono text-xs font-semibold tabular-nums {{if .DeltaPos}}text-positive-ink{{else if .DeltaNeg}}text-danger-ink{{else}}text-ink-muted{{end}}">{{.AvgDelta}}</span>
               </div>
               <div class="grid grid-cols-4 gap-2 text-xs">
                 <div>
-                  <p class="text-slate-500">N</p>
-                  <p class="mt-0.5 font-semibold tabular-nums text-slate-200">{{.Count}}</p>
+                  <p class="text-ink-subtle">N</p>
+                  <p class="mt-0.5 font-mono font-semibold tabular-nums text-ink">{{.Count}}</p>
                 </div>
                 <div>
-                  <p class="text-slate-500">W-L</p>
-                  <p class="mt-0.5 font-semibold tabular-nums text-slate-200">{{.Record}}</p>
+                  <p class="text-ink-subtle">W-L</p>
+                  <p class="mt-0.5 font-mono font-semibold tabular-nums text-ink">{{.Record}}</p>
                 </div>
                 <div>
-                  <p class="text-slate-500">Hit %</p>
-                  <p class="mt-0.5 font-semibold tabular-nums text-slate-100">{{.HitPct}}</p>
+                  <p class="text-ink-subtle">Hit %</p>
+                  <p class="mt-0.5 font-mono font-semibold tabular-nums text-ink">{{.HitPct}}</p>
                 </div>
                 <div>
-                  <p class="text-slate-500">Lift</p>
-                  <p class="mt-0.5 font-semibold tabular-nums {{if .LiftPositive}}text-emerald-400{{else if .LiftNegative}}text-rose-400{{else}}text-slate-200{{end}}">{{.Lift}}</p>
+                  <p class="text-ink-subtle">Lift</p>
+                  <p class="mt-0.5 font-mono font-semibold tabular-nums {{if .LiftPositive}}text-positive-ink{{else if .LiftNegative}}text-danger-ink{{else}}text-ink{{end}}">{{.Lift}}</p>
                 </div>
               </div>
             </div>
           {{end}}
         </div>
 
-        <div class="hidden sm:block overflow-x-auto rounded-lg border border-slate-800 bg-slate-950/60">
+        <div class="hidden sm:block overflow-x-auto rounded-lg border border-line bg-surface-2">
           <table class="w-full text-left text-xs">
-            <thead class="border-b border-slate-800 text-slate-400">
+            <thead class="border-b border-line text-ink-muted">
               <tr>
                 <th class="px-3 py-2.5">Factor</th>
                 <th class="px-3 py-2.5 text-right">N</th>
@@ -423,15 +423,15 @@
                 <th class="px-3 py-2.5 text-right">Avg &Delta;</th>
               </tr>
             </thead>
-            <tbody class="divide-y divide-slate-800/80">
+            <tbody class="divide-y divide-line">
               {{range .SlipFactors}}
                 <tr>
-                  <td class="px-3 py-2 font-medium text-slate-100">{{.Label}}</td>
-                  <td class="px-3 py-2 text-right tabular-nums text-slate-300">{{.Count}}</td>
-                  <td class="px-3 py-2 text-right tabular-nums text-slate-300">{{.Record}}</td>
-                  <td class="px-3 py-2 text-right font-semibold tabular-nums text-slate-100">{{.HitPct}}</td>
-                  <td class="px-3 py-2 text-right font-semibold tabular-nums {{if .LiftPositive}}text-emerald-400{{else if .LiftNegative}}text-rose-400{{else}}text-slate-200{{end}}">{{.Lift}}</td>
-                  <td class="px-3 py-2 text-right font-semibold tabular-nums {{if .DeltaPos}}text-emerald-400{{else if .DeltaNeg}}text-rose-400{{else}}text-slate-200{{end}}">{{.AvgDelta}}</td>
+                  <td class="px-3 py-2 font-medium text-ink">{{.Label}}</td>
+                  <td class="px-3 py-2 text-right font-mono tabular-nums text-ink-muted">{{.Count}}</td>
+                  <td class="px-3 py-2 text-right font-mono tabular-nums text-ink-muted">{{.Record}}</td>
+                  <td class="px-3 py-2 text-right font-mono font-semibold tabular-nums text-ink">{{.HitPct}}</td>
+                  <td class="px-3 py-2 text-right font-mono font-semibold tabular-nums {{if .LiftPositive}}text-positive-ink{{else if .LiftNegative}}text-danger-ink{{else}}text-ink{{end}}">{{.Lift}}</td>
+                  <td class="px-3 py-2 text-right font-mono font-semibold tabular-nums {{if .DeltaPos}}text-positive-ink{{else if .DeltaNeg}}text-danger-ink{{else}}text-ink{{end}}">{{.AvgDelta}}</td>
                 </tr>
               {{end}}
             </tbody>
@@ -440,32 +440,32 @@
       </section>
     {{end}}
 
-    <section class="space-y-3 rounded-xl border border-slate-800 bg-slate-900 p-4">
-      <h2 class="text-base font-semibold text-slate-100">Pre-Kickoff Data Coverage</h2>
+    <section class="ui-card space-y-3 p-4">
+      <h2 class="text-base font-semibold text-ink">Pre-Kickoff Data Coverage</h2>
       <div class="grid grid-cols-2 gap-2 text-xs sm:grid-cols-3">
-        <div class="rounded-lg border border-slate-800 bg-slate-950/60 p-3">
-          <p class="text-slate-400">Replayed legs</p>
-          <p class="mt-1 text-base font-semibold tabular-nums text-slate-100">{{.Coverage.TotalLegs}}</p>
+        <div class="rounded-lg border border-line bg-surface-2 p-3">
+          <p class="text-ink-muted">Replayed legs</p>
+          <p class="mt-1 font-mono text-base font-semibold tabular-nums text-ink">{{.Coverage.TotalLegs}}</p>
         </div>
-        <div class="rounded-lg border border-slate-800 bg-slate-950/60 p-3">
-          <p class="text-slate-400">Game logs</p>
-          <p class="mt-1 text-base font-semibold tabular-nums text-slate-100">{{.Coverage.WithGameLogs}}</p>
+        <div class="rounded-lg border border-line bg-surface-2 p-3">
+          <p class="text-ink-muted">Game logs</p>
+          <p class="mt-1 font-mono text-base font-semibold tabular-nums text-ink">{{.Coverage.WithGameLogs}}</p>
         </div>
-        <div class="rounded-lg border border-slate-800 bg-slate-950/60 p-3">
-          <p class="text-slate-400">Injuries</p>
-          <p class="mt-1 text-base font-semibold tabular-nums text-slate-100">{{.Coverage.WithInjuries}}</p>
+        <div class="rounded-lg border border-line bg-surface-2 p-3">
+          <p class="text-ink-muted">Injuries</p>
+          <p class="mt-1 font-mono text-base font-semibold tabular-nums text-ink">{{.Coverage.WithInjuries}}</p>
         </div>
-        <div class="rounded-lg border border-slate-800 bg-slate-950/60 p-3">
-          <p class="text-slate-400">nflverse</p>
-          <p class="mt-1 text-base font-semibold tabular-nums text-slate-100">{{.Coverage.WithNFLVerse}}</p>
+        <div class="rounded-lg border border-line bg-surface-2 p-3">
+          <p class="text-ink-muted">nflverse</p>
+          <p class="mt-1 font-mono text-base font-semibold tabular-nums text-ink">{{.Coverage.WithNFLVerse}}</p>
         </div>
-        <div class="rounded-lg border border-slate-800 bg-slate-950/60 p-3">
-          <p class="text-slate-400">nfelo</p>
-          <p class="mt-1 text-base font-semibold tabular-nums text-slate-100">{{.Coverage.WithNfelo}}</p>
+        <div class="rounded-lg border border-line bg-surface-2 p-3">
+          <p class="text-ink-muted">nfelo</p>
+          <p class="mt-1 font-mono text-base font-semibold tabular-nums text-ink">{{.Coverage.WithNfelo}}</p>
         </div>
-        <div class="rounded-lg border border-slate-800 bg-slate-950/60 p-3">
-          <p class="text-slate-400">Archived odds</p>
-          <p class="mt-1 text-base font-semibold tabular-nums text-slate-100">{{.Coverage.WithOdds}}</p>
+        <div class="rounded-lg border border-line bg-surface-2 p-3">
+          <p class="text-ink-muted">Archived odds</p>
+          <p class="mt-1 font-mono text-base font-semibold tabular-nums text-ink">{{.Coverage.WithOdds}}</p>
         </div>
       </div>
     </section>

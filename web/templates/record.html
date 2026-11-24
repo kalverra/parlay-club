@@ -4,7 +4,7 @@
     <div class="space-y-1">
       <h1 class="text-xl font-semibold">Record Book</h1>
       {{if .HasGroup}}
-        <p class="text-sm text-slate-400">
+        <p class="text-sm text-page-muted">
           {{.GroupName}} &middot; {{.Season}} season
         </p>
       {{end}}
@@ -18,7 +18,7 @@
           name="season"
           aria-label="Season"
           onchange="this.form.submit()"
-          class="rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-sm font-medium text-slate-100 focus:border-sky-500 focus:outline-none"
+          class="rounded-lg border border-line-strong bg-surface px-3 py-1.5 text-sm font-medium text-ink focus:border-accent focus:outline-none"
         >
           {{range .Seasons}}
             <option value="{{.Year}}"{{if .Current}} selected{{end}}>{{.Year}} Season</option>
@@ -27,7 +27,7 @@
         <noscript>
           <button
             type="submit"
-            class="rounded-lg border border-slate-700 bg-slate-800 px-3 py-1.5 text-sm font-medium text-slate-100"
+            class="rounded-lg border border-line-strong bg-surface-2 px-3 py-1.5 text-sm font-medium text-ink"
           >
             Go
           </button>
@@ -37,89 +37,89 @@
   </div>
 
   {{if not .HasGroup}}
-    <p class="rounded-xl border border-dashed border-slate-700 bg-slate-900 p-4 text-sm text-slate-400">
+    <p class="ui-card border-dashed p-4 text-sm text-ink-muted">
       Join or create a group to see its Record Book.
     </p>
   {{else if not .HasSlips}}
-    <p class="rounded-xl border border-dashed border-slate-700 bg-slate-900 p-4 text-sm text-slate-400">
+    <p class="ui-card border-dashed p-4 text-sm text-ink-muted">
       No graded slips yet for the {{.Season}} season. Once a slip finishes grading, your group&rsquo;s record and leaderboard will show up here.
     </p>
   {{else}}
     <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
-      <div class="rounded-xl border border-slate-800 bg-slate-900 p-3.5">
-        <p class="text-xs font-medium text-slate-400">Group record</p>
-        <p class="mt-1 text-xl font-semibold tabular-nums text-slate-100">{{.Record}}</p>
-        <p class="mt-0.5 text-xs text-slate-500">
+      <div class="ui-card p-3.5">
+        <p class="text-xs font-medium text-ink-muted">Group record</p>
+        <p class="mt-1 font-mono text-xl font-semibold tabular-nums text-ink">{{.Record}}</p>
+        <p class="mt-0.5 text-xs text-ink-subtle">
           {{.TotalSlips}} graded slip{{if ne .TotalSlips 1}}s{{end}}
         </p>
       </div>
 
-      <div class="rounded-xl border border-slate-800 bg-slate-900 p-3.5">
-        <p class="text-xs font-medium text-slate-400">Units P/L</p>
-        <p class="mt-1 text-xl font-semibold tabular-nums {{if .UnitsPositive}}text-emerald-400{{else if .UnitsNegative}}text-rose-400{{else}}text-slate-100{{end}}">
+      <div class="ui-card p-3.5">
+        <p class="text-xs font-medium text-ink-muted">Units P/L</p>
+        <p class="mt-1 font-mono text-xl font-semibold tabular-nums {{if .UnitsPositive}}text-positive-ink{{else if .UnitsNegative}}text-danger-ink{{else}}text-ink{{end}}">
           {{.UnitsPL}}
         </p>
-        <p class="mt-0.5 text-xs text-slate-500">Active leg odds</p>
+        <p class="mt-0.5 text-xs text-ink-subtle">Active leg odds</p>
       </div>
 
-      <div class="rounded-xl border border-slate-800 bg-slate-900 p-3.5">
-        <p class="text-xs font-medium text-slate-400">Win streak</p>
-        <p class="mt-1 text-xl font-semibold tabular-nums text-slate-100">{{.LongestWin}}</p>
-        <p class="mt-0.5 text-xs text-slate-500">Best run</p>
+      <div class="ui-card p-3.5">
+        <p class="text-xs font-medium text-ink-muted">Win streak</p>
+        <p class="mt-1 font-mono text-xl font-semibold tabular-nums text-ink">{{.LongestWin}}</p>
+        <p class="mt-0.5 text-xs text-ink-subtle">Best run</p>
       </div>
 
-      <div class="rounded-xl border border-slate-800 bg-slate-900 p-3.5">
-        <p class="text-xs font-medium text-slate-400">Loss streak</p>
-        <p class="mt-1 text-xl font-semibold tabular-nums text-slate-100">{{.LongestLoss}}</p>
-        <p class="mt-0.5 text-xs text-slate-500">Worst skid</p>
+      <div class="ui-card p-3.5">
+        <p class="text-xs font-medium text-ink-muted">Loss streak</p>
+        <p class="mt-1 font-mono text-xl font-semibold tabular-nums text-ink">{{.LongestLoss}}</p>
+        <p class="mt-0.5 text-xs text-ink-subtle">Worst skid</p>
       </div>
     </div>
 
     <div class="space-y-3">
       <div class="space-y-1">
         <h2 class="text-base font-semibold">Leaderboard</h2>
-        <p class="text-xs text-slate-400">
+        <p class="text-xs text-page-muted">
           Ranked by Hit% (6+ decided legs to qualify). Group Units P/L uses active leg odds; personal Dollar P/L uses each member&rsquo;s logged wager odds and boosts.
         </p>
       </div>
 
       {{if not .Leaderboard}}
-        <p class="rounded-xl border border-dashed border-slate-700 bg-slate-900 p-4 text-sm text-slate-400">
+        <p class="ui-card border-dashed p-4 text-sm text-ink-muted">
           No member legs on graded slips yet.
         </p>
       {{else}}
         <div class="space-y-3 sm:hidden">
           {{range .Leaderboard}}
-            <div class="rounded-xl border border-slate-800 bg-slate-900 p-4 space-y-3">
+            <div class="ui-card p-4 space-y-3">
               <div class="flex items-center justify-between gap-3">
                 <div class="flex items-center gap-2.5 min-w-0">
                   {{template "avatar" .Avatar}}
                   <div class="min-w-0">
-                    <p class="truncate text-sm font-semibold text-slate-100">{{.Name}}</p>
-                    <p class="text-xs text-slate-400 tabular-nums">Legs: {{.LegsRecord}}</p>
+                    <p class="truncate text-sm font-semibold text-ink">{{.Name}}</p>
+                    <p class="font-mono text-xs text-ink-muted tabular-nums">Legs: {{.LegsRecord}}</p>
                   </div>
                 </div>
                 {{if .ParlayTerrorist}}
-                  <span class="shrink-0 rounded-md border border-rose-800 bg-rose-950 px-2 py-0.5 text-xs font-medium text-rose-300">
+                  <span class="ui-stamp shrink-0 bg-danger-soft text-[11px] text-danger-ink">
                     Parlay Terrorist ({{.TerroristCount}})
                   </span>
                 {{end}}
               </div>
 
-              <div class="grid grid-cols-3 gap-2 border-t border-slate-800 pt-3 text-xs">
+              <div class="grid grid-cols-3 gap-2 border-t border-line pt-3 text-xs">
                 <div>
-                  <p class="text-slate-500">Hit %</p>
-                  <p class="mt-0.5 font-semibold tabular-nums {{if .Qualified}}text-slate-100{{else}}text-slate-400{{end}}">
+                  <p class="text-ink-subtle">Hit %</p>
+                  <p class="mt-0.5 font-mono font-semibold tabular-nums {{if .Qualified}}text-ink{{else}}text-ink-muted{{end}}">
                     {{.HitPct}}
                   </p>
                 </div>
                 <div>
-                  <p class="text-slate-500">Avg odds</p>
-                  <p class="mt-0.5 font-semibold tabular-nums text-slate-100">{{.AvgLegOdds}}</p>
+                  <p class="text-ink-subtle">Avg odds</p>
+                  <p class="mt-0.5 font-mono font-semibold tabular-nums text-ink">{{.AvgLegOdds}}</p>
                 </div>
                 <div>
-                  <p class="text-slate-500">Dollar P/L</p>
-                  <p class="mt-0.5 font-semibold tabular-nums {{if .DollarPositive}}text-emerald-400{{else if .DollarNegative}}text-rose-400{{else}}text-slate-200{{end}}">
+                  <p class="text-ink-subtle">Dollar P/L</p>
+                  <p class="mt-0.5 font-mono font-semibold tabular-nums {{if .DollarPositive}}text-positive-ink{{else if .DollarNegative}}text-danger-ink{{else}}text-ink{{end}}">
                     {{.DollarPL}}
                   </p>
                 </div>
@@ -128,9 +128,9 @@
           {{end}}
         </div>
 
-        <div class="hidden sm:block overflow-x-auto rounded-xl border border-slate-800 bg-slate-900">
+        <div class="hidden sm:block overflow-x-auto ui-card">
           <table class="w-full text-left text-sm">
-            <thead class="border-b border-slate-800 text-xs font-medium text-slate-400">
+            <thead class="border-b border-line text-xs font-medium text-ink-muted">
               <tr>
                 <th class="px-4 py-3">Member</th>
                 <th class="px-3 py-3 text-right">Legs</th>
@@ -140,29 +140,29 @@
                 <th class="px-4 py-3 text-right">Dollar P/L</th>
               </tr>
             </thead>
-            <tbody class="divide-y divide-slate-800/80">
+            <tbody class="divide-y divide-line">
               {{range .Leaderboard}}
                 <tr>
                   <td class="px-4 py-3">
                     <div class="flex items-center gap-2.5">
                       {{template "avatar" .Avatar}}
                       <div class="flex flex-wrap items-center gap-2 min-w-0">
-                        <span class="truncate font-medium text-slate-100">{{.Name}}</span>
+                        <span class="truncate font-medium text-ink">{{.Name}}</span>
                         {{if .ParlayTerrorist}}
-                          <span class="shrink-0 rounded-md border border-rose-800 bg-rose-950 px-2 py-0.5 text-xs font-medium text-rose-300">
+                          <span class="ui-stamp shrink-0 bg-danger-soft text-[11px] text-danger-ink">
                             Parlay Terrorist
                           </span>
                         {{end}}
                       </div>
                     </div>
                   </td>
-                  <td class="px-3 py-3 text-right tabular-nums text-slate-300">{{.LegsRecord}}</td>
-                  <td class="px-3 py-3 text-right tabular-nums font-medium {{if .Qualified}}text-slate-100{{else}}text-slate-400{{end}}">
+                  <td class="px-3 py-3 text-right font-mono tabular-nums text-ink-muted">{{.LegsRecord}}</td>
+                  <td class="px-3 py-3 text-right font-mono tabular-nums font-medium {{if .Qualified}}text-ink{{else}}text-ink-muted{{end}}">
                     {{.HitPct}}
                   </td>
-                  <td class="px-3 py-3 text-right tabular-nums text-slate-300">{{.AvgLegOdds}}</td>
-                  <td class="px-3 py-3 text-right tabular-nums text-slate-300">{{.TerroristCount}}</td>
-                  <td class="px-4 py-3 text-right tabular-nums font-medium {{if .DollarPositive}}text-emerald-400{{else if .DollarNegative}}text-rose-400{{else}}text-slate-300{{end}}">
+                  <td class="px-3 py-3 text-right font-mono tabular-nums text-ink-muted">{{.AvgLegOdds}}</td>
+                  <td class="px-3 py-3 text-right font-mono tabular-nums text-ink-muted">{{.TerroristCount}}</td>
+                  <td class="px-4 py-3 text-right font-mono tabular-nums font-medium {{if .DollarPositive}}text-positive-ink{{else if .DollarNegative}}text-danger-ink{{else}}text-ink-muted{{end}}">
                     {{.DollarPL}}
                   </td>
                 </tr>
