@@ -35,20 +35,32 @@ type NFLverseTeamWeek struct {
 }
 
 // NFLversePlayerWeek holds one player's weekly snap share, target/air-yards
-// usage, and EPA from nflverse.
+// usage, matchup context, and box-score production from nflverse.
 type NFLversePlayerWeek struct {
 	ESPNID        string
 	Season        int
 	SeasonType    int // 2 = regular, 3 = postseason
 	WeekNum       int
 	Team          string // ESPN abbreviation
+	Opponent      string // ESPN abbreviation
+	PlayerName    string
+	Position      string
 	OffenseSnaps  int
 	OffensePct    float64
 	TargetShare   float64
 	AirYardsShare float64
 	WOPR          float64
+	PassAtt       int
+	PassYds       int
+	PassTDs       int
 	Carries       int
+	RushYds       int
+	RushTDs       int
 	Targets       int
+	Receptions    int
+	RecYds        int
+	RecTDs        int
+	KickerPts     int
 	TotalEPA      float64
 	RZOpps        int
 	UpdatedAt     time.Time
@@ -60,9 +72,10 @@ const nflverseTeamWeekColumns = `
 	updated_at`
 
 const nflversePlayerWeekColumns = `
-	espn_id, season, season_type, week_num, team, offense_snaps, offense_pct,
-	target_share, air_yards_share, wopr, carries, targets, total_epa, rz_opps,
-	updated_at`
+	espn_id, season, season_type, week_num, team, opponent, player_name,
+	position, offense_snaps, offense_pct, target_share, air_yards_share, wopr,
+	pass_att, pass_yds, pass_tds, carries, rush_yds, rush_tds, targets,
+	receptions, rec_yds, rec_tds, kicker_pts, total_epa, rz_opps, updated_at`
 
 // UpsertNFLversePlayerIDs writes each player crosswalk row and reports whether
 // any row changed. Identical rows keep their existing updated_at.
@@ -280,30 +293,57 @@ func (s *Store) UpsertNFLversePlayerWeeks(ctx context.Context, rows []NFLversePl
 		for _, row := range rows {
 			result, err := tx.conn().ExecContext(ctx, `
 				INSERT INTO nflverse_player_weeks (
-					espn_id, season, season_type, week_num, team, offense_snaps,
-					offense_pct, target_share, air_yards_share, wopr, carries,
-					targets, total_epa, rz_opps, updated_at
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+					espn_id, season, season_type, week_num, team, opponent,
+					player_name, position, offense_snaps, offense_pct,
+					target_share, air_yards_share, wopr, pass_att, pass_yds,
+					pass_tds, carries, rush_yds, rush_tds, targets,
+					receptions, rec_yds, rec_tds, kicker_pts, total_epa,
+					rz_opps, updated_at
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 				ON CONFLICT (espn_id, season, season_type, week_num) DO UPDATE SET
 					team = excluded.team,
+					opponent = excluded.opponent,
+					player_name = excluded.player_name,
+					position = excluded.position,
 					offense_snaps = excluded.offense_snaps,
 					offense_pct = excluded.offense_pct,
 					target_share = excluded.target_share,
 					air_yards_share = excluded.air_yards_share,
 					wopr = excluded.wopr,
+					pass_att = excluded.pass_att,
+					pass_yds = excluded.pass_yds,
+					pass_tds = excluded.pass_tds,
 					carries = excluded.carries,
+					rush_yds = excluded.rush_yds,
+					rush_tds = excluded.rush_tds,
 					targets = excluded.targets,
+					receptions = excluded.receptions,
+					rec_yds = excluded.rec_yds,
+					rec_tds = excluded.rec_tds,
+					kicker_pts = excluded.kicker_pts,
 					total_epa = excluded.total_epa,
 					rz_opps = excluded.rz_opps,
 					updated_at = excluded.updated_at
 				WHERE nflverse_player_weeks.team IS NOT excluded.team
+					OR nflverse_player_weeks.opponent IS NOT excluded.opponent
+					OR nflverse_player_weeks.player_name IS NOT excluded.player_name
+					OR nflverse_player_weeks.position IS NOT excluded.position
 					OR nflverse_player_weeks.offense_snaps IS NOT excluded.offense_snaps
 					OR nflverse_player_weeks.offense_pct IS NOT excluded.offense_pct
 					OR nflverse_player_weeks.target_share IS NOT excluded.target_share
 					OR nflverse_player_weeks.air_yards_share IS NOT excluded.air_yards_share
 					OR nflverse_player_weeks.wopr IS NOT excluded.wopr
+					OR nflverse_player_weeks.pass_att IS NOT excluded.pass_att
+					OR nflverse_player_weeks.pass_yds IS NOT excluded.pass_yds
+					OR nflverse_player_weeks.pass_tds IS NOT excluded.pass_tds
 					OR nflverse_player_weeks.carries IS NOT excluded.carries
+					OR nflverse_player_weeks.rush_yds IS NOT excluded.rush_yds
+					OR nflverse_player_weeks.rush_tds IS NOT excluded.rush_tds
 					OR nflverse_player_weeks.targets IS NOT excluded.targets
+					OR nflverse_player_weeks.receptions IS NOT excluded.receptions
+					OR nflverse_player_weeks.rec_yds IS NOT excluded.rec_yds
+					OR nflverse_player_weeks.rec_tds IS NOT excluded.rec_tds
+					OR nflverse_player_weeks.kicker_pts IS NOT excluded.kicker_pts
 					OR nflverse_player_weeks.total_epa IS NOT excluded.total_epa
 					OR nflverse_player_weeks.rz_opps IS NOT excluded.rz_opps`,
 				row.ESPNID,
@@ -311,13 +351,25 @@ func (s *Store) UpsertNFLversePlayerWeeks(ctx context.Context, rows []NFLversePl
 				row.SeasonType,
 				row.WeekNum,
 				row.Team,
+				row.Opponent,
+				row.PlayerName,
+				normalizeNFLversePosition(row.Position),
 				row.OffenseSnaps,
 				row.OffensePct,
 				row.TargetShare,
 				row.AirYardsShare,
 				row.WOPR,
+				row.PassAtt,
+				row.PassYds,
+				row.PassTDs,
 				row.Carries,
+				row.RushYds,
+				row.RushTDs,
 				row.Targets,
+				row.Receptions,
+				row.RecYds,
+				row.RecTDs,
+				row.KickerPts,
 				row.TotalEPA,
 				row.RZOpps,
 				formatTimestamp(row.UpdatedAt),
@@ -469,6 +521,94 @@ func (s *Store) NFLversePlayerWeeksForSeason(
 	return scanNFLversePlayerWeeks(rows)
 }
 
+// NFLversePlayerWeeksAgainstOpponent returns weekly nflverse rows for all
+// players at position who faced opponent in season across seasonTypes, ordered
+// most recent season type and week first.
+func (s *Store) NFLversePlayerWeeksAgainstOpponent(
+	ctx context.Context,
+	opponent, position string,
+	season int,
+	seasonTypes ...int,
+) ([]NFLversePlayerWeek, error) {
+	opponent = strings.ToUpper(strings.TrimSpace(opponent))
+	position = normalizeNFLversePosition(position)
+	if opponent == "" || position == "" || len(seasonTypes) == 0 {
+		return nil, nil
+	}
+	placeholders, typeArgs := seasonTypePlaceholders(seasonTypes)
+	args := make([]any, 0, 3+len(typeArgs))
+	args = append(args, season)
+	args = append(args, typeArgs...)
+	args = append(args, opponent, position)
+
+	rows, err := s.readConn().QueryContext(ctx, "SELECT"+nflversePlayerWeekColumns+`
+		FROM nflverse_player_weeks
+		WHERE season = ? AND season_type IN (`+placeholders+`) AND opponent = ? AND position = ?
+		ORDER BY season_type DESC, week_num DESC, espn_id ASC`, args...)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"nflverse player weeks against %s/%s/%d/%v: %w",
+			opponent,
+			position,
+			season,
+			seasonTypes,
+			err,
+		)
+	}
+	defer func() { _ = rows.Close() }()
+	return scanNFLversePlayerWeeks(rows)
+}
+
+// NFLversePlayerWeeksForPositionTypes returns weekly nflverse rows for all
+// players at position in season across seasonTypes, ordered most recent season
+// type and week first.
+func (s *Store) NFLversePlayerWeeksForPositionTypes(
+	ctx context.Context,
+	position string,
+	season int,
+	seasonTypes ...int,
+) ([]NFLversePlayerWeek, error) {
+	position = normalizeNFLversePosition(position)
+	if position == "" || len(seasonTypes) == 0 {
+		return nil, nil
+	}
+	placeholders, typeArgs := seasonTypePlaceholders(seasonTypes)
+	args := make([]any, 0, 2+len(typeArgs))
+	args = append(args, season)
+	args = append(args, typeArgs...)
+	args = append(args, position)
+
+	rows, err := s.readConn().QueryContext(ctx, "SELECT"+nflversePlayerWeekColumns+`
+		FROM nflverse_player_weeks
+		WHERE season = ? AND season_type IN (`+placeholders+`) AND position = ?
+		ORDER BY season_type DESC, week_num DESC, espn_id ASC`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("nflverse player weeks for %s/%d/%v: %w", position, season, seasonTypes, err)
+	}
+	defer func() { _ = rows.Close() }()
+	return scanNFLversePlayerWeeks(rows)
+}
+
+func seasonTypePlaceholders(seasonTypes []int) (string, []any) {
+	placeholders := strings.Repeat("?,", len(seasonTypes))
+	placeholders = placeholders[:len(placeholders)-1]
+	args := make([]any, 0, len(seasonTypes))
+	for _, st := range seasonTypes {
+		args = append(args, st)
+	}
+	return placeholders, args
+}
+
+func normalizeNFLversePosition(pos string) string {
+	pos = strings.ToUpper(strings.TrimSpace(pos))
+	switch pos {
+	case "FB", "HB":
+		return "RB"
+	default:
+		return pos
+	}
+}
+
 func scanNFLversePlayerWeeks(rows *sql.Rows) ([]NFLversePlayerWeek, error) {
 	var out []NFLversePlayerWeek
 	for rows.Next() {
@@ -482,13 +622,25 @@ func scanNFLversePlayerWeeks(rows *sql.Rows) ([]NFLversePlayerWeek, error) {
 			&item.SeasonType,
 			&item.WeekNum,
 			&item.Team,
+			&item.Opponent,
+			&item.PlayerName,
+			&item.Position,
 			&item.OffenseSnaps,
 			&item.OffensePct,
 			&item.TargetShare,
 			&item.AirYardsShare,
 			&item.WOPR,
+			&item.PassAtt,
+			&item.PassYds,
+			&item.PassTDs,
 			&item.Carries,
+			&item.RushYds,
+			&item.RushTDs,
 			&item.Targets,
+			&item.Receptions,
+			&item.RecYds,
+			&item.RecTDs,
+			&item.KickerPts,
 			&item.TotalEPA,
 			&item.RZOpps,
 			&updatedAt,

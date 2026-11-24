@@ -80,6 +80,14 @@ func TestSyncNFLverseWritesTablesAndPublishesOnce(t *testing.T) {
 				LatestTeam:  "CIN",
 				Position:    "QB",
 			},
+			{
+				GSISID:      "00-0036854",
+				PFRID:       "McPhEv00",
+				ESPNID:      "4360234",
+				DisplayName: "Evan McPherson",
+				LatestTeam:  "CIN",
+				Position:    "K",
+			},
 		},
 		teamStats: []nflverse.TeamWeek{
 			{
@@ -106,19 +114,38 @@ func TestSyncNFLverseWritesTablesAndPublishesOnce(t *testing.T) {
 		},
 		playerStats: []nflverse.PlayerWeek{
 			{
-				PlayerID:      "00-0036900",
-				Team:          "CIN",
-				Season:        2026,
-				SeasonType:    nflverse.SeasonTypeRegular,
-				Week:          8,
-				TargetShare:   0.32,
-				AirYardsShare: 0.44,
-				WOPR:          0.79,
-				PassingEPA:    0,
-				RushingEPA:    0.5,
-				ReceivingEPA:  7.5,
-				Targets:       12,
-				Carries:       1,
+				PlayerID:       "00-0036900",
+				PlayerName:     "Ja'Marr Chase",
+				Position:       "WR",
+				Team:           "CIN",
+				Opponent:       "BAL",
+				Season:         2026,
+				SeasonType:     nflverse.SeasonTypeRegular,
+				Week:           8,
+				TargetShare:    0.32,
+				AirYardsShare:  0.44,
+				WOPR:           0.79,
+				PassingEPA:     0,
+				RushingEPA:     0.5,
+				ReceivingEPA:   7.5,
+				Targets:        12,
+				Carries:        1,
+				Receptions:     9,
+				ReceivingYards: 142,
+				RushingYards:   7,
+				ReceivingTDs:   2,
+			},
+			{
+				PlayerID:   "00-0036854",
+				PlayerName: "Evan McPherson",
+				Position:   "K",
+				Team:       "CIN",
+				Opponent:   "BAL",
+				Season:     2026,
+				SeasonType: nflverse.SeasonTypeRegular,
+				Week:       8,
+				FGMade:     2,
+				PATMade:    3,
 			},
 			// Unmatched GSIS ID fails soft.
 			{
@@ -201,7 +228,7 @@ func TestSyncNFLverseWritesTablesAndPublishesOnce(t *testing.T) {
 
 	playerRows, err := store.NFLversePlayerWeeksForSeason(t.Context(), 2026, nflverse.SeasonTypeRegular)
 	require.NoError(t, err)
-	require.Len(t, playerRows, 2)
+	require.Len(t, playerRows, 3)
 	assert.Equal(t, db.NFLversePlayerWeek{
 		ESPNID:       "3915511",
 		Season:       2026,
@@ -213,21 +240,40 @@ func TestSyncNFLverseWritesTablesAndPublishesOnce(t *testing.T) {
 		UpdatedAt:    now,
 	}, playerRows[0])
 	assert.Equal(t, db.NFLversePlayerWeek{
+		ESPNID:     "4360234",
+		Season:     2026,
+		SeasonType: nflverse.SeasonTypeRegular,
+		WeekNum:    8,
+		Team:       "CIN",
+		Opponent:   "BAL",
+		PlayerName: "Evan McPherson",
+		Position:   "K",
+		KickerPts:  9,
+		UpdatedAt:  now,
+	}, playerRows[1])
+	assert.Equal(t, db.NFLversePlayerWeek{
 		ESPNID:        "4362628",
 		Season:        2026,
 		SeasonType:    nflverse.SeasonTypeRegular,
 		WeekNum:       8,
 		Team:          "CIN",
+		Opponent:      "BAL",
+		PlayerName:    "Ja'Marr Chase",
+		Position:      "WR",
 		OffenseSnaps:  58,
 		OffensePct:    0.95,
 		TargetShare:   0.32,
 		AirYardsShare: 0.44,
 		WOPR:          0.79,
 		Carries:       1,
+		RushYds:       7,
 		Targets:       12,
+		Receptions:    9,
+		RecYds:        142,
+		RecTDs:        2,
 		TotalEPA:      8.0,
 		UpdatedAt:     now,
-	}, playerRows[1])
+	}, playerRows[2])
 
 	state, err := store.SyncState(t.Context(), NFLverseSource(2026))
 	require.NoError(t, err)

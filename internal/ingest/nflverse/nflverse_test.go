@@ -152,14 +152,39 @@ func TestPlayerStatsParsesSavedFixture(t *testing.T) {
 	// The fixture has 1,036 data rows; 1 row has an empty player_id and is dropped.
 	assert.Len(t, rows, 1035)
 
+	byID := make(map[string]nflverse.PlayerWeek, len(rows))
 	for _, r := range rows {
 		assert.NotEmpty(t, r.PlayerID)
+		assert.NotEmpty(t, r.PlayerName)
+		assert.NotEmpty(t, r.Position)
 		assert.Equal(t, 2026, r.Season)
 		assert.Equal(t, nflverse.SeasonTypeRegular, r.SeasonType)
 		assert.Equal(t, 9, r.Week)
 		_, ok := espnTeamCodes[r.Team]
 		assert.True(t, ok, "team code %q is not an ESPN abbreviation", r.Team)
+		_, ok = espnTeamCodes[r.Opponent]
+		assert.True(t, ok, "opponent code %q is not an ESPN abbreviation", r.Opponent)
+		byID[r.PlayerID] = r
 	}
+
+	stafford, ok := byID["00-0026498"]
+	require.True(t, ok)
+	assert.Equal(t, "Matthew Stafford", stafford.PlayerName)
+	assert.Equal(t, "QB", stafford.Position)
+	assert.Equal(t, "LAR", stafford.Team)
+	assert.Equal(t, "WSH", stafford.Opponent)
+	assert.Equal(t, 43, stafford.Attempts)
+	assert.Equal(t, 228, stafford.PassingYards)
+	assert.Equal(t, 1, stafford.PassingTDs)
+
+	folk, ok := byID["00-0025565"]
+	require.True(t, ok)
+	assert.Equal(t, "Nick Folk", folk.PlayerName)
+	assert.Equal(t, "K", folk.Position)
+	assert.Equal(t, "ATL", folk.Team)
+	assert.Equal(t, "CIN", folk.Opponent)
+	assert.Equal(t, 1, folk.FGMade)
+	assert.Equal(t, 2, folk.PATMade)
 }
 
 func TestSnapCountsParsesSavedFixture(t *testing.T) {
@@ -290,19 +315,25 @@ func TestParserErrors(t *testing.T) {
 	t.Run("empty optional cells default to zero", func(t *testing.T) {
 		t.Parallel()
 		header := []string{
-			"player_id", "team", "season", "week", "season_type",
+			"player_id", "player_name", "player_display_name", "position",
+			"team", "opponent_team", "season", "week", "season_type",
 			"target_share", "air_yards_share", "wopr",
 			"passing_epa", "rushing_epa", "receiving_epa",
-			"targets", "carries", "receptions",
+			"targets", "carries", "attempts", "receptions",
 			"receiving_yards", "rushing_yards", "passing_yards",
 			"passing_tds", "rushing_tds", "receiving_tds",
+			"fg_made", "pat_made",
 		}
 		body := buildCSV(
 			t,
 			header,
 			[]string{
 				"00-1",
+				"J. Allen",
+				"",
+				"QB",
 				"BUF",
+				"WAS",
 				"2026",
 				"1",
 				"REG",
@@ -314,6 +345,7 @@ func TestParserErrors(t *testing.T) {
 				"",
 				"",
 				"",
+				"30",
 				"",
 				"",
 				"",
@@ -321,18 +353,35 @@ func TestParserErrors(t *testing.T) {
 				"2",
 				"",
 				"",
+				"",
+				"",
 			},
-			[]string{"", "BUF", "2026", "1", "REG", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""},
+			[]string{
+				"00-2", "P. Ricard", "Patrick Ricard", "FB", "BAL", "LA", "2026", "1", "REG",
+				"", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
+			},
+			[]string{
+				"", "", "", "", "BUF", "KC", "2026", "1", "REG",
+				"", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
+			},
 		)
 		server := csvServer(t, "/stats_player/stats_player_week_2026.csv", body)
 		rows, err := nflverse.NewClient(server.URL, server.Client()).PlayerStats(t.Context(), 2026)
 		require.NoError(t, err)
-		require.Len(t, rows, 1, "row with empty player_id is dropped")
+		require.Len(t, rows, 2, "row with empty player_id is dropped")
+		assert.Equal(t, "J. Allen", rows[0].PlayerName, "falls back to player_name when player_display_name is empty")
+		assert.Equal(t, "QB", rows[0].Position)
+		assert.Equal(t, "WSH", rows[0].Opponent)
+		assert.Equal(t, 30, rows[0].Attempts)
 		assert.InDelta(t, 1.25, rows[0].PassingEPA, 1e-9)
 		assert.Zero(t, rows[0].ReceivingEPA)
 		assert.Zero(t, rows[0].AirYardsShare)
 		assert.Equal(t, 200, rows[0].PassingYards)
 		assert.Equal(t, 2, rows[0].PassingTDs)
+
+		assert.Equal(t, "Patrick Ricard", rows[1].PlayerName)
+		assert.Equal(t, "RB", rows[1].Position, "FB normalizes to RB")
+		assert.Equal(t, "LAR", rows[1].Opponent)
 	})
 
 	t.Run("http error and invalid season", func(t *testing.T) {

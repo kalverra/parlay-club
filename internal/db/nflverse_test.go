@@ -144,6 +144,9 @@ func TestUpsertNFLversePlayerWeeksIdempotentAndQuery(t *testing.T) {
 			SeasonType:    2,
 			WeekNum:       7,
 			Team:          "CIN",
+			Opponent:      "CLE",
+			PlayerName:    "Ja'Marr Chase",
+			Position:      "WR",
 			OffenseSnaps:  62,
 			OffensePct:    0.94,
 			TargetShare:   0.29,
@@ -151,6 +154,9 @@ func TestUpsertNFLversePlayerWeeksIdempotentAndQuery(t *testing.T) {
 			WOPR:          0.72,
 			Carries:       0,
 			Targets:       11,
+			Receptions:    8,
+			RecYds:        112,
+			RecTDs:        1,
 			TotalEPA:      8.4,
 			RZOpps:        2,
 			UpdatedAt:     first,
@@ -161,13 +167,20 @@ func TestUpsertNFLversePlayerWeeksIdempotentAndQuery(t *testing.T) {
 			SeasonType:    2,
 			WeekNum:       8,
 			Team:          "CIN",
+			Opponent:      "BAL",
+			PlayerName:    "Ja'Marr Chase",
+			Position:      "WR",
 			OffenseSnaps:  65,
 			OffensePct:    0.96,
 			TargetShare:   0.33,
 			AirYardsShare: 0.45,
 			WOPR:          0.81,
 			Carries:       1,
+			RushYds:       6,
 			Targets:       13,
+			Receptions:    10,
+			RecYds:        148,
+			RecTDs:        2,
 			TotalEPA:      11.2,
 			RZOpps:        3,
 			UpdatedAt:     first,
@@ -229,7 +242,19 @@ func TestUpsertNFLversePlayerWeeksIdempotentAndQuery(t *testing.T) {
 	assert.Equal(t, 3, teamMerged[1].SeasonType)
 
 	_, err = store.UpsertNFLversePlayerWeeks(t.Context(), []db.NFLversePlayerWeek{
-		{ESPNID: "4362628", Season: 2026, SeasonType: 3, WeekNum: 1, Team: "CIN", OffensePct: 0.99, UpdatedAt: second},
+		{
+			ESPNID:     "4362628",
+			Season:     2026,
+			SeasonType: 3,
+			WeekNum:    1,
+			Team:       "CIN",
+			Opponent:   "BAL",
+			PlayerName: "Ja'Marr Chase",
+			Position:   "WR",
+			OffensePct: 0.99,
+			RecYds:     130,
+			UpdatedAt:  second,
+		},
 	})
 	require.NoError(t, err)
 	playerMerged, err := store.NFLversePlayerWeeksForPlayersTypes(t.Context(), []string{"4362628"}, 2026, 2, 3)
@@ -238,4 +263,65 @@ func TestUpsertNFLversePlayerWeeksIdempotentAndQuery(t *testing.T) {
 	assert.Equal(t, 3, playerMerged["4362628"][0].SeasonType, "postseason week comes first")
 	assert.Equal(t, 8, playerMerged["4362628"][1].WeekNum)
 	assert.Equal(t, 7, playerMerged["4362628"][2].WeekNum)
+
+	// Opponent + position queries return matching rows across season types,
+	// normalizing FB/HB to RB.
+	_, err = store.UpsertNFLversePlayerWeeks(t.Context(), []db.NFLversePlayerWeek{
+		{
+			ESPNID:     "4429202",
+			Season:     2026,
+			SeasonType: 2,
+			WeekNum:    6,
+			Team:       "PIT",
+			Opponent:   "BAL",
+			PlayerName: "Back One",
+			Position:   "HB",
+			RushYds:    88,
+			UpdatedAt:  first,
+		},
+		{
+			ESPNID:     "3915511",
+			Season:     2026,
+			SeasonType: 2,
+			WeekNum:    8,
+			Team:       "CIN",
+			Opponent:   "BAL",
+			PlayerName: "Joe Burrow",
+			Position:   "QB",
+			PassAtt:    36,
+			PassYds:    310,
+			PassTDs:    3,
+			UpdatedAt:  first,
+		},
+	})
+	require.NoError(t, err)
+
+	vsBALWR, err := store.NFLversePlayerWeeksAgainstOpponent(t.Context(), "BAL", "WR", 2026, 2, 3)
+	require.NoError(t, err)
+	require.Len(t, vsBALWR, 2)
+	assert.Equal(t, 3, vsBALWR[0].SeasonType)
+	assert.Equal(t, 130, vsBALWR[0].RecYds)
+	assert.Equal(t, 2, vsBALWR[1].SeasonType)
+	assert.Equal(t, 8, vsBALWR[1].WeekNum)
+
+	vsBALRB, err := store.NFLversePlayerWeeksAgainstOpponent(t.Context(), "bal", "fb", 2026, 2)
+	require.NoError(t, err)
+	require.Len(t, vsBALRB, 1)
+	assert.Equal(t, "RB", vsBALRB[0].Position)
+	assert.Equal(t, 88, vsBALRB[0].RushYds)
+
+	allWRs, err := store.NFLversePlayerWeeksForPositionTypes(t.Context(), "WR", 2026, 2, 3)
+	require.NoError(t, err)
+	require.Len(t, allWRs, 3)
+	assert.Equal(t, 3, allWRs[0].SeasonType)
+	assert.Equal(t, 8, allWRs[1].WeekNum)
+	assert.Equal(t, 7, allWRs[2].WeekNum)
+
+	emptyOpp, err := store.NFLversePlayerWeeksAgainstOpponent(t.Context(), "", "WR", 2026, 2)
+	require.NoError(t, err)
+	assert.Empty(t, emptyOpp)
+
+	emptyPos, err := store.NFLversePlayerWeeksForPositionTypes(t.Context(), "WR", 2026)
+	require.NoError(t, err)
+	assert.Empty(t, emptyPos)
 }
