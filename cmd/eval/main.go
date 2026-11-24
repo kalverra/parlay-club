@@ -251,7 +251,17 @@ func writeReportText(w io.Writer, r eval.Report) error {
 	if ew.err != nil {
 		return ew.err
 	}
-	return writeBandsTable(w, r.SlipBands)
+	if err := writeBandsTable(w, r.SlipBands); err != nil {
+		return err
+	}
+	if len(r.SlipFactors) > 0 {
+		ew.println("\nSlip Factor Attribution:")
+		if ew.err != nil {
+			return ew.err
+		}
+		return writeFactorsTable(w, r.SlipFactors)
+	}
+	return nil
 }
 
 func writeDiffText(w io.Writer, base, cand eval.Report, diff eval.DiffReport) error {
@@ -287,7 +297,17 @@ func writeDiffText(w io.Writer, base, cand eval.Report, diff eval.DiffReport) er
 	if ew.err != nil {
 		return ew.err
 	}
-	return writeFactorsTable(w, cand.Factors)
+	if err := writeFactorsTable(w, cand.Factors); err != nil {
+		return err
+	}
+	if len(cand.SlipFactors) > 0 {
+		ew.printf("\nCandidate Slip Factor Attribution (%s):\n", cand.RubricName)
+		if ew.err != nil {
+			return ew.err
+		}
+		return writeFactorsTable(w, cand.SlipFactors)
+	}
+	return nil
 }
 
 func writeCoverage(ew *errWriter, c eval.DataCoverage) {
@@ -445,6 +465,10 @@ func writeDiffMarkdown(w io.Writer, base, cand eval.Report, diff eval.DiffReport
 	writeDiffSectionsMarkdown(ew, diff)
 	ew.printf("\n### Candidate Factor Attribution (`%s`)\n\n", cand.RubricName)
 	writeFactorsMarkdown(ew, cand.Factors)
+	if len(cand.SlipFactors) > 0 {
+		ew.printf("\n### Candidate Slip Factor Attribution (`%s`)\n\n", cand.RubricName)
+		writeFactorsMarkdown(ew, cand.SlipFactors)
+	}
 	return ew.err
 }
 
@@ -468,6 +492,11 @@ func writeReportSectionsMarkdown(ew *errWriter, r eval.Report) {
 
 	ew.printf("\n#### Top Factor Attribution\n\n")
 	writeFactorsMarkdown(ew, r.Factors)
+
+	if len(r.SlipFactors) > 0 {
+		ew.printf("\n#### Slip Factor Attribution\n\n")
+		writeFactorsMarkdown(ew, r.SlipFactors)
+	}
 }
 
 func writeDiffSectionsMarkdown(ew *errWriter, diff eval.DiffReport) {

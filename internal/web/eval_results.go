@@ -33,6 +33,7 @@ type EvalResultsPage struct {
 	Diffs           []EvalDiffView
 	Weekly          []EvalWeekView
 	Factors         []EvalFactorView
+	SlipFactors     []EvalFactorView
 	Coverage        EvalCoverageView
 }
 
@@ -344,6 +345,7 @@ func buildEvalResultsPage(
 		Diffs:           buildEvalDiffs(suite.Diffs),
 		Weekly:          buildEvalWeekly(report.Weekly),
 		Factors:         buildEvalFactors(report.Factors),
+		SlipFactors:     buildEvalFactors(report.SlipFactors),
 		Coverage: EvalCoverageView{
 			TotalLegs:    suite.Coverage.TotalLegs,
 			WithGameLogs: suite.Coverage.WithGameLogs,
