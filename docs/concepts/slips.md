@@ -278,7 +278,8 @@ the one Yes on an anytime touchdown. A side with no stored price leaves one full
 A prop tab clusters that tab's rows by player. One card carries the player's portrait (or initials), name, position, and
 team (with team logo), and every market that player has in the tab sits under it, so Receiving Yards and Receptions
 share a card. Prop buttons stay text-only and read short ("Over 245.5", "Yes") because the card already names the
-player; the pick they post is unchanged.
+player; the pick they post is unchanged. Every pick-board option button (`tap to add`, `tap to remove`, `tap to switch`,
+and `swap in`) pairs its price with its implied percentage chance (e.g., `-110 (52%)`).
 
 The search text also filters the open game's rows. Sorts are player (default), odds (shortest price first), line
 (highest line first), and matchup (strongest suggestion signal and softest opposing defense EPA rank first). Kickoff and
@@ -358,14 +359,13 @@ off, it says picks are closed. A search or filter that matches nothing keeps "No
 with no rows in the current search says the same inside the detail; with no search it says the game's lines have not
 synced. When only some games have started, one line says how many are hidden.
 
-The dock shows "Your picks", then `Picked of Limit` and the combined price of the viewer's legs, and a "Slip" button.
-The combined price is `parlay.CombinedOdds` over the viewer's legs, converted back with `parlay.DecimalToAmerican`, the
-same math the payout card uses; a slip with no legs shows only the count. The button loads `GET /slips/{id}/tray` into a
-`dialog` sheet, and the tray inside carries the viewer's legs with remove buttons, progress ("1 of 2"), the analyzer
-warnings that name one of the viewer's legs, and one action: "Done" back to the hub, or "Review and lock in" at the
-limit. A leg whose game has kicked off shows "Locked" instead of a remove button. The dock watches `tray-updated` and
-`slip-updated` and refreshes from `GET /slips/{id}/pick/dock`, and the tray does the same, so a leg added, swapped, or
-removed anywhere updates the count and price without a reload.
+The dock shows "Your picks", `Picked of Limit`, the combined price, and its implied percentage chance (e.g.,
+`1 of 2 · 1.91x (-110) · 52%`), plus a "Slip" button. The combined price uses `parlay.CombinedOdds` and
+`parlay.DecimalToAmerican`, matching the payout card; an empty slip shows only the count and omits the implied chance.
+The button loads `GET /slips/{id}/tray` into a `dialog` sheet showing the viewer's legs (each with odds and muted implied
+chance), remove buttons (or "Locked" after kickoff), progress ("1 of 2"), analyzer warnings for those legs, and "Done"
+or "Review and lock in" at the limit. Both the dock (`GET /slips/{id}/pick/dock`) and tray watch `tray-updated` and
+`slip-updated` so any leg change updates the count and price without a reload.
 
 `GET /games` is a 303 to the active group's week, so old links still land somewhere useful. `GET /games/{id}/props`
 without `?slip=` still renders the standalone prop partial for one game, with team totals and player props grouped under
