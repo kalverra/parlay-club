@@ -3541,3 +3541,85 @@ func TestPickBoardSurfacesAGradeCountsAndTopPlaysInGame(t *testing.T) {
 	assert.Contains(t, batchResp.Body.String(), `id="pick-body"`)
 	assert.NotContains(t, batchResp.Body.String(), "Top plays in this game")
 }
+
+func TestPickBoardTrayAndDockRenderImpliedChances(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	game := addGame(t, fixture, gameKickoff())
+	addGameOdds(t, fixture.store, game.ID)
+	_, err := fixture.store.SetUserHomeBook(t.Context(), fixture.user.ID, new("draftkings"))
+	require.NoError(t, err)
+
+	get := func(path string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
+		fixture.handler.ServeHTTP(rec, req)
+		return rec
+	}
+
+	// Empty dock omits combined implied chance.
+	emptyDock := get(fmt.Sprintf("/slips/%d/pick/dock", fixture.slip.ID))
+	require.Equal(t, http.StatusOK, emptyDock.Code)
+	assert.Contains(t, emptyDock.Body.String(), "0 of 2")
+	assert.NotContains(t, emptyDock.Body.String(), "Implied chance from combined odds")
+
+	// Unpicked detail shows implied chances on "tap to add" option buttons.
+	detailBefore := get(fmt.Sprintf("/slips/%d/pick/detail?game=%s", fixture.slip.ID, game.ID))
+	require.Equal(t, http.StatusOK, detailBefore.Code)
+	detailBeforeBody := detailBefore.Body.String()
+	assert.Contains(t, detailBeforeBody, "(60%)")
+	assert.Contains(t, detailBeforeBody, "(43%)")
+	assert.Contains(t, detailBeforeBody, "(52%)")
+	assert.Contains(t, detailBeforeBody, "tap to add")
+
+	// Adding one side of a pair row renders "tap to remove" on it and "tap to switch" on the other.
+	addML := postForm(t, fixture.handler, fmt.Sprintf("/slips/%d/legs", fixture.slip.ID), url.Values{
+		"quick":       {"1"},
+		"from":        {"board"},
+		"game_id":     {game.ID},
+		"market_type": {"ML"},
+		"team":        {"BUF"},
+		"side":        {"TEAM"},
+		"odds":        {"-150"},
+	})
+	require.Equal(t, http.StatusOK, addML.Code, addML.Body.String())
+	pairBody := addML.Body.String()
+	assert.Contains(t, pairBody, "(60%)")
+	assert.Contains(t, pairBody, "tap to remove")
+	assert.Contains(t, pairBody, "(43%)")
+	assert.Contains(t, pairBody, "tap to switch")
+
+	// Add a second leg (-110 -> 52%) to reach the 2-leg limit.
+	addTotal := postForm(t, fixture.handler, fmt.Sprintf("/slips/%d/legs", fixture.slip.ID), url.Values{
+		"quick":       {"1"},
+		"from":        {"board"},
+		"game_id":     {game.ID},
+		"market_type": {"TOTAL"},
+		"side":        {"OVER"},
+		"line":        {"47.5"},
+		"odds":        {"-110"},
+	})
+	require.Equal(t, http.StatusOK, addTotal.Code, addTotal.Body.String())
+
+	// At the limit, unpicked options show "swap in" with their implied chance.
+	detailAtLimit := get(fmt.Sprintf("/slips/%d/pick/detail?game=%s", fixture.slip.ID, game.ID))
+	require.Equal(t, http.StatusOK, detailAtLimit.Code)
+	assert.Contains(t, detailAtLimit.Body.String(), "swap in")
+	assert.Contains(t, detailAtLimit.Body.String(), "(52%)")
+
+	// Tray leg rows render each leg's implied chance.
+	trayResp := get(fmt.Sprintf("/slips/%d/tray", fixture.slip.ID))
+	require.Equal(t, http.StatusOK, trayResp.Code)
+	trayBody := trayResp.Body.String()
+	assert.Contains(t, trayBody, "(60%)")
+	assert.Contains(t, trayBody, "(52%)")
+
+	// Dock renders combined implied chance: (-150 * -110 = 3.18x -> 31%).
+	dockResp := get(fmt.Sprintf("/slips/%d/pick/dock", fixture.slip.ID))
+	require.Equal(t, http.StatusOK, dockResp.Code)
+	dockBody := dockResp.Body.String()
+	assert.Contains(t, dockBody, "2 of 2")
+	assert.Contains(t, dockBody, "Implied chance from combined odds")
+	assert.Contains(t, dockBody, "31%")
+}

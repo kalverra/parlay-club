@@ -151,24 +151,25 @@ type PickChip struct {
 
 // PickRowView is one selection a person can add, remove, or swap.
 type PickRowView struct {
-	SlipID     int64
-	GameID     string
-	Market     string
-	Team       string
-	PlayerName string
-	PlayerID   string
-	Side       string
-	Line       string
-	Odds       int
-	Price      string
-	Text       string
-	PickID     int64
-	UpdateID   int64
-	AtLimit    bool
-	SwapURL    string
-	Badge      string
-	DriftNote  string
-	CanRefresh bool
+	SlipID        int64
+	GameID        string
+	Market        string
+	Team          string
+	PlayerName    string
+	PlayerID      string
+	Side          string
+	Line          string
+	Odds          int
+	Price         string
+	ImpliedChance string
+	Text          string
+	PickID        int64
+	UpdateID      int64
+	AtLimit       bool
+	SwapURL       string
+	Badge         string
+	DriftNote     string
+	CanRefresh    bool
 }
 
 // PickDockView is the viewer's own picks: the fixed dock's count and combined
@@ -179,6 +180,7 @@ type PickDockView struct {
 	Limit            int
 	Combined         string
 	CombinedAmerican string
+	CombinedImplied  string
 	Legs             []TrayLegView
 	Grade            GradeView
 	Warnings         []AnalyzerWarningView
@@ -188,13 +190,14 @@ type PickDockView struct {
 
 // TrayLegView is one of the viewer's legs in the tray.
 type TrayLegView struct {
-	ID        int64
-	Selection string
-	Odds      string
-	Grade     GradeView
-	Locked    bool
-	DriftNote string
-	Refresh   *LegRefreshView
+	ID            int64
+	Selection     string
+	Odds          string
+	ImpliedChance string
+	Grade         GradeView
+	Locked        bool
+	DriftNote     string
+	Refresh       *LegRefreshView
 }
 
 // LegRefreshView carries the current board fields needed to sync a drifted leg
@@ -1145,10 +1148,11 @@ func (h *slipHandlers) dockFrom(
 			locked = true
 		}
 		trayLeg := TrayLegView{
-			ID:        leg.ID,
-			Selection: leg.Selection,
-			Odds:      formatOdds(leg.Odds),
-			Locked:    locked,
+			ID:            leg.ID,
+			Selection:     leg.Selection,
+			Odds:          formatOdds(leg.Odds),
+			ImpliedChance: formatImpliedChance(parlay.ImpliedProb(leg.Odds)),
+			Locked:        locked,
 		}
 		if row, ok := rowByLegID[leg.ID]; ok && row.Drifted {
 			trayLeg.DriftNote = row.TrayDriftNote
@@ -1165,6 +1169,7 @@ func (h *slipHandlers) dockFrom(
 	combined := parlay.CombinedOdds(combinedLegs)
 	view.Combined = fmt.Sprintf("%.2fx", combined)
 	view.CombinedAmerican = formatOdds(parlay.DecimalToAmerican(combined))
+	view.CombinedImplied = formatImpliedChance(parlay.DecimalImpliedProb(combined))
 
 	gamesByID, stats := analyzer.LoadSlipSignals(ctx, h.deps.Store, now, slip.WeekID, games, legs)
 	analysis, legGrades := analyzerView(legs, gamesByID, stats, names)
@@ -1348,19 +1353,20 @@ func pickRowView(
 	canRefresh bool,
 ) PickRowView {
 	view := PickRowView{
-		SlipID:     slipID,
-		GameID:     row.GameID,
-		Market:     row.Market,
-		Team:       row.Team,
-		PlayerName: row.PlayerName,
-		PlayerID:   row.PlayerID,
-		Side:       row.Side,
-		Odds:       row.Odds,
-		Price:      formatOdds(row.Odds),
-		Text:       row.Text,
-		PickID:     row.Picked,
-		AtLimit:    atLimit,
-		Badge:      row.Badge,
+		SlipID:        slipID,
+		GameID:        row.GameID,
+		Market:        row.Market,
+		Team:          row.Team,
+		PlayerName:    row.PlayerName,
+		PlayerID:      row.PlayerID,
+		Side:          row.Side,
+		Odds:          row.Odds,
+		Price:         formatOdds(row.Odds),
+		ImpliedChance: formatImpliedChance(parlay.ImpliedProb(row.Odds)),
+		Text:          row.Text,
+		PickID:        row.Picked,
+		AtLimit:       atLimit,
+		Badge:         row.Badge,
 	}
 	if row.Line != nil {
 		view.Line = formatFloat(*row.Line)
@@ -1413,17 +1419,18 @@ func swapURL(slipID int64, row PickRowView, q board.Query) string {
 // line the board can no longer rebuild, such as a custom pick with no odds.
 func pickRowFromLeg(slip db.Slip, leg db.Leg) PickRowView {
 	view := PickRowView{
-		SlipID:     slip.ID,
-		GameID:     db.StringValue(leg.GameID),
-		Market:     leg.MarketType,
-		Team:       db.StringValue(leg.Team),
-		PlayerName: db.StringValue(leg.PlayerName),
-		PlayerID:   db.StringValue(leg.PlayerID),
-		Side:       db.StringValue(leg.Side),
-		Odds:       leg.Odds,
-		Price:      formatOdds(leg.Odds),
-		Text:       leg.Selection,
-		PickID:     leg.ID,
+		SlipID:        slip.ID,
+		GameID:        db.StringValue(leg.GameID),
+		Market:        leg.MarketType,
+		Team:          db.StringValue(leg.Team),
+		PlayerName:    db.StringValue(leg.PlayerName),
+		PlayerID:      db.StringValue(leg.PlayerID),
+		Side:          db.StringValue(leg.Side),
+		Odds:          leg.Odds,
+		Price:         formatOdds(leg.Odds),
+		ImpliedChance: formatImpliedChance(parlay.ImpliedProb(leg.Odds)),
+		Text:          leg.Selection,
+		PickID:        leg.ID,
 	}
 	if leg.Line != nil {
 		view.Line = formatFloat(*leg.Line)
