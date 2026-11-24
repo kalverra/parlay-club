@@ -261,9 +261,9 @@ covers and appears only when it has rows. A card is a link with a plain `href` t
 `#pick-slate` re-fetches itself from `GET /slips/{id}/pick/slate` on `board-updated`, so the cards follow a prop sync
 without touching the open detail.
 
-Inside the open game, the detail has a pinned header with the back link, matchup, kickoff, venue, and a Research link,
-then—when the slip is `OPEN` and the viewer has open slots—the `"Top plays in this game"` strip (up to 3 A-grade legs
-and 1 same-game A-grade combo), followed by a horizontal tab bar and the sort chips. The tabs are Lines, Passing, Rushing, Receiving, TDs, and Kicking. Team
+Inside the open game, the detail has a pinned header with the back link, matchup, kickoff, venue, a Research link, and
+a horizontal tab bar. Below the pinned header and tab bar—when the slip is `OPEN` and the viewer has open slots—sits
+the `"Top plays in this game"` strip (up to 3 A-grade legs and 1 same-game A-grade combo), followed by the sort chips. The tabs are Lines, Passing, Rushing, Receiving, TDs, and Kicking. Team
 totals fold into Lines, a tab appears only when it has rows or is open, and each badge counts its rows, so the Lines
 badge includes both sides of each line. Tab and sort chips swap `#pick-detail` and push the full page URL, leaving the
 slate and its scroll alone. `#pick-detail` re-fetches itself from its resolved tab and sort on `board-updated`, and a

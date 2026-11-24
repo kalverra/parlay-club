@@ -241,10 +241,10 @@ matchup, venue, kickoff, spread, total, moneyline, an `"N A-grade"` pill when th
 either "Explore N props" or "No props yet", and the open game is highlighted. Cards are links: a plain `href` to the full page and an `hx-get` that swaps `#pick-body` and pushes the
 full page URL.
 
-A card opens the detail: a pinned header with paired matchup logos, the matchup, kickoff, venue, a Research link, and an
-"All games" back link, then—when the slip is `OPEN` and the viewer has open slots—a **"Top plays in this game"** strip
-(up to 3 A-grade legs and up to 1 same-game A-grade parlay combo with one-tap `+ Add`), followed by a horizontal tab bar
-and the sort chips. The header and tab bar stay below the top bar while
+A card opens the detail: a pinned header with paired matchup logos, the matchup, kickoff, venue, a Research link, an
+"All games" back link, and a horizontal tab bar. Below the pinned header and tab bar—when the slip is `OPEN` and the
+viewer has open slots—sits a **"Top plays in this game"** strip (up to 3 A-grade legs and up to 1 same-game A-grade
+parlay combo with one-tap `+ Add`), followed by the sort chips. The header and tab bar stay below the top bar while
 the rows scroll, and the tab bar scrolls sideways on a phone with no visible scrollbar.
 
 The tabs are Lines, Passing, Rushing, Receiving, TDs, and Kicking. Team totals fold into Lines, so they have no tab of

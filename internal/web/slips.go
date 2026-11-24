@@ -1782,13 +1782,7 @@ func (h *slipHandlers) slipHighlights(
 		return HighlightsView{}, nil
 	}
 
-	playerIDs := make([]string, 0, len(rows))
-	for _, row := range rows {
-		if row.PlayerID != "" {
-			playerIDs = append(playerIDs, row.PlayerID)
-		}
-	}
-	boardGames, boardStats := analyzer.LoadBoardSignals(ctx, h.deps.Store, now, slip.WeekID, games, playerIDs)
+	boardGames, boardStats := h.loadBoardSignalsForRows(ctx, now, slip.WeekID, games, rows)
 	set := board.SelectHighlights(rows, boardGames, boardStats, board.HighlightOptions{
 		ExcludePicked: true,
 	})
