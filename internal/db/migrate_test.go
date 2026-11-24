@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -193,7 +194,13 @@ func TestMigrationUpgradePathEnsureWeekSlipsSingleSlip(t *testing.T) {
 	assert.Equal(t, schedules[0].ID, *slip.ScheduleID)
 
 	// Now run EnsureWeekSlips on the week
-	slipsList, err := slips.EnsureWeekSlips(t.Context(), store, 1, 2026209)
+	slipsList, err := slips.EnsureWeekSlips(
+		t.Context(),
+		store,
+		1,
+		2026209,
+		time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC),
+	)
 	require.NoError(t, err)
 	assert.Len(t, slipsList, 1, "week must still have exactly one slip, no duplicate created")
 	assert.Equal(t, int64(10), slipsList[0].ID)

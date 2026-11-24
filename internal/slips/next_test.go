@@ -420,3 +420,37 @@ func TestNextStepSlateScopeDeadlinesAndClosure(t *testing.T) {
 	assert.Nil(t, gotFullTue.Deadline)
 	assert.Equal(t, slips.StepClosed, gotFullTue.Step)
 }
+
+func TestWeekendSlateScopeFilterAndNextStep(t *testing.T) {
+	t.Parallel()
+
+	ada := nextUser(1, "Ada")
+	// 2027-01-07 is Thursday, 2027-01-09 is Saturday, 2027-01-10 is Sunday.
+	thuKickoff := time.Date(2027, 1, 8, 1, 15, 0, 0, time.UTC)  // Thursday 20:15 ET
+	satKickoff := time.Date(2027, 1, 9, 21, 30, 0, 0, time.UTC) // Saturday 16:30 ET
+	sunKickoff := time.Date(2027, 1, 10, 18, 0, 0, 0, time.UTC) // Sunday 13:00 ET
+
+	games := []db.Game{
+		nextGame("thu", thuKickoff),
+		nextGame("sat", satKickoff),
+		nextGame("sun", sunKickoff),
+	}
+
+	filtered := slips.FilterGamesByScope(games, db.SlateScopeWeekend)
+	require.Len(t, filtered, 2)
+	assert.Equal(t, "sat", filtered[0].ID)
+	assert.Equal(t, "sun", filtered[1].ID)
+
+	weekendSlip := db.Slip{
+		LegsPerMember: 2,
+		Status:        db.SlipOpen,
+		SlateScope:    db.SlateScopeWeekend,
+		Result:        parlay.Pending,
+	}
+
+	satMorning := time.Date(2027, 1, 9, 15, 0, 0, 0, time.UTC)
+	got := slips.NextStep(weekendSlip, []db.SlipMember{nextMember(ada, false)}, nil, games, ada.ID, satMorning)
+	require.NotNil(t, got.Deadline)
+	assert.True(t, satKickoff.Equal(*got.Deadline), "weekend slip deadline includes Saturday playoff kickoff")
+	assert.Equal(t, slips.StepPick, got.Step)
+}

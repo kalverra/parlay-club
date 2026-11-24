@@ -333,6 +333,131 @@ func TestGroupWeekAutoCreatesMultipleScheduledSlipsAndRendersView(t *testing.T) 
 	assert.Equal(t, []int64{fixture.second.ID}, fixture.selections)
 }
 
+func TestGroupWeekSkipsSchedulesWithoutUpcomingGames(t *testing.T) {
+	t.Parallel()
+
+	t.Run("playoff week skips thursday schedule and creates weekend and sunday slips", func(t *testing.T) {
+		t.Parallel()
+
+		fixture := newLandingFixture(t)
+		now := time.Date(2027, 1, 8, 17, 0, 0, 0, time.UTC) // Friday noon ET
+		fixture.clock = func() time.Time { return now }
+		fixture.handler = fixture.build()
+
+		satKick := time.Date(2027, 1, 9, 21, 30, 0, 0, time.UTC) // Saturday 4:30 PM ET
+		sunKick := time.Date(2027, 1, 10, 18, 0, 0, 0, time.UTC) // Sunday 1:00 PM ET
+		_, err := fixture.store.UpsertGame(t.Context(), db.Game{
+			ID:         "401900001",
+			WeekID:     fixture.week.ID,
+			HomeTeam:   "BUF",
+			AwayTeam:   "DEN",
+			HomeName:   "Buffalo Bills",
+			AwayName:   "Denver Broncos",
+			HomeESPNID: "2",
+			AwayESPNID: "7",
+			Kickoff:    satKick,
+			Status:     db.GameScheduled,
+			UpdatedAt:  now,
+		})
+		require.NoError(t, err)
+		_, err = fixture.store.UpsertGame(t.Context(), db.Game{
+			ID:         "401900002",
+			WeekID:     fixture.week.ID,
+			HomeTeam:   "KC",
+			AwayTeam:   "LAC",
+			HomeName:   "Kansas City Chiefs",
+			AwayName:   "Los Angeles Chargers",
+			HomeESPNID: "12",
+			AwayESPNID: "24",
+			Kickoff:    sunKick,
+			Status:     db.GameScheduled,
+			UpdatedAt:  now,
+		})
+		require.NoError(t, err)
+
+		// Disable the default schedule on fixture.second and set up explicit schedules.
+		existingScheds, err := fixture.store.GroupSlipSchedules(t.Context(), fixture.second.ID)
+		require.NoError(t, err)
+		for _, s := range existingScheds {
+			_, err := fixture.store.SetGroupSlipScheduleActive(t.Context(), s.ID, false)
+			require.NoError(t, err)
+		}
+		_, err = fixture.store.CreateGroupSlipSchedule(
+			t.Context(), fixture.second.ID, "Thursday Night", db.SlateScopeThursday, 2,
+		)
+		require.NoError(t, err)
+		_, err = fixture.store.CreateGroupSlipSchedule(
+			t.Context(), fixture.second.ID, "Sunday Main", db.SlateScopeSundayMain, 2,
+		)
+		require.NoError(t, err)
+		_, err = fixture.store.CreateGroupSlipSchedule(
+			t.Context(), fixture.second.ID, "Playoff Weekend", db.SlateScopeWeekend, 2,
+		)
+		require.NoError(t, err)
+
+		recorder := fixture.get(t, fmt.Sprintf("/groups/%d/week", fixture.second.ID))
+		require.Equal(t, http.StatusOK, recorder.Code)
+		body := html.UnescapeString(recorder.Body.String())
+
+		assert.Contains(t, body, "Sunday Main")
+		assert.Contains(t, body, "Playoff Weekend")
+		assert.NotContains(t, body, `class="slip-card-title">Thursday Night`)
+
+		createdSlips, err := fixture.store.SlipsForWeek(t.Context(), fixture.second.ID, fixture.week.ID)
+		require.NoError(t, err)
+		require.Len(t, createdSlips, 2)
+	})
+
+	t.Run("completed week skips auto-creating dead slips", func(t *testing.T) {
+		t.Parallel()
+
+		fixture := newLandingFixture(t)
+		now := time.Date(2026, 11, 10, 17, 0, 0, 0, time.UTC) // Tuesday noon ET
+		fixture.clock = func() time.Time { return now }
+		fixture.handler = fixture.build()
+
+		sunKick := time.Date(2026, 11, 8, 18, 0, 0, 0, time.UTC)
+		monKick := time.Date(2026, 11, 10, 1, 15, 0, 0, time.UTC)
+		_, err := fixture.store.UpsertGame(t.Context(), db.Game{
+			ID:         "401900010",
+			WeekID:     fixture.week.ID,
+			HomeTeam:   "KC",
+			AwayTeam:   "BUF",
+			HomeName:   "Kansas City Chiefs",
+			AwayName:   "Buffalo Bills",
+			HomeESPNID: "12",
+			AwayESPNID: "2",
+			Kickoff:    sunKick,
+			Status:     db.GameFinal,
+			UpdatedAt:  now,
+		})
+		require.NoError(t, err)
+		_, err = fixture.store.UpsertGame(t.Context(), db.Game{
+			ID:         "401900011",
+			WeekID:     fixture.week.ID,
+			HomeTeam:   "DAL",
+			AwayTeam:   "PHI",
+			HomeName:   "Dallas Cowboys",
+			AwayName:   "Philadelphia Eagles",
+			HomeESPNID: "6",
+			AwayESPNID: "21",
+			Kickoff:    monKick,
+			Status:     db.GameFinal,
+			UpdatedAt:  now,
+		})
+		require.NoError(t, err)
+
+		recorder := fixture.get(t, fmt.Sprintf("/groups/%d/week", fixture.second.ID))
+		require.Equal(t, http.StatusOK, recorder.Code)
+		body := html.UnescapeString(recorder.Body.String())
+
+		assert.Contains(t, body, "No slip for Week 9 yet.")
+		createdSlips, err := fixture.store.SlipsForWeek(t.Context(), fixture.second.ID, fixture.week.ID)
+		require.NoError(t, err)
+		assert.Empty(t, createdSlips)
+	})
+}
+
 func TestGroupWeekShowsTheCreateFormWithNoSlip(t *testing.T) {
 	t.Parallel()
 

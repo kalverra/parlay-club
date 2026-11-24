@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/kalverra/parlay-club/internal/db"
 )
@@ -21,6 +22,7 @@ type Store interface {
 	SlipMemberIDs(ctx context.Context, slipID int64) ([]int64, error)
 	ActiveGroupSlipSchedules(ctx context.Context, groupID int64) ([]db.GroupSlipSchedule, error)
 	SlipsForWeek(ctx context.Context, groupID, weekID int64) ([]db.Slip, error)
+	GamesForWeek(ctx context.Context, weekID int64) ([]db.Game, error)
 	Members(ctx context.Context, groupID int64) ([]db.User, error)
 	CreateSlip(
 		ctx context.Context,
@@ -65,8 +67,11 @@ func CreateDefaults(ctx context.Context, store Store, groupID, weekID int64) (De
 // EnsureWeekSlips checks for slips matching each active schedule for groupID.
 // For any active schedule without a slip in weekID, it creates one with the
 // schedule's name, slate scope, legs-per-member, and all active group members.
-// It returns all slips for the group in weekID.
-func EnsureWeekSlips(ctx context.Context, store Store, groupID, weekID int64) ([]db.Slip, error) {
+// When weekID already has stored games, schedules without any upcoming game
+// matching their slate scope are skipped so playoff or completed weeks do not
+// gain empty or dead slips. Existing slips are never removed or modified. It
+// returns all slips for the group in weekID.
+func EnsureWeekSlips(ctx context.Context, store Store, groupID, weekID int64, now time.Time) ([]db.Slip, error) {
 	schedules, err := store.ActiveGroupSlipSchedules(ctx, groupID)
 	if err != nil {
 		return nil, fmt.Errorf("ensure week slips for group %d in week %d: %w", groupID, weekID, err)
@@ -96,6 +101,23 @@ func EnsureWeekSlips(ctx context.Context, store Store, groupID, weekID int64) ([
 
 	if len(missing) == 0 {
 		return existingSlips, nil
+	}
+
+	games, err := store.GamesForWeek(ctx, weekID)
+	if err != nil {
+		return nil, fmt.Errorf("ensure week slips for group %d in week %d: %w", groupID, weekID, err)
+	}
+	if len(games) > 0 {
+		filtered := missing[:0]
+		for _, sched := range missing {
+			if hasUpcomingMatchingGame(games, sched.SlateScope, now) {
+				filtered = append(filtered, sched)
+			}
+		}
+		missing = filtered
+		if len(missing) == 0 {
+			return existingSlips, nil
+		}
 	}
 
 	members, err := store.Members(ctx, groupID)
@@ -134,4 +156,15 @@ func EnsureWeekSlips(ctx context.Context, store Store, groupID, weekID int64) ([
 	}
 
 	return store.SlipsForWeek(ctx, groupID, weekID)
+}
+
+// hasUpcomingMatchingGame reports whether games contains at least one
+// non-final game matching scope whose kickoff is still after now.
+func hasUpcomingMatchingGame(games []db.Game, scope db.SlateScope, now time.Time) bool {
+	for _, g := range FilterGamesByScope(games, scope) {
+		if g.Status != db.GameFinal && now.Before(g.Kickoff) {
+			return true
+		}
+	}
+	return false
 }
