@@ -451,7 +451,7 @@ func TestGroupWeekSkipsSchedulesWithoutUpcomingGames(t *testing.T) {
 		require.Equal(t, http.StatusOK, recorder.Code)
 		body := html.UnescapeString(recorder.Body.String())
 
-		assert.Contains(t, body, "No slip for Week 9 yet.")
+		assert.Contains(t, body, "No upcoming games are loaded yet.")
 		createdSlips, err := fixture.store.SlipsForWeek(t.Context(), fixture.second.ID, fixture.week.ID)
 		require.NoError(t, err)
 		assert.Empty(t, createdSlips)
@@ -462,6 +462,24 @@ func TestGroupWeekShowsTheCreateFormWithNoSlip(t *testing.T) {
 	t.Parallel()
 
 	fixture := newLandingFixture(t)
+	now := time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC)
+	fixture.clock = func() time.Time { return now }
+	fixture.handler = fixture.build()
+	_, err := fixture.store.UpsertGame(t.Context(), db.Game{
+		ID:         "401900099",
+		WeekID:     fixture.week.ID,
+		HomeTeam:   "KC",
+		AwayTeam:   "BUF",
+		HomeName:   "Kansas City Chiefs",
+		AwayName:   "Buffalo Bills",
+		HomeESPNID: "12",
+		AwayESPNID: "2",
+		Kickoff:    now.Add(72 * time.Hour),
+		Status:     db.GameScheduled,
+		UpdatedAt:  now,
+	})
+	require.NoError(t, err)
+
 	schedules, err := fixture.store.GroupSlipSchedules(t.Context(), fixture.second.ID)
 	require.NoError(t, err)
 	for _, s := range schedules {
@@ -475,8 +493,7 @@ func TestGroupWeekShowsTheCreateFormWithNoSlip(t *testing.T) {
 
 	assert.Contains(t, body, "Start Week 9’s slip", "the create screen names the week")
 	assert.Contains(t, body, "No slip for Week 9 yet.", "the empty state explains why the form is here")
-	assert.Contains(t, body, "data-past-week>")
-	assert.NotContains(t, body, "data-past-week open")
+	assert.NotContains(t, body, "Or add a past week")
 	assert.Contains(t, body, "Create slip")
 	assert.Contains(t, body, ">Lake House</span>", "the top bar shows the group the page acts in")
 	assert.Contains(t, body, fmt.Sprintf(`href="/groups/%d/week"`, fixture.second.ID))
@@ -487,6 +504,24 @@ func TestGroupWeekCreateFormWelcomesTheOnlyMember(t *testing.T) {
 	t.Parallel()
 
 	fixture := newLandingFixture(t)
+	now := time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC)
+	fixture.clock = func() time.Time { return now }
+	fixture.handler = fixture.build()
+	_, err := fixture.store.UpsertGame(t.Context(), db.Game{
+		ID:         "401900100",
+		WeekID:     fixture.week.ID,
+		HomeTeam:   "KC",
+		AwayTeam:   "BUF",
+		HomeName:   "Kansas City Chiefs",
+		AwayName:   "Buffalo Bills",
+		HomeESPNID: "12",
+		AwayESPNID: "2",
+		Kickoff:    now.Add(72 * time.Hour),
+		Status:     db.GameScheduled,
+		UpdatedAt:  now,
+	})
+	require.NoError(t, err)
+
 	schedules, err := fixture.store.GroupSlipSchedules(t.Context(), fixture.second.ID)
 	require.NoError(t, err)
 	for _, s := range schedules {
@@ -512,10 +547,10 @@ func TestGroupWeekCreateFormWithoutAWeekSaysSo(t *testing.T) {
 	body := html.UnescapeString(recorder.Body.String())
 
 	assert.Contains(t, body, "Start a slip")
-	assert.Contains(t, body, "No week is loaded yet. Add a past week below to start a slip.")
+	assert.Contains(t, body, "No upcoming games are loaded yet.")
 	assert.NotContains(t, body, `name="week_id"`, "an empty week picker is not offered")
-	assert.Contains(t, body, "Or add a past week", "the typed-week fields still start a slip")
-	assert.Contains(t, body, "data-past-week open>")
+	assert.NotContains(t, body, "Or add a past week")
+	assert.NotContains(t, body, "Create slip")
 }
 
 func TestGroupWeekRefusesANonMember(t *testing.T) {

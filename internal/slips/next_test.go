@@ -454,3 +454,41 @@ func TestWeekendSlateScopeFilterAndNextStep(t *testing.T) {
 	assert.True(t, satKickoff.Equal(*got.Deadline), "weekend slip deadline includes Saturday playoff kickoff")
 	assert.Equal(t, slips.StepPick, got.Step)
 }
+
+func TestCustomScopeFilterGamesAndScopeBadge(t *testing.T) {
+	t.Parallel()
+
+	ada := db.User{ID: 1, Name: "Ada"}
+	sunEarly := time.Date(2026, 11, 8, 18, 0, 0, 0, time.UTC)
+	sunLate := time.Date(2026, 11, 8, 21, 25, 0, 0, time.UTC)
+	monNight := time.Date(2026, 11, 10, 1, 15, 0, 0, time.UTC)
+	games := []db.Game{
+		{ID: "g-sun-1", Kickoff: sunEarly},
+		{ID: "g-sun-2", Kickoff: sunLate},
+		{ID: "g-mon", Kickoff: monNight},
+	}
+
+	customTwo := db.Slip{
+		ID:            1,
+		LegsPerMember: 2,
+		Status:        db.SlipOpen,
+		SlateScope:    db.SlateScopeCustom,
+		GameIDs:       []string{"g-sun-2", "g-mon"},
+		Result:        parlay.Pending,
+	}
+
+	filtered := slips.FilterGamesForSlip(games, customTwo)
+	require.Len(t, filtered, 2)
+	assert.Equal(t, []string{"g-sun-2", "g-mon"}, []string{filtered[0].ID, filtered[1].ID})
+
+	// NextStep uses only the custom slip's games for its deadline.
+	sunBeforeEarly := time.Date(2026, 11, 8, 17, 0, 0, 0, time.UTC)
+	got := slips.NextStep(customTwo, []db.SlipMember{nextMember(ada, false)}, nil, games, ada.ID, sunBeforeEarly)
+	require.NotNil(t, got.Deadline)
+	assert.True(t, sunLate.Equal(*got.Deadline))
+	assert.Equal(t, slips.StepPick, got.Step)
+
+	assert.Equal(t, "2 Games", slips.ScopeBadge(customTwo))
+	assert.Equal(t, "1 Game", slips.ScopeBadge(db.Slip{SlateScope: db.SlateScopeCustom, GameIDs: []string{"g-sun-1"}}))
+	assert.Equal(t, "Sunday Slate", slips.ScopeBadge(db.Slip{SlateScope: db.SlateScopeSundayMain}))
+}

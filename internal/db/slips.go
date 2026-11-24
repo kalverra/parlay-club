@@ -29,6 +29,8 @@ var (
 	ErrLegsPerMemberRange = errors.New("legs per member must be between 1 and 5")
 	// ErrSlipMembersRequired is returned when a new slip has no members.
 	ErrSlipMembersRequired = errors.New("slip needs at least one member")
+	// ErrSlipGamesRequired is returned when a custom slip has no eligible games.
+	ErrSlipGamesRequired = errors.New("select at least one game")
 	// ErrSlipMemberNotFound is returned when a person is not on the slip.
 	ErrSlipMemberNotFound = errors.New("slip member not found")
 	// ErrSlipStatusInvalid is returned when a status is not one the schema allows.
@@ -46,11 +48,24 @@ const (
 	SlateScopeSundayMain SlateScope = "sunday_main"
 	SlateScopeWeekend    SlateScope = "weekend"
 	SlateScopeFullWeek   SlateScope = "full_week"
+	SlateScopeCustom     SlateScope = "custom"
 )
 
 // Valid reports whether the slate scope is one of SlateScopeThursday,
-// SlateScopeSundayMain, SlateScopeWeekend, or SlateScopeFullWeek.
+// SlateScopeSundayMain, SlateScopeWeekend, SlateScopeFullWeek, or
+// SlateScopeCustom.
 func (s SlateScope) Valid() bool {
+	switch s {
+	case SlateScopeThursday, SlateScopeSundayMain, SlateScopeWeekend, SlateScopeFullWeek, SlateScopeCustom:
+		return true
+	default:
+		return false
+	}
+}
+
+// ValidForSchedule reports whether the slate scope can be used on a recurring
+// group slip schedule (excludes SlateScopeCustom).
+func (s SlateScope) ValidForSchedule() bool {
 	switch s {
 	case SlateScopeThursday, SlateScopeSundayMain, SlateScopeWeekend, SlateScopeFullWeek:
 		return true
@@ -68,6 +83,8 @@ func (s SlateScope) Label() string {
 		return "Weekend Slate"
 	case SlateScopeFullWeek:
 		return "Full Week"
+	case SlateScopeCustom:
+		return "Custom"
 	case SlateScopeSundayMain:
 		return "Sunday Slate"
 	default:
@@ -122,6 +139,7 @@ type Slip struct {
 	ScheduleID    *int64
 	Name          string
 	SlateScope    SlateScope
+	GameIDs       []string // populated when SlateScope == SlateScopeCustom
 	LegsPerMember int
 	Status        SlipStatus
 	Result        parlay.Result
@@ -152,6 +170,22 @@ func (s *Store) CreateSlip(
 	legsPerMember int,
 	memberIDs []int64,
 ) (Slip, error) {
+	return s.CreateSlipWithGames(ctx, groupID, weekID, scheduleID, name, slateScope, legsPerMember, memberIDs, nil)
+}
+
+// CreateSlipWithGames adds a slip, its members, and (when slateScope is
+// SlateScopeCustom) its eligible game IDs in one transaction. Custom slips
+// require at least one valid game in weekID, with duplicate game IDs ignored.
+func (s *Store) CreateSlipWithGames(
+	ctx context.Context,
+	groupID, weekID int64,
+	scheduleID *int64,
+	name string,
+	slateScope SlateScope,
+	legsPerMember int,
+	memberIDs []int64,
+	gameIDs []string,
+) (Slip, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return Slip{}, ErrSlipNameRequired
@@ -169,8 +203,22 @@ func (s *Store) CreateSlip(
 		return Slip{}, ErrSlipMembersRequired
 	}
 
+	var dedupedGames []string
+	if slateScope == SlateScopeCustom {
+		dedupedGames = dedupeGameIDs(gameIDs)
+		if len(dedupedGames) == 0 {
+			return Slip{}, ErrSlipGamesRequired
+		}
+	}
+
 	var slip Slip
 	err := s.Tx(ctx, func(tx *Store) error {
+		if slateScope == SlateScopeCustom {
+			if err := tx.verifyGamesInWeek(ctx, weekID, dedupedGames); err != nil {
+				return err
+			}
+		}
+
 		result, err := tx.conn().ExecContext(ctx, `
 			INSERT INTO slips (group_id, week_id, schedule_id, name, slate_scope, legs_per_member)
 			VALUES (?, ?, ?, ?, ?, ?)`, groupID, weekID, scheduleID, name, string(slateScope), legsPerMember)
@@ -191,6 +239,13 @@ func (s *Store) CreateSlip(
 				return fmt.Errorf("add member %d to slip %d: %w", userID, id, err)
 			}
 		}
+		for _, gameID := range dedupedGames {
+			if _, err := tx.conn().ExecContext(ctx, `
+				INSERT INTO slip_games (slip_id, game_id) VALUES (?, ?)
+				ON CONFLICT (slip_id, game_id) DO NOTHING`, id, gameID); err != nil {
+				return fmt.Errorf("add game %q to slip %d: %w", gameID, id, err)
+			}
+		}
 
 		slip, err = tx.SlipByID(ctx, id)
 		return err
@@ -199,6 +254,55 @@ func (s *Store) CreateSlip(
 		return Slip{}, fmt.Errorf("create slip %q: %w", name, err)
 	}
 	return slip, nil
+}
+
+// dedupeGameIDs trims, drops blanks, and deduplicates game IDs in order.
+func dedupeGameIDs(gameIDs []string) []string {
+	if len(gameIDs) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(gameIDs))
+	out := make([]string, 0, len(gameIDs))
+	for _, raw := range gameIDs {
+		id := strings.TrimSpace(raw)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out
+}
+
+// verifyGamesInWeek checks that every game ID exists in weekID.
+func (s *Store) verifyGamesInWeek(ctx context.Context, weekID int64, gameIDs []string) error {
+	rows, err := s.readConn().QueryContext(ctx, `SELECT id FROM games WHERE week_id = ?`, weekID)
+	if err != nil {
+		return fmt.Errorf("verify games in week %d: %w", weekID, err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	valid := make(map[string]struct{})
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return fmt.Errorf("verify games in week %d: %w", weekID, err)
+		}
+		valid[id] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("verify games in week %d: %w", weekID, err)
+	}
+
+	for _, id := range gameIDs {
+		if _, ok := valid[id]; !ok {
+			return fmt.Errorf("game %q not in week %d: %w", id, weekID, ErrGameNotFound)
+		}
+	}
+	return nil
 }
 
 // SlipByID returns the slip with the given ID. A missing row wraps
@@ -210,6 +314,9 @@ func (s *Store) SlipByID(ctx context.Context, id int64) (Slip, error) {
 		return Slip{}, fmt.Errorf("slip %d: %w", id, ErrSlipNotFound)
 	}
 	if err != nil {
+		return Slip{}, fmt.Errorf("slip %d: %w", id, err)
+	}
+	if err := s.hydrateSlipGameIDs(ctx, &slip); err != nil {
 		return Slip{}, fmt.Errorf("slip %d: %w", id, err)
 	}
 	return slip, nil
@@ -236,6 +343,9 @@ func (s *Store) SlipsForWeek(ctx context.Context, groupID, weekID int64) ([]Slip
 		slips = append(slips, slip)
 	}
 	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list slips for group %d in week %d: %w", groupID, weekID, err)
+	}
+	if err := s.hydrateSlipsGameIDs(ctx, slips); err != nil {
 		return nil, fmt.Errorf("list slips for group %d in week %d: %w", groupID, weekID, err)
 	}
 	return slips, nil
@@ -294,6 +404,9 @@ func (s *Store) SlipsWithLegsForWeek(
 	}
 	if len(slips) == 0 {
 		return []SlipWithLegs{}, nil
+	}
+	if err := s.hydrateSlipsGameIDs(ctx, slips); err != nil {
+		return nil, fmt.Errorf("list slips with legs for week %d: %w", weekID, err)
 	}
 
 	legsBySlip, err := s.LegsForSlips(ctx, slipIDs)
@@ -354,6 +467,9 @@ func (s *Store) NewestSlipForWeek(ctx context.Context, groupID, weekID int64) (S
 	if err != nil {
 		return Slip{}, fmt.Errorf("newest slip for group %d in week %d: %w", groupID, weekID, err)
 	}
+	if err := s.hydrateSlipGameIDs(ctx, &slip); err != nil {
+		return Slip{}, fmt.Errorf("newest slip for group %d in week %d: %w", groupID, weekID, err)
+	}
 	return slip, nil
 }
 
@@ -372,6 +488,9 @@ func (s *Store) PreviousSlip(ctx context.Context, groupID, weekID int64) (Slip, 
 		return Slip{}, fmt.Errorf("previous slip for group %d before week %d: %w", groupID, weekID, ErrSlipNotFound)
 	}
 	if err != nil {
+		return Slip{}, fmt.Errorf("previous slip for group %d before week %d: %w", groupID, weekID, err)
+	}
+	if err := s.hydrateSlipGameIDs(ctx, &slip); err != nil {
 		return Slip{}, fmt.Errorf("previous slip for group %d before week %d: %w", groupID, weekID, err)
 	}
 	return slip, nil
@@ -630,6 +749,84 @@ func scanSlip(row rowScanner) (Slip, error) {
 	slip.Result = parlay.Result(result)
 	slip.CreatedAt = parsed
 	return slip, nil
+}
+
+// hydrateSlipGameIDs populates GameIDs when slip has SlateScopeCustom.
+func (s *Store) hydrateSlipGameIDs(ctx context.Context, slip *Slip) error {
+	if slip.SlateScope != SlateScopeCustom {
+		return nil
+	}
+	rows, err := s.readConn().QueryContext(ctx, `
+		SELECT game_id FROM slip_games WHERE slip_id = ? ORDER BY game_id`, slip.ID)
+	if err != nil {
+		return fmt.Errorf("load slip games: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	ids := make([]string, 0)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return fmt.Errorf("load slip games: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("load slip games: %w", err)
+	}
+	slip.GameIDs = ids
+	return nil
+}
+
+// hydrateSlipsGameIDs batch-populates GameIDs for any SlateScopeCustom slips.
+func (s *Store) hydrateSlipsGameIDs(ctx context.Context, slips []Slip) error {
+	customIDs := make([]int64, 0)
+	for _, slip := range slips {
+		if slip.SlateScope == SlateScopeCustom {
+			customIDs = append(customIDs, slip.ID)
+		}
+	}
+	if len(customIDs) == 0 {
+		return nil
+	}
+
+	placeholders := make([]string, len(customIDs))
+	args := make([]any, len(customIDs))
+	for i, id := range customIDs {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+
+	// #nosec G202 -- placeholders contains only static "?" tokens.
+	query := `SELECT slip_id, game_id FROM slip_games WHERE slip_id IN (` +
+		strings.Join(placeholders, ",") + `) ORDER BY slip_id, game_id`
+	rows, err := s.readConn().QueryContext(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("batch load slip games: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	bySlip := make(map[int64][]string, len(customIDs))
+	for rows.Next() {
+		var (
+			slipID int64
+			gameID string
+		)
+		if err := rows.Scan(&slipID, &gameID); err != nil {
+			return fmt.Errorf("batch load slip games: %w", err)
+		}
+		bySlip[slipID] = append(bySlip[slipID], gameID)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("batch load slip games: %w", err)
+	}
+
+	for i := range slips {
+		if slips[i].SlateScope == SlateScopeCustom {
+			slips[i].GameIDs = bySlip[slips[i].ID]
+		}
+	}
+	return nil
 }
 
 // scanTimestamp reads one of the RFC 3339 UTC strings the schema stores.

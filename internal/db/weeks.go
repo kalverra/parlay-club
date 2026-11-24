@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 )
 
 // ErrWeekNotFound is returned when a week lookup matches no row.
@@ -60,6 +61,36 @@ func (s *Store) Weeks(ctx context.Context) ([]Week, error) {
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("list weeks: %w", err)
+	}
+	return weeks, nil
+}
+
+// UpcomingWeeks returns weeks that have at least one game with kickoff > now,
+// ordered soonest-first (by id ASC).
+func (s *Store) UpcomingWeeks(ctx context.Context, now time.Time) ([]Week, error) {
+	rows, err := s.readConn().QueryContext(ctx, `
+		SELECT w.id, w.season, w.season_type, w.week_num
+		FROM weeks w
+		WHERE EXISTS (
+			SELECT 1 FROM games g
+			WHERE g.week_id = w.id AND g.kickoff_utc > ?
+		)
+		ORDER BY w.id ASC`, formatTimestamp(now))
+	if err != nil {
+		return nil, fmt.Errorf("list upcoming weeks: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	weeks := make([]Week, 0)
+	for rows.Next() {
+		var week Week
+		if err := rows.Scan(&week.ID, &week.Season, &week.SeasonType, &week.WeekNum); err != nil {
+			return nil, fmt.Errorf("list upcoming weeks: %w", err)
+		}
+		weeks = append(weeks, week)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list upcoming weeks: %w", err)
 	}
 	return weeks, nil
 }

@@ -1,143 +1,132 @@
 {{define "content"}}
 <section class="space-y-3"{{if .LiveURL}} data-live-url="{{.LiveURL}}"{{end}}>
   {{if .Creating}}
-    <div class="space-y-1">
-      <h1 class="text-xl font-semibold">
-        {{if .Create.WeekID}}{{if .Create.HasExistingSlips}}Add a slip for {{.Page.WeekLabel}}{{else}}Start {{.Page.WeekLabel}}&rsquo;s slip{{end}}{{else}}Start a slip{{end}}
-      </h1>
-      {{if .Create.WeekID}}
+    {{if not .Create.Weeks}}
+      <div class="space-y-1">
+        <h1 class="text-xl font-semibold">Start a slip</h1>
+        <p class="text-sm text-page-muted">
+          No upcoming games are loaded yet. Check back once the next week&rsquo;s schedule is available.
+        </p>
+      </div>
+    {{else}}
+      <div class="space-y-1">
+        <h1 class="text-xl font-semibold">
+          {{if .Create.HasExistingSlips}}Add a slip for {{.Page.WeekLabel}}{{else}}Start {{.Page.WeekLabel}}&rsquo;s slip{{end}}
+        </h1>
         <p class="text-sm text-page-muted">
           {{if .Create.HasExistingSlips}}
-            Pick a slate, legs per member, and who&rsquo;s in.
+            Pick a mode, games or slate, legs per member, and who&rsquo;s in.
           {{else}}
             No slip for {{.Page.WeekLabel}} yet. Check who&rsquo;s picking, then everyone adds their legs.
           {{end}}
         </p>
-      {{else}}
-        <p class="text-sm text-page-muted">
-          No week is loaded yet. Add a past week below to start a slip.
-        </p>
-      {{end}}
-      {{if .Create.Solo}}
-        <p class="text-sm text-page-muted">
-          It&rsquo;s just you for now. Invite friends from Groups whenever you like.
-        </p>
-      {{end}}
-    </div>
-    <form
-      class="ui-card space-y-4 p-4"
-      hx-post="/slips"
-      hx-target="#content"
-      hx-swap="innerHTML"
-    >
-      {{if .Create.Error}}
-        <p class="rounded-lg border border-danger bg-danger-soft px-3 py-2 text-sm text-danger-ink">
+        {{if .Create.Solo}}
+          <p class="text-sm text-page-muted">
+            It&rsquo;s just you for now. Invite friends from Groups whenever you like.
+          </p>
+        {{end}}
+      </div>
+      <form
+        class="ui-card space-y-4 p-4"
+        hx-post="/slips"
+        hx-target="#content"
+        hx-swap="innerHTML"
+        data-slip-create-form
+      >
+        <p class="rounded-lg border border-danger bg-danger-soft px-3 py-2 text-sm text-danger-ink{{if not .Create.Error}} hidden{{end}}" data-form-error role="alert">
           {{.Create.Error}}
         </p>
-      {{end}}
-      {{if .Create.Weeks}}
+        <input type="hidden" name="mode" value="{{if eq .Create.Mode "recurring"}}recurring{{else}}one_off{{end}}" data-slip-mode-input>
+        <div class="grid grid-cols-2 gap-1 rounded-lg border border-line bg-surface-2 p-1" role="group" aria-label="Slip type">
+          <button
+            type="button"
+            data-slip-mode-btn="one_off"
+            aria-pressed="{{if ne .Create.Mode "recurring"}}true{{else}}false{{end}}"
+            class="rounded-md px-3 py-1.5 text-sm font-medium {{if ne .Create.Mode "recurring"}}bg-accent text-accent-ink{{else}}text-ink-muted hover:text-ink{{end}}"
+          >
+            One-off
+          </button>
+          <button
+            type="button"
+            data-slip-mode-btn="recurring"
+            aria-pressed="{{if eq .Create.Mode "recurring"}}true{{else}}false{{end}}"
+            class="rounded-md px-3 py-1.5 text-sm font-medium {{if eq .Create.Mode "recurring"}}bg-accent text-accent-ink{{else}}text-ink-muted hover:text-ink{{end}}"
+          >
+            Recurring
+          </button>
+        </div>
         <label class="block text-sm text-ink">
-          Week
-          <select name="week_id" class="mt-1 w-full rounded-md border border-line-strong bg-surface-2 px-3 py-2 text-ink">
-            {{range .Create.Weeks}}
-              <option value="{{.ID}}"{{if eq .ID $.Create.WeekID}} selected{{end}}>{{.Label}}</option>
-            {{end}}
-          </select>
+          Name
+          <input
+            type="text"
+            name="name"
+            value="{{.Create.Name}}"
+            class="mt-1 w-full rounded-md border border-line-strong bg-surface-2 px-3 py-2 text-ink"
+          >
         </label>
-      {{end}}
-      <details class="rounded-lg border border-line p-3" data-past-week{{if or (eq (len .Create.Weeks) 0) (ne .Create.Season 0) (ne .Create.WeekNum 0)}} open{{end}}>
-        <summary class="cursor-pointer list-none text-sm text-ink">Or add a past week</summary>
-        <fieldset class="mt-2 space-y-2">
-          <legend class="sr-only">Or add a past week</legend>
-          <p class="text-xs text-ink-muted">
-            Use this for a week the slate never stored. Filling both overrides the week above.
-          </p>
-          <div class="grid grid-cols-2 gap-2">
-            <label class="block text-sm text-ink">
-              Season
-              <input
-                type="number"
-                name="season"
-                min="1900"
-                max="2100"
-                placeholder="2026"
-                value="{{if .Create.Season}}{{.Create.Season}}{{end}}"
-                class="mt-1 w-full rounded-md border border-line-strong bg-surface-2 px-3 py-2 text-ink"
-              >
-            </label>
-            <label class="block text-sm text-ink">
-              Week number
-              <input
-                type="number"
-                name="week"
-                min="1"
-                max="22"
-                placeholder="9"
-                value="{{if .Create.WeekNum}}{{.Create.WeekNum}}{{end}}"
-                class="mt-1 w-full rounded-md border border-line-strong bg-surface-2 px-3 py-2 text-ink"
-              >
-            </label>
-          </div>
+        <label class="block text-sm text-ink">
+          Legs per member
+          <input
+            type="number"
+            name="legs_per_member"
+            min="1"
+            max="5"
+            value="{{.Create.LegsPerMember}}"
+            class="mt-1 w-full rounded-md border border-line-strong bg-surface-2 px-3 py-2 text-ink"
+          >
+        </label>
+        <fieldset class="space-y-4"{{if eq .Create.Mode "recurring"}} hidden{{end}} data-slip-mode-panel="one_off">
+          <legend class="sr-only">One-off slip games and members</legend>
           <label class="block text-sm text-ink">
-            Season type
-            <select name="season_type" class="mt-1 w-full rounded-md border border-line-strong bg-surface-2 px-3 py-2 text-ink">
-              <option value="2"{{if ne .Create.SeasonType 3}} selected{{end}}>Regular season</option>
-              <option value="3"{{if eq .Create.SeasonType 3}} selected{{end}}>Postseason</option>
+            Week
+            <select
+              name="week_id"
+              hx-get="/slips/new/games"
+              hx-target="#slip-create-games"
+              hx-swap="innerHTML"
+              hx-include="this"
+              class="mt-1 w-full rounded-md border border-line-strong bg-surface-2 px-3 py-2 text-ink"
+            >
+              {{range .Create.Weeks}}
+                <option value="{{.ID}}"{{if eq .ID $.Create.WeekID}} selected{{end}}>{{.Label}}</option>
+              {{end}}
             </select>
           </label>
-        </fieldset>
-      </details>
-      <label class="block text-sm text-ink">
-        Name
-        <input
-          type="text"
-          name="name"
-          value="{{.Create.Name}}"
-          class="mt-1 w-full rounded-md border border-line-strong bg-surface-2 px-3 py-2 text-ink"
-        >
-      </label>
-      <label class="block text-sm text-ink">
-        Slate scope
-        <select name="slate_scope" class="mt-1 w-full rounded-md border border-line-strong bg-surface-2 px-3 py-2 text-ink">
-          {{if .Create.SlateScopes}}
-            {{range .Create.SlateScopes}}
-              <option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>
+          <div id="slip-create-games" class="space-y-2">
+            {{template "slip-create-games" .Create}}
+          </div>
+          <fieldset class="space-y-2">
+            <legend class="text-sm text-ink">Members</legend>
+            {{range .Create.Members}}
+              <label class="flex items-center gap-2 text-sm text-ink">
+                <input type="checkbox" name="member_id" value="{{.ID}}"{{if .Selected}} checked{{end}}>
+                {{.Name}}
+              </label>
             {{end}}
-          {{else}}
-            <option value="sunday_main"{{if or (eq .Create.SlateScope "sunday_main") (eq .Create.SlateScope "")}} selected{{end}}>Sunday Slate</option>
-            <option value="thursday"{{if eq .Create.SlateScope "thursday"}} selected{{end}}>Thursday Slate</option>
-            <option value="weekend"{{if eq .Create.SlateScope "weekend"}} selected{{end}}>Weekend Slate</option>
-            <option value="full_week"{{if eq .Create.SlateScope "full_week"}} selected{{end}}>Full Week</option>
-          {{end}}
-        </select>
-      </label>
-      <label class="block text-sm text-ink">
-        Legs per member
-        <input
-          type="number"
-          name="legs_per_member"
-          min="1"
-          max="5"
-          value="{{.Create.LegsPerMember}}"
-          class="mt-1 w-full rounded-md border border-line-strong bg-surface-2 px-3 py-2 text-ink"
-        >
-      </label>
-      <fieldset class="space-y-2">
-        <legend class="text-sm text-ink">Members</legend>
-        {{range .Create.Members}}
-          <label class="flex items-center gap-2 text-sm text-ink">
-            <input type="checkbox" name="member_id" value="{{.ID}}"{{if .Selected}} checked{{end}}>
-            {{.Name}}
+          </fieldset>
+        </fieldset>
+        <fieldset class="space-y-3"{{if ne .Create.Mode "recurring"}} hidden{{end}} data-slip-mode-panel="recurring">
+          <legend class="sr-only">Recurring schedule</legend>
+          <label class="block text-sm text-ink">
+            Repeating slate rule
+            <select name="slate_scope" class="mt-1 w-full rounded-md border border-line-strong bg-surface-2 px-3 py-2 text-ink">
+              {{range .Create.SlateScopes}}
+                <option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>
+              {{end}}
+            </select>
           </label>
-        {{end}}
-      </fieldset>
-      <button
-        type="submit"
-        class="w-full rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-accent-ink hover:opacity-90"
-      >
-        Create slip
-      </button>
-    </form>
+          <p class="text-xs text-ink-muted">
+            Automatically creates a slip each week for active group members.
+          </p>
+        </fieldset>
+        <button
+          type="submit"
+          class="w-full rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-accent-ink hover:opacity-90"
+        >
+          Create slip
+        </button>
+      </form>
+    {{end}}
   {{else if .Slip}}
     {{template "slip-export" .Export}}
     {{template "slip-panel" .}}

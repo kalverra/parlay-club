@@ -1252,3 +1252,44 @@ func TestRulesEnforceSlateScopeOnPicks(t *testing.T) {
 	})
 	require.ErrorIs(t, err, slips.ErrKickoffLocked)
 }
+
+func TestRulesEnforceCustomGameIDsOnPicks(t *testing.T) {
+	t.Parallel()
+
+	f := newFixture(t)
+	now := time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC)
+
+	sun1 := "sun-1"
+	sun2 := "sun-2"
+	_, err := f.store.UpsertGame(t.Context(), db.Game{
+		ID: sun1, WeekID: f.week.ID,
+		HomeTeam: "BUF", AwayTeam: "KC", HomeName: "Buffalo Bills", AwayName: "Kansas City Chiefs",
+		HomeESPNID: "2", AwayESPNID: "12",
+		Kickoff: time.Date(2026, 11, 8, 18, 0, 0, 0, time.UTC), Status: db.GameScheduled, UpdatedAt: now,
+	})
+	require.NoError(t, err)
+	_, err = f.store.UpsertGame(t.Context(), db.Game{
+		ID: sun2, WeekID: f.week.ID,
+		HomeTeam: "DET", AwayTeam: "GB", HomeName: "Detroit Lions", AwayName: "Green Bay Packers",
+		HomeESPNID: "8", AwayESPNID: "9",
+		Kickoff: time.Date(2026, 11, 8, 21, 25, 0, 0, time.UTC), Status: db.GameScheduled, UpdatedAt: now,
+	})
+	require.NoError(t, err)
+
+	customSlip, err := f.store.CreateSlipWithGames(
+		t.Context(), f.group.ID, f.week.ID, nil, "Custom One",
+		db.SlateScopeCustom, 2, []int64{f.ada.ID}, []string{sun1},
+	)
+	require.NoError(t, err)
+
+	service := slips.New(f.store, f.published, fixedClock{at: now}.Now)
+	_, err = service.AddLeg(t.Context(), f.ada.ID, db.Leg{
+		SlipID: customSlip.ID, GameID: &sun1, MarketType: "ML", Selection: "BUF ML",
+	})
+	require.NoError(t, err)
+
+	_, err = service.AddLeg(t.Context(), f.ada.ID, db.Leg{
+		SlipID: customSlip.ID, GameID: &sun2, MarketType: "ML", Selection: "DET ML",
+	})
+	require.ErrorIs(t, err, slips.ErrGameOutsideScope)
+}

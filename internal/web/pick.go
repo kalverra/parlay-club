@@ -403,7 +403,7 @@ func (h *slipHandlers) syncPickScope(
 	if err != nil {
 		return false, false, err
 	}
-	games := slips.FilterGamesByScope(allGames, slip.SlateScope)
+	games := slips.FilterGamesForSlip(allGames, slip)
 	for _, game := range games {
 		if now.Before(game.Kickoff) {
 			hasUpcoming = true
@@ -510,7 +510,7 @@ func (h *slipHandlers) pickPageData(
 	if err != nil {
 		return PickPage{}, err
 	}
-	games := slips.FilterGamesByScope(allGames, slip.SlateScope)
+	games := slips.FilterGamesForSlip(allGames, slip)
 	odds, err := h.deps.Store.OddsForWeek(ctx, slip.WeekID)
 	if err != nil {
 		return PickPage{}, err
@@ -599,7 +599,7 @@ func (h *slipHandlers) pickSlateData(
 	if err != nil {
 		return PickSlateView{}, err
 	}
-	games := slips.FilterGamesByScope(allGames, slip.SlateScope)
+	games := slips.FilterGamesForSlip(allGames, slip)
 	odds, err := h.deps.Store.OddsForWeek(ctx, slip.WeekID)
 	if err != nil {
 		return PickSlateView{}, err
@@ -652,7 +652,7 @@ func (h *slipHandlers) pickDetailData(
 	if err != nil {
 		return PickDetailView{}, false, err
 	}
-	if game.WeekID != slip.WeekID || !slip.SlateScope.Matches(game.Kickoff) {
+	if game.WeekID != slip.WeekID || len(slips.FilterGamesForSlip([]db.Game{game}, slip)) == 0 {
 		return PickDetailView{}, false, nil
 	}
 
@@ -1074,7 +1074,7 @@ func (h *slipHandlers) pickDockData(ctx context.Context, slip db.Slip) (PickDock
 	if err != nil {
 		return PickDockView{}, err
 	}
-	games = slips.FilterGamesByScope(games, slip.SlateScope)
+	games = slips.FilterGamesForSlip(games, slip)
 	user, homeBook, q := h.pickViewer(ctx, board.Query{})
 	mine := legsForUser(legs, user.ID)
 

@@ -34,6 +34,7 @@ const partialsFile = "templates/partials.html"
 // partialFiles names the fragments the slip screen can render on its own.
 var partialFiles = map[string]string{
 	"group-list":         partialsFile,
+	"slip-create-games":  partialsFile,
 	"slip-panel":         partialsFile,
 	"slip-export":        partialsFile,
 	"slip-activity":      partialsFile,

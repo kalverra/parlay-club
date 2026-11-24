@@ -141,8 +141,9 @@ slip outside every group is 404.
 
 | Method + path                              | Purpose                                                         | Request and response |
 | ------------------------------------------ | --------------------------------------------------------------- | -------------------- |
-| `GET /slips/new`                           | Create-slip page                                                | Optional `?week=` and `?slate_scope=` (or `?scope=`); unknown week 404. Full page. |
-| `POST /slips`                              | Create the slip from `week_id` (or a typed `season`, `season_type`, and `week`), `name`, `slate_scope`, `legs_per_member`, and `member_id` | 303 to `/slips/{id}`; a fixable error re-renders the form. |
+| `GET /slips/new`                           | Unified one-off / recurring create-slip page                    | Lists `UpcomingWeeks`; optional `?week=`, `?mode=recurring`, and `?slate_scope=` (or `?scope=`). Full page. |
+| `GET /slips/new/games`                     | `#slip-create-games` partial for an upcoming week               | Query `?week_id=` (or `?week=`); 404 when not an upcoming week. |
+| `POST /slips`                              | Create a one-off `custom` slip (`mode=one_off` with upcoming `week_id` and `game_id`s) or a recurring schedule (`mode=recurring` with repeating `slate_scope`) | 303 to `/slips/{id}` (or `/groups/{id}/week` for recurring with no upcoming match); 422 on validation errors. |
 | `GET /slips/{id}`                          | Full slip page                                                  | Full page, with the payout form at the default stake. |
 | `GET /slips/{id}/pick`                     | Focused pick board: the game slate, the open game's picks, and the dock | Full page; no bottom bar. |
 | `GET /slips/{id}/pick/results`             | `#pick-body` for a search, window, or game change                | Optional `?q=`, `?cat=`, `?win=`, `?sort=`, and `?game=`; `#pick-body` partial. |
@@ -229,8 +230,8 @@ bar in the header with links to each sibling slip and their status summaries (`(
 | `GET /games`                    | 303 to the active group's week                                           | Redirect |
 | `GET /games/{id}/props`         | Load one game's props on demand, or render its prop partial               | 200 with `Hx-Trigger: board-updated` when `?slip=`, otherwise a partial |
 
-`GET /slips/{id}/pick` is the hub's pick action. It filters the week's games by the slip's `slate_scope` via
-`slips.FilterGamesByScope`, so games outside the scope are omitted from the slate, window chips, and detail drilldowns.
+`GET /slips/{id}/pick` is the hub's pick action. It filters the week's games for the slip via
+`slips.FilterGamesForSlip`, so games outside the slip's scope or `slip_games` are omitted from the slate, window chips, and detail drilldowns.
 It reads the filtered games, one `OddsForWeek` read, the week's rosters, and the viewer's legs, then hands them to
 `internal/board`. `board.Build` folds one row per selection, using the viewer's home-book price when it carries the pick
 and the median across books otherwise, and drops games that have kicked off. `board.Slates` turns the same rows into one

@@ -2395,3 +2395,44 @@
   </section>
 {{end}}
 {{end}}
+
+{{define "slip-create-games"}}
+  {{if .Shortcuts}}
+    <div class="flex flex-wrap gap-1.5" role="group" aria-label="Game selection shortcuts">
+      {{range .Shortcuts}}
+        <button
+          type="button"
+          data-slate-shortcut="{{.Key}}"
+          class="rounded-full border border-line-strong bg-surface-2 px-2.5 py-1 text-xs font-medium text-ink hover:border-accent"
+        >
+          {{.Label}}
+        </button>
+      {{end}}
+    </div>
+  {{end}}
+  <p class="text-xs text-ink-muted" data-selected-games-count>
+    {{.SelectedGames}} {{if eq .SelectedGames 1}}game{{else}}games{{end}} selected
+  </p>
+  {{if .Games}}
+    <fieldset class="space-y-1.5">
+      <legend class="sr-only">Eligible games</legend>
+      {{range .Games}}
+        <label class="flex items-center justify-between gap-2 rounded-md border border-line bg-surface-2 px-3 py-2 text-sm text-ink">
+          <span class="flex items-center gap-2">
+            <input
+              type="checkbox"
+              name="game_id"
+              value="{{.ID}}"
+              data-game-day="{{.Day}}"
+              {{if .Selected}}checked{{end}}
+            >
+            <span class="font-medium">{{.AwayTeam}} @ {{.HomeTeam}}</span>
+          </span>
+          <time datetime="{{.KickoffISO}}" class="text-xs text-ink-muted">{{.KickoffISO}}</time>
+        </label>
+      {{end}}
+    </fieldset>
+  {{else}}
+    <p class="text-sm text-ink-muted">No upcoming games left in this week.</p>
+  {{end}}
+{{end}}

@@ -16,6 +16,7 @@ import (
 	"github.com/kalverra/parlay-club/internal/db"
 	"github.com/kalverra/parlay-club/internal/parlay"
 	"github.com/kalverra/parlay-club/internal/slips"
+	"github.com/kalverra/parlay-club/internal/tz"
 )
 
 // maxFormBytes caps a submitted slip form.
@@ -52,6 +53,7 @@ var ruleErrors = []error{
 	db.ErrSlateScopeInvalid,
 	db.ErrLegsPerMemberRange,
 	db.ErrSlipMembersRequired,
+	db.ErrSlipGamesRequired,
 	db.ErrGameNotFound,
 	db.ErrLegResultInvalid,
 }
@@ -80,6 +82,7 @@ func (h *slipHandlers) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /groups/{id}/schedules/{scheduleID}", h.deleteSchedule)
 
 	mux.HandleFunc("GET /slips/new", h.newSlipForm)
+	mux.HandleFunc("GET /slips/new/games", h.newSlipGames)
 	mux.HandleFunc("POST /slips", h.createSlip)
 	mux.HandleFunc("GET /slips/{id}", h.slipPage)
 	mux.HandleFunc("GET /slips/{id}/pick", h.pickBoard)
@@ -276,24 +279,41 @@ type ActivityView struct {
 	When    string
 }
 
-// SlipCreateView is the create-slip form. Season, SeasonType, and WeekNum hold
-// a past week the slate sync never stored; filling them overrides WeekID.
+// SlipCreateView is the unified create-slip form (one-off or recurring).
 // Solo says the group has only the viewer so far.
 type SlipCreateView struct {
 	Weeks            []WeekOption
 	WeekID           int64
 	HasExistingSlips bool
-	Season           int
-	SeasonType       int
-	WeekNum          int
+	Mode             string // "one_off" or "recurring"
 	Name             string
 	SlateScope       string
 	SlateScopes      []SlateScopeOption
+	Games            []CreateGameOption
+	Shortcuts        []SlateShortcut
+	SelectedGames    int
 	LegsPerMember    int
 	Members          []MemberOption
 	Selected         []int64
+	SelectedGameIDs  []string
 	Solo             bool
 	Error            string
+}
+
+// CreateGameOption is one upcoming game in the one-off slip game checklist.
+type CreateGameOption struct {
+	ID         string
+	AwayTeam   string
+	HomeTeam   string
+	KickoffISO string
+	Day        string
+	Selected   bool
+}
+
+// SlateShortcut is a one-tap game selection chip derived from a week's upcoming games.
+type SlateShortcut struct {
+	Key   string
+	Label string
 }
 
 // SlateScopeOption is one choice in the slip create form's slate scope picker.
@@ -391,7 +411,7 @@ type ProfileMember struct {
 	Self   bool
 }
 
-// newSlipForm shows the create form for a chosen or latest week.
+// newSlipForm shows the unified create-slip form for upcoming weeks.
 func (h *slipHandlers) newSlipForm(w http.ResponseWriter, r *http.Request) {
 	user, group, ok := h.requireActor(w, r)
 	if !ok {
@@ -399,6 +419,13 @@ func (h *slipHandlers) newSlipForm(w http.ResponseWriter, r *http.Request) {
 	}
 
 	page := h.page(r, "New slip")
+	now := h.deps.now()
+	upcoming, err := h.deps.Store.UpcomingWeeks(r.Context(), now)
+	if err != nil {
+		h.serverError(w, err)
+		return
+	}
+
 	var week *db.Week
 	if raw := r.URL.Query().Get("week"); raw != "" {
 		id, valid := parseID(raw)
@@ -406,32 +433,69 @@ func (h *slipHandlers) newSlipForm(w http.ResponseWriter, r *http.Request) {
 			http.NotFound(w, r)
 			return
 		}
-		found, err := h.deps.Store.WeekByID(r.Context(), id)
-		if errors.Is(err, db.ErrWeekNotFound) {
-			http.NotFound(w, r)
-			return
-		}
-		if err != nil {
-			h.serverError(w, err)
-			return
-		}
-		week = &found
-	} else {
-		found, err := h.deps.Store.LatestWeek(r.Context())
-		switch {
-		case errors.Is(err, db.ErrWeekNotFound):
-		case err != nil:
-			h.serverError(w, err)
-			return
-		default:
-			week = &found
+		for i := range upcoming {
+			if upcoming[i].ID == id {
+				week = &upcoming[i]
+				break
+			}
 		}
 	}
+	if week == nil && len(upcoming) > 0 {
+		week = &upcoming[0]
+	}
 
-	h.renderCreate(w, r, page, user, group, week, nil)
+	h.renderCreate(w, r, page, user, group, upcoming, week, nil)
 }
 
-// createSlip writes a new slip and sends the browser to it.
+// newSlipGames returns the HTMX partial for the upcoming game checklist and
+// slate shortcuts when the user switches the selected week.
+func (h *slipHandlers) newSlipGames(w http.ResponseWriter, r *http.Request) {
+	if _, _, ok := h.requireActor(w, r); !ok {
+		return
+	}
+	raw := r.URL.Query().Get("week_id")
+	if raw == "" {
+		raw = r.URL.Query().Get("week")
+	}
+	weekID, valid := parseID(raw)
+	if !valid {
+		http.NotFound(w, r)
+		return
+	}
+
+	now := h.deps.now()
+	upcoming, err := h.deps.Store.UpcomingWeeks(r.Context(), now)
+	if err != nil {
+		h.serverError(w, err)
+		return
+	}
+	found := false
+	for _, wk := range upcoming {
+		if wk.ID == weekID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		http.NotFound(w, r)
+		return
+	}
+
+	allGames, err := h.deps.Store.GamesForWeek(r.Context(), weekID)
+	if err != nil {
+		h.serverError(w, err)
+		return
+	}
+	games, shortcuts, selectedCount := buildCreateGames(allGames, now, nil)
+	h.renderPartial(w, "slip-create-games", SlipCreateView{
+		WeekID:        weekID,
+		Games:         games,
+		Shortcuts:     shortcuts,
+		SelectedGames: selectedCount,
+	})
+}
+
+// createSlip writes either a one-off custom slip or a recurring group schedule.
 func (h *slipHandlers) createSlip(w http.ResponseWriter, r *http.Request) {
 	user, group, ok := h.requireActor(w, r)
 	if !ok {
@@ -442,8 +506,8 @@ func (h *slipHandlers) createSlip(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	weekID, ok := h.weekFromCreateForm(w, r, user, group)
-	if !ok {
+	if strings.TrimSpace(r.PostForm.Get("season")) != "" || strings.TrimSpace(r.PostForm.Get("week")) != "" {
+		h.renderCreateError(w, r, user, group, "Past weeks cannot be added.")
 		return
 	}
 
@@ -457,36 +521,73 @@ func (h *slipHandlers) createSlip(w http.ResponseWriter, r *http.Request) {
 		legsPerMember = parsed
 	}
 
-	memberIDs := make([]int64, 0, len(r.PostForm["member_id"]))
-	for _, raw := range r.PostForm["member_id"] {
-		id, valid := parseID(raw)
-		if !valid {
+	mode := strings.TrimSpace(r.PostForm.Get("mode"))
+	if mode == "" {
+		mode = "one_off"
+	}
+	if mode != "one_off" && mode != "recurring" {
+		h.renderCreateError(w, r, user, group, "Pick one-off or recurring.")
+		return
+	}
+
+	now := h.deps.now()
+	upcoming, err := h.deps.Store.UpcomingWeeks(r.Context(), now)
+	if err != nil {
+		h.serverError(w, err)
+		return
+	}
+
+	if mode == "recurring" {
+		h.createRecurringFromForm(w, r, user, group, upcoming, legsPerMember, now)
+		return
+	}
+
+	weekID, valid := parseID(r.PostForm.Get("week_id"))
+	if !valid || !containsWeekID(upcoming, weekID) {
+		h.renderCreateError(w, r, user, group, "Pick an upcoming week.")
+		return
+	}
+
+	memberIDs, err := h.filterGroupMembers(r.Context(), group.ID, r.PostForm["member_id"])
+	if err != nil {
+		h.serverError(w, err)
+		return
+	}
+
+	allGames, err := h.deps.Store.GamesForWeek(r.Context(), weekID)
+	if err != nil {
+		h.serverError(w, err)
+		return
+	}
+	upcomingByID := make(map[string]struct{}, len(allGames))
+	for _, g := range allGames {
+		if now.Before(g.Kickoff) {
+			upcomingByID[g.ID] = struct{}{}
+		}
+	}
+	gameIDs := make([]string, 0, len(r.PostForm["game_id"]))
+	for _, raw := range r.PostForm["game_id"] {
+		id := strings.TrimSpace(raw)
+		if id == "" {
 			continue
 		}
-		member, err := h.deps.Store.IsMember(r.Context(), group.ID, id)
-		if err != nil {
-			h.serverError(w, err)
+		if _, ok := upcomingByID[id]; !ok {
+			h.renderCreateError(w, r, user, group, "Pick upcoming games from the selected week.")
 			return
 		}
-		if member {
-			memberIDs = append(memberIDs, id)
-		}
+		gameIDs = append(gameIDs, id)
 	}
 
-	scope := r.PostForm.Get("slate_scope")
-	if scope == "" {
-		scope = r.PostForm.Get("scope")
-	}
-
-	created, err := h.deps.Store.CreateSlip(
+	created, err := h.deps.Store.CreateSlipWithGames(
 		r.Context(),
 		group.ID,
 		weekID,
 		nil,
 		r.PostForm.Get("name"),
-		db.SlateScope(scope),
+		db.SlateScopeCustom,
 		legsPerMember,
 		memberIDs,
+		gameIDs,
 	)
 	if err != nil {
 		if message, ok := fixableMessage(err); ok {
@@ -500,82 +601,81 @@ func (h *slipHandlers) createSlip(w http.ResponseWriter, r *http.Request) {
 	h.redirect(w, r, fmt.Sprintf("/slips/%d", created.ID))
 }
 
-// weekFromCreateForm resolves the create form's week and writes the refusal. A
-// filled season and week number make a week the slate sync never stored;
-// otherwise the chosen week_id is used.
-func (h *slipHandlers) weekFromCreateForm(
+func (h *slipHandlers) createRecurringFromForm(
 	w http.ResponseWriter,
 	r *http.Request,
 	user db.User,
 	group db.Group,
-) (int64, bool) {
-	seasonRaw := strings.TrimSpace(r.PostForm.Get("season"))
-	weekRaw := strings.TrimSpace(r.PostForm.Get("week"))
-	if seasonRaw != "" || weekRaw != "" {
-		season, err := strconv.Atoi(seasonRaw)
-		if err != nil || season < 1900 || season > 2100 {
-			h.renderCreateError(w, r, user, group, "Season must be a year.")
-			return 0, false
+	upcoming []db.Week,
+	legsPerMember int,
+	now time.Time,
+) {
+	scope := strings.TrimSpace(r.PostForm.Get("slate_scope"))
+	if scope == "" {
+		scope = strings.TrimSpace(r.PostForm.Get("scope"))
+	}
+	if scope == "" {
+		scope = string(db.SlateScopeSundayMain)
+	}
+
+	sched, err := h.deps.Store.CreateGroupSlipSchedule(
+		r.Context(),
+		group.ID,
+		r.PostForm.Get("name"),
+		db.SlateScope(scope),
+		legsPerMember,
+	)
+	if err != nil {
+		if message, ok := fixableMessage(err); ok {
+			h.renderCreateError(w, r, user, group, message)
+			return
 		}
-		weekNum, err := strconv.Atoi(weekRaw)
-		if err != nil || weekNum < 1 || weekNum > 22 {
-			h.renderCreateError(w, r, user, group, "Week must be a number from 1 to 22.")
-			return 0, false
-		}
-		seasonType, ok := parseSeasonType(r.PostForm.Get("season_type"))
-		if !ok {
-			h.renderCreateError(w, r, user, group, "Pick a season type.")
-			return 0, false
-		}
-		weekID := db.WeekID(season, seasonType, weekNum)
-		if !h.weekIDIsPast(w, r, user, group, weekID) {
-			return 0, false
-		}
-		week, err := h.deps.Store.UpsertWeek(r.Context(), season, seasonType, weekNum)
+		h.serverError(w, err)
+		return
+	}
+
+	if len(upcoming) > 0 {
+		createdSlips, err := slips.EnsureWeekSlips(r.Context(), h.deps.Store, group.ID, upcoming[0].ID, now)
 		if err != nil {
 			h.serverError(w, err)
-			return 0, false
+			return
 		}
-		return week.ID, true
+		for _, s := range createdSlips {
+			if s.ScheduleID != nil && *s.ScheduleID == sched.ID {
+				h.redirect(w, r, fmt.Sprintf("/slips/%d", s.ID))
+				return
+			}
+		}
 	}
 
-	weekID, valid := parseID(r.PostForm.Get("week_id"))
-	if !valid {
-		h.renderCreateError(w, r, user, group, "Pick a week.")
-		return 0, false
-	}
-	if _, err := h.deps.Store.WeekByID(r.Context(), weekID); errors.Is(err, db.ErrWeekNotFound) {
-		http.NotFound(w, r)
-		return 0, false
-	} else if err != nil {
-		h.serverError(w, err)
-		return 0, false
-	}
-	return weekID, true
+	h.redirect(w, r, fmt.Sprintf("/groups/%d/week", group.ID))
 }
 
-// weekIDIsPast refuses a typed week later than the latest known one. With no
-// weeks on record there is nothing to compare against, so any week is allowed.
-func (h *slipHandlers) weekIDIsPast(
-	w http.ResponseWriter,
-	r *http.Request,
-	user db.User,
-	group db.Group,
-	weekID int64,
-) bool {
-	latest, err := h.deps.Store.LatestWeek(r.Context())
-	if errors.Is(err, db.ErrWeekNotFound) {
-		return true
+func (h *slipHandlers) filterGroupMembers(ctx context.Context, groupID int64, rawIDs []string) ([]int64, error) {
+	memberIDs := make([]int64, 0, len(rawIDs))
+	for _, raw := range rawIDs {
+		id, valid := parseID(raw)
+		if !valid {
+			continue
+		}
+		member, err := h.deps.Store.IsMember(ctx, groupID, id)
+		if err != nil {
+			return nil, err
+		}
+		if member {
+			memberIDs = append(memberIDs, id)
+		}
 	}
-	if err != nil {
-		h.serverError(w, err)
-		return false
+	return memberIDs, nil
+}
+
+func containsWeekID(weeks []db.Week, weekID int64) bool {
+	for _, wk := range weeks {
+		if wk.ID == weekID {
+			return true
+		}
 	}
-	if weekID > latest.ID {
-		h.renderCreateError(w, r, user, group, "That week hasn't started yet.")
-		return false
-	}
-	return true
+	return false
 }
 
 // slipPage shows one slip in full.
@@ -810,7 +910,7 @@ func (h *slipHandlers) withGames(
 	if err != nil {
 		return LegFormView{}, err
 	}
-	games = slips.FilterGamesByScope(games, slip.SlateScope)
+	games = slips.FilterGamesForSlip(games, slip)
 
 	selected := false
 	for _, game := range games {
@@ -1416,10 +1516,18 @@ func (h *slipHandlers) renderCreate(
 	page Page,
 	user db.User,
 	group db.Group,
+	upcoming []db.Week,
 	week *db.Week,
 	form *SlipCreateView,
 ) {
-	create, err := h.createView(r.Context(), user, group, week)
+	var selectedGames map[string]bool
+	if form != nil {
+		selectedGames = make(map[string]bool, len(form.SelectedGameIDs))
+		for _, id := range form.SelectedGameIDs {
+			selectedGames[id] = true
+		}
+	}
+	create, err := h.createView(r.Context(), user, group, upcoming, week, selectedGames)
 	if err != nil {
 		h.serverError(w, err)
 		return
@@ -1428,15 +1536,15 @@ func (h *slipHandlers) renderCreate(
 		page.WeekLabel = weekLabel(*week)
 	}
 	if form != nil {
+		if form.Mode != "" {
+			create.Mode = form.Mode
+		}
 		create.WeekID = form.WeekID
 		create.Name = form.Name
 		if form.SlateScope != "" {
 			create.SlateScope = form.SlateScope
 		}
 		create.LegsPerMember = form.LegsPerMember
-		create.Season = form.Season
-		create.SeasonType = form.SeasonType
-		create.WeekNum = form.WeekNum
 		create.Error = form.Error
 		if form.Selected != nil {
 			chosen := make(map[int64]bool, len(form.Selected))
@@ -1448,29 +1556,42 @@ func (h *slipHandlers) renderCreate(
 			}
 		}
 	} else {
+		if r.URL.Query().Get("mode") == "recurring" {
+			create.Mode = "recurring"
+		}
 		reqScope := r.URL.Query().Get("slate_scope")
 		if reqScope == "" {
 			reqScope = r.URL.Query().Get("scope")
 		}
-		if db.SlateScope(reqScope).Valid() {
+		if db.SlateScope(reqScope).ValidForSchedule() {
 			create.SlateScope = reqScope
 		}
 	}
 	create.SlateScopes = defaultSlateScopeOptions(create.SlateScope)
+	if form != nil && form.Error != "" {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		html, err := h.deps.Renderer.Render("slip", SlipPage{Page: page, Creating: true, Create: create})
+		if err != nil {
+			h.serverError(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_, _ = w.Write(html)
+		return
+	}
 	h.renderPage(w, "slip", SlipPage{Page: page, Creating: true, Create: create})
 }
 
-// createView builds the create form's weeks, defaults, and member checklist.
+// createView builds the create form's upcoming weeks, games, defaults, and member checklist.
 func (h *slipHandlers) createView(
 	ctx context.Context,
 	user db.User,
 	group db.Group,
+	weeks []db.Week,
 	week *db.Week,
+	selectedGames map[string]bool,
 ) (SlipCreateView, error) {
-	weeks, err := h.deps.Store.Weeks(ctx)
-	if err != nil {
-		return SlipCreateView{}, err
-	}
 	options := make([]WeekOption, 0, len(weeks))
 	for _, known := range weeks {
 		options = append(options, WeekOption{ID: known.ID, Label: weekOptionLabel(known)})
@@ -1491,7 +1612,7 @@ func (h *slipHandlers) createView(
 
 	view := SlipCreateView{
 		Weeks:         options,
-		SeasonType:    2,
+		Mode:          "one_off",
 		SlateScope:    string(db.SlateScopeSundayMain),
 		LegsPerMember: slips.DefaultLegsPerMember,
 		Members:       memberOptions,
@@ -1523,7 +1644,82 @@ func (h *slipHandlers) createView(
 	}
 	view.HasExistingSlips = len(existing) > 0
 	view.Name = nextSlipName(existing, view.Name)
+
+	allGames, err := h.deps.Store.GamesForWeek(ctx, week.ID)
+	if err != nil {
+		return SlipCreateView{}, err
+	}
+	view.Games, view.Shortcuts, view.SelectedGames = buildCreateGames(allGames, h.deps.now(), selectedGames)
 	return view, nil
+}
+
+// buildCreateGames filters to upcoming games, computes weekday shortcuts in
+// Eastern time, and pre-selects Sunday games (or all games when none are Sunday).
+func buildCreateGames(
+	allGames []db.Game,
+	now time.Time,
+	explicit map[string]bool,
+) ([]CreateGameOption, []SlateShortcut, int) {
+	upcoming := make([]db.Game, 0, len(allGames))
+	hasDay := make(map[string]bool)
+	for _, g := range allGames {
+		if !now.Before(g.Kickoff) {
+			continue
+		}
+		upcoming = append(upcoming, g)
+		day := strings.ToLower(g.Kickoff.In(tz.Eastern).Weekday().String())
+		hasDay[day] = true
+	}
+
+	options := make([]CreateGameOption, 0, len(upcoming))
+	selectedCount := 0
+	for _, g := range upcoming {
+		day := strings.ToLower(g.Kickoff.In(tz.Eastern).Weekday().String())
+		var sel bool
+		switch {
+		case explicit != nil:
+			sel = explicit[g.ID]
+		case hasDay["sunday"]:
+			sel = day == "sunday"
+		default:
+			sel = true
+		}
+		if sel {
+			selectedCount++
+		}
+		options = append(options, CreateGameOption{
+			ID:         g.ID,
+			AwayTeam:   g.AwayTeam,
+			HomeTeam:   g.HomeTeam,
+			KickoffISO: g.Kickoff.UTC().Format(time.RFC3339),
+			Day:        day,
+			Selected:   sel,
+		})
+	}
+
+	dayOrder := []struct {
+		key   string
+		label string
+	}{
+		{"sunday", "All Sunday"},
+		{"thursday", "All Thursday"},
+		{"monday", "All Monday"},
+		{"saturday", "All Saturday"},
+		{"friday", "All Friday"},
+	}
+	shortcuts := make([]SlateShortcut, 0, len(dayOrder)+2)
+	for _, d := range dayOrder {
+		if hasDay[d.key] {
+			shortcuts = append(shortcuts, SlateShortcut{Key: d.key, Label: d.label})
+		}
+	}
+	if len(options) > 0 {
+		shortcuts = append(shortcuts,
+			SlateShortcut{Key: "all", Label: "All games"},
+			SlateShortcut{Key: "clear", Label: "Clear"},
+		)
+	}
+	return options, shortcuts, selectedCount
 }
 
 // nextSlipName appends " #2", " #3" until the name is free in the week.
@@ -1543,8 +1739,8 @@ func nextSlipName(groupSlips []db.Slip, base string) string {
 	}
 }
 
-// renderCreateError re-renders the form with a short message and the values
-// the person already typed.
+// renderCreateError answers 422 with the error message for HTMX, or re-renders
+// the form with 422 for standard requests.
 func (h *slipHandlers) renderCreateError(
 	w http.ResponseWriter,
 	r *http.Request,
@@ -1552,23 +1748,37 @@ func (h *slipHandlers) renderCreateError(
 	group db.Group,
 	message string,
 ) {
+	if isHTMX(r) {
+		h.writeFormError(w, message)
+		return
+	}
 	page := h.page(r, "New slip")
+	upcoming, err := h.deps.Store.UpcomingWeeks(r.Context(), h.deps.now())
+	if err != nil {
+		h.serverError(w, err)
+		return
+	}
 	var week *db.Week
 	if id, ok := parseID(r.PostForm.Get("week_id")); ok {
-		found, err := h.deps.Store.WeekByID(r.Context(), id)
-		if err == nil {
-			week = &found
+		for i := range upcoming {
+			if upcoming[i].ID == id {
+				week = &upcoming[i]
+				break
+			}
 		}
 	}
+	mode := r.PostForm.Get("mode")
+	if mode != "recurring" {
+		mode = "one_off"
+	}
 	form := &SlipCreateView{
-		WeekID:        weekIDFromForm(r),
-		Season:        intFromForm(r, "season"),
-		SeasonType:    seasonTypeFromForm(r),
-		WeekNum:       intFromForm(r, "week"),
-		Name:          r.PostForm.Get("name"),
-		SlateScope:    r.PostForm.Get("slate_scope"),
-		LegsPerMember: slips.DefaultLegsPerMember,
-		Error:         message,
+		Mode:            mode,
+		WeekID:          weekIDFromForm(r),
+		Name:            r.PostForm.Get("name"),
+		SlateScope:      r.PostForm.Get("slate_scope"),
+		LegsPerMember:   slips.DefaultLegsPerMember,
+		SelectedGameIDs: r.PostForm["game_id"],
+		Error:           message,
 	}
 	if form.SlateScope == "" {
 		form.SlateScope = r.PostForm.Get("scope")
@@ -1583,7 +1793,7 @@ func (h *slipHandlers) renderCreateError(
 			form.Selected = append(form.Selected, id)
 		}
 	}
-	h.renderCreate(w, r, page, user, group, week, form)
+	h.renderCreate(w, r, page, user, group, upcoming, week, form)
 }
 
 // slipView loads and shapes one slip for the panel.
@@ -1626,7 +1836,7 @@ func (h *slipHandlers) slipPageData(ctx context.Context, slip db.Slip) (SlipPage
 	if err != nil {
 		return SlipPage{}, err
 	}
-	games := slips.FilterGamesByScope(allWeekGames, slip.SlateScope)
+	games := slips.FilterGamesForSlip(allWeekGames, slip)
 	entries, err := h.deps.Store.ActivityForSlip(ctx, slip.ID)
 	if err != nil {
 		return SlipPage{}, err
@@ -1705,7 +1915,7 @@ func (h *slipHandlers) slipPageData(ctx context.Context, slip db.Slip) (SlipPage
 		ID:            slip.ID,
 		WeekID:        slip.WeekID,
 		Name:          slip.Name,
-		ScopeBadge:    scopeBadge(slip.SlateScope),
+		ScopeBadge:    scopeBadge(slip),
 		Status:        string(slip.Status),
 		LegsPerMember: slip.LegsPerMember,
 		Open:          open,
@@ -2747,37 +2957,6 @@ func parseActive(raw string, current bool) (bool, bool) {
 	default:
 		return false, false
 	}
-}
-
-// parseSeasonType reads a create-form season type. ESPN uses 2 for the regular
-// season and 3 for the postseason.
-func parseSeasonType(raw string) (int, bool) {
-	switch strings.TrimSpace(raw) {
-	case "", "2":
-		return 2, true
-	case "3":
-		return 3, true
-	default:
-		return 0, false
-	}
-}
-
-// seasonTypeFromForm reads the create form's season type, defaulting to regular.
-func seasonTypeFromForm(r *http.Request) int {
-	seasonType, ok := parseSeasonType(r.PostForm.Get("season_type"))
-	if !ok {
-		return 2
-	}
-	return seasonType
-}
-
-// intFromForm reads a whole number from the submitted form, or 0.
-func intFromForm(r *http.Request, name string) int {
-	value, err := strconv.Atoi(strings.TrimSpace(r.PostForm.Get(name)))
-	if err != nil {
-		return 0
-	}
-	return value
 }
 
 // weekIDFromForm reads the create form's week.

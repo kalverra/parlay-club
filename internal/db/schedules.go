@@ -130,7 +130,7 @@ func (s *Store) CreateGroupSlipSchedule(
 	if slateScope == "" {
 		slateScope = SlateScopeSundayMain
 	}
-	if !slateScope.Valid() {
+	if !slateScope.ValidForSchedule() {
 		return GroupSlipSchedule{}, ErrSlateScopeInvalid
 	}
 	if legsPerMember < 1 || legsPerMember > 5 {
@@ -178,7 +178,7 @@ func (s *Store) UpdateGroupSlipSchedule(
 	if slateScope == "" {
 		slateScope = SlateScopeSundayMain
 	}
-	if !slateScope.Valid() {
+	if !slateScope.ValidForSchedule() {
 		return GroupSlipSchedule{}, ErrSlateScopeInvalid
 	}
 	if legsPerMember < 1 || legsPerMember > 5 {

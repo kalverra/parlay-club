@@ -2,6 +2,7 @@ package db_test
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -77,4 +78,47 @@ func TestLatestWeekReportsAnEmptyTable(t *testing.T) {
 
 	_, err := store.LatestWeek(t.Context())
 	require.ErrorIs(t, err, db.ErrWeekNotFound)
+}
+
+func TestUpcomingWeeksFiltersAndOrdersSoonestFirst(t *testing.T) {
+	t.Parallel()
+
+	store, _ := openTestStore(t)
+	now := time.Date(2026, 11, 18, 12, 0, 0, 0, time.UTC)
+
+	wkEmpty, err := store.UpsertWeek(t.Context(), 2026, 2, 9)
+	require.NoError(t, err)
+	wkPast, err := store.UpsertWeek(t.Context(), 2026, 2, 10)
+	require.NoError(t, err)
+	wkSoon, err := store.UpsertWeek(t.Context(), 2026, 2, 11)
+	require.NoError(t, err)
+	wkLater, err := store.UpsertWeek(t.Context(), 2026, 2, 12)
+	require.NoError(t, err)
+	_ = wkEmpty
+
+	addGame := func(id string, weekID int64, kickoff time.Time, status db.GameStatus) {
+		_, err := store.UpsertGame(t.Context(), db.Game{
+			ID:         id,
+			WeekID:     weekID,
+			HomeTeam:   "BUF",
+			AwayTeam:   "KC",
+			HomeName:   "Buffalo Bills",
+			AwayName:   "Kansas City Chiefs",
+			HomeESPNID: "2",
+			AwayESPNID: "12",
+			Kickoff:    kickoff,
+			Status:     status,
+			UpdatedAt:  now,
+		})
+		require.NoError(t, err)
+	}
+
+	addGame("g-past", wkPast.ID, now.Add(-24*time.Hour), db.GameFinal)
+	addGame("g-soon-past", wkSoon.ID, now.Add(-2*time.Hour), db.GameLive)
+	addGame("g-soon-future", wkSoon.ID, now.Add(4*time.Hour), db.GameScheduled)
+	addGame("g-later", wkLater.ID, now.Add(7*24*time.Hour), db.GameScheduled)
+
+	upcoming, err := store.UpcomingWeeks(t.Context(), now)
+	require.NoError(t, err)
+	assert.Equal(t, []db.Week{wkSoon, wkLater}, upcoming)
 }
