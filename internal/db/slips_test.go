@@ -784,3 +784,72 @@ func TestCreateSlipWithGamesRejectsEmptyOrInvalidGames(t *testing.T) {
 	)
 	require.ErrorIs(t, err, db.ErrGameNotFound)
 }
+
+func TestRecentSlipsForGroupOrdersByWeekAndIDAndHonorsLimit(t *testing.T) {
+	t.Parallel()
+
+	store, _ := openTestStore(t)
+	ada := createUser(t, store, "Ada")
+	bob := createUser(t, store, "Bob")
+	groupA := createTestGroup(t, store, ada)
+	groupB, err := store.Create(t.Context(), bob.ID, "Other Group")
+	require.NoError(t, err)
+
+	week8 := createTestWeek(t, store, 8)
+	week10 := createTestWeek(t, store, 10)
+	week9 := createTestWeek(t, store, 9)
+
+	empty, err := store.RecentSlipsForGroup(t.Context(), groupA.ID, 5)
+	require.NoError(t, err)
+	assert.Empty(t, empty)
+
+	now := time.Date(2026, 11, 12, 12, 0, 0, 0, time.UTC)
+	_, err = store.UpsertGame(t.Context(), db.Game{
+		ID:         "g-wk10",
+		WeekID:     week10.ID,
+		HomeTeam:   "BUF",
+		AwayTeam:   "KC",
+		HomeName:   "Buffalo Bills",
+		AwayName:   "Kansas City Chiefs",
+		HomeESPNID: "2",
+		AwayESPNID: "12",
+		Kickoff:    now.Add(24 * time.Hour),
+		Status:     db.GameScheduled,
+		UpdatedAt:  now,
+	})
+	require.NoError(t, err)
+
+	s1 := createTestSlip(t, store, groupA, week8, "Week 8 Slip", 2, ada)
+	s2 := createTestSlip(t, store, groupA, week9, "Week 9 First", 2, ada)
+	s3 := createTestSlip(t, store, groupA, week9, "Week 9 Second", 2, ada)
+	s4, err := store.CreateSlipWithGames(
+		t.Context(), groupA.ID, week10.ID, nil, "Week 10 Custom",
+		db.SlateScopeCustom, 2, []int64{ada.ID}, []string{"g-wk10"},
+	)
+	require.NoError(t, err)
+	_ = createTestSlip(t, store, groupB, week10, "Other Group Slip", 2, bob)
+
+	nonPositive, err := store.RecentSlipsForGroup(t.Context(), groupA.ID, 0)
+	require.NoError(t, err)
+	assert.Empty(t, nonPositive)
+
+	recent, err := store.RecentSlipsForGroup(t.Context(), groupA.ID, 3)
+	require.NoError(t, err)
+	require.Len(t, recent, 3)
+
+	assert.Equal(t, s4.ID, recent[0].Slip.ID)
+	assert.Equal(t, week10, recent[0].Week)
+	assert.Equal(t, []string{"g-wk10"}, recent[0].Slip.GameIDs)
+
+	assert.Equal(t, s3.ID, recent[1].Slip.ID)
+	assert.Equal(t, week9, recent[1].Week)
+
+	assert.Equal(t, s2.ID, recent[2].Slip.ID)
+	assert.Equal(t, week9, recent[2].Week)
+
+	all, err := store.RecentSlipsForGroup(t.Context(), groupA.ID, 10)
+	require.NoError(t, err)
+	require.Len(t, all, 4)
+	assert.Equal(t, s1.ID, all[3].Slip.ID)
+	assert.Equal(t, week8, all[3].Week)
+}

@@ -123,7 +123,7 @@ card with a one-tap primary button keeps live-week friction near zero while keep
 Complexity: medium (wires `RecentSlipsForGroup`, `internal/record` summary, and `isSpotlightSlip` classification across
 `internal/db` and `internal/web`) Risk: low (read-only queries and pure classification helpers with focused unit tests)
 
-- [ ] Add `Store.RecentSlipsForGroup(ctx, groupID, limit)` in `internal/db/slips.go` (returning recent slips with their
+- [x] Add `Store.RecentSlipsForGroup(ctx, groupID, limit)` in `internal/db/slips.go` (returning recent slips with their
       week metadata) with store tests.
 - [ ] Add `GroupOverviewPage` view model and pure `isSpotlightSlip` classifier in `internal/web/home.go` that separates
       active/upcoming spotlight slips from recent/completed slips and assembles the group record snapshot, recurring
