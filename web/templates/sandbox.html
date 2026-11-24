@@ -3,41 +3,41 @@
   <div class="flex flex-wrap items-start justify-between gap-2">
     <div>
       <h1 class="text-xl font-semibold">Sandbox controls</h1>
-      <p class="text-xs text-slate-500">
+      <p class="text-xs text-page-muted">
         Development only. Every switch uses the real sign-in, group scope, and services.
       </p>
     </div>
-    <span class="rounded-full border border-amber-700 bg-amber-950/40 px-2 py-1 text-xs font-medium text-amber-300">
+    <span class="rounded-full border border-warning bg-warning-soft px-2 py-1 text-xs font-medium text-warning-ink">
       Offline replay
     </span>
   </div>
 
   <dl class="grid grid-cols-1 gap-2 sm:grid-cols-2">
-    <div class="rounded-xl border border-slate-800 bg-slate-900 p-4">
-      <dt class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Stage</dt>
-      <dd class="mt-1 font-medium text-slate-100">{{.Stage}}</dd>
+    <div class="ui-card p-4">
+      <dt class="text-[11px] font-semibold uppercase tracking-wide text-ink-muted">Stage</dt>
+      <dd class="mt-1 font-medium text-ink">{{.Stage}}</dd>
     </div>
-    <div class="rounded-xl border border-slate-800 bg-slate-900 p-4">
-      <dt class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Scenario time</dt>
-      <dd class="mt-1 font-medium text-slate-100">
+    <div class="ui-card p-4">
+      <dt class="text-[11px] font-semibold uppercase tracking-wide text-ink-muted">Scenario time</dt>
+      <dd class="mt-1 font-medium text-ink">
         <time datetime="{{.WhenISO}}">{{.WhenLabel}}</time>
       </dd>
     </div>
-    <div class="rounded-xl border border-slate-800 bg-slate-900 p-4">
-      <dt class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Signed in as</dt>
-      <dd class="mt-1 font-medium text-slate-100">{{.CurrentName}}</dd>
-      <dd class="text-xs break-all text-slate-500">{{.CurrentEmail}}</dd>
+    <div class="ui-card p-4">
+      <dt class="text-[11px] font-semibold uppercase tracking-wide text-ink-muted">Signed in as</dt>
+      <dd class="mt-1 font-medium text-ink">{{.CurrentName}}</dd>
+      <dd class="text-xs break-all text-ink-subtle">{{.CurrentEmail}}</dd>
     </div>
-    <div class="rounded-xl border border-slate-800 bg-slate-900 p-4">
-      <dt class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Active group</dt>
-      <dd class="mt-1 font-medium text-slate-100">{{if .GroupName}}{{.GroupName}}{{else}}None{{end}}</dd>
+    <div class="ui-card p-4">
+      <dt class="text-[11px] font-semibold uppercase tracking-wide text-ink-muted">Active group</dt>
+      <dd class="mt-1 font-medium text-ink">{{if .GroupName}}{{.GroupName}}{{else}}None{{end}}</dd>
     </div>
   </dl>
 
-  <section class="rounded-xl border border-slate-800 bg-slate-900 p-4">
+  <section class="ui-card p-4">
     <div>
-      <h2 class="text-sm font-semibold text-slate-300">Stages</h2>
-      <p class="mt-1 text-xs text-slate-500">
+      <h2 class="text-sm font-semibold text-ink">Stages</h2>
+      <p class="mt-1 text-xs text-ink-subtle">
         Every stage rebuilds Sunday morning, runs the real refresh, locks the shared slip, and records scripted manual
         grades. The analyzer never infers a result from a score.
       </p>
@@ -45,13 +45,13 @@
 
     <ul class="mt-3 space-y-2">
       {{range .Stages}}
-        <li class="flex flex-col gap-2 rounded-lg border border-slate-800 px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
+        <li class="flex flex-col gap-2 rounded-lg border border-line px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
           <div class="min-w-0">
-            <p class="truncate text-sm font-medium text-slate-200">{{.Name}}</p>
-            <p class="text-xs text-slate-500">{{.Description}}</p>
+            <p class="truncate text-sm font-medium text-ink">{{.Name}}</p>
+            <p class="text-xs text-ink-subtle">{{.Description}}</p>
           </div>
           {{if .Current}}
-            <span class="shrink-0 self-start rounded-full border border-emerald-800 bg-emerald-950/40 px-2 py-1 text-xs font-medium text-emerald-300 sm:self-auto">
+            <span class="shrink-0 self-start rounded-full border border-positive bg-positive-soft px-2 py-1 text-xs font-medium text-positive-ink sm:self-auto">
               Current
             </span>
           {{else}}
@@ -59,7 +59,7 @@
               <input type="hidden" name="stage" value="{{.ID}}">
               <button
                 type="submit"
-                class="w-full rounded-lg border border-slate-700 px-3 py-2 text-sm font-medium text-slate-200 hover:bg-slate-800 sm:w-auto"
+                class="w-full rounded-lg border border-line-strong bg-surface-2 px-3 py-2 text-sm font-medium text-ink hover:opacity-90 sm:w-auto"
               >
                 Select {{.Name}}
               </button>
@@ -70,31 +70,31 @@
     </ul>
   </section>
 
-  <section class="rounded-xl border border-slate-800 bg-slate-900 p-4">
+  <section class="ui-card p-4">
     <div>
-      <h2 class="text-sm font-semibold text-slate-300">Personas</h2>
-      <p class="mt-1 text-xs text-slate-500">
+      <h2 class="text-sm font-semibold text-ink">Personas</h2>
+      <p class="mt-1 text-xs text-ink-subtle">
         Ada, Ben, and Cleo share the sandbox slip. Dex stays outside it until they accept the invite.
       </p>
     </div>
 
     <ul class="mt-3 space-y-2">
       {{range .Personas}}
-        <li class="flex flex-col gap-2 rounded-lg border border-slate-800 px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
+        <li class="flex flex-col gap-2 rounded-lg border border-line px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
           <div class="min-w-0">
-            <p class="truncate text-sm font-medium text-slate-200">
+            <p class="truncate text-sm font-medium text-ink">
               {{.Name}}
-              <span class="text-xs font-normal text-slate-500">
+              <span class="text-xs font-normal text-ink-subtle">
                 {{if .Shared}}shared group{{else}}outsider{{end}}
               </span>
             </p>
-            <p class="text-xs break-all text-slate-500">{{.Email}}</p>
-            <p class="text-xs text-slate-500">
+            <p class="text-xs break-all text-ink-subtle">{{.Email}}</p>
+            <p class="text-xs text-ink-subtle">
               {{if .GroupName}}{{.GroupName}}{{else}}Not seeded yet{{end}}
             </p>
           </div>
           {{if .Current}}
-            <span class="shrink-0 self-start rounded-full border border-sky-800 bg-sky-950/40 px-2 py-1 text-xs font-medium text-sky-300 sm:self-auto">
+            <span class="shrink-0 self-start rounded-full border border-accent bg-accent-soft px-2 py-1 text-xs font-medium text-ink sm:self-auto">
               Current
             </span>
           {{else}}
@@ -102,7 +102,7 @@
               <input type="hidden" name="persona" value="{{.ID}}">
               <button
                 type="submit"
-                class="w-full rounded-lg border border-slate-700 px-3 py-2 text-sm font-medium text-slate-200 hover:bg-slate-800 sm:w-auto"
+                class="w-full rounded-lg border border-line-strong bg-surface-2 px-3 py-2 text-sm font-medium text-ink hover:opacity-90 sm:w-auto"
               >
                 Sign in as {{.Name}}
               </button>
@@ -114,31 +114,31 @@
   </section>
 
   {{if .InviteToken}}
-    <section class="rounded-xl border border-slate-800 bg-slate-900 p-4">
-      <h2 class="text-sm font-semibold text-slate-300">Shared invite</h2>
-      <p class="mt-1 text-xs text-slate-500">
+    <section class="ui-card p-4">
+      <h2 class="text-sm font-semibold text-ink">Shared invite</h2>
+      <p class="mt-1 text-xs text-ink-subtle">
         Switch to Dex, then open this link to exercise the normal join flow. Joining makes them a shared member, so
         reset when you want the outsider view again.
       </p>
       <a
         href="/join/{{.InviteToken}}"
-        class="mt-3 block w-full rounded-lg border border-slate-700 px-3 py-2 text-center text-sm font-medium text-slate-200 hover:bg-slate-800"
+        class="mt-3 block w-full rounded-lg border border-line-strong bg-surface-2 px-3 py-2 text-center text-sm font-medium text-ink hover:opacity-90"
       >
         Open shared invite
       </a>
     </section>
   {{end}}
 
-  <section class="rounded-xl border border-rose-900/60 bg-slate-900 p-4">
-    <h2 class="text-sm font-semibold text-slate-300">Reset</h2>
-    <p class="mt-1 text-xs text-slate-500">
+  <section class="ui-card border-danger p-4">
+    <h2 class="text-sm font-semibold text-ink">Reset</h2>
+    <p class="mt-1 text-xs text-ink-subtle">
       Deletes every sandbox person, group, slip, pick, activity line, cache row, and manual edit, then rebuilds Sunday
       morning and signs this browser back in as the same persona. The normal dev database is never touched.
     </p>
     <form class="mt-3" hx-post="/dev/sandbox/reset" hx-swap="none">
       <button
         type="submit"
-        class="w-full rounded-lg bg-sky-600 px-3 py-2 text-sm font-semibold text-white hover:bg-sky-500"
+        class="w-full rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-accent-ink hover:opacity-90"
       >
         Reset to Sunday morning
       </button>
@@ -146,7 +146,7 @@
   </section>
 
   <p class="text-center text-sm">
-    <a href="/" class="text-sky-400 hover:text-sky-300">Back to the app</a>
+    <a href="/" class="text-page-muted underline hover:text-page-ink">Back to the app</a>
   </p>
 </section>
 {{end}}

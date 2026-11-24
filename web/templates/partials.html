@@ -12,15 +12,15 @@
       <li>
         <a
           href="/groups/{{.ID}}/week"
-          class="flex items-center justify-between gap-3 rounded-xl border border-slate-800 bg-slate-900 p-4 hover:border-slate-700 hover:bg-slate-800/60"
+          class="ui-card flex items-center justify-between gap-3 p-4 hover:border-line-strong hover:bg-surface-2"
         >
           <span class="min-w-0 truncate text-base font-semibold">{{.Name}}</span>
-          <span class="shrink-0 text-sm text-slate-400">{{.Summary}}</span>
+          <span class="shrink-0 text-sm text-ink-muted">{{.Summary}}</span>
         </a>
       </li>
     {{else}}
       <li
-        class="rounded-xl border border-dashed border-slate-700 bg-slate-900 p-4 text-sm text-slate-400"
+        class="ui-card border-dashed p-4 text-sm text-ink-muted"
       >
         No groups yet. Start one from the groups page.
       </li>
@@ -876,12 +876,12 @@
 {{end}}
 
 {{define "game-props"}}
-<div class="mt-3 border-t border-slate-800 pt-3">
+<div class="mt-3 border-t border-line pt-3">
   <div class="flex items-center justify-between">
-    <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Props</p>
+    <p class="text-[11px] font-semibold uppercase tracking-wide text-ink-muted">Props</p>
     <a
       href="/research?game_id={{.GameID}}"
-      class="text-xs font-medium text-sky-400 hover:text-sky-300"
+      class="text-xs font-medium text-ink-muted underline hover:text-ink"
     >
       Game research &rarr;
     </a>
@@ -889,7 +889,7 @@
 
   {{if .TeamTotals}}
     <div class="mt-2.5">
-      <p class="text-[11px] font-medium text-slate-400">Team Totals</p>
+      <p class="text-[11px] font-medium text-ink-muted">Team Totals</p>
       <div class="mt-1.5 flex flex-wrap gap-2">
         {{range .TeamTotals}}
           {{if and $.CanAdd}}
@@ -903,14 +903,14 @@
               <input type="hidden" name="odds" value="{{.Odds}}">
               <button
                 type="submit"
-                class="rounded-full border border-sky-800 bg-sky-950/40 px-3 py-1.5 text-xs font-medium text-sky-300 hover:bg-sky-900/60"
+                class="rounded-full border border-accent bg-accent-soft px-3 py-1.5 text-xs font-medium text-ink hover:opacity-90"
               >
-                {{.Text}} <span class="text-sky-400/70">{{.Price}}</span>
+                {{.Text}} <span class="font-mono tabular-nums text-ink-muted">{{.Price}}</span>
               </button>
             </form>
           {{else}}
-            <span class="rounded-full border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-300">
-              {{.Text}} <span class="text-slate-400">{{.Price}}</span>
+            <span class="rounded-full border border-line-strong bg-surface-2 px-3 py-1.5 text-xs font-medium text-ink-muted">
+              {{.Text}} <span class="font-mono tabular-nums text-ink-subtle">{{.Price}}</span>
             </span>
           {{end}}
         {{end}}
@@ -920,20 +920,20 @@
 
   {{if .Players}}
     <div class="mt-3 space-y-3">
-      <p class="text-[11px] font-medium text-slate-400">Player Props</p>
+      <p class="text-[11px] font-medium text-ink-muted">Player Props</p>
       {{range .Players}}
         <div>
           <div class="flex items-center justify-between gap-2 text-xs">
             <div class="flex min-w-0 items-center gap-2">
               {{template "player-portrait" (dict "URL" .HeadshotURL "Initials" .Initials "Size" "h-7 w-7" "TextSize" "text-[10px]")}}
-              <span class="min-w-0 truncate font-medium text-slate-200">
-                {{.Name}} {{if .Team}}<span class="text-slate-400">({{.Team}})</span>{{end}}
+              <span class="min-w-0 truncate font-medium text-ink">
+                {{.Name}} {{if .Team}}<span class="text-ink-muted">({{.Team}})</span>{{end}}
               </span>
             </div>
             {{if .PlayerID}}
               <a
                 href="/research?player_id={{.PlayerID}}"
-                class="shrink-0 font-medium text-sky-400 hover:text-sky-300"
+                class="shrink-0 font-medium text-ink-muted underline hover:text-ink"
               >
                 Research &rarr;
               </a>
@@ -954,14 +954,14 @@
                   <input type="hidden" name="odds" value="{{.Odds}}">
                   <button
                     type="submit"
-                    class="rounded-full border border-sky-800 bg-sky-950/40 px-3 py-1.5 text-xs font-medium text-sky-300 hover:bg-sky-900/60"
+                    class="rounded-full border border-accent bg-accent-soft px-3 py-1.5 text-xs font-medium text-ink hover:opacity-90"
                   >
-                    {{.Text}} <span class="text-sky-400/70">{{.Price}}</span>
+                    {{.Text}} <span class="font-mono tabular-nums text-ink-muted">{{.Price}}</span>
                   </button>
                 </form>
               {{else}}
-                <span class="rounded-full border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-300">
-                  {{.Text}} <span class="text-slate-400">{{.Price}}</span>
+                <span class="rounded-full border border-line-strong bg-surface-2 px-3 py-1.5 text-xs font-medium text-ink-muted">
+                  {{.Text}} <span class="font-mono tabular-nums text-ink-subtle">{{.Price}}</span>
                 </span>
               {{end}}
             {{end}}
@@ -972,7 +972,7 @@
   {{end}}
 
   {{if and (not .TeamTotals) (not .Players)}}
-    <p class="mt-2 text-xs text-slate-500">No prop lines available yet.</p>
+    <p class="mt-2 text-xs text-ink-subtle">No prop lines available yet.</p>
   {{end}}
 </div>
 {{end}}
