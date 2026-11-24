@@ -140,14 +140,19 @@ const (
 	maxTwoWayOverround = 1.25
 )
 
-// ImpliedProb returns the raw implied probability (0..1) for American odds, or
-// 0 for an invalid price of 0.
-func ImpliedProb(american int) float64 {
-	decimal := AmericanToDecimal(american)
-	if decimal <= 0 {
+// DecimalImpliedProb returns the raw implied probability (0..1) for decimal
+// odds greater than 1, or 0 for non-betting values (<= 1, NaN, or Inf).
+func DecimalImpliedProb(decimal float64) float64 {
+	if decimal <= 1 || math.IsNaN(decimal) || math.IsInf(decimal, 0) {
 		return 0
 	}
 	return 1 / decimal
+}
+
+// ImpliedProb returns the raw implied probability (0..1) for American odds, or
+// 0 for an invalid price of 0.
+func ImpliedProb(american int) float64 {
+	return DecimalImpliedProb(AmericanToDecimal(american))
 }
 
 // DevigTwoWay removes the vig from a two-way market by normalizing both raw
