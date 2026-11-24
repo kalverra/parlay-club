@@ -117,9 +117,33 @@ func TestBuildTeamDefenseProfiles(t *testing.T) {
 	assert.Nil(t, analyzer.BuildTeamDefenseProfiles(nil))
 
 	rows := []db.NFLverseTeamWeek{
-		{Team: "BUF", WeekNum: 1, OffPassEPA: 0.10, DefPassEPAAllowed: 0.20, PlaysPerGame: 60, PassRate: 0.55},
-		{Team: "BUF", WeekNum: 2, OffPassEPA: 0.30, DefPassEPAAllowed: 0.00, PlaysPerGame: 64, PassRate: 0.65},
-		{Team: "MIA", WeekNum: 1, OffPassEPA: 0.05, DefPassEPAAllowed: 0.30, PlaysPerGame: 58, PassRate: 0.50},
+		{
+			Team:              "BUF",
+			WeekNum:           1,
+			OffPassEPA:        0.10,
+			DefPassEPAAllowed: 0.20,
+			DefRushEPAAllowed: -0.10,
+			PlaysPerGame:      60,
+			PassRate:          0.55,
+		},
+		{
+			Team:              "BUF",
+			WeekNum:           2,
+			OffPassEPA:        0.30,
+			DefPassEPAAllowed: 0.00,
+			DefRushEPAAllowed: -0.10,
+			PlaysPerGame:      64,
+			PassRate:          0.65,
+		},
+		{
+			Team:              "MIA",
+			WeekNum:           1,
+			OffPassEPA:        0.05,
+			DefPassEPAAllowed: 0.30,
+			DefRushEPAAllowed: 0.05,
+			PlaysPerGame:      58,
+			PassRate:          0.50,
+		},
 	}
 	profiles := analyzer.BuildTeamDefenseProfiles(rows)
 	require.Len(t, profiles, 2)
@@ -128,10 +152,14 @@ func TestBuildTeamDefenseProfiles(t *testing.T) {
 	require.NotNil(t, buf)
 	assert.InDelta(t, 0.20, buf.OffPassEPA, 1e-9)
 	assert.InDelta(t, 0.10, buf.DefPassEPAAllowed, 1e-9)
+	assert.InDelta(t, 0.00, buf.DefOverallEPAAllowed, 1e-9)
 	assert.Equal(t, 1, buf.OffPassEPARank)
 	assert.Equal(t, 1, buf.DefPassEPAAllowedRank)
+	assert.Equal(t, 1, buf.DefOverallEPARank)
+	assert.InDelta(t, 0.35, profiles["MIA"].DefOverallEPAAllowed, 1e-9)
 	assert.Equal(t, 2, profiles["MIA"].OffPassEPARank)
 	assert.Equal(t, 2, profiles["MIA"].DefPassEPAAllowedRank)
+	assert.Equal(t, 2, profiles["MIA"].DefOverallEPARank)
 }
 
 func TestBuildPlayerUsageAndSummarizeRecentUsage(t *testing.T) {
@@ -417,45 +445,183 @@ func TestLoadPlayerResearchSignals(t *testing.T) {
 	// Only 2 weeks exist; research still summarizes up to 3 weeks.
 	_, err = store.UpsertNFLversePlayerWeeks(t.Context(), []db.NFLversePlayerWeek{
 		{
-			ESPNID:      "rb1",
-			Season:      2026,
-			SeasonType:  nflverse.SeasonTypeRegular,
-			WeekNum:     5,
-			Team:        "BUF",
-			OffensePct:  0.70,
-			TargetShare: 0.12,
-			WOPR:        0.30,
-			UpdatedAt:   now,
+			ESPNID:        "rb1",
+			Season:        2026,
+			SeasonType:    nflverse.SeasonTypeRegular,
+			WeekNum:       5,
+			Team:          "BUF",
+			Opponent:      "NE",
+			PlayerName:    "James Cook",
+			Position:      "FB", // normalized to RB on write
+			OffensePct:    0.70,
+			TargetShare:   0.12,
+			AirYardsShare: 0.06,
+			WOPR:          0.30,
+			Carries:       18,
+			RushYds:       96,
+			Targets:       4,
+			RZOpps:        3,
+			TotalEPA:      4.2,
+			UpdatedAt:     now,
 		},
 		{
-			ESPNID:      "rb1",
-			Season:      2026,
-			SeasonType:  nflverse.SeasonTypeRegular,
-			WeekNum:     4,
-			Team:        "BUF",
-			OffensePct:  0.60,
-			TargetShare: 0.10,
-			WOPR:        0.20,
-			UpdatedAt:   now,
+			ESPNID:        "rb1",
+			Season:        2026,
+			SeasonType:    nflverse.SeasonTypeRegular,
+			WeekNum:       4,
+			Team:          "BUF",
+			Opponent:      "NYJ",
+			PlayerName:    "James Cook",
+			Position:      "RB",
+			OffensePct:    0.60,
+			TargetShare:   0.10,
+			AirYardsShare: 0.04,
+			WOPR:          0.20,
+			Carries:       12,
+			RushYds:       64,
+			Targets:       2,
+			RZOpps:        1,
+			TotalEPA:      1.8,
+			UpdatedAt:     now,
+		},
+		{
+			ESPNID:     "rb-opp-1",
+			Season:     2026,
+			SeasonType: nflverse.SeasonTypeRegular,
+			WeekNum:    5,
+			Team:       "NYJ",
+			Opponent:   "MIA",
+			PlayerName: "Breece Hall",
+			Position:   "RB",
+			OffensePct: 0.80,
+			RushYds:    110,
+			UpdatedAt:  now,
+		},
+		{
+			ESPNID:     "rb-opp-2",
+			Season:     2026,
+			SeasonType: nflverse.SeasonTypeRegular,
+			WeekNum:    4,
+			Team:       "NE",
+			Opponent:   "MIA",
+			PlayerName: "Rhamondre Stevenson",
+			Position:   "RB",
+			OffensePct: 0.72,
+			RushYds:    84,
+			UpdatedAt:  now,
 		},
 	})
 	require.NoError(t, err)
 	require.NoError(t, store.RecordSync(t.Context(), analyzer.NFLverseSource(2026), now.Add(-24*time.Hour), nil))
 
-	sig := analyzer.LoadPlayerResearchSignals(t.Context(), store, now, "rb1", "BUF", "RB", "")
+	sig := analyzer.LoadPlayerResearchSignals(t.Context(), store, now, "rb1", "BUF", "FB", "")
 	require.True(t, sig.HasUsage)
 	assert.InDelta(t, 0.65, sig.SnapPct, 1e-9)
 	assert.InDelta(t, 0.11, sig.TargetShare, 1e-9)
 	assert.InDelta(t, 0.25, sig.WOPR, 1e-9)
+	assert.InDelta(t, 15.0, sig.CarriesPerGame, 1e-9)
+	assert.InDelta(t, 3.0, sig.TargetsPerGame, 1e-9)
+	assert.InDelta(t, 0.05, sig.AirYardsShare, 1e-9)
+	assert.InDelta(t, 2.0, sig.RZOppsPerGame, 1e-9)
+	assert.InDelta(t, 3.0, sig.EPAPerGame, 1e-9)
 	assert.Equal(t, "MIA", sig.Opponent)
 	assert.Equal(t, "rush", sig.OppDefSplit)
 	assert.Equal(t, 2, sig.OppDefRank)
+	assert.Equal(t, 2, sig.OppOverallDefRank)
+	require.NotNil(t, sig.TeamDefProfiles)
+	assert.Equal(t, 1, sig.TeamDefProfiles["BUF"].DefOverallEPARank)
+	require.NotNil(t, sig.PosDefRanks)
+	assert.Equal(t, 3, sig.OppPosDefRank) // NYJ (64), NE (96), MIA (97 avg)
+	require.Len(t, sig.OppDefenseL5, 2)
+	assert.Equal(t, 4, sig.OppDefenseL5[0].WeekNum)
+	assert.Equal(t, "Rhamondre Stevenson", sig.OppDefenseL5[0].PlayerName)
+	assert.Equal(t, 5, sig.OppDefenseL5[1].WeekNum)
+	assert.Equal(t, "Breece Hall", sig.OppDefenseL5[1].PlayerName)
 
 	// Stale nflverse returns zeroed signals.
 	require.NoError(t, store.RecordSync(t.Context(), analyzer.NFLverseSource(2026), now.Add(-8*24*time.Hour), nil))
 	stale := analyzer.LoadPlayerResearchSignals(t.Context(), store, now, "rb1", "BUF", "RB", "REC_YDS")
 	assert.False(t, stale.HasUsage)
 	assert.Zero(t, stale.OppDefRank)
+	assert.Zero(t, stale.OppOverallDefRank)
+	assert.Zero(t, stale.OppPosDefRank)
+	assert.Nil(t, stale.TeamDefProfiles)
+	assert.Nil(t, stale.PosDefRanks)
+	assert.Nil(t, stale.OppDefenseL5)
+}
+
+func TestBuildPositionDefenseRanks(t *testing.T) {
+	t.Parallel()
+
+	assert.Nil(t, analyzer.BuildPositionDefenseRanks(nil, "RB", "RUSH_YDS"))
+	assert.Nil(
+		t,
+		analyzer.BuildPositionDefenseRanks([]db.NFLversePlayerWeek{{Opponent: "BUF", Position: "RB"}}, "", ""),
+	)
+
+	rows := []db.NFLversePlayerWeek{
+		// vs BUF: week 1 (60+40=100), week 2 (80) -> avg 90.0
+		{Opponent: "BUF", Position: "RB", SeasonType: 2, WeekNum: 1, RushYds: 60},
+		{Opponent: "BUF", Position: "FB", SeasonType: 2, WeekNum: 1, RushYds: 40}, // FB normalizes to RB
+		{Opponent: "BUF", Position: "RB", SeasonType: 2, WeekNum: 2, RushYds: 80},
+		// vs MIA: week 1 (90) -> avg 90.0 (tie with BUF; BUF < MIA alphabetically)
+		{Opponent: "MIA", Position: "RB", SeasonType: 2, WeekNum: 1, RushYds: 90},
+		// vs NYJ: week 1 (50) -> avg 50.0 (toughest, rank 1)
+		{Opponent: "NYJ", Position: "HB", SeasonType: 2, WeekNum: 1, RushYds: 50},
+		// WR row should be ignored for RB ranks
+		{Opponent: "NYJ", Position: "WR", SeasonType: 2, WeekNum: 1, RushYds: 200, RecYds: 120},
+	}
+
+	ranks := analyzer.BuildPositionDefenseRanks(rows, "FB", "") // empty market falls back to RUSH_YDS
+	require.Len(t, ranks, 3)
+	assert.Equal(t, 1, ranks["NYJ"])
+	assert.Equal(t, 2, ranks["BUF"])
+	assert.Equal(t, 3, ranks["MIA"])
+
+	wrRanks := analyzer.BuildPositionDefenseRanks(rows, "WR", "")
+	require.Len(t, wrRanks, 1)
+	assert.Equal(t, 1, wrRanks["NYJ"])
+}
+
+func TestBuildOppDefenseLast5(t *testing.T) {
+	t.Parallel()
+
+	assert.Nil(t, analyzer.BuildOppDefenseLast5(nil, "REC_YDS"))
+
+	// <5 games early season, including a zero-value game and tie-break by usage then name.
+	early := []db.NFLversePlayerWeek{
+		{SeasonType: 2, WeekNum: 3, PlayerName: "Zero Guy", Team: "NE", Position: "WR", OffensePct: 0.40, RecYds: 0},
+		{SeasonType: 2, WeekNum: 3, PlayerName: "Snap Leader", Team: "NE", Position: "WR", OffensePct: 0.85, RecYds: 0},
+		{SeasonType: 2, WeekNum: 1, PlayerName: "B. Alpha", Team: "BUF", Position: "WR", OffensePct: 0.80, RecYds: 80},
+		{SeasonType: 2, WeekNum: 1, PlayerName: "A. Alpha", Team: "BUF", Position: "WR", OffensePct: 0.80, RecYds: 80},
+	}
+	earlyL5 := analyzer.BuildOppDefenseLast5(early, "REC_YDS")
+	require.Len(t, earlyL5, 2)
+	assert.Equal(t, 1, earlyL5[0].WeekNum)
+	assert.Equal(t, "A. Alpha", earlyL5[0].PlayerName)
+	assert.InDelta(t, 80, earlyL5[0].Value, 1e-9)
+	assert.Equal(t, 3, earlyL5[1].WeekNum)
+	assert.Equal(t, "Snap Leader", earlyL5[1].PlayerName)
+	assert.InDelta(t, 0, earlyL5[1].Value, 1e-9)
+
+	// >5 games including postseason: keeps 5 most recent in chronological order.
+	many := []db.NFLversePlayerWeek{
+		{SeasonType: 2, WeekNum: 14, PlayerName: "W14", Team: "T1", Position: "WR", RecYds: 50},
+		{SeasonType: 2, WeekNum: 15, PlayerName: "W15", Team: "T2", Position: "WR", RecYds: 60},
+		{SeasonType: 2, WeekNum: 16, PlayerName: "W16", Team: "T3", Position: "WR", RecYds: 70},
+		{SeasonType: 2, WeekNum: 17, PlayerName: "W17", Team: "T4", Position: "WR", RecYds: 80},
+		{SeasonType: 2, WeekNum: 18, PlayerName: "W18", Team: "T5", Position: "WR", RecYds: 90},
+		{SeasonType: 3, WeekNum: 1, PlayerName: "WC1", Team: "T6", Position: "WR", RecYds: 100},
+	}
+	l5 := analyzer.BuildOppDefenseLast5(many, "")
+	require.Len(t, l5, 5)
+	assert.Equal(
+		t,
+		[]int{15, 16, 17, 18, 1},
+		[]int{l5[0].WeekNum, l5[1].WeekNum, l5[2].WeekNum, l5[3].WeekNum, l5[4].WeekNum},
+	)
+	assert.Equal(t, 3, l5[4].SeasonType)
+	assert.Equal(t, "WC1", l5[4].PlayerName)
 }
 
 func TestPlayerUsageAccessorFallbacks(t *testing.T) {

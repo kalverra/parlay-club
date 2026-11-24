@@ -117,6 +117,7 @@ func BuildTeamDefenseProfiles(rows []db.NFLverseTeamWeek) map[string]*TeamDefens
 		prof.OffRushEPA /= n
 		prof.DefPassEPAAllowed /= n
 		prof.DefRushEPAAllowed /= n
+		prof.DefOverallEPAAllowed = prof.DefPassEPAAllowed + prof.DefRushEPAAllowed
 		prof.PlaysPerGame /= n
 		prof.PassRate /= n
 
@@ -152,6 +153,9 @@ func BuildTeamDefenseProfiles(rows []db.NFLverseTeamWeek) map[string]*TeamDefens
 	})
 	rankTeams(teams, func(t string) float64 { return profiles[t].DefRushEPAAllowed }, false, func(t string, r int) {
 		profiles[t].DefRushEPAAllowedRank = r
+	})
+	rankTeams(teams, func(t string) float64 { return profiles[t].DefOverallEPAAllowed }, false, func(t string, r int) {
+		profiles[t].DefOverallEPARank = r
 	})
 	rankTeams(teams, func(t string) float64 { return profiles[t].PlaysPerGame }, true, func(t string, r int) {
 		profiles[t].PlaysPerGameRank = r
@@ -307,6 +311,16 @@ func LegFromDB(leg db.Leg, owner string) Leg {
 	return converted
 }
 
+// OppDefenseGame holds the leading opposing player's stat line against a
+// defense in one week for the opposing defense L5 chart.
+type OppDefenseGame struct {
+	SeasonType int
+	WeekNum    int
+	PlayerName string
+	Team       string
+	Value      float64
+}
+
 // PlayerResearchSignals holds nflverse usage and opponent matchup rank for a
 // player research view. Zero values indicate missing or stale data.
 type PlayerResearchSignals struct {
@@ -317,6 +331,19 @@ type PlayerResearchSignals struct {
 	Opponent    string
 	OppDefSplit string
 	OppDefRank  int
+
+	CarriesPerGame float64
+	TargetsPerGame float64
+	PassAttPerGame float64
+	AirYardsShare  float64
+	RZOppsPerGame  float64
+	EPAPerGame     float64
+
+	TeamDefProfiles   map[string]*TeamDefenseProfile
+	PosDefRanks       map[string]int
+	OppOverallDefRank int
+	OppPosDefRank     int
+	OppDefenseL5      []OppDefenseGame
 }
 
 // MergeGameInjuries combines a game's stored summary injuries with key-position
@@ -534,8 +561,210 @@ func LoadGameSignals(
 	return teamEPA, playerUsage
 }
 
-// LoadPlayerResearchSignals loads L3 nflverse usage and opponent defense rank
-// for the latest week when nflverse data is fresh.
+// BuildPositionDefenseRanks groups nflverse player-week rows for position by
+// (opponent, season_type, week_num), sums the active market stat allowed per
+// game, averages across games played by each defense, and ranks ascending
+// (1 = fewest allowed, ties broken alphabetically).
+func BuildPositionDefenseRanks(rows []db.NFLversePlayerWeek, position, market string) map[string]int {
+	pos := normalizeResearchPosition(position)
+	if pos == "" || len(rows) == 0 {
+		return nil
+	}
+	resolvedMarket := resolveResearchMarket(pos, market)
+	if _, ok := marketStatValue(db.NFLversePlayerWeek{}, resolvedMarket); !ok {
+		return nil
+	}
+
+	type oppGameKey struct {
+		opponent   string
+		seasonType int
+		weekNum    int
+	}
+	gameTotals := make(map[oppGameKey]float64)
+	for _, row := range rows {
+		if normalizeResearchPosition(row.Position) != pos {
+			continue
+		}
+		opp := strings.ToUpper(strings.TrimSpace(row.Opponent))
+		if opp == "" {
+			continue
+		}
+		val, ok := marketStatValue(row, resolvedMarket)
+		if !ok {
+			continue
+		}
+		key := oppGameKey{
+			opponent:   opp,
+			seasonType: row.SeasonType,
+			weekNum:    row.WeekNum,
+		}
+		gameTotals[key] += val
+	}
+	if len(gameTotals) == 0 {
+		return nil
+	}
+
+	sumByOpp := make(map[string]float64)
+	gamesByOpp := make(map[string]int)
+	for key, total := range gameTotals {
+		sumByOpp[key.opponent] += total
+		gamesByOpp[key.opponent]++
+	}
+
+	teams := make([]string, 0, len(sumByOpp))
+	avgByOpp := make(map[string]float64, len(sumByOpp))
+	for opp, sum := range sumByOpp {
+		teams = append(teams, opp)
+		avgByOpp[opp] = sum / float64(gamesByOpp[opp])
+	}
+
+	ranks := make(map[string]int, len(teams))
+	rankTeams(teams, func(t string) float64 { return avgByOpp[t] }, false, func(t string, r int) {
+		ranks[t] = r
+	})
+	return ranks
+}
+
+// BuildOppDefenseLast5 groups opposing player-week rows by (season_type,
+// week_num), selects the leading opposing player per game for market (highest
+// value, tie-broken by usage then player name), and returns up to the 5 most
+// recent games in chronological order.
+func BuildOppDefenseLast5(rows []db.NFLversePlayerWeek, market string) []OppDefenseGame {
+	if len(rows) == 0 {
+		return nil
+	}
+	resolvedMarket := strings.ToUpper(strings.TrimSpace(market))
+	if resolvedMarket == "" {
+		resolvedMarket = defaultMarketForPosition(rows[0].Position)
+	}
+	if _, ok := marketStatValue(db.NFLversePlayerWeek{}, resolvedMarket); !ok {
+		return nil
+	}
+
+	type weekKey struct {
+		seasonType int
+		weekNum    int
+	}
+	type candidate struct {
+		row db.NFLversePlayerWeek
+		val float64
+	}
+	bestByWeek := make(map[weekKey]candidate)
+	for _, row := range rows {
+		val, ok := marketStatValue(row, resolvedMarket)
+		if !ok {
+			continue
+		}
+		key := weekKey{seasonType: row.SeasonType, weekNum: row.WeekNum}
+		cur, exists := bestByWeek[key]
+		if !exists || oppCandidateBetter(row, val, cur.row, cur.val) {
+			bestByWeek[key] = candidate{row: row, val: val}
+		}
+	}
+	if len(bestByWeek) == 0 {
+		return nil
+	}
+
+	out := make([]OppDefenseGame, 0, len(bestByWeek))
+	for _, best := range bestByWeek {
+		out = append(out, OppDefenseGame{
+			SeasonType: best.row.SeasonType,
+			WeekNum:    best.row.WeekNum,
+			PlayerName: best.row.PlayerName,
+			Team:       best.row.Team,
+			Value:      best.val,
+		})
+	}
+	slices.SortFunc(out, func(a, b OppDefenseGame) int {
+		if a.SeasonType != b.SeasonType {
+			return cmp.Compare(a.SeasonType, b.SeasonType)
+		}
+		return cmp.Compare(a.WeekNum, b.WeekNum)
+	})
+	if len(out) > 5 {
+		out = out[len(out)-5:]
+	}
+	return out
+}
+
+func oppCandidateBetter(a db.NFLversePlayerWeek, aVal float64, b db.NFLversePlayerWeek, bVal float64) bool {
+	if aVal != bVal {
+		return aVal > bVal
+	}
+	if a.OffensePct != b.OffensePct {
+		return a.OffensePct > b.OffensePct
+	}
+	if a.TargetShare != b.TargetShare {
+		return a.TargetShare > b.TargetShare
+	}
+	if a.OffenseSnaps != b.OffenseSnaps {
+		return a.OffenseSnaps > b.OffenseSnaps
+	}
+	if a.PlayerName != b.PlayerName {
+		return a.PlayerName < b.PlayerName
+	}
+	return a.ESPNID < b.ESPNID
+}
+
+func normalizeResearchPosition(pos string) string {
+	pos = strings.ToUpper(strings.TrimSpace(pos))
+	switch pos {
+	case "FB", "HB":
+		return "RB"
+	default:
+		return pos
+	}
+}
+
+func defaultMarketForPosition(pos string) string {
+	switch normalizeResearchPosition(pos) {
+	case "QB":
+		return marketPassYds
+	case "RB":
+		return marketRushYds
+	case "WR", "TE":
+		return marketRecYds
+	case "K":
+		return marketKickerPts
+	default:
+		return ""
+	}
+}
+
+func resolveResearchMarket(position, market string) string {
+	resolved := strings.ToUpper(strings.TrimSpace(market))
+	if resolved != "" {
+		return resolved
+	}
+	return defaultMarketForPosition(position)
+}
+
+func marketStatValue(row db.NFLversePlayerWeek, market string) (float64, bool) {
+	switch strings.ToUpper(strings.TrimSpace(market)) {
+	case marketPassYds:
+		return float64(row.PassYds), true
+	case marketPassTDs:
+		return float64(row.PassTDs), true
+	case marketRushYds:
+		return float64(row.RushYds), true
+	case marketRushAtt:
+		return float64(row.Carries), true
+	case marketRecYds:
+		return float64(row.RecYds), true
+	case marketReceptions:
+		return float64(row.Receptions), true
+	case marketAnytimeTD:
+		return float64(row.RushTDs + row.RecTDs), true
+	case marketKickerPts:
+		return float64(row.KickerPts), true
+	default:
+		return 0, false
+	}
+}
+
+// LoadPlayerResearchSignals loads L3 nflverse usage, overall and position
+// defense rank maps, and opposing defense L5 games for the latest week when
+// nflverse data is fresh.
 func LoadPlayerResearchSignals(
 	ctx context.Context,
 	store *db.Store,
@@ -551,15 +780,27 @@ func LoadPlayerResearchSignals(
 		return PlayerResearchSignals{}
 	}
 
-	var res PlayerResearchSignals
+	res := PlayerResearchSignals{
+		TeamDefProfiles: teamEPA,
+	}
+	normPos := normalizeResearchPosition(position)
+
+	seasonTypes := NFLverseSeasonTypes(week.SeasonType)
 	if pWeeks, err := store.NFLversePlayerWeeksForPlayerTypes(
-		ctx, athleteID, week.Season, NFLverseSeasonTypes(week.SeasonType)...,
-	); err == nil {
-		if snap, target, wopr, ok := SummarizeRecentUsage(pWeeks); ok {
-			res.HasUsage = true
-			res.SnapPct = snap
-			res.TargetShare = target
-			res.WOPR = wopr
+		ctx, athleteID, week.Season, seasonTypes...,
+	); err == nil && len(pWeeks) > 0 {
+		if normPos == "" {
+			normPos = normalizeResearchPosition(pWeeks[0].Position)
+		}
+		populateL3ResearchUsage(&res, pWeeks)
+	}
+
+	market := resolveResearchMarket(normPos, activeMarket)
+	if normPos != "" && market != "" {
+		if posWeeks, err := store.NFLversePlayerWeeksForPositionTypes(
+			ctx, normPos, week.Season, seasonTypes...,
+		); err == nil && len(posWeeks) > 0 {
+			res.PosDefRanks = BuildPositionDefenseRanks(posWeeks, normPos, market)
 		}
 	}
 
@@ -582,26 +823,67 @@ func LoadPlayerResearchSignals(
 			break
 		}
 	}
-	oppProf := teamEPA[opp]
-	if oppProf == nil {
-		return res
-	}
-	market := activeMarket
-	if market == "" {
-		if strings.EqualFold(position, "RB") {
-			market = "RUSH_YDS"
-		} else {
-			market = "PASS_YDS"
-		}
-	}
-	split, rank, ok := MatchupDefenseRank(market, oppProf)
-	if !ok {
+	if opp == "" {
 		return res
 	}
 	res.Opponent = opp
-	res.OppDefSplit = split
-	res.OppDefRank = rank
+
+	if oppProf := teamEPA[opp]; oppProf != nil {
+		res.OppOverallDefRank = oppProf.DefOverallEPARank
+		matchupMarket := market
+		if matchupMarket == "" {
+			matchupMarket = marketPassYds
+		}
+		if split, rank, ok := MatchupDefenseRank(matchupMarket, oppProf); ok {
+			res.OppDefSplit = split
+			res.OppDefRank = rank
+		}
+	}
+	if rank, ok := res.PosDefRanks[opp]; ok {
+		res.OppPosDefRank = rank
+	}
+	if normPos != "" && market != "" {
+		if oppWeeks, err := store.NFLversePlayerWeeksAgainstOpponent(
+			ctx, opp, normPos, week.Season, seasonTypes...,
+		); err == nil && len(oppWeeks) > 0 {
+			res.OppDefenseL5 = BuildOppDefenseLast5(oppWeeks, market)
+		}
+	}
 	return res
+}
+
+func populateL3ResearchUsage(res *PlayerResearchSignals, rows []db.NFLversePlayerWeek) {
+	l3Count := min(3, len(rows))
+	if l3Count == 0 {
+		return
+	}
+	var (
+		snapSum, targetShareSum, woprSum   float64
+		carriesSum, targetsSum, passAttSum float64
+		airYardsSum, rzOppsSum, epaSum     float64
+	)
+	for _, w := range rows[:l3Count] {
+		snapSum += w.OffensePct
+		targetShareSum += w.TargetShare
+		woprSum += w.WOPR
+		carriesSum += float64(w.Carries)
+		targetsSum += float64(w.Targets)
+		passAttSum += float64(w.PassAtt)
+		airYardsSum += w.AirYardsShare
+		rzOppsSum += float64(w.RZOpps)
+		epaSum += w.TotalEPA
+	}
+	n := float64(l3Count)
+	res.HasUsage = true
+	res.SnapPct = snapSum / n
+	res.TargetShare = targetShareSum / n
+	res.WOPR = woprSum / n
+	res.CarriesPerGame = carriesSum / n
+	res.TargetsPerGame = targetsSum / n
+	res.PassAttPerGame = passAttSum / n
+	res.AirYardsShare = airYardsSum / n
+	res.RZOppsPerGame = rzOppsSum / n
+	res.EPAPerGame = epaSum / n
 }
 
 func loadFreshNfelo(ctx context.Context, store *db.Store, now time.Time, games []db.Game) map[string]db.NfeloGame {
