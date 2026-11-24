@@ -607,6 +607,131 @@ func TestLatestPropForPlayer(t *testing.T) {
 	assert.InDelta(t, 42.5, *prop.Line, 0.001)
 }
 
+func TestLatestPropForPlayerMarket(t *testing.T) {
+	t.Parallel()
+
+	store, _ := openTestStore(t)
+	week := createTestWeek(t, store, 10)
+	game, err := store.UpsertGame(t.Context(), testSlateGame(week))
+	require.NoError(t, err)
+	now := time.Now().UTC()
+	older := now.Add(-1 * time.Hour)
+	newer := now
+
+	require.NoError(t, store.SaveManualPlayerMatch(t.Context(), "Ja'Marr Chase", "CIN", "4362628"))
+
+	_, err = store.UpsertOdds(t.Context(), []db.Odds{
+		{
+			GameID:     game.ID,
+			Book:       "draftkings",
+			MarketType: "RECEPTIONS",
+			Team:       "CIN",
+			PlayerName: "Ja'Marr Chase",
+			Side:       "OVER",
+			Line:       new(5.5),
+			Price:      -115,
+			FetchedAt:  older,
+		},
+		{
+			GameID:     game.ID,
+			Book:       "draftkings",
+			MarketType: "REC_YDS",
+			Team:       "CIN",
+			PlayerName: "Ja'Marr Chase",
+			Side:       "OVER",
+			Line:       new(68.5),
+			Price:      -110,
+			FetchedAt:  older,
+		},
+		{
+			GameID:     game.ID,
+			Book:       "fanduel",
+			MarketType: "REC_YDS",
+			Team:       "CIN",
+			PlayerName: "Ja'Marr Chase",
+			Side:       "OVER",
+			Line:       new(72.5),
+			Price:      -112,
+			FetchedAt:  newer,
+		},
+		{
+			GameID:     game.ID,
+			Book:       "draftkings",
+			MarketType: "ANYTIME_TD",
+			Team:       "CIN",
+			PlayerName: "Ja'Marr Chase",
+			Side:       "YES",
+			Line:       nil,
+			Price:      +105,
+			FetchedAt:  newer,
+		},
+		{
+			GameID:     game.ID,
+			Book:       "draftkings",
+			MarketType: "RUSH_YDS",
+			Team:       "BUF",
+			PlayerName: "Ja'Marr Chase",
+			Side:       "OVER",
+			Line:       new(12.5),
+			Price:      -110,
+			FetchedAt:  newer,
+		},
+	})
+	require.NoError(t, err)
+
+	// Empty market falls back to newest prop across all markets.
+	prop, ok, err := store.LatestPropForPlayerMarket(t.Context(), "4362628", "Ja'Marr Chase", "CIN", "")
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Equal(t, "REC_YDS", prop.MarketType)
+	assert.InDelta(t, 72.5, *prop.Line, 0.001)
+
+	// Specific market returns that market's line without bleeding from newer REC_YDS.
+	prop, ok, err = store.LatestPropForPlayerMarket(t.Context(), "4362628", "Ja'Marr Chase", "CIN", "RECEPTIONS")
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Equal(t, "RECEPTIONS", prop.MarketType)
+	assert.InDelta(t, 5.5, *prop.Line, 0.001)
+
+	// Specific market returns newest row for that market.
+	prop, ok, err = store.LatestPropForPlayerMarket(t.Context(), "4362628", "Ja'Marr Chase", "CIN", "REC_YDS")
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Equal(t, "REC_YDS", prop.MarketType)
+	assert.InDelta(t, 72.5, *prop.Line, 0.001)
+
+	// Match via player_matches when caller's display name differs from odds name.
+	require.NoError(t, store.SaveManualPlayerMatch(t.Context(), "Gabe Davis", "CIN", "4241479"))
+	_, err = store.UpsertOdds(t.Context(), []db.Odds{
+		{
+			GameID:     game.ID,
+			Book:       "draftkings",
+			MarketType: "RECEPTIONS",
+			Team:       "CIN",
+			PlayerName: "Gabe Davis",
+			Side:       "OVER",
+			Line:       new(3.5),
+			Price:      -110,
+			FetchedAt:  newer,
+		},
+	})
+	require.NoError(t, err)
+	prop, ok, err = store.LatestPropForPlayerMarket(t.Context(), "4241479", "Gabriel Davis", "CIN", "RECEPTIONS")
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.InDelta(t, 3.5, *prop.Line, 0.001)
+
+	// Market with no line (ANYTIME_TD) returns false.
+	_, ok, err = store.LatestPropForPlayerMarket(t.Context(), "4362628", "Ja'Marr Chase", "CIN", "ANYTIME_TD")
+	require.NoError(t, err)
+	assert.False(t, ok)
+
+	// Market belonging to a different team is excluded when team is specified.
+	_, ok, err = store.LatestPropForPlayerMarket(t.Context(), "4362628", "Ja'Marr Chase", "CIN", "RUSH_YDS")
+	require.NoError(t, err)
+	assert.False(t, ok)
+}
+
 func TestUpsertPlayerMatches(t *testing.T) {
 	t.Parallel()
 
