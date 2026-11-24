@@ -244,17 +244,17 @@ func gradeView(letter string, score int, summary string, factors []analyzer.Grad
 func gradeClass(letter string) string {
 	switch letter {
 	case "A":
-		return "border-emerald-700 bg-emerald-950 text-emerald-300"
+		return "grade-a"
 	case "B":
-		return "border-sky-700 bg-sky-950 text-sky-300"
+		return "grade-b"
 	case "C":
-		return "border-amber-700 bg-amber-950 text-amber-300"
+		return "grade-c"
 	case "D":
-		return "border-orange-700 bg-orange-950 text-orange-300"
+		return "grade-d"
 	case "F":
-		return "border-rose-800 bg-rose-950 text-rose-300"
+		return "grade-f"
 	default:
-		return "border-slate-700 bg-slate-950 text-slate-300"
+		return "grade-neutral"
 	}
 }
 
@@ -301,10 +301,10 @@ func formatModelSpread(spread float64) string {
 func analyzerSeverity(severity analyzer.Severity) (string, string) {
 	switch severity {
 	case analyzer.Danger:
-		return "Danger", "border-rose-800 bg-rose-950 text-rose-200"
+		return "Danger", "sev-danger"
 	case analyzer.Warn:
-		return "Warn", "border-amber-700 bg-amber-950 text-amber-300"
+		return "Warn", "sev-warn"
 	default:
-		return "Info", "border-sky-700 bg-sky-950 text-sky-300"
+		return "Info", "sev-info"
 	}
 }

@@ -465,6 +465,12 @@ func TestAnalyzerGuideRendersAllRulesAndAnchors(t *testing.T) {
 	assert.Contains(t, body, `id="suggestions"`)
 	assert.Contains(t, body, "Grade A")
 	assert.Contains(t, body, "Grade F")
+	assert.Contains(t, body, "grade-a")
+	assert.Contains(t, body, "grade-b")
+	assert.Contains(t, body, "grade-c")
+	assert.Contains(t, body, "grade-d")
+	assert.Contains(t, body, "grade-f")
+	assert.Contains(t, body, "sev-warn")
 	for _, ruleID := range analyzer.RuleIDs() {
 		assert.Contains(t, body, fmt.Sprintf(`id="rule-%s"`, ruleID))
 	}

@@ -2873,20 +2873,18 @@ func resultLabel(result, gradedBy string) string {
 	return result
 }
 
-// resultClass colors a leg's result chip: green for a win, rose for a loss,
-// amber when manual grading is needed, muted for a push or void, and slate
-// while it waits.
+// resultClass colors a leg's result chip using semantic theme badge classes.
 func resultClass(result string) string {
 	switch result {
 	case "WON":
-		return "border-emerald-800 bg-emerald-950 text-emerald-300"
+		return "badge-won"
 	case "LOST":
-		return "border-rose-800 bg-rose-950 text-rose-300"
+		return "badge-lost"
 	case "NEEDS_GRADING":
-		return "border-amber-700 bg-amber-950 text-amber-300"
+		return "badge-push"
 	case "PUSH", "VOID":
-		return "border-slate-700 bg-slate-800 text-slate-300"
+		return "badge-void"
 	default:
-		return "border-slate-700 bg-slate-800 text-slate-400"
+		return "badge-pending"
 	}
 }

@@ -1284,6 +1284,9 @@ func TestResearchPlayerRichChartsAndMatchupContext(t *testing.T) {
 	assert.Contains(t, body, "vs BAL")
 	assert.Contains(t, body, "Def #1")
 	assert.Contains(t, body, "vs WR #1")
+	assert.Contains(t, body, "bar-hit")
+	assert.Contains(t, body, "bar-miss")
+	assert.Contains(t, body, "badge-lost")
 
 	// Opposing defense L5 chart.
 	assert.Contains(t, body, "MIA Defense · Last 5 vs WR · Rec Yds")
