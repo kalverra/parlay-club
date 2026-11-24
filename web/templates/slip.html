@@ -106,6 +106,7 @@
           {{else}}
             <option value="sunday_main"{{if or (eq .Create.SlateScope "sunday_main") (eq .Create.SlateScope "")}} selected{{end}}>Sunday Slate</option>
             <option value="thursday"{{if eq .Create.SlateScope "thursday"}} selected{{end}}>Thursday Slate</option>
+            <option value="weekend"{{if eq .Create.SlateScope "weekend"}} selected{{end}}>Weekend Slate</option>
             <option value="full_week"{{if eq .Create.SlateScope "full_week"}} selected{{end}}>Full Week</option>
           {{end}}
         </select>

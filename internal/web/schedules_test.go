@@ -184,6 +184,34 @@ func TestCreateGroupSlipSchedule(t *testing.T) {
 		assert.True(t, created.IsActive)
 	})
 
+	t.Run("creates weekend schedule via form", func(t *testing.T) {
+		t.Parallel()
+		f := newScheduleTestFixture(t)
+
+		form := url.Values{
+			"name":            {"Playoff Weekend"},
+			"slate_scope":     {"weekend"},
+			"legs_per_member": {"3"},
+		}
+		rec := postForm(t, f.handler, fmt.Sprintf("/groups/%d/schedules", f.group.ID), form)
+		assert.Equal(t, http.StatusOK, rec.Code)
+		assert.Equal(t, "true", rec.Header().Get("Hx-Refresh"))
+
+		schedules, err := f.store.GroupSlipSchedules(t.Context(), f.group.ID)
+		require.NoError(t, err)
+		var created *db.GroupSlipSchedule
+		for _, s := range schedules {
+			if s.Name == "Playoff Weekend" {
+				created = &s
+				break
+			}
+		}
+		require.NotNil(t, created)
+		assert.Equal(t, db.SlateScopeWeekend, created.SlateScope)
+		assert.Equal(t, 3, created.LegsPerMember)
+		assert.True(t, created.IsActive)
+	})
+
 	t.Run("creates schedule successfully via JSON", func(t *testing.T) {
 		t.Parallel()
 		f := newScheduleTestFixture(t)
@@ -446,7 +474,7 @@ func TestUpdateAndDeleteGroupSlipSchedule(t *testing.T) {
 	f := newScheduleTestFixture(t)
 
 	// Update schedule
-	payload := `{"name":"Updated Name","slate_scope":"full_week","legs_per_member":4}`
+	payload := `{"name":"Updated Name","slate_scope":"weekend","legs_per_member":4}`
 	req := httptest.NewRequestWithContext(
 		t.Context(),
 		http.MethodPatch,
@@ -463,7 +491,7 @@ func TestUpdateAndDeleteGroupSlipSchedule(t *testing.T) {
 	err := json.Unmarshal(rec.Body.Bytes(), &updated)
 	require.NoError(t, err)
 	assert.Equal(t, "Updated Name", updated.Name)
-	assert.Equal(t, db.SlateScopeFullWeek, updated.SlateScope)
+	assert.Equal(t, db.SlateScopeWeekend, updated.SlateScope)
 	assert.Equal(t, 4, updated.LegsPerMember)
 
 	// Delete schedule

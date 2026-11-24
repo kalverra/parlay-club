@@ -44,14 +44,15 @@ type SlateScope string
 const (
 	SlateScopeThursday   SlateScope = "thursday"
 	SlateScopeSundayMain SlateScope = "sunday_main"
+	SlateScopeWeekend    SlateScope = "weekend"
 	SlateScopeFullWeek   SlateScope = "full_week"
 )
 
 // Valid reports whether the slate scope is one of SlateScopeThursday,
-// SlateScopeSundayMain, or SlateScopeFullWeek.
+// SlateScopeSundayMain, SlateScopeWeekend, or SlateScopeFullWeek.
 func (s SlateScope) Valid() bool {
 	switch s {
-	case SlateScopeThursday, SlateScopeSundayMain, SlateScopeFullWeek:
+	case SlateScopeThursday, SlateScopeSundayMain, SlateScopeWeekend, SlateScopeFullWeek:
 		return true
 	default:
 		return false
@@ -63,6 +64,8 @@ func (s SlateScope) Label() string {
 	switch s {
 	case SlateScopeThursday:
 		return "Thursday Slate"
+	case SlateScopeWeekend:
+		return "Weekend Slate"
 	case SlateScopeFullWeek:
 		return "Full Week"
 	case SlateScopeSundayMain:
@@ -79,6 +82,8 @@ func (s SlateScope) Matches(kickoff time.Time) bool {
 	switch s {
 	case SlateScopeThursday:
 		return day == time.Thursday
+	case SlateScopeWeekend:
+		return day == time.Saturday || day == time.Sunday || day == time.Monday
 	case SlateScopeFullWeek:
 		return true
 	case SlateScopeSundayMain:

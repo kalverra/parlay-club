@@ -114,6 +114,9 @@ func TestCreateSlipStoresExplicitSlateScope(t *testing.T) {
 	thuSlip := createTestSlipWithScope(t, store, group, week, "Thursday Night", db.SlateScopeThursday, 2, ada)
 	assert.Equal(t, db.SlateScopeThursday, thuSlip.SlateScope)
 
+	weekendSlip := createTestSlipWithScope(t, store, group, week, "Weekend Slate", db.SlateScopeWeekend, 2, ada)
+	assert.Equal(t, db.SlateScopeWeekend, weekendSlip.SlateScope)
+
 	fullSlip := createTestSlipWithScope(t, store, group, week, "Full Week", db.SlateScopeFullWeek, 2, ada)
 	assert.Equal(t, db.SlateScopeFullWeek, fullSlip.SlateScope)
 
@@ -584,8 +587,16 @@ func TestSetSlipStatus(t *testing.T) {
 func TestSlateScopeLabel(t *testing.T) {
 	t.Parallel()
 
+	assert.True(t, db.SlateScopeSundayMain.Valid())
+	assert.True(t, db.SlateScopeThursday.Valid())
+	assert.True(t, db.SlateScopeWeekend.Valid())
+	assert.True(t, db.SlateScopeFullWeek.Valid())
+	assert.False(t, db.SlateScope("unknown").Valid())
+	assert.False(t, db.SlateScope("").Valid())
+
 	assert.Equal(t, "Sunday Slate", db.SlateScopeSundayMain.Label())
 	assert.Equal(t, "Thursday Slate", db.SlateScopeThursday.Label())
+	assert.Equal(t, "Weekend Slate", db.SlateScopeWeekend.Label())
 	assert.Equal(t, "Full Week", db.SlateScopeFullWeek.Label())
 	assert.Equal(t, "Sunday Slate", db.SlateScope("unknown").Label())
 	assert.Equal(t, "Sunday Slate", db.SlateScope("").Label())
@@ -602,7 +613,9 @@ func TestSlateScopeMatches(t *testing.T) {
 	thuAfternoon := time.Date(2026, 11, 5, 13, 0, 0, 0, loc)
 	thuNight := time.Date(2026, 11, 5, 20, 15, 0, 0, loc)
 	fri := time.Date(2026, 11, 6, 15, 0, 0, 0, loc)
+	friNight := time.Date(2026, 11, 6, 20, 15, 0, 0, loc)
 	sat := time.Date(2026, 11, 7, 16, 30, 0, 0, loc)
+	satNight := time.Date(2026, 11, 7, 20, 15, 0, 0, loc)
 	sunLondon := time.Date(2026, 11, 8, 9, 30, 0, 0, loc)
 	sunAfternoon := time.Date(2026, 11, 8, 13, 0, 0, 0, loc)
 	sunNight := time.Date(2026, 11, 8, 20, 20, 0, 0, loc)
@@ -634,6 +647,22 @@ func TestSlateScopeMatches(t *testing.T) {
 	assert.True(t, db.SlateScopeSundayMain.Matches(monNight.UTC())) // Tuesday in UTC
 	assert.False(t, db.SlateScopeSundayMain.Matches(tue))
 
+	// SlateScopeWeekend matches Saturday, Sunday, and Monday kickoffs in Eastern time.
+	assert.False(t, db.SlateScopeWeekend.Matches(thuAfternoon))
+	assert.False(t, db.SlateScopeWeekend.Matches(thuNight))
+	assert.False(t, db.SlateScopeWeekend.Matches(fri))
+	assert.False(t, db.SlateScopeWeekend.Matches(friNight.UTC())) // Saturday in UTC, Friday in ET
+	assert.True(t, db.SlateScopeWeekend.Matches(sat))
+	assert.True(t, db.SlateScopeWeekend.Matches(satNight))
+	assert.True(t, db.SlateScopeWeekend.Matches(satNight.UTC())) // Sunday in UTC
+	assert.True(t, db.SlateScopeWeekend.Matches(sunLondon))
+	assert.True(t, db.SlateScopeWeekend.Matches(sunAfternoon))
+	assert.True(t, db.SlateScopeWeekend.Matches(sunNight))
+	assert.True(t, db.SlateScopeWeekend.Matches(sunNight.UTC())) // Monday in UTC
+	assert.True(t, db.SlateScopeWeekend.Matches(monNight))
+	assert.True(t, db.SlateScopeWeekend.Matches(monNight.UTC())) // Tuesday in UTC
+	assert.False(t, db.SlateScopeWeekend.Matches(tue))
+
 	// Blank / default scope behaves like Sunday Main.
 	var defaultScope db.SlateScope
 	assert.False(t, defaultScope.Matches(thuNight))
@@ -642,7 +671,7 @@ func TestSlateScopeMatches(t *testing.T) {
 
 	// SlateScopeFullWeek matches any day of the week.
 	for _, kickoff := range []time.Time{
-		thuAfternoon, thuNight, fri, sat, sunLondon, sunAfternoon, sunNight, monNight, tue,
+		thuAfternoon, thuNight, fri, friNight, sat, satNight, sunLondon, sunAfternoon, sunNight, monNight, tue,
 	} {
 		assert.True(t, db.SlateScopeFullWeek.Matches(kickoff))
 	}

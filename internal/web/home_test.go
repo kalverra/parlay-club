@@ -305,6 +305,14 @@ func TestGroupWeekAutoCreatesMultipleScheduledSlipsAndRendersView(t *testing.T) 
 		2,
 	)
 	require.NoError(t, err)
+	_, err = fixture.store.CreateGroupSlipSchedule(
+		t.Context(),
+		fixture.second.ID,
+		"Playoff Weekend",
+		db.SlateScopeWeekend,
+		2,
+	)
+	require.NoError(t, err)
 
 	recorder := fixture.get(t, fmt.Sprintf("/groups/%d/week", fixture.second.ID))
 	require.Equal(t, http.StatusOK, recorder.Code)
@@ -315,6 +323,9 @@ func TestGroupWeekAutoCreatesMultipleScheduledSlipsAndRendersView(t *testing.T) 
 	assert.Contains(t, body, "Thursday Slate")
 	assert.Contains(t, body, "Sunday Main")
 	assert.Contains(t, body, "Sunday Slate")
+	assert.Contains(t, body, "Playoff Weekend")
+	assert.Contains(t, body, "Weekend Slate")
+	assert.Contains(t, body, `<option value="weekend">Weekend Slate</option>`)
 	assert.Contains(t, body, "+ Add one-off slip")
 	assert.Contains(t, body, "Recurring schedules")
 	assert.Contains(t, body, fmt.Sprintf(`/groups/%d/schedules`, fixture.second.ID))
