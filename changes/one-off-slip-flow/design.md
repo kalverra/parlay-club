@@ -178,6 +178,10 @@ Risk: low (read-only display and form presentation changes with focused unit and
 - [x] Update `home` in `internal/web/home.go` to pick the highest-priority actionable slip summary across all slips in
   the latest week (actionable step > waiting/export > closed > done, tie-breaking by earliest upcoming deadline) and add
   multi-slip summary tests in `internal/web/home_test.go`.
-- [ ] Docs: update `docs/concepts/slips.md` to document `"Thursday Slate"`, the slip hub's scope badge and `+ New slip`
+- [x] Docs: update `docs/concepts/slips.md` to document `"Thursday Slate"`, the slip hub's scope badge and `+ New slip`
   entry point, the single sibling pill switcher, the create-slip form's empty vs. existing-week states, and the
   multi-slip Groups home summary.
+
+## Reviews
+
+- [x] Final review: agy@gemini-4-neon-low

@@ -36,13 +36,16 @@ with their own stake, and no money passes through the app.
 
 ## The hub
 
-`GET /slips/{id}` is the hub. A step banner leads, then the members and their legs, then the export card, the payout
-calculator, the **My wager** form (`slip-wager`), and the activity feed. In the `export` step the card moves above the
-banner, because placing the picks is the one thing left. `slip-wager` sits outside `slip-panel`, so live `slip-updated`
-refreshes do not wipe out in-progress wager inputs. When a group has multiple slips in the active week, the header
-renders a horizontal sibling slip switcher bar below the title with links to each sibling slip and their status summary
-(`(Locked)`, `(1/2 Picks)`, `(Won)`). The bottom bar keeps Groups, This week, and Record Book; the hub's one primary
-action is the way into picking. The hub stays one column at every width.
+`GET /slips/{id}` is the hub. A step banner leads, then the slip header card, the members and their legs, the export card,
+the payout calculator, the **My wager** form (`slip-wager`), and the activity feed. The header shows the slip title,
+its scope badge (`Thursday Slate`, `Sunday Slate`, or `Full Week`), status, and a `+ New slip` link to
+`/slips/new?week={id}`. On a single-slip week, `+ New slip` sits in the header metadata row. When a group has multiple
+slips in the active week, one horizontal sibling pill switcher bar (`[data-sibling-switcher]`) sits below the title
+with links to each sibling slip, their status summary (`(Locked)`, `(1/2 Picks)`, `(Won)`), and `+ New slip` as a
+trailing pill. In the `export` step the export card moves above the banner, because placing the picks is the one thing
+left. `slip-wager` sits outside `slip-panel`, so live `slip-updated` refreshes do not wipe out in-progress wager inputs.
+The bottom bar keeps Groups, This week, and Record Book; the hub's one primary action is the way into picking. The hub
+stays one column at every width.
 
 When the slip is `OPEN` and the viewer is in the `pick` step (has remaining leg slots), `#slip-panel` renders a compact
 **"Top A-grade ideas"** strip below the step banner. It runs `analyzer.LoadBoardSignals` and `board.SelectHighlights`
@@ -97,15 +100,21 @@ button to add a one-off slip.
 A member can create an ad-hoc one-off slip at `/slips/new` (with optional `?week=` and `?slate_scope=` or `?scope=`).
 One-off slips belong only to that week and do not create recurring schedules.
 
-The create screen says which empty state it is in. With a stored week it reads "No slip for Week 9 yet" and offers the
-week's form. With no stored week it says no week is loaded and points at the typed past-week fields, so the empty week
-picker is not shown. A group with only the viewer adds "It's just you for now" and points at Groups for an invite.
+The create screen adapts to whether the target week already has slips or stored weeks exist:
+
+- **Empty week:** With a stored week and no slips yet, it reads *"Start {Week}'s slip"* and *"No slip for {Week} yet"*.
+- **Existing-slip week:** When the target week already has at least one slip, it reads *"Add a slip for {Week}"* and
+  *"Pick a slate, legs per member, and who's in."*
+- **No stored weeks:** It says no week is loaded yet and hides the empty week picker.
+- **Past-week fields:** *"Or add a past week"* sits inside a `<details>` element that stays collapsed by default when
+  stored weeks exist, and opens only when no stored weeks exist or past-week fields (`season` or `week`) were submitted.
+- **Solo group:** A group with only the viewer adds *"It's just you for now"* and points at Groups for an invite.
 
 - Week defaults to the latest week. The picker lists every stored week with its season. A past week the slate never
   stored can be typed in by season, season type, and week number, and the form creates the week. A typed week later than
   the latest stored week is refused.
 - Name defaults to the week label, `Week 9`, then `Week 9 #2`.
-- `slate_scope` defaults to `sunday_main`, with options for `Sunday Slate` (`sunday_main`), `Thursday Night`
+- `slate_scope` defaults to `sunday_main`, with options for `Sunday Slate` (`sunday_main`), `Thursday Slate`
   (`thursday`), and `Full Week` (`full_week`).
 - `legs_per_member` defaults to 2 and allows 1–5.
 - Members default to the previous slip's members.
@@ -517,16 +526,19 @@ Dollar P/L in the Record Book.
 ## Several slips
 
 A group can run several slips in the same week, either automatically through recurring schedules (such as a weekly
-Thursday Night slip and Sunday Main slip) or as one-off slips.
+Thursday Slate slip and Sunday Slate slip) or as one-off slips.
 
 When a week has multiple slips:
 
 - **Week hub (`GET /groups/{id}/week`):** Renders a card for each slip in the week showing its name, scope badge
-  (`Thursday Night`, `Sunday Slate`, `Full Week`), next-step banner summary, reader-localized deadline, and pick
+  (`Thursday Slate`, `Sunday Slate`, `Full Week`), next-step banner summary, reader-localized deadline, and pick
   progress, plus a button to "+ Add one-off slip".
-- **Sibling switcher (`GET /slips/{id}`):** When viewing any slip on the hub, a horizontal navigation bar sits below the
-  title with links to each sibling slip and their status summary (`(Locked)`, `(1/2 Picks)`, `(Won)`). It updates live
-  on `slip-updated`.
+- **Single sibling pill switcher (`GET /slips/{id}`):** The slip header card renders one horizontal pill bar below the
+  title with links to each sibling slip, their status summary (`(Locked)`, `(1/2 Picks)`, `(Won)`), and `+ New slip` at
+  the end. It updates live on `slip-updated`.
+- **Groups home summary (`GET /`):** Evaluates `slips.NextStep` across every slip in the group's latest week and shows
+  the highest-priority label: actionable viewer step (`pick`, `lock_in`, `join`) > active progress (`waiting`, `export`)
+  > `closed` > `done`, breaking ties by earliest upcoming deadline and then `SlipsForWeek` order.
 - **Pick isolation:** Each slip isolates its own deadlines and available board games by its `slate_scope`.
 
 ## Related
