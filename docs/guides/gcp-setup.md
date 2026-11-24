@@ -135,9 +135,10 @@ printf '%s' "$GH_ISSUES_TOKEN" | gcloud secrets versions add github-token --data
 Tokens expire: when the issue call starts failing, add a new version and deploy again.
 
 With a `prefill-token` version, the optional `POST /internal/prefill` fallback endpoint accepts bearer-token requests;
-without one, the endpoint stays disabled (`404`). Sunday morning pre-fill already runs automatically on the first
-authenticated Sunday full-page visit at or after 6:00 AM `America/New_York` (tracked in `sync_state` as
-`prefill:sunday`), so only add `prefill-token` if you want the Cloud Scheduler fallback in step 8 or a manual trigger.
+without one, the endpoint stays disabled (`404`). Per-game-day morning pre-fill already runs automatically on the first
+authenticated full-page visit at or after 6:00 AM `America/New_York` on any scheduled game day while upcoming non-`FINAL`
+games remain on that date (tracked in `sync_state` as `prefill:gameday`), so only add `prefill-token` if you want the
+Cloud Scheduler fallback in step 8 or a manual trigger.
 Generate a random bearer token and save the value so you can pass it to Cloud Scheduler:
 
 ```sh
@@ -226,12 +227,13 @@ Copy the URL from the job summary, then:
 The file is idempotent by week and name, so a restart adds nothing twice. To change a slip that already loaded, edit it
 in the app or give the file entry a new name. An edit to the file is not a re-import of the same slip.
 
-### 8. Schedule the Sunday morning pre-fill fallback (optional)
+### 8. Schedule the game-day morning pre-fill fallback (optional)
 
-Sunday morning pre-fill runs automatically on the first authenticated Sunday full-page visit at or after 6:00 AM
-`America/New_York` while Sunday games remain (tracked via `prefill:sunday` in `sync_state`). If you also want an
-unattended Cloud Scheduler fallback to warm lines and Parlay API props before anyone opens the app at 9:30 AM
-`America/New_York` (`30 9 * * 0`), set `BASE_URL`, add a `prefill-token` version in step 3, and create the job:
+Per-game-day morning pre-fill runs automatically on the first authenticated full-page visit at or after 6:00 AM
+`America/New_York` on any scheduled game day while upcoming non-`FINAL` games remain on that date (tracked via
+`prefill:gameday` in `sync_state`). If you also want an unattended Cloud Scheduler fallback to warm lines and Parlay API
+props before anyone opens the app on Sundays at 9:30 AM `America/New_York` (`30 9 * * 0`), set `BASE_URL`, add a
+`prefill-token` version in step 3, and create the job:
 
 ```sh
 gcloud scheduler jobs create http parlay-club-prefill \
