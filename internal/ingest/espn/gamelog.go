@@ -9,19 +9,41 @@ import (
 	"strings"
 )
 
+// GameLogEntry holds per-game opponent and result metadata aligned with GameLog.Markets.
+type GameLogEntry struct {
+	EventID  string `json:"eventId"`
+	Week     int    `json:"week"`
+	Opponent string `json:"opponent"`
+	AtVs     string `json:"atVs"`
+	Result   string `json:"result"`
+	Score    string `json:"score"`
+}
+
 // GameLog holds the parsed game log for an athlete, most recent games first.
 type GameLog struct {
 	AthleteID   string
 	GamesPlayed int
 	Markets     map[string][]float64
+	Entries     []GameLogEntry
 }
 
 // rawGamelogResponse is the slice of ESPN's athlete gamelog JSON this app reads.
 type rawGamelogResponse struct {
-	Names       []string        `json:"names"`
-	Labels      []string        `json:"labels"`
-	Categories  []rawCategory   `json:"categories"`
-	SeasonTypes []rawSeasonType `json:"seasonTypes"`
+	Names       []string                   `json:"names"`
+	Labels      []string                   `json:"labels"`
+	Categories  []rawCategory              `json:"categories"`
+	SeasonTypes []rawSeasonType            `json:"seasonTypes"`
+	Events      map[string]rawGamelogEvent `json:"events"`
+}
+
+type rawGamelogEvent struct {
+	Week       int    `json:"week"`
+	AtVs       string `json:"atVs"`
+	GameResult string `json:"gameResult"`
+	Score      string `json:"score"`
+	Opponent   struct {
+		Abbreviation string `json:"abbreviation"`
+	} `json:"opponent"`
 }
 
 type rawCategory struct {
@@ -134,6 +156,7 @@ func isPreseason(stName, catName, splitType string) bool {
 func parseGameLog(athleteID string, raw rawGamelogResponse) GameLog {
 	cols := resolveColumnIndices(raw)
 	markets := initMarkets(cols)
+	entries := make([]GameLogEntry, 0)
 	gamesPlayed := 0
 
 	for _, st := range raw.SeasonTypes {
@@ -147,6 +170,7 @@ func parseGameLog(athleteID string, raw rawGamelogResponse) GameLog {
 			for _, ev := range cat.Events {
 				gamesPlayed++
 				recordEventStats(ev.Stats, cols, markets)
+				entries = append(entries, buildGameLogEntry(ev.EventID, raw.Events))
 			}
 		}
 	}
@@ -155,7 +179,20 @@ func parseGameLog(athleteID string, raw rawGamelogResponse) GameLog {
 		AthleteID:   athleteID,
 		GamesPlayed: gamesPlayed,
 		Markets:     markets,
+		Entries:     entries,
 	}
+}
+
+func buildGameLogEntry(eventID string, events map[string]rawGamelogEvent) GameLogEntry {
+	entry := GameLogEntry{EventID: eventID}
+	if meta, ok := events[eventID]; ok {
+		entry.Week = meta.Week
+		entry.Opponent = meta.Opponent.Abbreviation
+		entry.AtVs = meta.AtVs
+		entry.Result = meta.GameResult
+		entry.Score = meta.Score
+	}
+	return entry
 }
 
 func recordEventStats(stats []string, cols colIndices, markets map[string][]float64) {

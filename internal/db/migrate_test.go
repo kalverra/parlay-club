@@ -14,7 +14,7 @@ import (
 )
 
 // latestSchemaVersion is the version the last migration records.
-const latestSchemaVersion = 14
+const latestSchemaVersion = 15
 
 func TestMigrateFreshDatabase(t *testing.T) {
 	t.Parallel()
@@ -485,6 +485,59 @@ func TestMigration0014RosterInjuries(t *testing.T) {
 		Scan(&status, &date))
 	assert.Equal(t, "Questionable", status)
 	assert.Equal(t, "2026-11-08T12:00:00Z", date)
+}
+
+func TestMigration0015ResearchContext(t *testing.T) {
+	t.Parallel()
+
+	database := openTestDB(t)
+	require.NoError(t, db.Migrate(t.Context(), database))
+
+	_, err := database.ExecContext(t.Context(), `
+		INSERT INTO player_gamelogs (athlete_id, games_played, stats_json, updated_at)
+		VALUES ('3918298', 1, '{}', '2026-11-08T12:00:00Z')`)
+	require.NoError(t, err)
+
+	var gamesJSON string
+	require.NoError(t, database.QueryRowContext(t.Context(),
+		"SELECT games_json FROM player_gamelogs WHERE athlete_id = '3918298'").Scan(&gamesJSON))
+	assert.JSONEq(t, "[]", gamesJSON)
+
+	_, err = database.ExecContext(t.Context(), `
+		INSERT INTO nflverse_player_weeks (
+			espn_id, season, season_type, week_num, team,
+			offense_snaps, offense_pct, target_share, air_yards_share, wopr,
+			carries, targets, total_epa, rz_opps, updated_at
+		) VALUES (
+			'4362628', 2026, 2, 9, 'CIN',
+			50, 0.9, 0.3, 0.4, 0.7,
+			0, 10, 5.2, 2, '2026-11-08T12:00:00Z'
+		)`)
+	require.NoError(t, err)
+
+	var (
+		opponent   string
+		playerName string
+		position   string
+		recYds     int
+		kickerPts  int
+	)
+	require.NoError(t, database.QueryRowContext(t.Context(),
+		`SELECT opponent, player_name, position, rec_yds, kicker_pts
+		 FROM nflverse_player_weeks WHERE espn_id = '4362628'`).
+		Scan(&opponent, &playerName, &position, &recYds, &kickerPts))
+	assert.Empty(t, opponent)
+	assert.Empty(t, playerName)
+	assert.Empty(t, position)
+	assert.Zero(t, recYds)
+	assert.Zero(t, kickerPts)
+
+	var idxName string
+	require.NoError(t, database.QueryRowContext(t.Context(),
+		`SELECT name FROM sqlite_master
+		 WHERE type = 'index' AND name = 'idx_nflverse_player_weeks_opp_pos'`).
+		Scan(&idxName))
+	assert.Equal(t, "idx_nflverse_player_weeks_opp_pos", idxName)
 }
 
 // schemaVersion reads PRAGMA user_version, the migration runner's record of the

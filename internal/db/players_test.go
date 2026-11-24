@@ -230,6 +230,7 @@ func TestPlayerGameLogs(t *testing.T) {
 		AthleteID:   "3918298",
 		GamesPlayed: 8,
 		StatsJSON:   `{"PASS_YDS":[250.0,310.0,190.0]}`,
+		GamesJSON:   `[{"eventId":"401","week":9,"opponent":"BAL","atVs":"vs","result":"W","score":"31-24"}]`,
 		UpdatedAt:   now,
 	}
 
@@ -240,11 +241,16 @@ func TestPlayerGameLogs(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 8, fetched.GamesPlayed)
 	assert.JSONEq(t, `{"PASS_YDS":[250.0,310.0,190.0]}`, fetched.StatsJSON)
+	assert.JSONEq(
+		t,
+		`[{"eventId":"401","week":9,"opponent":"BAL","atVs":"vs","result":"W","score":"31-24"}]`,
+		fetched.GamesJSON,
+	)
 
 	_, err = store.PlayerGameLog(t.Context(), "missing")
 	require.ErrorIs(t, err, db.ErrGameLogNotFound)
 
-	// Batch get
+	// Batch get (empty GamesJSON defaults to [])
 	log2 := db.PlayerGameLog{
 		AthleteID:   "4361579",
 		GamesPlayed: 7,
@@ -258,6 +264,7 @@ func TestPlayerGameLogs(t *testing.T) {
 	assert.Len(t, batch, 2)
 	assert.Equal(t, 8, batch["3918298"].GamesPlayed)
 	assert.Equal(t, 7, batch["4361579"].GamesPlayed)
+	assert.Equal(t, "[]", batch["4361579"].GamesJSON)
 
 	emptyBatch, err := store.PlayerGameLogs(t.Context(), nil)
 	require.NoError(t, err)
