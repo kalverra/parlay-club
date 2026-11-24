@@ -3,11 +3,15 @@
   {{if .Creating}}
     <div class="space-y-1">
       <h1 class="text-xl font-semibold">
-        {{if .Create.WeekID}}Start {{.Page.WeekLabel}}&rsquo;s slip{{else}}Start a slip{{end}}
+        {{if .Create.WeekID}}{{if .Create.HasExistingSlips}}Add a slip for {{.Page.WeekLabel}}{{else}}Start {{.Page.WeekLabel}}&rsquo;s slip{{end}}{{else}}Start a slip{{end}}
       </h1>
       {{if .Create.WeekID}}
         <p class="text-sm text-page-muted">
-          No slip for {{.Page.WeekLabel}} yet. Check who&rsquo;s picking, then everyone adds their legs.
+          {{if .Create.HasExistingSlips}}
+            Pick a slate, legs per member, and who&rsquo;s in.
+          {{else}}
+            No slip for {{.Page.WeekLabel}} yet. Check who&rsquo;s picking, then everyone adds their legs.
+          {{end}}
         </p>
       {{else}}
         <p class="text-sm text-page-muted">
@@ -41,45 +45,48 @@
           </select>
         </label>
       {{end}}
-      <fieldset class="space-y-2 rounded-lg border border-line p-3">
-        <legend class="px-1 text-sm text-ink">Or add a past week</legend>
-        <p class="text-xs text-ink-muted">
-          Use this for a week the slate never stored. Filling both overrides the week above.
-        </p>
-        <div class="grid grid-cols-2 gap-2">
+      <details class="rounded-lg border border-line p-3" data-past-week{{if or (eq (len .Create.Weeks) 0) (ne .Create.Season 0) (ne .Create.WeekNum 0)}} open{{end}}>
+        <summary class="cursor-pointer list-none text-sm text-ink">Or add a past week</summary>
+        <fieldset class="mt-2 space-y-2">
+          <legend class="sr-only">Or add a past week</legend>
+          <p class="text-xs text-ink-muted">
+            Use this for a week the slate never stored. Filling both overrides the week above.
+          </p>
+          <div class="grid grid-cols-2 gap-2">
+            <label class="block text-sm text-ink">
+              Season
+              <input
+                type="number"
+                name="season"
+                min="1900"
+                max="2100"
+                placeholder="2026"
+                value="{{if .Create.Season}}{{.Create.Season}}{{end}}"
+                class="mt-1 w-full rounded-md border border-line-strong bg-surface-2 px-3 py-2 text-ink"
+              >
+            </label>
+            <label class="block text-sm text-ink">
+              Week number
+              <input
+                type="number"
+                name="week"
+                min="1"
+                max="22"
+                placeholder="9"
+                value="{{if .Create.WeekNum}}{{.Create.WeekNum}}{{end}}"
+                class="mt-1 w-full rounded-md border border-line-strong bg-surface-2 px-3 py-2 text-ink"
+              >
+            </label>
+          </div>
           <label class="block text-sm text-ink">
-            Season
-            <input
-              type="number"
-              name="season"
-              min="1900"
-              max="2100"
-              placeholder="2026"
-              value="{{if .Create.Season}}{{.Create.Season}}{{end}}"
-              class="mt-1 w-full rounded-md border border-line-strong bg-surface-2 px-3 py-2 text-ink"
-            >
+            Season type
+            <select name="season_type" class="mt-1 w-full rounded-md border border-line-strong bg-surface-2 px-3 py-2 text-ink">
+              <option value="2"{{if ne .Create.SeasonType 3}} selected{{end}}>Regular season</option>
+              <option value="3"{{if eq .Create.SeasonType 3}} selected{{end}}>Postseason</option>
+            </select>
           </label>
-          <label class="block text-sm text-ink">
-            Week number
-            <input
-              type="number"
-              name="week"
-              min="1"
-              max="22"
-              placeholder="9"
-              value="{{if .Create.WeekNum}}{{.Create.WeekNum}}{{end}}"
-              class="mt-1 w-full rounded-md border border-line-strong bg-surface-2 px-3 py-2 text-ink"
-            >
-          </label>
-        </div>
-        <label class="block text-sm text-ink">
-          Season type
-          <select name="season_type" class="mt-1 w-full rounded-md border border-line-strong bg-surface-2 px-3 py-2 text-ink">
-            <option value="2"{{if ne .Create.SeasonType 3}} selected{{end}}>Regular season</option>
-            <option value="3"{{if eq .Create.SeasonType 3}} selected{{end}}>Postseason</option>
-          </select>
-        </label>
-      </fieldset>
+        </fieldset>
+      </details>
       <label class="block text-sm text-ink">
         Name
         <input

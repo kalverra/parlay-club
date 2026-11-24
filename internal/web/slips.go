@@ -280,19 +280,20 @@ type ActivityView struct {
 // a past week the slate sync never stored; filling them overrides WeekID.
 // Solo says the group has only the viewer so far.
 type SlipCreateView struct {
-	Weeks         []WeekOption
-	WeekID        int64
-	Season        int
-	SeasonType    int
-	WeekNum       int
-	Name          string
-	SlateScope    string
-	SlateScopes   []SlateScopeOption
-	LegsPerMember int
-	Members       []MemberOption
-	Selected      []int64
-	Solo          bool
-	Error         string
+	Weeks            []WeekOption
+	WeekID           int64
+	HasExistingSlips bool
+	Season           int
+	SeasonType       int
+	WeekNum          int
+	Name             string
+	SlateScope       string
+	SlateScopes      []SlateScopeOption
+	LegsPerMember    int
+	Members          []MemberOption
+	Selected         []int64
+	Solo             bool
+	Error            string
 }
 
 // SlateScopeOption is one choice in the slip create form's slate scope picker.
@@ -1511,20 +1512,17 @@ func (h *slipHandlers) createView(
 			view.Members[i].Selected = selected[view.Members[i].ID]
 		}
 	}
-	view.Name = h.nextSlipName(ctx, group.ID, week.ID, view.Name)
+	existing, err := h.deps.Store.SlipsForWeek(ctx, group.ID, week.ID)
+	if err != nil {
+		return SlipCreateView{}, err
+	}
+	view.HasExistingSlips = len(existing) > 0
+	view.Name = nextSlipName(existing, view.Name)
 	return view, nil
 }
 
 // nextSlipName appends " #2", " #3" until the name is free in the week.
-func (h *slipHandlers) nextSlipName(
-	ctx context.Context,
-	groupID, weekID int64,
-	base string,
-) string {
-	groupSlips, err := h.deps.Store.SlipsForWeek(ctx, groupID, weekID)
-	if err != nil {
-		return base
-	}
+func nextSlipName(groupSlips []db.Slip, base string) string {
 	used := make(map[string]bool, len(groupSlips))
 	for _, slip := range groupSlips {
 		used[slip.Name] = true

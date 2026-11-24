@@ -615,6 +615,57 @@ func TestCreateFormRefusesAFutureWeek(t *testing.T) {
 	require.ErrorIs(t, err, db.ErrWeekNotFound, "a refused week is not stored")
 }
 
+// TestCreateFormStates verifies existing-slip copy and past-week details state.
+func TestCreateFormStates(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	past, err := fixture.store.UpsertWeek(t.Context(), 2025, 2, 7)
+	require.NoError(t, err)
+
+	// Existing slip in Week 9: shows "Add a slip for" copy and collapsed details.
+	recExisting := httptest.NewRecorder()
+	reqExisting := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/slips/new", nil)
+	fixture.handler.ServeHTTP(recExisting, reqExisting)
+	require.Equal(t, http.StatusOK, recExisting.Code)
+	bodyExisting := html.UnescapeString(recExisting.Body.String())
+	assert.Contains(t, bodyExisting, "Add a slip for Week 9")
+	assert.Contains(t, bodyExisting, "Pick a slate, legs per member, and who’s in.")
+	assert.NotContains(t, bodyExisting, "No slip for Week 9 yet")
+	assert.Contains(t, bodyExisting, "data-past-week>")
+	assert.NotContains(t, bodyExisting, "data-past-week open")
+
+	// Empty week (Week 7): shows "No slip for ... yet" copy and collapsed details.
+	recEmpty := httptest.NewRecorder()
+	reqEmpty := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodGet,
+		fmt.Sprintf("/slips/new?week=%d", past.ID),
+		nil,
+	)
+	fixture.handler.ServeHTTP(recEmpty, reqEmpty)
+	require.Equal(t, http.StatusOK, recEmpty.Code)
+	bodyEmpty := html.UnescapeString(recEmpty.Body.String())
+	assert.Contains(t, bodyEmpty, "Start Week 7’s slip")
+	assert.Contains(t, bodyEmpty, "No slip for Week 7 yet.")
+	assert.NotContains(t, bodyEmpty, "Add a slip for")
+	assert.Contains(t, bodyEmpty, "data-past-week>")
+	assert.NotContains(t, bodyEmpty, "data-past-week open")
+
+	// Past-week form error: details renders open.
+	recErr := postForm(t, fixture.handler, "/slips", url.Values{
+		"week_id":         {strconv.FormatInt(fixture.week.ID, 10)},
+		"season":          {"2026"},
+		"season_type":     {"2"},
+		"week":            {"10"},
+		"name":            {"Week 10"},
+		"legs_per_member": {"2"},
+		"member_id":       {strconv.FormatInt(fixture.user.ID, 10)},
+	})
+	require.Equal(t, http.StatusOK, recErr.Code)
+	assert.Contains(t, recErr.Body.String(), "data-past-week open>")
+}
+
 // postForm sends one already-encoded form as the browser's HTMX layer would.
 func postForm(t *testing.T, handler http.Handler, path string, form url.Values) *httptest.ResponseRecorder {
 	t.Helper()
