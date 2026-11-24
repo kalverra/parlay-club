@@ -183,7 +183,7 @@ changes yet)
 
 - [x] Add `LoadBoardSignals` to `internal/analyzer/signals.go` (sharing internal helpers with `LoadSlipSignals`) with
       tests in `internal/analyzer/signals_test.go`.
-- [ ] Implement `RowToAnalyzerLeg`, `LegHighlight`, `ParlayHighlight`, and `SelectHighlights` in
+- [x] Implement `RowToAnalyzerLeg`, `LegHighlight`, `ParlayHighlight`, and `SelectHighlights` in
       `internal/board/highlights.go` with unit tests and a full-slate benchmark in `internal/board/highlights_test.go`.
 
 ### Phase 2: Main screen highlights and batch-add endpoint
