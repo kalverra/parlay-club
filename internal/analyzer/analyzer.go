@@ -73,12 +73,13 @@ type Game struct {
 // offensive/defensive EPA, pace, and league ranks (1..32, where 1 is toughest
 // defense, highest offense, fastest pace, or highest pass rate; 0 means unset).
 type TeamDefenseProfile struct {
-	OffPassEPA        float64
-	OffRushEPA        float64
-	DefPassEPAAllowed float64
-	DefRushEPAAllowed float64
-	PlaysPerGame      float64
-	PassRate          float64
+	OffPassEPA           float64
+	OffRushEPA           float64
+	DefPassEPAAllowed    float64
+	DefRushEPAAllowed    float64
+	DefOverallEPAAllowed float64
+	PlaysPerGame         float64
+	PassRate             float64
 
 	L4OffPassEPA        float64
 	L4OffRushEPA        float64
@@ -91,6 +92,7 @@ type TeamDefenseProfile struct {
 	OffRushEPARank        int
 	DefPassEPAAllowedRank int
 	DefRushEPAAllowedRank int
+	DefOverallEPARank     int
 	PlaysPerGameRank      int
 	PassRateRank          int
 }

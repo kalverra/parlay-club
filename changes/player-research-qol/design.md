@@ -126,7 +126,7 @@ Risk: low (additive schema columns with safe defaults; existing `stats_json` con
 Complexity: medium (coordinates position normalization, overall and position-level 1..32 rankings, opposing-defense L5 aggregation, and market-filtered prop lookup across `internal/analyzer` and `internal/db`)
 Risk: low (pure deterministic aggregation and read-only SQL query with thorough unit tests and soft-fail behavior when data is missing or stale)
 
-- [ ] Add `DefOverallEPAAllowed` and `DefOverallEPARank` to `analyzer.TeamDefenseProfile`, implement `BuildPositionDefenseRanks` and `BuildOppDefenseLast5` in `internal/analyzer/signals.go`, and expand `LoadPlayerResearchSignals` with defense rank maps, opposing defense L5 games, and position-relevant L3 usage averages, with unit tests covering edge cases (`<5` games, ties, `FB`→`RB`, stale nflverse).
+- [x] Add `DefOverallEPAAllowed` and `DefOverallEPARank` to `analyzer.TeamDefenseProfile`, implement `BuildPositionDefenseRanks` and `BuildOppDefenseLast5` in `internal/analyzer/signals.go`, and expand `LoadPlayerResearchSignals` with defense rank maps, opposing defense L5 games, and position-relevant L3 usage averages, with unit tests covering edge cases (`<5` games, ties, `FB`→`RB`, stale nflverse).
 - [ ] Add `Store.LatestPropForPlayerMarket` in `internal/db/odds.go` so player research resolves the current week's O/U line for a specific market without bleeding lines across market tabs, with unit tests in `internal/db/players_test.go`.
 
 ### Phase 3: Render dotted O/U charts, opposing defense L5 chart, and matchup context
