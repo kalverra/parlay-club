@@ -1,6 +1,7 @@
 package parlay_test
 
 import (
+	"math"
 	"slices"
 	"strconv"
 	"testing"
@@ -288,6 +289,57 @@ func TestImpliedProb(t *testing.T) {
 			assert.InDelta(t, tt.want, parlay.ImpliedProb(tt.american), 1e-12)
 		})
 	}
+}
+
+func TestDecimalImpliedProb(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		decimal float64
+		want    float64
+	}{
+		{name: "minus 110 decimal", decimal: parlay.AmericanToDecimal(-110), want: 110.0 / 210.0},
+		{name: "even money", decimal: 2.0, want: 0.5},
+		{name: "plus 150 decimal", decimal: 2.5, want: 0.4},
+		{name: "long shot", decimal: 13.0, want: 1.0 / 13.0},
+		{name: "one is non-betting", decimal: 1.0, want: 0},
+		{name: "zero is invalid", decimal: 0, want: 0},
+		{name: "negative is invalid", decimal: -2.5, want: 0},
+		{name: "NaN is invalid", decimal: math.NaN(), want: 0},
+		{name: "positive Inf is invalid", decimal: math.Inf(1), want: 0},
+		{name: "negative Inf is invalid", decimal: math.Inf(-1), want: 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.InDelta(t, tt.want, parlay.DecimalImpliedProb(tt.decimal), 1e-12)
+		})
+	}
+
+	t.Run("combined odds with pushed and voided legs", func(t *testing.T) {
+		t.Parallel()
+
+		counting := parlay.CombinedOdds([]parlay.Leg{
+			{Decimal: parlay.AmericanToDecimal(-110), Result: parlay.Pending},
+			{Decimal: parlay.AmericanToDecimal(150), Result: parlay.Push},
+			{Decimal: parlay.AmericanToDecimal(-200), Result: parlay.Won},
+			{Decimal: parlay.AmericanToDecimal(250), Result: parlay.Void},
+		})
+		want := (110.0 / 210.0) * (200.0 / 300.0)
+		assert.InDelta(t, want, parlay.DecimalImpliedProb(counting), 1e-12)
+
+		allDropped := parlay.CombinedOdds([]parlay.Leg{
+			{Decimal: parlay.AmericanToDecimal(150), Result: parlay.Push},
+			{Decimal: parlay.AmericanToDecimal(-200), Result: parlay.Void},
+		})
+		assert.Zero(t, parlay.DecimalImpliedProb(allDropped))
+
+		empty := parlay.CombinedOdds(nil)
+		assert.Zero(t, parlay.DecimalImpliedProb(empty))
+	})
 }
 
 func TestDevigTwoWay(t *testing.T) {

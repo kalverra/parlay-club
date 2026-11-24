@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"net/url"
 	"slices"
@@ -3011,6 +3012,25 @@ func formatOdds(odds int) string {
 		return fmt.Sprintf("+%d", odds)
 	}
 	return strconv.Itoa(odds)
+}
+
+// formatImpliedChance formats a raw implied probability (0..1) as a compact
+// percentage string, returning "" for non-positive, >= 1, or non-finite values.
+func formatImpliedChance(prob float64) string {
+	if prob <= 0 || prob >= 1 || math.IsNaN(prob) || math.IsInf(prob, 0) {
+		return ""
+	}
+	pct := prob * 100
+	switch {
+	case pct < 0.1:
+		return "<0.1%"
+	case math.Round(pct*10) < 100:
+		return fmt.Sprintf("%.1f%%", pct)
+	case math.Round(pct) >= 100:
+		return ">99%"
+	default:
+		return fmt.Sprintf("%.0f%%", pct)
+	}
 }
 
 // money prints a dollar amount with two decimals.
