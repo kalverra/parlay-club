@@ -769,13 +769,13 @@ func TestResearchPlayerSurfacesNFLverseMetricsAndHTMX(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	t.Run("fresh nflverse surfaces Snap %, Target share, WOPR, Opp Def Rank, and HTMX market swap", func(t *testing.T) {
+	t.Run("fresh nflverse surfaces position usage tiles and HTMX market swap", func(t *testing.T) {
 		t.Parallel()
 		fixture := newSlipFixture(t, 2)
 		seedResearchNFLverse(t, fixture, time.Now().UTC())
 		handler := researchHandlerWithRefresher(t, fixture, fixture.user, &researchTestRefresher{})
 
-		// 1. HTMX partial swap via GET /research?player_id=3918298 (defaults to RUSH_YDS).
+		// 1. HTMX partial swap via GET /research?player_id=3918298 (RB defaults to RUSH_YDS).
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/research?player_id=3918298", nil)
 		req.Header.Set("Hx-Request", "true")
 		rec := httptest.NewRecorder()
@@ -785,18 +785,16 @@ func TestResearchPlayerSurfacesNFLverseMetricsAndHTMX(t *testing.T) {
 		body := rec.Body.String()
 		assert.Contains(t, body, "Snap % (L3)")
 		assert.Contains(t, body, "72%")
-		assert.Contains(t, body, "Target share")
-		assert.Contains(t, body, "14.0%")
-		assert.Contains(t, body, "WOPR")
-		assert.Contains(t, body, "0.38")
-		assert.Contains(t, body, "Opp Rush Def")
-		assert.Contains(t, body, "#3 vs MIA")
+		assert.Contains(t, body, "Carries/g (L3)")
+		assert.Contains(t, body, "Targets/g (L3)")
+		assert.Contains(t, body, "RZ Opps/g")
+		assert.Contains(t, body, "Last 5 Games · Rush Yds")
 		// Mobile-width 2-column grid layout on phone screens.
 		assert.Contains(t, body, "grid-cols-2 gap-2 sm:grid-cols-4")
 		// Partial response should not include full page wrapper.
 		assert.NotContains(t, body, `id="research-panel"`)
 
-		// 2. HTMX market tab swap to REC_YDS switches opponent rank to Opp Pass Def.
+		// 2. HTMX market tab swap to REC_YDS switches active market chart.
 		reqRec := httptest.NewRequestWithContext(
 			t.Context(), http.MethodGet, "/research/players/3918298?market=REC_YDS", nil,
 		)
@@ -806,8 +804,7 @@ func TestResearchPlayerSurfacesNFLverseMetricsAndHTMX(t *testing.T) {
 		require.Equal(t, http.StatusOK, recSwap.Code)
 
 		swapBody := recSwap.Body.String()
-		assert.Contains(t, swapBody, "Opp Pass Def")
-		assert.Contains(t, swapBody, "#2 vs MIA")
+		assert.Contains(t, swapBody, "Last 5 Games · Rec Yds")
 	})
 
 	t.Run("stale nflverse fails soft without usage tiles", func(t *testing.T) {
@@ -1097,4 +1094,203 @@ func TestResearchPlayerMarketTabResolvesOwnLine(t *testing.T) {
 	handler.ServeHTTP(recOverride, reqOverride)
 	require.Equal(t, http.StatusOK, recOverride.Code)
 	assert.Contains(t, recOverride.Body.String(), `Target: <span class="font-semibold text-slate-200">50.5</span>`)
+}
+
+func TestResearchPlayerRichChartsAndMatchupContext(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	game := addGame(t, fixture, gameKickoff()) // BUF (home) vs MIA (away)
+	handler := researchHandlerWithRefresher(t, fixture, fixture.user, &researchTestRefresher{})
+
+	now := time.Now().UTC()
+	require.NoError(t, fixture.store.UpsertRosterPlayers(t.Context(), []db.RosterPlayer{
+		{
+			AthleteID:    "4241479",
+			Team:         "BUF",
+			FullName:     "Khalil Shakir",
+			Position:     "WR",
+			InjuryStatus: "Questionable",
+			UpdatedAt:    now,
+		},
+	}))
+
+	// 6 games most-recent first: 5 of 6 over 74.5; L5 is [90, 80, 110, 50, 85] -> 4/5 hit, range 50–110.
+	require.NoError(t, fixture.store.UpsertPlayerGameLog(t.Context(), db.PlayerGameLog{
+		AthleteID:   "4241479",
+		GamesPlayed: 6,
+		StatsJSON:   `{"REC_YDS":[90,80,110,50,85,100]}`,
+		GamesJSON: `[
+			{"eventId":"6","week":6,"opponent":"KC","atVs":"@","result":"W","score":"24-20"},
+			{"eventId":"5","week":5,"opponent":"BAL","atVs":"vs","result":"L","score":"20-27"},
+			{"eventId":"4","week":4,"opponent":"NYJ","atVs":"@","result":"W","score":"30-10"},
+			{"eventId":"3","week":3,"opponent":"NE","atVs":"vs","result":"W","score":"28-14"},
+			{"eventId":"2","week":2,"opponent":"CIN","atVs":"@","result":"L","score":"17-24"}
+		]`,
+		UpdatedAt: now,
+	}))
+
+	// Cached game weather + spread/total + player prop line.
+	_, err := fixture.store.SetGameWeather(t.Context(), game.ID, 42.0, 14.0, 0, 0, now)
+	require.NoError(t, err)
+	_, err = fixture.store.UpsertOdds(t.Context(), []db.Odds{
+		{
+			GameID:     game.ID,
+			Book:       "draftkings",
+			MarketType: "SPREAD",
+			Team:       "BUF",
+			Side:       "HOME",
+			Line:       new(-3.5),
+			Price:      -110,
+			FetchedAt:  now,
+		},
+		{
+			GameID:     game.ID,
+			Book:       "draftkings",
+			MarketType: "TOTAL",
+			Side:       "OVER",
+			Line:       new(48.5),
+			Price:      -110,
+			FetchedAt:  now,
+		},
+		{
+			GameID:     game.ID,
+			Book:       "draftkings",
+			MarketType: "REC_YDS",
+			Team:       "BUF",
+			PlayerName: "Khalil Shakir",
+			Side:       "OVER",
+			Line:       new(74.5),
+			Price:      -110,
+			FetchedAt:  now,
+		},
+	})
+	require.NoError(t, err)
+
+	// Fresh nflverse team + player weeks for overall/pos defense ranks and Opp Defense L5.
+	require.NoError(t, fixture.store.RecordSync(t.Context(), "nflverse:season:2026", now, nil))
+	_, err = fixture.store.UpsertNFLverseTeamWeeks(t.Context(), []db.NFLverseTeamWeek{
+		{
+			Season:            2026,
+			SeasonType:        2,
+			WeekNum:           1,
+			Team:              "KC",
+			DefPassEPAAllowed: 0.05,
+			DefRushEPAAllowed: 0.05,
+			UpdatedAt:         now,
+		},
+		{
+			Season:            2026,
+			SeasonType:        2,
+			WeekNum:           1,
+			Team:              "MIA",
+			DefPassEPAAllowed: 0.25,
+			DefRushEPAAllowed: 0.25,
+			UpdatedAt:         now,
+		},
+		{
+			Season:            2026,
+			SeasonType:        2,
+			WeekNum:           1,
+			Team:              "BAL",
+			DefPassEPAAllowed: 0.10,
+			DefRushEPAAllowed: 0.10,
+			UpdatedAt:         now,
+		},
+	})
+	require.NoError(t, err)
+	_, err = fixture.store.UpsertNFLversePlayerWeeks(t.Context(), []db.NFLversePlayerWeek{
+		{
+			Season:        2026,
+			SeasonType:    2,
+			WeekNum:       1,
+			ESPNID:        "4241479",
+			PlayerName:    "Khalil Shakir",
+			Team:          "BUF",
+			Opponent:      "KC",
+			Position:      "WR",
+			OffensePct:    0.82,
+			TargetShare:   0.26,
+			AirYardsShare: 0.31,
+			WOPR:          0.62,
+			RecYds:        90,
+			UpdatedAt:     now,
+		},
+		{
+			Season:     2026,
+			SeasonType: 2,
+			WeekNum:    1,
+			ESPNID:     "4362628",
+			PlayerName: "Ja'Marr Chase",
+			Team:       "CIN",
+			Opponent:   "MIA",
+			Position:   "WR",
+			RecYds:     112,
+			UpdatedAt:  now,
+		},
+		{
+			Season:     2026,
+			SeasonType: 2,
+			WeekNum:    2,
+			ESPNID:     "4047646",
+			PlayerName: "Garrett Wilson",
+			Team:       "NYJ",
+			Opponent:   "MIA",
+			Position:   "WR",
+			RecYds:     68,
+			UpdatedAt:  now,
+		},
+	})
+	require.NoError(t, err)
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/research/players/4241479", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	body := rec.Body.String()
+
+	// Injury badge & phone-first matchup strip.
+	assert.Contains(t, body, "Questionable")
+	assert.Contains(t, body, "vs MIA")
+	assert.Contains(t, body, "Spread <span class=\"font-semibold text-slate-100\">-3.5</span>")
+	assert.Contains(t, body, "O/U <span class=\"font-semibold text-slate-100\">48.5</span>")
+	assert.Contains(t, body, "42°F · 14 mph")
+
+	// Hit-rate & L5 range tiles.
+	assert.Contains(t, body, "L5 Hit")
+	assert.Contains(t, body, "4/5")
+	assert.Contains(t, body, "Season Hit")
+	assert.Contains(t, body, "5/6")
+	assert.Contains(t, body, "L5 Range")
+	assert.Contains(t, body, "50–110")
+
+	// WR position-tailored usage tiles.
+	assert.Contains(t, body, "Snap % (L3)")
+	assert.Contains(t, body, "82%")
+	assert.Contains(t, body, "Target share")
+	assert.Contains(t, body, "26.0%")
+	assert.Contains(t, body, "Air Yards %")
+	assert.Contains(t, body, "31.0%")
+	assert.Contains(t, body, "WOPR")
+	assert.Contains(t, body, "0.62")
+
+	// Dotted O/U reference line appears on both charts (player L5 + opp defense L5).
+	assert.Equal(t, 2, strings.Count(body, "border-dashed border-amber-300/80"))
+	assert.Equal(t, 2, strings.Count(body, "O/U 74.5"))
+
+	// Player L5 bar opponent labels and defense-rank badges.
+	assert.Contains(t, body, "@KC")
+	assert.Contains(t, body, "vs BAL")
+	assert.Contains(t, body, "Def #1")
+	assert.Contains(t, body, "vs WR #1")
+
+	// Opposing defense L5 chart.
+	assert.Contains(t, body, "MIA Defense · Last 5 vs WR · Rec Yds")
+	assert.Contains(t, body, "Def #3")
+	assert.Contains(t, body, "vs WR #2")
+	assert.Contains(t, body, "J. Chase")
+	assert.Contains(t, body, "CIN · W1")
+	assert.Contains(t, body, "G. Wilson")
+	assert.Contains(t, body, "NYJ · W2")
 }
