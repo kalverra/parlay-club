@@ -62,6 +62,8 @@ type Book struct {
 	UnitsPL     float64
 	LongestWin  int
 	LongestLoss int
+	CurrentWin  int
+	CurrentLoss int
 	Leaderboard []MemberRow
 }
 
@@ -147,28 +149,27 @@ func accumulateSlips(
 	legsBySlip map[int64][]Leg,
 	ensureMember func(int64) *memberStats,
 ) {
-	var curWin, curLoss int
 	for _, s := range graded {
 		book.TotalSlips++
 		switch s.Result {
 		case parlay.Won:
 			book.Wins++
-			curWin++
-			curLoss = 0
-			if curWin > book.LongestWin {
-				book.LongestWin = curWin
+			book.CurrentWin++
+			book.CurrentLoss = 0
+			if book.CurrentWin > book.LongestWin {
+				book.LongestWin = book.CurrentWin
 			}
 		case parlay.Lost:
 			book.Losses++
-			curLoss++
-			curWin = 0
-			if curLoss > book.LongestLoss {
-				book.LongestLoss = curLoss
+			book.CurrentLoss++
+			book.CurrentWin = 0
+			if book.CurrentLoss > book.LongestLoss {
+				book.LongestLoss = book.CurrentLoss
 			}
 		case parlay.Push:
 			book.Pushes++
-			curWin = 0
-			curLoss = 0
+			book.CurrentWin = 0
+			book.CurrentLoss = 0
 		}
 
 		slipLegs := legsBySlip[s.ID]

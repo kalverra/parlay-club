@@ -141,3 +141,7 @@ API-budget impact; verified by handler and template tests)
       `internal/web/home_test.go` for active, multi-slip, quiet, and non-member cases.
 - [x] Docs: update `docs/concepts/groups.md` and `docs/concepts/slips.md` to describe the per-group overview landing
       page and spotlight behavior.
+
+## Reviews
+
+- [x] Final review: agy@gemini-4-neon-medium
