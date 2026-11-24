@@ -18,6 +18,7 @@
 - [Auto-grading and Record Book](grading-record-book.md): Grade legs automatically from ESPN box scores once games end, with hand overrides.
 - [Automated grading evals and in-app results page](grading-results.md): Automated grading evals and in-app results page
 - [Redesign per-group landing page](group-landing-overview.md): Turn the per-group entry point into a state-aware group landing page that always renders a coherent overview, elevating active or soon-upcoming slips into a hero spotlight when present.
+- [Implied percentage chances on legs and parlays](implied-chance-display.md): Implied percentage chances on legs and parlays
 - [Include roster injuries in leg grading](injury-aware-grading.md): Include roster injuries in leg grading
 - [nflverse signals for leg suggestions and grading](nflverse-signals.md): Add `nflverse` as a free, weekly lazy-synced source alongside `nfelo`, then feed its team-defense EPA, player usage, and snap-share signals into two pure, deterministic layers: sharp-friend **leg and slip grades** in the analyzer, and **matchup/script badges** on the pick board.
 - [Smooth out one-off slip flow](one-off-slip-flow.md): Keep the single-slip redirect for normal weeks, and expose a clean, optional path to add a one-off slip directly on the slip hub.
