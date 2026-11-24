@@ -4,13 +4,20 @@ title: Groups
 type: concept
 summary: How groups split people into shared clubs, how invites and leaving work, how recurring slip schedules automate weekly slips, and how the active group scopes what a person sees.
 tags: [groups, membership, invites, solo, scope, cookies, schedules]
-sources: [internal/groups/groups.go, internal/groups/handlers.go, internal/db/groups.go, internal/db/schedules.go, internal/db/migrations/0001_init.sql, internal/db/migrations/0009_multi_slip_events.sql, internal/auth/signin.go, internal/auth/cookies.go, internal/auth/middleware.go, internal/web/home.go, internal/web/slips.go, internal/web/schedules.go, internal/slips/slips.go, cmd/server/main.go, web/templates/home.html, web/templates/groups.html, web/templates/join.html, web/templates/layout.html, web/static/app.js]
-last_verified: 2026-11-13
 ---
 
 # Groups
 
-## Summary
+## Overview
+
+```mermaid
+flowchart LR
+  User["Signed-in User"] -->|"pc_group cookie / Scope"| Active["Active Group"]
+  Active -->|"Invite (/join/{token})"| Members["Group Members"]
+  Active -->|"group_slip_schedules"| Ensure["EnsureWeekSlips"]
+  Ensure -->|"Upcoming matching games"| Slips["Week Slips"]
+  Slips -->|"Scoped stats"| Record["Record Book"]
+```
 
 A group is one club of people who share slips. It is the boundary for everything people see and change together. A
 person can belong to more than one group, and every person starts in a group of one so solo play needs no separate mode.
@@ -40,13 +47,18 @@ week in two groups succeeds in both. Each person's legs stay theirs after they l
 
 Groups configure recurring slip schedules (`group_slip_schedules`) to automate their weekly rituals:
 
-- Each schedule defines a name, a slate scope (`thursday`, `sunday_main`, or `full_week`), a leg limit per member (1–5,
-  defaulting to 2), and an active toggle (`is_active`). Names are unique within a group.
+- Each schedule defines a name, a slate scope (`thursday`, `sunday_main`, `weekend`, or `full_week`), a leg limit per
+  member (1–5, defaulting to 2), and an active toggle (`is_active`). Names are unique within a group. `weekend`
+  (`Weekend Slate`) matches Saturday, Sunday, and Monday kickoffs in Eastern time, fitting late-season Saturday slates
+  and NFL playoff weekends without opening Thursday games.
 - Every group starts with a default active schedule: `Main Sunday Slip` (`sunday_main`, 2 legs). Existing groups were
   backfilled with this schedule in migration 0009.
-- When resolving a group's active week, `EnsureWeekSlips` checks for slips matching each active schedule. If any are
-  missing for that week, it creates them and attaches all active group members. Slips created from a schedule store its
-  `schedule_id`.
+- When resolving a group's active week, `EnsureWeekSlips` checks for slips matching each active schedule and creates
+  missing ones with all active group members, storing the schedule's `schedule_id`. When the week already has stored
+  games (`GamesForWeek`), `EnsureWeekSlips` skips any missing schedule whose `slate_scope` has no upcoming non-final game
+  (`status != FINAL` and `now < kickoff`)—so playoff weeks without Thursday games or completed weeks do not gain empty
+  or dead slips. Cold weeks with no stored games still create every active schedule, and existing slips are never
+  removed or modified.
 - Members can toggle schedules on or off, edit their slate scope or leg count, add new schedules, or delete them.
   Pausing a schedule stops auto-creation for future weeks without modifying existing slips.
 - Members can also create ad-hoc one-off slips for the current week without a schedule (`schedule_id` is null). These do
