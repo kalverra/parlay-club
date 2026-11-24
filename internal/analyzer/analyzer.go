@@ -54,17 +54,19 @@ type Injury struct {
 
 // Game is the slice of a game the analyzer needs: the two teams, whether it is
 // indoors, the forecast when there is one, nfelo's model when it is fresh,
-// optional nflverse team EPA/pace profiles, and team injury lists.
+// optional nflverse team EPA/pace profiles, team injury lists, and optional
+// sharp-book fair benchmarks.
 type Game struct {
 	ID       string
 	Home     string
 	Away     string
 	Indoor   bool
-	Weather  *Weather            // nil when unknown
-	Nfelo    *Nfelo              // nil when unknown or stale
-	HomeEPA  *TeamDefenseProfile // nil when unknown or stale (> 7 days)
-	AwayEPA  *TeamDefenseProfile // nil when unknown or stale (> 7 days)
-	Injuries map[string][]Injury // keyed by team abbreviation (e.g. "BUF")
+	Weather  *Weather                // nil when unknown
+	Nfelo    *Nfelo                  // nil when unknown or stale
+	HomeEPA  *TeamDefenseProfile     // nil when unknown or stale (> 7 days)
+	AwayEPA  *TeamDefenseProfile     // nil when unknown or stale (> 7 days)
+	Injuries map[string][]Injury     // keyed by team abbreviation (e.g. "BUF")
+	Sharp    map[SharpKey]SharpQuote `json:"-"` // nil when no sharp benchmarks are available
 }
 
 // TeamDefenseProfile holds one team's season-to-date and last-4-week

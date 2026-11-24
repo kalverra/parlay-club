@@ -4,9 +4,25 @@ import (
 	"fmt"
 	"math"
 	"strings"
+
+	"github.com/kalverra/parlay-club/internal/db"
+	"github.com/kalverra/parlay-club/internal/parlay"
 )
 
-const chalkMaxOdds = -500
+const (
+	chalkMaxOdds = -500
+
+	sharpLineEdgeDelta           = 8
+	sharpLineEdgeConsensusDelta  = 5
+	sharpLineFadeDelta           = -8
+	sharpLineFadeConsensusDelta  = -5
+	sharpPriceEdgeDelta          = 6
+	sharpPriceEdgeConsensusDelta = 4
+	sharpPriceFadeDelta          = -6
+	sharpPriceFadeConsensusDelta = -4
+	sharpPriceEdgeThreshold      = 0.025
+	sharpPriceFadeThreshold      = -0.045
+)
 
 // GradeFactor is one scoring adjustment applied to a leg or slip grade.
 type GradeFactor struct {
@@ -449,7 +465,189 @@ func scoreLineAndPrice(leg Leg, game Game, rubric Rubric) []GradeFactor {
 		})
 	}
 
+	candidates = append(candidates, scoreSharpBenchmark(leg, game)...)
+
 	return clampCategoryFactors(candidates, rubric.LinePriceMin, rubric.LinePriceMax)
+}
+
+func scoreSharpBenchmark(leg Leg, game Game) []GradeFactor {
+	if len(game.Sharp) == 0 {
+		return nil
+	}
+	sharp, ok := game.Sharp[sharpKeyForLeg(leg)]
+	if !ok {
+		return nil
+	}
+
+	source := sharpSourceLabel(sharp)
+	market := normalizeSharpMarket(leg.Market)
+	side := strings.ToUpper(strings.TrimSpace(leg.Side))
+
+	if leg.Line != nil && sharp.Line != nil && math.Abs(*leg.Line-*sharp.Line) > lineMatchEpsilon {
+		var lineEdge float64
+		switch {
+		case market == marketSpread:
+			lineEdge = *leg.Line - *sharp.Line
+		case side == sideOver:
+			lineEdge = *sharp.Line - *leg.Line
+		case side == sideUnder:
+			lineEdge = *leg.Line - *sharp.Line
+		default:
+			return nil
+		}
+
+		threshold := sharpLineThreshold(market)
+		sharpLine := sharpLineDisplay(market, sharp.Line)
+		if lineEdge >= threshold-lineMatchEpsilon {
+			return []GradeFactor{{
+				Rule:   ruleSharpLineEdge,
+				Label:  "Sharp line edge",
+				Delta:  sharpTierDelta(sharp.Tier, sharpLineEdgeDelta, sharpLineEdgeConsensusDelta),
+				Detail: fmt.Sprintf("Getting %s while %s sits at %s.", selection(leg), source, sharpLine),
+			}}
+		}
+		if lineEdge <= -threshold+lineMatchEpsilon {
+			legLine := selection(leg)
+			if market == marketSpread {
+				legLine = signedLine(leg.Line)
+			}
+			return []GradeFactor{{
+				Rule:  ruleSharpLineFade,
+				Label: "Sharp line fade",
+				Delta: sharpTierDelta(sharp.Tier, sharpLineFadeDelta, sharpLineFadeConsensusDelta),
+				Detail: fmt.Sprintf(
+					"%s sits at %s, so %s gives up %s.",
+					source,
+					sharpLine,
+					legLine,
+					sharpDiffText(market, math.Abs(lineEdge)),
+				),
+			}}
+		}
+		return nil
+	}
+
+	linesMatch := (leg.Line == nil && sharp.Line == nil) ||
+		(leg.Line != nil && sharp.Line != nil && math.Abs(*leg.Line-*sharp.Line) <= lineMatchEpsilon)
+	if !linesMatch || sharp.FairProb <= 0 || sharp.FairProb >= 1 || leg.Odds == 0 {
+		return nil
+	}
+
+	edge := parlay.PriceEdge(leg.Odds, sharp.FairProb)
+	fairAmerican := sharp.FairAmerican
+	if fairAmerican == 0 {
+		fairAmerican = parlay.DecimalToAmerican(1 / sharp.FairProb)
+	}
+	if edge >= sharpPriceEdgeThreshold-lineMatchEpsilon {
+		return []GradeFactor{{
+			Rule:  ruleSharpPriceEdge,
+			Label: "Sharp price edge",
+			Delta: sharpTierDelta(sharp.Tier, sharpPriceEdgeDelta, sharpPriceEdgeConsensusDelta),
+			Detail: fmt.Sprintf(
+				"Strong price at %s vs. %s fair price near %s.",
+				americanOddsText(leg.Odds),
+				source,
+				americanOddsText(fairAmerican),
+			),
+		}}
+	}
+	if edge <= sharpPriceFadeThreshold+lineMatchEpsilon {
+		return []GradeFactor{{
+			Rule:  ruleSharpPriceFade,
+			Label: "Steep price vs. sharp",
+			Delta: sharpTierDelta(sharp.Tier, sharpPriceFadeDelta, sharpPriceFadeConsensusDelta),
+			Detail: fmt.Sprintf(
+				"Steep price at %s vs. %s fair price near %s.",
+				americanOddsText(leg.Odds),
+				source,
+				americanOddsText(fairAmerican),
+			),
+		}}
+	}
+	return nil
+}
+
+func sharpKeyForLeg(leg Leg) SharpKey {
+	market := normalizeSharpMarket(leg.Market)
+	team := strings.ToUpper(strings.TrimSpace(leg.Team))
+	if market == marketTotal {
+		team = ""
+	}
+	side := strings.ToUpper(strings.TrimSpace(leg.Side))
+	if (market == marketML || market == marketSpread) && side == "" {
+		side = "TEAM"
+	}
+	var player string
+	if db.IsPlayerMarket(market) || strings.TrimSpace(leg.PlayerName) != "" {
+		player = db.NormalizePlayerName(leg.PlayerName)
+	}
+	return SharpKey{
+		MarketType: market,
+		Team:       team,
+		PlayerName: player,
+		Side:       side,
+	}
+}
+
+func normalizeSharpMarket(market string) string {
+	m := strings.ToUpper(strings.TrimSpace(market))
+	if m == "MONEYLINE" {
+		return marketML
+	}
+	return m
+}
+
+func sharpLineThreshold(market string) float64 {
+	switch market {
+	case marketPassYds, marketRushYds, marketRecYds, marketRushAtt:
+		return 2.0
+	default:
+		return 0.5
+	}
+}
+
+func sharpTierDelta(tier, sharpDelta, consensusDelta int) int {
+	if tier == sharpTier3 {
+		return consensusDelta
+	}
+	return sharpDelta
+}
+
+func sharpSourceLabel(sharp SharpQuote) string {
+	if s := strings.TrimSpace(sharp.Source); s != "" {
+		return s
+	}
+	if sharp.Tier == sharpTier3 {
+		return consensusBookLabel
+	}
+	return "sharp market"
+}
+
+func sharpLineDisplay(market string, line *float64) string {
+	if market == marketSpread {
+		return signedLine(line)
+	}
+	return lineText(line)
+}
+
+func sharpDiffText(market string, diff float64) string {
+	switch market {
+	case marketPassYds, marketRushYds, marketRecYds:
+		return number(diff) + " yards"
+	case marketRushAtt:
+		return number(diff) + " attempts"
+	case marketReceptions:
+		return number(diff) + " receptions"
+	default:
+		if math.Abs(diff-1.0) <= lineMatchEpsilon {
+			return "a full point"
+		}
+		return number(diff) + " points"
+	}
+}
+
+func americanOddsText(odds int) string {
+	return fmt.Sprintf("%+d", odds)
 }
 
 // clampCategoryFactors bounds the cumulative delta of a category to [minTotal, maxTotal]

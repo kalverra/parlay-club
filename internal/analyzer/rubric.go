@@ -62,7 +62,7 @@ var RubricV1 = Rubric{
 	MatchupEnvMin: -20,
 	MatchupEnvMax: 15,
 	LinePriceMin:  -20,
-	LinePriceMax:  10,
+	LinePriceMax:  15,
 
 	HitRate:            10,
 	RisingUsage:        5,

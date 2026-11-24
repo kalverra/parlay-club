@@ -193,7 +193,7 @@ Complexity: medium (integrates sharp benchmarks into `scoreLineAndPrice`, `Grade
 preserving fail-soft behavior and category clamping) Risk: medium (changes live A–F leg grades when sharp quotes are
 present; bounded by deterministic unit/web tests and fail-soft thresholds)
 
-- [ ] Add `Sharp` to `analyzer.Game`, implement `sharp_line_edge`, `sharp_line_fade`, `sharp_price_edge`, and
+- [x] Add `Sharp` to `analyzer.Game`, implement `sharp_line_edge`, `sharp_line_fade`, `sharp_price_edge`, and
       `sharp_price_fade` in `internal/analyzer/grade.go` (raising `linePriceMax` to `15`), register them in
       `GradeRubric()` (`internal/analyzer/docs.go`), and cover all branches and tone rules in
       `internal/analyzer/analyzer_test.go`.
