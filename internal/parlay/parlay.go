@@ -134,3 +134,46 @@ func Units(result Result, decimal float64) float64 {
 		return 0
 	}
 }
+
+const (
+	minTwoWayOverround = 0.95
+	maxTwoWayOverround = 1.25
+)
+
+// ImpliedProb returns the raw implied probability (0..1) for American odds, or
+// 0 for an invalid price of 0.
+func ImpliedProb(american int) float64 {
+	decimal := AmericanToDecimal(american)
+	if decimal <= 0 {
+		return 0
+	}
+	return 1 / decimal
+}
+
+// DevigTwoWay removes the vig from a two-way market by normalizing both raw
+// implied probabilities to sum to 1. It returns ok=false if either price is
+// invalid or the combined overround falls outside [0.95, 1.25].
+func DevigTwoWay(priceA, priceB int) (probA, probB float64, ok bool) {
+	pA := ImpliedProb(priceA)
+	pB := ImpliedProb(priceB)
+	if pA <= 0 || pB <= 0 {
+		return 0, 0, false
+	}
+	overround := pA + pB
+	if overround < minTwoWayOverround || overround > maxTwoWayOverround {
+		return 0, 0, false
+	}
+	return pA / overround, pB / overround, true
+}
+
+// PriceEdge returns fairProb - ImpliedProb(retailAmerican). Positive values
+// mean the retail price pays better than the sharp fair probability; negative
+// values mean the retail price carries extra juice or shading. Returns 0 when
+// retailAmerican is 0 or fairProb is outside (0, 1).
+func PriceEdge(retailAmerican int, fairProb float64) float64 {
+	retailProb := ImpliedProb(retailAmerican)
+	if retailProb == 0 || fairProb <= 0 || fairProb >= 1 {
+		return 0
+	}
+	return fairProb - retailProb
+}
