@@ -172,7 +172,7 @@ partial, and adds progressive-enhancement shortcuts in `web/static/app.js`) Risk
 - [x] Update `GET /slips/new`, add `GET /slips/new/games`, and update `POST /slips` in `internal/web/slips.go` to
       restrict to `UpcomingWeeks`, remove past-week entry, handle `mode=one_off` (per-game selection) and
       `mode=recurring` (schedule creation + `EnsureWeekSlips`), and update `internal/web/slips_test.go`.
-- [ ] Redesign the create-slip form in `web/templates/slip.html` and add mode-toggle and slate-shortcut checkbox helpers
+- [x] Redesign the create-slip form in `web/templates/slip.html` and add mode-toggle and slate-shortcut checkbox helpers
       in `web/static/app.js` for phone-first usability (One-off/Recurring toggle, dynamic weekday shortcuts, game
       checklist with kickoffs, live selected count).
 - [ ] Docs: update `docs/concepts/slips.md` to document upcoming-only slip creation, unified one-off vs. recurring
