@@ -1829,3 +1829,101 @@ func TestSlipHubHighlightsHideAndDisableWhenSlotsFullOrLocked(t *testing.T) {
 	require.Equal(t, http.StatusOK, lockResp.Code, lockResp.Body.String())
 	assert.NotContains(t, lockResp.Body.String(), "Top A-grade ideas")
 }
+
+func TestSlipHubRendersImpliedChancesAndOmitsEmptyOrVoided(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	game := addGame(t, fixture, gameKickoff())
+	addGameOdds(t, fixture.store, game.ID)
+	_, err := fixture.store.SetUserHomeBook(t.Context(), fixture.user.ID, new("draftkings"))
+	require.NoError(t, err)
+
+	get := func(path string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
+		fixture.handler.ServeHTTP(rec, req)
+		return rec
+	}
+
+	// Empty slip omits implied chances.
+	emptyPayout := get(fmt.Sprintf("/slips/%d/payout?stake=10&boost=0", fixture.slip.ID))
+	require.Equal(t, http.StatusOK, emptyPayout.Code)
+	assert.Contains(t, emptyPayout.Body.String(), "Add a leg to see a payout.")
+	assert.NotContains(t, emptyPayout.Body.String(), "Implied chance from combined odds")
+	assert.NotContains(t, emptyPayout.Body.String(), "Implied chance from reference odds")
+
+	// Add two legs: -110 (52%) and +150 (40%).
+	resp1 := postForm(t, fixture.handler, fmt.Sprintf("/slips/%d/legs", fixture.slip.ID), url.Values{
+		"game_id":     {game.ID},
+		"market_type": {"ML"},
+		"team":        {"BUF"},
+		"side":        {"TEAM"},
+		"odds":        {"-110"},
+	})
+	require.Equal(t, http.StatusOK, resp1.Code, resp1.Body.String())
+
+	resp2 := postForm(t, fixture.handler, fmt.Sprintf("/slips/%d/legs", fixture.slip.ID), url.Values{
+		"game_id":     {game.ID},
+		"market_type": {"TOTAL"},
+		"side":        {"OVER"},
+		"line":        {"47.5"},
+		"odds":        {"+150"},
+	})
+	require.Equal(t, http.StatusOK, resp2.Code, resp2.Body.String())
+
+	hubResp := get(fmt.Sprintf("/slips/%d", fixture.slip.ID))
+	require.Equal(t, http.StatusOK, hubResp.Code)
+	hubBody := hubResp.Body.String()
+	assert.Contains(t, hubBody, "(52%)")
+	assert.Contains(t, hubBody, "(40%)")
+	assert.Contains(t, hubBody, "21% chance")
+
+	// Payout endpoint renders both combined and reference implied chances.
+	payoutResp := get(fmt.Sprintf("/slips/%d/payout?stake=10&boost=0", fixture.slip.ID))
+	require.Equal(t, http.StatusOK, payoutResp.Code)
+	payoutBody := payoutResp.Body.String()
+	assert.Contains(t, payoutBody, "Implied chance from combined odds")
+	assert.Contains(t, payoutBody, "21% chance")
+	assert.Contains(t, payoutBody, "Implied chance from reference odds")
+
+	// Voiding all legs drops CombinedOdds to 1.00x and omits payout implied chances.
+	legs, err := fixture.store.LegsForSlip(t.Context(), fixture.slip.ID)
+	require.NoError(t, err)
+	require.Len(t, legs, 2)
+	for _, leg := range legs {
+		voidResp := putForm(t, fixture.handler, fmt.Sprintf("/legs/%d/result", leg.ID), url.Values{
+			"result": {"VOID"},
+		})
+		require.Equal(t, http.StatusOK, voidResp.Code, voidResp.Body.String())
+	}
+
+	voidPayout := get(fmt.Sprintf("/slips/%d/payout?stake=10&boost=0", fixture.slip.ID))
+	require.Equal(t, http.StatusOK, voidPayout.Code)
+	voidBody := voidPayout.Body.String()
+	assert.Contains(t, voidBody, "1.00x")
+	assert.NotContains(t, voidBody, "Implied chance from combined odds")
+	assert.NotContains(t, voidBody, "Implied chance from reference odds")
+	assert.NotContains(t, voidBody, "chance")
+}
+
+func TestSlipHubHighlightsRenderImpliedChances(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	game := addGame(t, fixture, gameKickoff())
+	seedAGradeBoardForHubTest(t, fixture, game)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf("/slips/%d", fixture.slip.ID), nil)
+	fixture.handler.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	body := rec.Body.String()
+	assert.Contains(t, body, "data-highlight-leg")
+	assert.Contains(t, body, "data-highlight-parlay")
+	// Single-leg highlights and combo leg items are -105 -> (51%).
+	assert.Contains(t, body, "(51%)")
+	// 2-leg combo of -105 and -105 is +281 -> (26%).
+	assert.Contains(t, body, "(26%)")
+}

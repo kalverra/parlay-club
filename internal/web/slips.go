@@ -143,29 +143,31 @@ type HighlightsView struct {
 // LegHighlightView is one A-grade leg idea with its grade, reason, and
 // one-tap add-leg form fields.
 type LegHighlightView struct {
-	GameID     string
-	Market     string
-	Team       string
-	PlayerName string
-	PlayerID   string
-	Side       string
-	Line       string
-	Odds       int
-	Price      string
-	Text       string
-	Grade      GradeView
-	Reason     string
+	GameID        string
+	Market        string
+	Team          string
+	PlayerName    string
+	PlayerID      string
+	Side          string
+	Line          string
+	Odds          int
+	Price         string
+	ImpliedChance string
+	Text          string
+	Grade         GradeView
+	Reason        string
 }
 
 // ParlayHighlightView is one A-grade 2- or 3-leg combo idea.
 type ParlayHighlightView struct {
-	Legs         []LegHighlightView
-	Grade        GradeView
-	CombinedOdds string
-	Label        string
-	Reason       string
-	LegCount     int
-	CanAddAll    bool
+	Legs            []LegHighlightView
+	Grade           GradeView
+	CombinedOdds    string
+	CombinedImplied string
+	Label           string
+	Reason          string
+	LegCount        int
+	CanAddAll       bool
 }
 
 // SiblingSlipView is one choice in the sibling slip switcher.
@@ -246,6 +248,7 @@ type LegView struct {
 	ID              int64
 	Selection       string
 	Odds            string
+	ImpliedChance   string
 	Model           string // nfelo chip; "" when there is no fresh model
 	Grade           GradeView
 	Result          string
@@ -345,8 +348,10 @@ type PayoutView struct {
 	Boost             string
 	Combined          string
 	CombinedAmerican  string
+	CombinedImplied   string
 	Reference         string
 	ReferenceAmerican string
+	ReferenceImplied  string
 	Return            string
 	Profit            string
 }
@@ -2005,13 +2010,14 @@ func highlightsView(set board.HighlightSet, remainingSlots int) HighlightsView {
 			pLegs = append(pLegs, legHighlightView(leg))
 		}
 		parlays = append(parlays, ParlayHighlightView{
-			Legs:         pLegs,
-			Grade:        gradeView(p.Grade.Letter, p.Grade.Score, p.Grade.Summary, p.Grade.Factors),
-			CombinedOdds: formatOdds(p.CombinedOdds),
-			Label:        p.Label,
-			Reason:       p.Reason,
-			LegCount:     len(pLegs),
-			CanAddAll:    remainingSlots >= len(pLegs),
+			Legs:            pLegs,
+			Grade:           gradeView(p.Grade.Letter, p.Grade.Score, p.Grade.Summary, p.Grade.Factors),
+			CombinedOdds:    formatOdds(p.CombinedOdds),
+			CombinedImplied: formatImpliedChance(parlay.ImpliedProb(p.CombinedOdds)),
+			Label:           p.Label,
+			Reason:          p.Reason,
+			LegCount:        len(pLegs),
+			CanAddAll:       remainingSlots >= len(pLegs),
 		})
 	}
 	return HighlightsView{
@@ -2028,18 +2034,19 @@ func legHighlightView(h board.LegHighlight) LegHighlightView {
 		line = formatFloat(*h.Row.Line)
 	}
 	return LegHighlightView{
-		GameID:     h.Row.GameID,
-		Market:     h.Row.Market,
-		Team:       h.Row.Team,
-		PlayerName: h.Row.PlayerName,
-		PlayerID:   h.Row.PlayerID,
-		Side:       h.Row.Side,
-		Line:       line,
-		Odds:       h.Row.Odds,
-		Price:      formatOdds(h.Row.Odds),
-		Text:       h.Row.Text,
-		Grade:      gradeView(h.Grade.Letter, h.Grade.Score, "", h.Grade.Factors),
-		Reason:     h.Reason,
+		GameID:        h.Row.GameID,
+		Market:        h.Row.Market,
+		Team:          h.Row.Team,
+		PlayerName:    h.Row.PlayerName,
+		PlayerID:      h.Row.PlayerID,
+		Side:          h.Row.Side,
+		Line:          line,
+		Odds:          h.Row.Odds,
+		Price:         formatOdds(h.Row.Odds),
+		ImpliedChance: formatImpliedChance(parlay.ImpliedProb(h.Row.Odds)),
+		Text:          h.Row.Text,
+		Grade:         gradeView(h.Grade.Letter, h.Grade.Score, "", h.Grade.Factors),
+		Reason:        h.Reason,
 	}
 }
 
@@ -2157,18 +2164,19 @@ func legViews(
 	for _, leg := range legs {
 		canVote := open && hasUser && viewerIsMember && leg.UserID != viewerID
 		view := LegView{
-			ID:          leg.ID,
-			Selection:   leg.Selection,
-			Odds:        formatOdds(leg.Odds),
-			Model:       legModel(leg, games),
-			Grade:       legGrades[leg.ID],
-			Result:      string(leg.Result),
-			GradedBy:    legGradedBy(leg.GradedBy),
-			OwnerName:   names[leg.UserID],
-			CanEdit:     open && hasUser && leg.UserID == viewerID,
-			CanGrade:    viewerIsMember,
-			ResearchURL: legResearchURL(leg),
-			Votes:       legVoteView(votes, leg, canVote),
+			ID:            leg.ID,
+			Selection:     leg.Selection,
+			Odds:          formatOdds(leg.Odds),
+			ImpliedChance: formatImpliedChance(parlay.ImpliedProb(leg.Odds)),
+			Model:         legModel(leg, games),
+			Grade:         legGrades[leg.ID],
+			Result:        string(leg.Result),
+			GradedBy:      legGradedBy(leg.GradedBy),
+			OwnerName:     names[leg.UserID],
+			CanEdit:       open && hasUser && leg.UserID == viewerID,
+			CanGrade:      viewerIsMember,
+			ResearchURL:   legResearchURL(leg),
+			Votes:         legVoteView(votes, leg, canVote),
 		}
 		applyLegMedia(&view, leg, media)
 		byUser[leg.UserID] = append(byUser[leg.UserID], view)
@@ -2356,8 +2364,10 @@ func (h *slipHandlers) payoutView(
 		Boost:             formatFloat(boost),
 		Combined:          fmt.Sprintf("%.2fx", combined),
 		CombinedAmerican:  formatOdds(parlay.DecimalToAmerican(combined)),
+		CombinedImplied:   formatImpliedChance(parlay.DecimalImpliedProb(combined)),
 		Reference:         fmt.Sprintf("%.2fx", reference),
 		ReferenceAmerican: formatOdds(parlay.DecimalToAmerican(reference)),
+		ReferenceImplied:  formatImpliedChance(parlay.DecimalImpliedProb(reference)),
 		Return:            money(total),
 		Profit:            money(total - stake),
 	}, nil

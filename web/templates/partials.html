@@ -176,7 +176,7 @@
               <div class="min-w-0">
                 <p class="truncate text-sm font-medium">{{.Selection}}</p>
                 <div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-ink-muted">
-                <span class="ui-odds">{{.Odds}}</span>
+                <span class="ui-odds">{{.Odds}}{{if .ImpliedChance}} <span class="font-normal text-ink-muted" title="Implied chance from odds">({{.ImpliedChance}})</span>{{end}}</span>
                 {{if .Votes.Has}}
                   <span class="flex items-center gap-1" data-votes>
                     {{if .Votes.CanVote}}
@@ -632,11 +632,11 @@
     <dl class="grid grid-cols-2 gap-2 text-sm">
       <div>
         <dt class="text-xs text-ink-muted">Combined</dt>
-        <dd class="font-medium">{{.Combined}} <span class="ui-odds">({{.CombinedAmerican}})</span></dd>
+        <dd class="font-medium">{{.Combined}} <span class="ui-odds">({{.CombinedAmerican}})</span>{{if .CombinedImplied}} <span class="text-xs font-normal tabular-nums text-ink-muted" title="Implied chance from combined odds">&middot; {{.CombinedImplied}} chance</span>{{end}}</dd>
       </div>
       <div>
         <dt class="text-xs text-ink-muted">Reference</dt>
-        <dd class="font-medium">{{.Reference}} <span class="ui-odds">({{.ReferenceAmerican}})</span></dd>
+        <dd class="font-medium">{{.Reference}} <span class="ui-odds">({{.ReferenceAmerican}})</span>{{if .ReferenceImplied}} <span class="text-xs font-normal tabular-nums text-ink-muted" title="Implied chance from reference odds">&middot; {{.ReferenceImplied}}</span>{{end}}</dd>
       </div>
       <div>
         <dt class="text-xs text-ink-muted">Return</dt>
@@ -2246,7 +2246,7 @@
                       {{end}}
                     </div>
                   </details>
-                  <span class="ui-odds">{{.Price}}</span>
+                  <span class="ui-odds">{{.Price}}{{if .ImpliedChance}} <span class="font-normal text-ink-muted" title="Implied chance from odds">({{.ImpliedChance}})</span>{{end}}</span>
                   {{if .Reason}}<span class="min-w-0 truncate text-ink-muted">{{.Reason}}</span>{{end}}
                 </div>
               </div>
@@ -2315,7 +2315,7 @@
                     </div>
                   </details>
                   <span class="font-semibold text-ink">{{.Label}}</span>
-                  <span class="ui-odds">{{.CombinedOdds}}</span>
+                  <span class="ui-odds">{{.CombinedOdds}}{{if .CombinedImplied}} <span class="font-normal text-ink-muted" title="Implied chance from combined odds">({{.CombinedImplied}})</span>{{end}}</span>
                 </div>
                 {{if .Reason}}<p class="mt-1 text-xs text-ink-muted">{{.Reason}}</p>{{end}}
               </div>
@@ -2360,7 +2360,7 @@
                 <li class="flex items-center justify-between gap-2 text-xs">
                   <div class="min-w-0 flex-1">
                     <span class="truncate font-medium text-ink">{{.Text}}</span>
-                    <span class="ui-odds ml-1.5">{{.Price}}</span>
+                    <span class="ui-odds ml-1.5">{{.Price}}{{if .ImpliedChance}} <span class="font-normal text-ink-muted" title="Implied chance from odds">({{.ImpliedChance}})</span>{{end}}</span>
                   </div>
                   <form
                     class="shrink-0"
