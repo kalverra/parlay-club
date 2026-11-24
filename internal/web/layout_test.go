@@ -77,11 +77,7 @@ func TestLayoutTopBar(t *testing.T) {
 		Title:     "Slip",
 		Tab:       webui.TabWeek,
 		WeekLabel: "Week 9",
-		Slips: []webui.SlipOption{
-			{ID: 1, Name: "Week 9"},
-			{ID: 2, Name: "Week 9 #2", Current: true},
-		},
-		User: &webui.User{Name: "Adam Hamrick", Initials: "AH", AvatarClass: "bg-sky-500"},
+		User:      &webui.User{Name: "Adam Hamrick", Initials: "AH", AvatarClass: "bg-sky-500"},
 	})
 
 	assert.Contains(t, out, `href="/"`)
@@ -89,9 +85,7 @@ func TestLayoutTopBar(t *testing.T) {
 	assert.Contains(t, out, `data-theme-cycle`)
 	assert.Contains(t, out, `data-theme-label`)
 	assert.Contains(t, out, ">Week 9</span>")
-	assert.Contains(t, out, `id="slip-switcher"`)
-	assert.Contains(t, out, `<option value="2" selected>Week 9 #2</option>`)
-	assert.Equal(t, 1, strings.Count(out, "selected"))
+	assert.NotContains(t, out, `id="slip-switcher"`)
 	assert.Contains(t, out, `href="/me"`)
 	assert.Contains(t, out, `title="Adam Hamrick"`)
 	assert.Contains(t, out, ">AH</span")
@@ -129,18 +123,6 @@ func TestAvatarFallsBackToInitials(t *testing.T) {
 	assert.Contains(t, out, ">AH</span")
 	assert.Contains(t, out, "bg-sky-500")
 	assert.NotContains(t, out, "<img")
-}
-
-func TestLayoutHidesSwitcherForOneSlip(t *testing.T) {
-	t.Parallel()
-
-	out := renderPage(t, "slip", webui.Page{
-		Title: "Slip",
-		Tab:   webui.TabWeek,
-		Slips: []webui.SlipOption{{ID: 1, Name: "Week 9", Current: true}},
-	})
-
-	assert.NotContains(t, out, `id="slip-switcher"`)
 }
 
 func TestLayoutGroupSwitcher(t *testing.T) {

@@ -211,7 +211,9 @@ type NextAction struct {
 // SlipView is everything the slip panel draws.
 type SlipView struct {
 	ID            int64
+	WeekID        int64
 	Name          string
+	ScopeBadge    string
 	Status        string
 	LegsPerMember int
 	Open          bool
@@ -1248,7 +1250,6 @@ func (h *slipHandlers) renderSlip(
 	if week, err := h.deps.Store.WeekByID(r.Context(), slip.WeekID); err == nil {
 		page.WeekLabel = weekLabel(week)
 	}
-	page.Slips = h.slipOptions(r.Context(), slip)
 	data, err := h.slipView(r.Context(), slip, stake, boost)
 	if err != nil {
 		h.serverError(w, err)
@@ -1262,24 +1263,6 @@ func (h *slipHandlers) renderSlip(
 	data.Page = page
 	data.Export = export
 	h.renderPage(w, "slip", data)
-}
-
-// slipOptions lists the group's slips in the slip's week for the top bar. The
-// current slip is marked so the switcher can show it.
-func (h *slipHandlers) slipOptions(ctx context.Context, slip db.Slip) []SlipOption {
-	groupSlips, err := h.deps.Store.SlipsForWeek(ctx, slip.GroupID, slip.WeekID)
-	if err != nil {
-		return nil
-	}
-	options := make([]SlipOption, 0, len(groupSlips))
-	for _, other := range groupSlips {
-		options = append(options, SlipOption{
-			ID:      other.ID,
-			Name:    other.Name,
-			Current: other.ID == slip.ID,
-		})
-	}
-	return options
 }
 
 // siblingSlips returns the sibling slips for the switcher when a group has multiple
@@ -1717,7 +1700,9 @@ func (h *slipHandlers) slipPageData(ctx context.Context, slip db.Slip) (SlipPage
 
 	view := &SlipView{
 		ID:            slip.ID,
+		WeekID:        slip.WeekID,
 		Name:          slip.Name,
+		ScopeBadge:    scopeBadge(slip.SlateScope),
 		Status:        string(slip.Status),
 		LegsPerMember: slip.LegsPerMember,
 		Open:          open,

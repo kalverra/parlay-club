@@ -439,16 +439,6 @@ function showToast(message) {
   toastTimer = setTimeout(() => toast.remove(), 4000);
 }
 
-// The top bar's slip switcher is a plain select; a choice loads that slip.
-document.addEventListener("change", (event) => {
-  if (event.target && event.target.id === "slip-switcher") {
-    const slipID = event.target.value;
-    if (slipID) {
-      window.location.assign(`/slips/${encodeURIComponent(slipID)}`);
-    }
-  }
-});
-
 // Live updates. The slip page marks its body with data-live-url. One
 // EventSource per page carries only signals, so the page refetches the
 // partials it shows. The server says bye at its deadline, and the client closes

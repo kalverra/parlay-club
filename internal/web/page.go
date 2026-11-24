@@ -18,13 +18,6 @@ type NavTab struct {
 	Current bool
 }
 
-// SlipOption is one choice in the top bar's slip switcher.
-type SlipOption struct {
-	ID      int64
-	Name    string
-	Current bool
-}
-
 // GroupOption is one choice in the top bar's group switcher.
 type GroupOption struct {
 	ID      int64
@@ -45,7 +38,6 @@ type Page struct {
 	Title     string
 	Tab       Tab
 	WeekLabel string
-	Slips     []SlipOption
 	Groups    []GroupOption
 	User      *User
 	// Wide widens the header and main column for a two-pane screen. Pages
