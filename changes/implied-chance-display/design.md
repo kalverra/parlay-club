@@ -116,5 +116,5 @@ Risk: low (read-only display addition with no persistence or payout changes, ful
 Complexity: low (follows the exact Phase 1 view-model and template pattern inside `internal/web/pick.go` and `web/templates/partials.html`)
 Risk: low (display-only changes on pick flow partials with no mutation or state changes, verified by existing pick handler tests)
 
-- [ ] Populate and render implied percentage chances on pick board option buttons (`PickRowView`), tray leg rows (`TrayLegView`), and the fixed pick dock (`PickDockView`) in `internal/web/pick.go` and `web/templates/partials.html`, with handler tests covering add/remove/switch/swap option rows, tray legs, and dock combined chance (including empty dock omission).
+- [x] Populate and render implied percentage chances on pick board option buttons (`PickRowView`), tray leg rows (`TrayLegView`), and the fixed pick dock (`PickDockView`) in `internal/web/pick.go` and `web/templates/partials.html`, with handler tests covering add/remove/switch/swap option rows, tray legs, and dock combined chance (including empty dock omission).
 - [ ] Docs: update `docs/concepts/slips.md` to document implied percentage chances on the pick board, dock, and tray.
