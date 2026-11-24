@@ -125,7 +125,7 @@ Complexity: medium (wires `RecentSlipsForGroup`, `internal/record` summary, and 
 
 - [x] Add `Store.RecentSlipsForGroup(ctx, groupID, limit)` in `internal/db/slips.go` (returning recent slips with their
       week metadata) with store tests.
-- [ ] Add `GroupOverviewPage` view model and pure `isSpotlightSlip` classifier in `internal/web/home.go` that separates
+- [x] Add `GroupOverviewPage` view model and pure `isSpotlightSlip` classifier in `internal/web/home.go` that separates
       active/upcoming spotlight slips from recent/completed slips and assembles the group record snapshot, recurring
       schedules, and members, with unit tests covering open, locked-live, closed, graded, and empty states.
 

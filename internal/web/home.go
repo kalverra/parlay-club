@@ -1,13 +1,16 @@
 package web
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/kalverra/parlay-club/internal/db"
+	"github.com/kalverra/parlay-club/internal/parlay"
 	"github.com/kalverra/parlay-club/internal/slips"
 )
 
@@ -56,6 +59,332 @@ type WeekSlipCard struct {
 	TotalPicks  int
 	LockedCount int
 	Progress    string
+}
+
+const recentSlipsLimit = 5
+
+// GroupOverviewPage is the per-group landing page showing active/upcoming
+// spotlight slips, a group record snapshot, recent slips, recurring schedules,
+// and members.
+type GroupOverviewPage struct {
+	Page
+	Group         db.Group
+	Week          *db.Week
+	NextWeekLabel string
+	Spotlight     []SpotlightSlipCard
+	Record        GroupRecordSnapshot
+	RecentSlips   []RecentSlipCard
+	Schedules     []ScheduleView
+	SlateScopes   []SlateScopeOption
+	Members       []User
+}
+
+// SpotlightSlipCard is an active or upcoming slip featured in the group
+// overview hero.
+type SpotlightSlipCard struct {
+	ID          int64
+	Name        string
+	WeekLabel   string
+	ScopeBadge  string
+	NextStep    string
+	Step        slips.Step
+	Deadline    *DeadlineView
+	MemberCount int
+	PicksCount  int
+	TotalPicks  int
+	LockedCount int
+	Progress    string
+	ActionLabel string
+	ActionHref  string
+}
+
+// GroupRecordSnapshot is the compact 3-metric record summary on the group
+// overview page.
+type GroupRecordSnapshot struct {
+	HasSlips   bool
+	Season     int
+	Record     string
+	Wins       int
+	Losses     int
+	Pushes     int
+	TotalSlips int
+	Streak     string
+}
+
+// RecentSlipCard is one completed or closed slip in the group overview's
+// recent slips list.
+type RecentSlipCard struct {
+	ID          int64
+	Name        string
+	WeekLabel   string
+	ScopeBadge  string
+	ResultLabel string
+	ResultTone  string
+	Href        string
+}
+
+// isSpotlightSlip reports whether a slip in the current or upcoming week
+// should appear in the group overview hero rather than the recent slips list.
+func isSpotlightSlip(slip db.Slip, next slips.Next, games []db.Game, now time.Time) bool {
+	if slip.Status == db.SlipGraded {
+		return false
+	}
+	switch next.Step {
+	case slips.StepPick, slips.StepLockIn, slips.StepJoin, slips.StepWaiting, slips.StepExport:
+		return true
+	}
+	if slip.Status == db.SlipLocked {
+		for _, g := range slips.FilterGamesForSlip(games, slip) {
+			if g.Status == db.GameLive || now.Before(g.Kickoff) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+type groupOverviewSlip struct {
+	Slip    db.Slip
+	Week    db.Week
+	Members []db.SlipMember
+	Legs    []db.Leg
+}
+
+type groupOverviewInput struct {
+	Page         Page
+	Group        db.Group
+	ActiveWeek   *db.Week
+	NextWeek     *db.Week
+	WeekSlips    []groupOverviewSlip
+	WeekGames    []db.Game
+	RecentSlips  []db.RecentSlipRow
+	RecordSeason int
+	GradedSlips  []db.GradedSlip
+	Schedules    []db.GroupSlipSchedule
+	GroupMembers []db.User
+	ViewerID     int64
+	Now          time.Time
+}
+
+func buildGroupOverviewPage(in groupOverviewInput) GroupOverviewPage {
+	type spotlightItem struct {
+		card SpotlightSlipCard
+		next slips.Next
+	}
+
+	spotlightItems := make([]spotlightItem, 0, len(in.WeekSlips))
+	spotlightIDs := make(map[int64]bool, len(in.WeekSlips))
+	for _, ws := range in.WeekSlips {
+		next := slips.NextStep(ws.Slip, ws.Members, ws.Legs, in.WeekGames, in.ViewerID, in.Now)
+		if !isSpotlightSlip(ws.Slip, next, in.WeekGames, in.Now) {
+			continue
+		}
+		var deadline *DeadlineView
+		if next.Deadline != nil {
+			deadline = newDeadlineView(in.WeekGames, *next.Deadline)
+		}
+		lockedCount, progress := slipProgressSummary(ws.Members, ws.Legs, ws.Slip.LegsPerMember)
+		actionLabel := "Open slip"
+		actionHref := fmt.Sprintf("/slips/%d", ws.Slip.ID)
+		if next.Step == slips.StepPick {
+			actionLabel = next.Label()
+			actionHref = fmt.Sprintf("/slips/%d/pick", ws.Slip.ID)
+		}
+
+		spotlightIDs[ws.Slip.ID] = true
+		spotlightItems = append(spotlightItems, spotlightItem{
+			card: SpotlightSlipCard{
+				ID:          ws.Slip.ID,
+				Name:        ws.Slip.Name,
+				WeekLabel:   weekLabel(ws.Week),
+				ScopeBadge:  scopeBadge(ws.Slip),
+				NextStep:    next.Label(),
+				Step:        next.Step,
+				Deadline:    deadline,
+				MemberCount: len(ws.Members),
+				PicksCount:  len(ws.Legs),
+				TotalPicks:  len(ws.Members) * ws.Slip.LegsPerMember,
+				LockedCount: lockedCount,
+				Progress:    progress,
+				ActionLabel: actionLabel,
+				ActionHref:  actionHref,
+			},
+			next: next,
+		})
+	}
+
+	slices.SortStableFunc(spotlightItems, func(a, b spotlightItem) int {
+		if betterStep(a.next, b.next) {
+			return -1
+		}
+		if betterStep(b.next, a.next) {
+			return 1
+		}
+		return 0
+	})
+
+	spotlight := make([]SpotlightSlipCard, len(spotlightItems))
+	for i, item := range spotlightItems {
+		spotlight[i] = item.card
+	}
+
+	recent := make([]RecentSlipCard, 0, min(recentSlipsLimit, len(in.RecentSlips)))
+	for _, row := range in.RecentSlips {
+		if spotlightIDs[row.Slip.ID] {
+			continue
+		}
+		label, tone := recentSlipResult(row.Slip)
+		recent = append(recent, RecentSlipCard{
+			ID:          row.Slip.ID,
+			Name:        row.Slip.Name,
+			WeekLabel:   weekLabel(row.Week),
+			ScopeBadge:  scopeBadge(row.Slip),
+			ResultLabel: label,
+			ResultTone:  tone,
+			Href:        fmt.Sprintf("/slips/%d", row.Slip.ID),
+		})
+		if len(recent) >= recentSlipsLimit {
+			break
+		}
+	}
+
+	members := make([]User, 0, len(in.GroupMembers))
+	for _, m := range in.GroupMembers {
+		members = append(members, NewUser(m))
+	}
+
+	var nextWeekLabel string
+	if in.NextWeek != nil {
+		nextWeekLabel = weekLabel(*in.NextWeek)
+	}
+
+	return GroupOverviewPage{
+		Page:          in.Page,
+		Group:         in.Group,
+		Week:          in.ActiveWeek,
+		NextWeekLabel: nextWeekLabel,
+		Spotlight:     spotlight,
+		Record:        buildGroupRecordSnapshot(in.RecordSeason, in.GradedSlips),
+		RecentSlips:   recent,
+		Schedules:     buildScheduleViews(in.Schedules),
+		SlateScopes:   defaultSlateScopeOptions(""),
+		Members:       members,
+	}
+}
+
+func buildGroupRecordSnapshot(season int, gradedSlips []db.GradedSlip) GroupRecordSnapshot {
+	book := buildRecordBook(season, gradedSlips, nil, nil, nil)
+	rec := fmt.Sprintf("%d-%d", book.Wins, book.Losses)
+	if book.Pushes > 0 {
+		rec = fmt.Sprintf("%d-%d-%d", book.Wins, book.Losses, book.Pushes)
+	}
+	return GroupRecordSnapshot{
+		HasSlips:   book.TotalSlips > 0,
+		Season:     season,
+		Record:     rec,
+		Wins:       book.Wins,
+		Losses:     book.Losses,
+		Pushes:     book.Pushes,
+		TotalSlips: book.TotalSlips,
+		Streak:     activeStreakLabel(gradedSlips),
+	}
+}
+
+func activeStreakLabel(gradedSlips []db.GradedSlip) string {
+	ordered := make([]db.GradedSlip, 0, len(gradedSlips))
+	for _, gs := range gradedSlips {
+		if gs.Slip.Status != db.SlipGraded {
+			continue
+		}
+		if gs.Slip.Result != parlay.Won && gs.Slip.Result != parlay.Lost && gs.Slip.Result != parlay.Push {
+			continue
+		}
+		ordered = append(ordered, gs)
+	}
+	if len(ordered) == 0 {
+		return "–"
+	}
+	slices.SortFunc(ordered, func(a, b db.GradedSlip) int {
+		if c := cmp.Compare(a.Week.Season, b.Week.Season); c != 0 {
+			return c
+		}
+		if c := cmp.Compare(a.Week.SeasonType, b.Week.SeasonType); c != 0 {
+			return c
+		}
+		if c := cmp.Compare(a.Week.WeekNum, b.Week.WeekNum); c != 0 {
+			return c
+		}
+		if c := a.Slip.CreatedAt.Compare(b.Slip.CreatedAt); c != 0 {
+			return c
+		}
+		return cmp.Compare(a.Slip.ID, b.Slip.ID)
+	})
+
+	winStreak, lossStreak := 0, 0
+	for _, gs := range ordered {
+		switch gs.Slip.Result {
+		case parlay.Won:
+			winStreak++
+			lossStreak = 0
+		case parlay.Lost:
+			lossStreak++
+			winStreak = 0
+		case parlay.Push:
+			winStreak = 0
+			lossStreak = 0
+		}
+	}
+	if winStreak > 0 {
+		return fmt.Sprintf("W%d", winStreak)
+	}
+	if lossStreak > 0 {
+		return fmt.Sprintf("L%d", lossStreak)
+	}
+	return "–"
+}
+
+func recentSlipResult(slip db.Slip) (label, tone string) {
+	if slip.Status != db.SlipGraded {
+		return "Closed", "closed"
+	}
+	switch slip.Result {
+	case parlay.Won:
+		return "Won", "won"
+	case parlay.Lost:
+		return "Lost", "lost"
+	case parlay.Push, parlay.Void:
+		return "Push", "push"
+	default:
+		return "Closed", "closed"
+	}
+}
+
+func slipProgressSummary(members []db.SlipMember, legs []db.Leg, legsPerMember int) (lockedCount int, progress string) {
+	for _, m := range members {
+		if m.LockedAt != nil {
+			lockedCount++
+		}
+	}
+	memberLabel := fmt.Sprintf("%d members", len(members))
+	if len(members) == 1 {
+		memberLabel = "1 member"
+	}
+	return lockedCount, fmt.Sprintf("%s · %d/%d picks", memberLabel, len(legs), len(members)*legsPerMember)
+}
+
+func buildScheduleViews(schedules []db.GroupSlipSchedule) []ScheduleView {
+	views := make([]ScheduleView, 0, len(schedules))
+	for _, s := range schedules {
+		views = append(views, ScheduleView{
+			ID:            s.ID,
+			Name:          s.Name,
+			SlateScope:    s.SlateScope,
+			ScopeBadge:    s.SlateScope.Label(),
+			LegsPerMember: s.LegsPerMember,
+			IsActive:      s.IsActive,
+		})
+	}
+	return views
 }
 
 // scopeBadge returns the display label for a slip's slate scope badge.
@@ -308,18 +637,7 @@ func (h *slipHandlers) groupWeek(w http.ResponseWriter, r *http.Request) {
 			deadline = newDeadlineView(games, *next.Deadline)
 		}
 
-		lockedCount := 0
-		for _, m := range members {
-			if m.LockedAt != nil {
-				lockedCount++
-			}
-		}
-
-		memberLabel := fmt.Sprintf("%d members", len(members))
-		if len(members) == 1 {
-			memberLabel = "1 member"
-		}
-		progress := fmt.Sprintf("%s · %d/%d picks", memberLabel, len(legs), len(members)*slip.LegsPerMember)
+		lockedCount, progress := slipProgressSummary(members, legs, slip.LegsPerMember)
 
 		cards = append(cards, WeekSlipCard{
 			ID:          slip.ID,
@@ -340,17 +658,7 @@ func (h *slipHandlers) groupWeek(w http.ResponseWriter, r *http.Request) {
 		h.serverError(w, err)
 		return
 	}
-	schedViews := make([]ScheduleView, 0, len(schedules))
-	for _, s := range schedules {
-		schedViews = append(schedViews, ScheduleView{
-			ID:            s.ID,
-			Name:          s.Name,
-			SlateScope:    s.SlateScope,
-			ScopeBadge:    s.SlateScope.Label(),
-			LegsPerMember: s.LegsPerMember,
-			IsActive:      s.IsActive,
-		})
-	}
+	schedViews := buildScheduleViews(schedules)
 
 	h.renderPage(w, "week", WeekPage{
 		Page:        page,
