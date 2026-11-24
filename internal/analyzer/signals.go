@@ -566,7 +566,7 @@ func LoadGameSignals(
 // game, averages across games played by each defense, and ranks ascending
 // (1 = fewest allowed, ties broken alphabetically).
 func BuildPositionDefenseRanks(rows []db.NFLversePlayerWeek, position, market string) map[string]int {
-	pos := normalizeResearchPosition(position)
+	pos := db.NormalizePosition(position)
 	if pos == "" || len(rows) == 0 {
 		return nil
 	}
@@ -582,7 +582,7 @@ func BuildPositionDefenseRanks(rows []db.NFLversePlayerWeek, position, market st
 	}
 	gameTotals := make(map[oppGameKey]float64)
 	for _, row := range rows {
-		if normalizeResearchPosition(row.Position) != pos {
+		if db.NormalizePosition(row.Position) != pos {
 			continue
 		}
 		opp := strings.ToUpper(strings.TrimSpace(row.Opponent))
@@ -706,18 +706,8 @@ func oppCandidateBetter(a db.NFLversePlayerWeek, aVal float64, b db.NFLversePlay
 	return a.ESPNID < b.ESPNID
 }
 
-func normalizeResearchPosition(pos string) string {
-	pos = strings.ToUpper(strings.TrimSpace(pos))
-	switch pos {
-	case "FB", "HB":
-		return "RB"
-	default:
-		return pos
-	}
-}
-
 func defaultMarketForPosition(pos string) string {
-	switch normalizeResearchPosition(pos) {
+	switch db.NormalizePosition(pos) {
 	case "QB":
 		return marketPassYds
 	case "RB":
@@ -783,14 +773,14 @@ func LoadPlayerResearchSignals(
 	res := PlayerResearchSignals{
 		TeamDefProfiles: teamEPA,
 	}
-	normPos := normalizeResearchPosition(position)
+	normPos := db.NormalizePosition(position)
 
 	seasonTypes := NFLverseSeasonTypes(week.SeasonType)
 	if pWeeks, err := store.NFLversePlayerWeeksForPlayerTypes(
 		ctx, athleteID, week.Season, seasonTypes...,
 	); err == nil && len(pWeeks) > 0 {
 		if normPos == "" {
-			normPos = normalizeResearchPosition(pWeeks[0].Position)
+			normPos = db.NormalizePosition(pWeeks[0].Position)
 		}
 		populateL3ResearchUsage(&res, pWeeks)
 	}

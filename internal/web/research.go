@@ -134,12 +134,6 @@ type PlayerResearchView struct {
 	L5HitRate        string
 	SeasonHitRate    string
 	L5MinMax         string
-	SnapPct          string
-	TargetShare      string
-	WOPR             string
-	OppDefLabel      string
-	OppDefRank       string
-	Bars             []HitBarView
 	PlayerChart      BarChartView
 	OppDefenseTitle  string
 	OppOverallBadge  *DefRankBadge
@@ -679,23 +673,19 @@ func (h *researchHandlers) populateNFLverseResearch(
 	sig := analyzer.LoadPlayerResearchSignals(
 		ctx, h.deps.Store, h.deps.now(), view.AthleteID, view.Team, view.Position, activeMarket,
 	)
-	if sig.HasUsage {
-		view.SnapPct = fmt.Sprintf("%.0f%%", sig.SnapPct*100)
-		view.TargetShare = fmt.Sprintf("%.1f%%", sig.TargetShare*100)
-		view.WOPR = fmt.Sprintf("%.2f", sig.WOPR)
-	}
+	var oppDefLabel, oppDefRank string
 	if sig.OppDefRank > 0 {
 		if sig.OppDefSplit == "rush" {
-			view.OppDefLabel = "Opp Rush Def"
+			oppDefLabel = "Opp Rush Def"
 		} else {
-			view.OppDefLabel = "Opp Pass Def"
+			oppDefLabel = "Opp Pass Def"
 		}
-		view.OppDefRank = fmt.Sprintf("#%d vs %s", sig.OppDefRank, sig.Opponent)
+		oppDefRank = fmt.Sprintf("#%d vs %s", sig.OppDefRank, sig.Opponent)
 	}
 
-	view.UsageTiles = buildUsageTiles(view.Position, sig, view.OppDefLabel, view.OppDefRank)
+	view.UsageTiles = buildUsageTiles(view.Position, sig, oppDefLabel, oppDefRank)
 
-	normPos := normalizeResearchPosition(view.Position)
+	normPos := db.NormalizePosition(view.Position)
 	if sig.Opponent != "" && normPos != "" && view.ActiveMarketName != "" {
 		view.OppDefenseTitle = fmt.Sprintf(
 			"%s Defense · Last 5 vs %s · %s",
@@ -872,7 +862,7 @@ func buildPlayerChart(
 		fallbackLabels = fallbackLabels[5-l5Len:]
 	}
 
-	normPos := normalizeResearchPosition(view.Position)
+	normPos := db.NormalizePosition(view.Position)
 	rawBars := make([]HitBarView, 0, l5Len)
 	for i := range l5Len {
 		srcIdx := l5Len - 1 - i
@@ -904,9 +894,7 @@ func buildPlayerChart(
 		rawBars = append(rawBars, bar)
 	}
 
-	chart := buildBarChart(rawBars, comparisonLine)
-	view.PlayerChart = chart
-	view.Bars = chart.Bars
+	view.PlayerChart = buildBarChart(rawBars, comparisonLine)
 }
 
 func buildOppDefenseChart(games []analyzer.OppDefenseGame, comparisonLine *float64) BarChartView {
@@ -983,7 +971,7 @@ func buildUsageTiles(
 		return nil
 	}
 
-	normPos := normalizeResearchPosition(position)
+	normPos := db.NormalizePosition(position)
 	if sig.HasUsage {
 		switch normPos {
 		case "QB":
@@ -1078,14 +1066,6 @@ func formatGameWeather(game db.Game) string {
 		parts = append(parts, fmt.Sprintf("%.0f mph", *game.WindMPH))
 	}
 	return strings.Join(parts, " · ")
-}
-
-func normalizeResearchPosition(position string) string {
-	pos := strings.ToUpper(strings.TrimSpace(position))
-	if pos == "FB" || pos == "HB" {
-		return "RB"
-	}
-	return pos
 }
 
 func abbreviatePlayerName(name string) string {
