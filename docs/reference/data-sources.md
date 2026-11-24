@@ -246,14 +246,15 @@ price, or no subject or book is skipped, so unpriced DFS rows never reach `refre
 | `player_kicking_points`          |                                                                  | `KICKER_PTS` |
 
 Parlay API rows carry validated prop links and sids on FanDuel only today. `odds:props:{game}` warms Parlay-only during
-`RunPrefill` (triggered automatically on the first authenticated Sunday morning visit at or after 6:00 AM ET via
-`prefill:sunday` in `sync_state`, or via the optional `POST /internal/prefill` fallback, with 15-minute idempotency)
-and runs on demand when someone opens an upcoming game on an `OPEN` slip's pick board, taps "Load them" or "Refresh
-odds", or opens a research view. After a Parlay-only `RunPrefill`, subsequent `SyncGameProps`, `SyncPickGame`,
-`ForcePickRefresh`, or `KickSlipExportEnrich` calls run enrichment-only via `odds:props:enrich:{game}` without
-re-calling Parlay API. `odds:props:{game}` is stale after 30 minutes on game days or within 6 hours of kickoff, and 2 hours
-otherwise (subject to a 2-minute cooldown on manual refresh), and is skipped once kickoff has passed. Before matching
-players, it syncs rosters for both teams (`espn:roster:{team}`). It checks the Parlay API 150-credit floor
+`RunPrefill` (triggered automatically on the first authenticated full-page visit at or after 6:00 AM ET on a scheduled
+game day while upcoming non-`FINAL` games remain on that date via `prefill:gameday` in `sync_state`, scoped to that
+date's upcoming games—or all upcoming week games when invoked manually via the optional `POST /internal/prefill`
+fallback on a non-game day—with 15-minute idempotency) and runs on demand when someone opens an upcoming game on an
+`OPEN` slip's pick board, taps "Load them" or "Refresh odds", or opens a research view. After a Parlay-only
+`RunPrefill`, subsequent `SyncGameProps`, `SyncPickGame`, `ForcePickRefresh`, or `KickSlipExportEnrich` calls run
+enrichment-only via `odds:props:enrich:{game}` without re-calling Parlay API. `odds:props:{game}` is stale after 30
+minutes on the game's Eastern date or within 6 hours of kickoff, and 2 hours otherwise (subject to a 2-minute cooldown
+on manual refresh), and is skipped once kickoff has passed. Before matching players, it syncs rosters for both teams (`espn:roster:{team}`). It checks the Parlay API 150-credit floor
 (`OddsPropsFloor`), calls `Client.Props`, maps `TEAM_TOTAL` to the game's team abbreviation, and canonicalizes player
 names and teams via batch resolution against `player_matches` and `roster_players`.
 
@@ -428,14 +429,17 @@ call. Both balances live in `sync_state`: `odds:lines` for Parlay API and `odds:
 
 The free tier is 1,000 credits a month. Target at most 800, leaving room for testing and playoff weeks.
 
-- `odds:lines` runs on the Sunday morning pre-fill (first authenticated Sunday full-page visit at or after 6:00 AM ET via
-  `prefill:sunday` in `sync_state`, or optional `POST /internal/prefill` fallback; 15 min idempotency), on-demand
-  pick-time views (`SyncPickLines`/`SyncPickGame`: 15 min on game days before the day's last kickoff or within 2 h of an
-  upcoming kickoff, 2 h otherwise; 2 min cooldown in `ForcePickRefresh`), and in sandbox `RunOnce` (24 h Monday–Friday,
-  12 h Saturday, 45 min Sunday before the last Sunday kickoff, 3 h after). Page-load `Kick()` omits `odds:lines` outside
-  that one-shot Sunday pre-fill, and all runs skip the fetch once every game of the week has kicked off.
-- `odds:props:{game}` warms Parlay-only during `RunPrefill` (15 min idempotency) and runs on demand on `OPEN`-slip
-  pick-time views, "Load them", "Refresh odds" (2 min cooldown), or research views (stale after 30 min on game days or
+- `odds:lines` runs on the per-game-day morning pre-fill (first authenticated full-page visit at or after 6:00 AM ET on
+  a scheduled game day while upcoming non-`FINAL` games remain on that date via `prefill:gameday` in `sync_state`, or
+  optional `POST /internal/prefill` fallback; 15 min idempotency), on-demand pick-time views
+  (`SyncPickLines`/`SyncPickGame`: 15 min when today has upcoming non-`FINAL` games in ET or within 2 h of an upcoming
+  kickoff, 2 h otherwise; 2 min cooldown in `ForcePickRefresh`), and in sandbox `RunOnce` (45 min with 2+ upcoming
+  non-`FINAL` games today in ET, 3 h with 1 upcoming game today, 12 h when tomorrow ET has games, 24 h otherwise).
+  Page-load `Kick()` omits `odds:lines` outside that one-shot per-game-day pre-fill, and all runs skip the fetch once
+  every game of the week has kicked off.
+- `odds:props:{game}` warms Parlay-only during `RunPrefill` for today's upcoming non-`FINAL` games in ET (or all upcoming
+  week games on a non-game-day manual fallback; 15 min idempotency) and runs on demand on `OPEN`-slip pick-time views,
+  "Load them", "Refresh odds" (2 min cooldown), or research views (stale after 30 min on the game's Eastern date or
   within 6 h of kickoff, 2 h otherwise), and only while at least 150 credits remain (`refresh.OddsPropsFloor`). Each
   game is one flat 3-credit `/props` call for all nine markets, not one credit per market.
 - `odds:lines` runs only while at least 50 credits remain (`refresh.OddsLinesFloor`).

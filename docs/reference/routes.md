@@ -46,7 +46,7 @@ of their groups makes that group active instead.
 | `GET /auth/google/start`            | Start the Google round trip                                             | Registered only when a Google client is configured. Redirects to Google. |
 | `GET /auth/google/callback`         | Finish Google sign-in                                                   | Bad `state`, code exchange, or identity answers 400 with the sign-in page. |
 | `GET /dev/login`, `POST /dev/login` | Local sign-in form and submit                                           | Registered only when `APP_ENV=dev` and `GOOGLE_CLIENT_ID` is empty. |
-| `POST /internal/prefill`            | Run the Sunday morning pre-fill sweep synchronously                     | Outside cookie/CSRF middleware; requires `Authorization: Bearer <PREFILL_TOKEN>` (constant-time compare). Returns 404 when `PREFILL_TOKEN` is empty, 401 on missing/invalid token, 503 in sandbox mode, 200 JSON `PrefillReport` on success, or 500 JSON on failure. |
+| `POST /internal/prefill`            | Run the per-game-day pre-fill sweep synchronously                       | Warms lines and Parlay-only props for today's upcoming non-`FINAL` games in ET (or all upcoming week games on a non-game day) and records `prefill:gameday`. Outside cookie/CSRF middleware; requires `Authorization: Bearer <PREFILL_TOKEN>` (constant-time compare). Returns 404 when `PREFILL_TOKEN` is empty, 401 on missing/invalid token, 503 in sandbox mode, 200 JSON `PrefillReport` on success, or 500 JSON on failure. |
 
 `GET /healthz` is what Cloud Run's startup and liveness probes call. It pings SQLite with a two-second timeout derived
 from the request, so a probe never waits on a busy database. A healthy handle answers 200 with the body `ok`; a closed

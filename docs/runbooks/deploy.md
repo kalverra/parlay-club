@@ -4,6 +4,9 @@ title: Deploy
 type: runbook
 summary: How a commit reaches Cloud Run, why deploys pause during game windows, how to force one, and how to verify, roll back, and read the spend.
 tags: [deploy, cloud-run, github-actions, blackout, litestream, rollback, runbook, cloud-scheduler]
+budget:
+  max_spans_per_100_lines: 65
+  reason: Names exact Cloud Run flags, secrets, workflow variables, and verification commands across the deploy runbook.
 ---
 
 # Deploy
@@ -19,8 +22,9 @@ setup lives in [GCP setup](../guides/gcp-setup.md); this runbook covers every de
   GitHub variables all exist.
 - The five required secrets have an `ENABLED` version. `github-token` and `prefill-token` are optional: with a version,
   bug reports open GitHub issues and the optional `POST /internal/prefill` fallback accepts bearer-token requests;
-  without one, bug reports stay in SQLite and `POST /internal/prefill` returns `404` (Sunday pre-fill still runs
-  automatically on the first authenticated Sunday visit via `prefill:sunday` in `sync_state`).
+  without one, bug reports stay in SQLite and `POST /internal/prefill` returns `404` (per-game-day pre-fill still runs
+  automatically on the first authenticated visit at or after 6:00 AM ET on any scheduled game day via `prefill:gameday` in
+  `sync_state`).
 - `parlay-deployer` can read Secret Manager metadata and the Litestream bucket. A project set up before the pre-flight
   checks existed needs `deploy/setup.sh` run once more; it grants `roles/secretmanager.viewer` and
   `roles/storage.bucketViewer`.
@@ -169,9 +173,9 @@ yourself under **Billing → Account management** if those mails never arrive.
   tier is a worry, check the repo size after a busy week.
 - Build layers live in the GitHub Actions cache, not Artifact Registry, so caching does not add to the repo size or the
   0.5 GB free tier.
-- Cloud Scheduler's free tier includes three jobs per billing account; if configured, the optional Sunday morning
+- Cloud Scheduler's free tier includes three jobs per billing account; if configured, the optional game-day morning
   pre-fill fallback job (`parlay-club-prefill`, set up in
-  [GCP setup](../guides/gcp-setup.md#8-schedule-the-sunday-morning-pre-fill-fallback-optional)) stays within it.
+  [GCP setup](../guides/gcp-setup.md#8-schedule-the-game-day-morning-pre-fill-fallback-optional)) stays within it.
 - Odds credits are separate from GCP spend. The app tracks them in `sync_state`; see
   [Data refresh](../concepts/data-refresh.md).
 
