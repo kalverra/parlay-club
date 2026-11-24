@@ -92,11 +92,22 @@
   <header class="ui-slip-card p-4">
     <div class="flex items-start justify-between gap-3">
       <div class="min-w-0">
-        <h1 class="truncate font-display text-xl font-semibold">{{.Slip.Name}}</h1>
+        <div class="flex flex-wrap items-center gap-2">
+          <h1 class="truncate font-display text-xl font-semibold">{{.Slip.Name}}</h1>
+          {{if .Slip.ScopeBadge}}
+            <span class="shrink-0 rounded-md border border-line bg-surface-2 px-2 py-0.5 text-xs font-medium text-ink-muted">
+              {{.Slip.ScopeBadge}}
+            </span>
+          {{end}}
+        </div>
         <p class="mt-1 text-sm text-ink-muted">
           {{.Slip.LockedIn}}/{{.Slip.MemberCount}} locked in
           <span aria-hidden="true">·</span>
           {{.Slip.LegsPerMember}} leg{{if ne .Slip.LegsPerMember 1}}s{{end}} per member
+          {{if le (len .Siblings) 1}}
+            <span aria-hidden="true">·</span>
+            <a href="/slips/new{{if .Slip.WeekID}}?week={{.Slip.WeekID}}{{end}}" class="font-medium text-ink hover:underline">+ New slip</a>
+          {{end}}
         </p>
       </div>
       <span
@@ -117,6 +128,12 @@
             <span class="{{if .Current}}opacity-80{{else}}text-ink-subtle{{end}}">({{.Summary}})</span>
           </a>
         {{end}}
+        <a
+          href="/slips/new{{if .Slip.WeekID}}?week={{.Slip.WeekID}}{{end}}"
+          class="inline-flex shrink-0 items-center rounded-lg border border-dashed border-line-strong px-2.5 py-1.5 text-xs font-medium text-ink-muted transition hover:border-ink-muted hover:text-ink"
+        >
+          + New slip
+        </a>
       </nav>
     {{end}}
   </header>

@@ -161,7 +161,7 @@ Risk: low (UI labels and navigation only, no schema or sync changes, verified by
 - [x] Rename `db.SlateScopeThursday.Label()` to `"Thursday Slate"` in `internal/db/slips.go`, update static option
   labels in `web/templates/slip.html` and `web/templates/week.html`, and update corresponding tests in
   `internal/db/slips_test.go`, `internal/web/home_test.go`, and `internal/web/slips_test.go`.
-- [ ] Add `WeekID` and `ScopeBadge` to `SlipView` (`internal/web/slips.go`), display `ScopeBadge` and a `+ New slip`
+- [x] Add `WeekID` and `ScopeBadge` to `SlipView` (`internal/web/slips.go`), display `ScopeBadge` and a `+ New slip`
   link (`/slips/new?week=...`) in `web/templates/partials.html` for both single-slip and multi-slip weeks, remove the
   redundant top-bar `#slip-switcher` (`internal/web/page.go`, `internal/web/slips.go`, `web/templates/layout.html`,
   `web/static/app.js`), and update `internal/web/layout_test.go` and `internal/web/slips_test.go`.

@@ -920,7 +920,7 @@ func TestSiblingSlipSwitcher(t *testing.T) {
 
 	fixture := newSlipFixture(t, 2)
 
-	// 1. Single slip in week: no sibling switcher rendered.
+	// 1. Single slip in week: no sibling switcher rendered, scope badge and + New slip shown.
 	reqSingle := httptest.NewRequestWithContext(
 		t.Context(),
 		http.MethodGet,
@@ -930,7 +930,12 @@ func TestSiblingSlipSwitcher(t *testing.T) {
 	recSingle := httptest.NewRecorder()
 	fixture.handler.ServeHTTP(recSingle, reqSingle)
 	assert.Equal(t, http.StatusOK, recSingle.Code)
-	assert.NotContains(t, recSingle.Body.String(), "data-sibling-switcher")
+	bodySingle := recSingle.Body.String()
+	assert.NotContains(t, bodySingle, "data-sibling-switcher")
+	assert.NotContains(t, bodySingle, `id="slip-switcher"`)
+	assert.Contains(t, bodySingle, "Full Week")
+	assert.Contains(t, bodySingle, fmt.Sprintf(`href="/slips/new?week=%d"`, fixture.week.ID))
+	assert.Contains(t, bodySingle, "+ New slip")
 
 	// 2. Add a second slip for Thursday Night in the same week.
 	thuSlip, err := fixture.store.CreateSlip(
@@ -971,13 +976,17 @@ func TestSiblingSlipSwitcher(t *testing.T) {
 	fixture.handler.ServeHTTP(recThu, reqThu)
 	assert.Equal(t, http.StatusOK, recThu.Code)
 	bodyThu := recThu.Body.String()
+	assert.NotContains(t, bodyThu, `id="slip-switcher"`)
 	assert.Contains(t, bodyThu, "data-sibling-switcher")
+	assert.Contains(t, bodyThu, "Thursday Slate")
 	assert.Contains(t, bodyThu, "Thursday Night")
 	assert.Contains(t, bodyThu, "(Locked)")
 	assert.Contains(t, bodyThu, fixture.slip.Name)
 	assert.Contains(t, bodyThu, "(1/2 Picks)")
 	assert.Contains(t, bodyThu, fmt.Sprintf(`href="/slips/%d"`, fixture.slip.ID))
 	assert.Contains(t, bodyThu, fmt.Sprintf(`href="/slips/%d"`, thuSlip.ID))
+	assert.Contains(t, bodyThu, fmt.Sprintf(`href="/slips/new?week=%d"`, fixture.week.ID))
+	assert.Contains(t, bodyThu, "+ New slip")
 	// Thursday is current on reqThu, Sunday is not.
 	assert.Contains(t, bodyThu, `aria-current="page"`)
 
@@ -992,9 +1001,12 @@ func TestSiblingSlipSwitcher(t *testing.T) {
 	fixture.handler.ServeHTTP(recSun, reqSun)
 	assert.Equal(t, http.StatusOK, recSun.Code)
 	bodySun := recSun.Body.String()
+	assert.NotContains(t, bodySun, `id="slip-switcher"`)
 	assert.Contains(t, bodySun, "data-sibling-switcher")
+	assert.Contains(t, bodySun, "Full Week")
 	assert.Contains(t, bodySun, "(Locked)")
 	assert.Contains(t, bodySun, "(1/2 Picks)")
+	assert.Contains(t, bodySun, fmt.Sprintf(`href="/slips/new?week=%d"`, fixture.week.ID))
 	assert.Contains(t, bodySun, `aria-current="page"`)
 
 	// 5. Check HTMX panel refresh also contains sibling switcher.

@@ -20,7 +20,7 @@
       >Skip to content</a
     >
 
-    {{if or .WeekLabel .User .Groups (gt (len .Slips) 1)}}
+    {{if or .WeekLabel .User .Groups}}
     <header class="sticky top-0 z-30 border-b border-chrome-border bg-chrome/95 text-chrome-ink backdrop-blur">
       <div class="mx-auto flex h-14 w-full {{if .Wide}}max-w-6xl{{else}}max-w-3xl{{end}} items-center gap-2 px-3">
         <a
@@ -81,15 +81,6 @@
         {{end}}
         {{if .WeekLabel}}
           <span class="shrink-0 text-sm font-semibold text-chrome-ink">{{.WeekLabel}}</span>
-        {{end}}
-        {{if gt (len .Slips) 1}}
-          <label for="slip-switcher" class="sr-only">Slip</label>
-          <select
-            id="slip-switcher"
-            class="min-w-0 rounded-md border border-chrome-border bg-chrome px-2 py-1 text-sm text-chrome-ink"
-          >
-            {{range .Slips}}<option value="{{.ID}}"{{if .Current}} selected{{end}}>{{.Name}}</option>{{end}}
-          </select>
         {{end}}
         <span class="flex-1"></span>
         <button
