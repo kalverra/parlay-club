@@ -404,8 +404,9 @@ func mergeTeamInjuryFeeds(
 }
 
 // LoadSlipSignals loads fresh nfelo projections, fresh nflverse team EPA/pace
-// profiles, nflverse player usage, merged team injuries, roster positions, and
-// player_gamelogs for a slip's games and legs. Missing or stale sources fail soft.
+// profiles, nflverse player usage, merged team injuries, roster positions,
+// player_gamelogs, and sharp bookmaker benchmarks from stored odds for a slip's
+// games and legs. Missing or stale sources fail soft.
 func LoadSlipSignals(
 	ctx context.Context,
 	store *db.Store,
@@ -440,6 +441,13 @@ func LoadSlipSignals(
 		}
 	}
 
+	var sharpByGame map[string]map[SharpKey]SharpQuote
+	if len(games) > 0 {
+		if oddsRows, err := store.OddsForWeek(ctx, weekID); err == nil {
+			sharpByGame = BuildSharpBenchmarks(oddsRows)
+		}
+	}
+
 	gamesByID := make(map[string]Game, len(games))
 	for _, game := range games {
 		var proj *db.NfeloGame
@@ -448,6 +456,7 @@ func LoadSlipSignals(
 		}
 		converted := GameFromDB(game, proj, teamEPA)
 		converted.Injuries = toAnalyzerInjuries(MergeGameInjuries(game, rosters))
+		converted.Sharp = sharpByGame[game.ID]
 		gamesByID[game.ID] = converted
 	}
 

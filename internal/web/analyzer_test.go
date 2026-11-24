@@ -700,3 +700,132 @@ func TestSlipPanelAndTrayWireNFLverseGradesAndRuleLinks(t *testing.T) {
 		assert.Contains(t, panelBody, `data-leg-grade`)
 	})
 }
+
+func TestSlipPanelTrayAndGuideRenderSharpFactors(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	game := addGame(t, fixture, gameKickoff())
+	now := time.Now().UTC()
+
+	_, err := fixture.store.UpsertOdds(t.Context(), []db.Odds{
+		{
+			GameID:     game.ID,
+			Book:       "lowvig",
+			MarketType: "SPREAD",
+			Team:       "BUF",
+			Side:       "TEAM",
+			Line:       new(-3.5),
+			Price:      -110,
+			FetchedAt:  now,
+		},
+		{
+			GameID:     game.ID,
+			Book:       "lowvig",
+			MarketType: "SPREAD",
+			Team:       "MIA",
+			Side:       "TEAM",
+			Line:       new(3.5),
+			Price:      -110,
+			FetchedAt:  now,
+		},
+		{
+			GameID:     game.ID,
+			Book:       "pinnacle",
+			MarketType: "PASS_YDS",
+			Team:       "BUF",
+			PlayerName: "Josh Allen",
+			Side:       "OVER",
+			Line:       new(265.5),
+			Price:      -120,
+			FetchedAt:  now,
+		},
+		{
+			GameID:     game.ID,
+			Book:       "pinnacle",
+			MarketType: "PASS_YDS",
+			Team:       "BUF",
+			PlayerName: "Josh Allen",
+			Side:       "UNDER",
+			Line:       new(265.5),
+			Price:      100,
+			FetchedAt:  now,
+		},
+	})
+	require.NoError(t, err)
+
+	addStoredLeg(t, fixture, db.Leg{
+		UserID:     fixture.user.ID,
+		GameID:     new(game.ID),
+		MarketType: "SPREAD",
+		Selection:  "BUF -2.5",
+		Team:       new("BUF"),
+		Side:       new("TEAM"),
+		Line:       new(-2.5),
+		Odds:       -110,
+	})
+	addStoredLeg(t, fixture, db.Leg{
+		UserID:     fixture.user.ID,
+		GameID:     new(game.ID),
+		MarketType: "PASS_YDS",
+		Selection:  "Josh Allen Over 265.5 Pass Yds",
+		Team:       new("BUF"),
+		PlayerName: new("Josh Allen"),
+		Side:       new("OVER"),
+		Line:       new(265.5),
+		Odds:       -135,
+	})
+
+	panelRec := httptest.NewRecorder()
+	panelReq := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodGet,
+		fmt.Sprintf("/slips/%d/panel", fixture.slip.ID),
+		nil,
+	)
+	fixture.handler.ServeHTTP(panelRec, panelReq)
+	require.Equal(t, http.StatusOK, panelRec.Code)
+	panelBody := html.UnescapeString(panelRec.Body.String())
+	assert.Contains(t, panelBody, "Sharp line edge")
+	assert.Contains(t, panelBody, "+8")
+	assert.Contains(t, panelBody, "Steep price vs. sharp")
+	assert.Contains(t, panelBody, "-6")
+
+	trayRec := httptest.NewRecorder()
+	trayReq := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodGet,
+		fmt.Sprintf("/slips/%d/tray", fixture.slip.ID),
+		nil,
+	)
+	fixture.handler.ServeHTTP(trayRec, trayReq)
+	require.Equal(t, http.StatusOK, trayRec.Code)
+	trayBody := html.UnescapeString(trayRec.Body.String())
+	assert.Contains(t, trayBody, "Sharp line edge")
+	assert.Contains(t, trayBody, "+8")
+	assert.Contains(t, trayBody, "Steep price vs. sharp")
+	assert.Contains(t, trayBody, "-6")
+
+	guideRec := httptest.NewRecorder()
+	guideReq := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodGet,
+		"/analyzer/guide",
+		nil,
+	)
+	fixture.handler.ServeHTTP(guideRec, guideReq)
+	require.Equal(t, http.StatusOK, guideRec.Code)
+	guideBody := html.UnescapeString(guideRec.Body.String())
+	for _, label := range []string{
+		"Sharp line edge",
+		"Sharp line fade",
+		"Sharp price edge",
+		"Steep price vs. sharp",
+		"+8 (+5 consensus)",
+		"-8 (-5 consensus)",
+		"+6 (+4 consensus)",
+		"-6 (-4 consensus)",
+	} {
+		assert.Contains(t, guideBody, label)
+	}
+}

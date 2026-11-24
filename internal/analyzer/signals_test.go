@@ -716,3 +716,120 @@ func TestMergeInjuryFeeds(t *testing.T) {
 		{AthleteID: "201", FullName: "Tyreek Hill", Position: "WR", Status: "Questionable"},
 	}, merged["MIA"])
 }
+
+func TestLoadSlipSignalsPopulatesSharpBenchmarks(t *testing.T) {
+	t.Parallel()
+
+	store := openSignalTestStore(t)
+	now := time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC)
+
+	week, err := store.UpsertWeek(t.Context(), 2026, nflverse.SeasonTypeRegular, 6)
+	require.NoError(t, err)
+	g1, err := store.UpsertGame(t.Context(), db.Game{
+		ID:       "g1",
+		WeekID:   week.ID,
+		HomeTeam: "BUF",
+		AwayTeam: "MIA",
+		Kickoff:  now.Add(48 * time.Hour),
+		Status:   db.GameScheduled,
+	})
+	require.NoError(t, err)
+	g2, err := store.UpsertGame(t.Context(), db.Game{
+		ID:       "g2",
+		WeekID:   week.ID,
+		HomeTeam: "KC",
+		AwayTeam: "BAL",
+		Kickoff:  now.Add(48 * time.Hour),
+		Status:   db.GameScheduled,
+	})
+	require.NoError(t, err)
+
+	_, err = store.UpsertOdds(t.Context(), []db.Odds{
+		{
+			GameID:     g1.ID,
+			Book:       "lowvig",
+			MarketType: "SPREAD",
+			Team:       "BUF",
+			Side:       "TEAM",
+			Line:       new(-3.5),
+			Price:      -110,
+			FetchedAt:  now,
+		},
+		{
+			GameID:     g1.ID,
+			Book:       "lowvig",
+			MarketType: "SPREAD",
+			Team:       "MIA",
+			Side:       "TEAM",
+			Line:       new(3.5),
+			Price:      -110,
+			FetchedAt:  now,
+		},
+		{
+			GameID:     g1.ID,
+			Book:       "pinnacle",
+			MarketType: "PASS_YDS",
+			Team:       "BUF",
+			PlayerName: "Josh Allen",
+			Side:       "OVER",
+			Line:       new(265.5),
+			Price:      -105,
+			FetchedAt:  now,
+		},
+		{
+			GameID:     g1.ID,
+			Book:       "pinnacle",
+			MarketType: "PASS_YDS",
+			Team:       "BUF",
+			PlayerName: "Josh Allen",
+			Side:       "UNDER",
+			Line:       new(265.5),
+			Price:      -115,
+			FetchedAt:  now,
+		},
+	})
+	require.NoError(t, err)
+
+	gamesByID, _ := analyzer.LoadSlipSignals(t.Context(), store, now, week.ID, []db.Game{g1, g2}, nil)
+	require.Contains(t, gamesByID, g1.ID)
+	require.Contains(t, gamesByID, g2.ID)
+	assert.Nil(t, gamesByID[g2.ID].Sharp, "games without stored odds should fail soft")
+
+	sharp := gamesByID[g1.ID].Sharp
+	require.NotNil(t, sharp)
+
+	spreadKey := analyzer.SharpKey{MarketType: "SPREAD", Team: "BUF", Side: "TEAM"}
+	spreadQuote, ok := sharp[spreadKey]
+	require.True(t, ok)
+	assert.Equal(t, "LowVig", spreadQuote.Source)
+	assert.Equal(t, 2, spreadQuote.Tier)
+	require.NotNil(t, spreadQuote.Line)
+	assert.InDelta(t, -3.5, *spreadQuote.Line, 1e-9)
+	assert.InDelta(t, 0.5, spreadQuote.FairProb, 1e-6)
+
+	propKey := analyzer.SharpKey{MarketType: "PASS_YDS", Team: "BUF", PlayerName: "josh allen", Side: "OVER"}
+	propQuote, ok := sharp[propKey]
+	require.True(t, ok)
+	assert.Equal(t, "Pinnacle", propQuote.Source)
+	assert.Equal(t, 1, propQuote.Tier)
+	require.NotNil(t, propQuote.Line)
+	assert.InDelta(t, 265.5, *propQuote.Line, 1e-9)
+
+	leg := analyzer.Leg{
+		ID:     1,
+		GameID: g1.ID,
+		Market: "SPREAD",
+		Team:   "BUF",
+		Side:   "TEAM",
+		Line:   new(-2.5),
+		Odds:   -110,
+	}
+	grade := analyzer.ScoreLeg(leg, gamesByID, nil)
+	require.Len(t, grade.Factors, 1)
+	assert.Equal(t, "sharp_line_edge", grade.Factors[0].Rule)
+	assert.Equal(t, 8, grade.Factors[0].Delta)
+
+	emptyGames, emptyStats := analyzer.LoadSlipSignals(t.Context(), store, now, week.ID, nil, nil)
+	assert.Empty(t, emptyGames)
+	assert.Nil(t, emptyStats)
+}
