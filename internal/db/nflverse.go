@@ -80,19 +80,28 @@ const nflversePlayerWeekColumns = `
 // UpsertNFLversePlayerIDs writes each player crosswalk row and reports whether
 // any row changed. Identical rows keep their existing updated_at.
 func (s *Store) UpsertNFLversePlayerIDs(ctx context.Context, rows []NFLversePlayerID) (bool, error) {
+	if len(rows) == 0 {
+		return false, nil
+	}
 	changed := false
 	err := s.Tx(ctx, func(tx *Store) error {
+		stmt, err := tx.conn().PrepareContext(ctx, `
+			INSERT INTO nflverse_player_ids (
+				espn_id, gsis_id, pfr_id, updated_at
+			) VALUES (?, ?, ?, ?)
+			ON CONFLICT (espn_id) DO UPDATE SET
+				gsis_id = excluded.gsis_id,
+				pfr_id = excluded.pfr_id,
+				updated_at = excluded.updated_at
+			WHERE nflverse_player_ids.gsis_id IS NOT excluded.gsis_id
+				OR nflverse_player_ids.pfr_id IS NOT excluded.pfr_id`)
+		if err != nil {
+			return fmt.Errorf("prepare upsert nflverse player ids: %w", err)
+		}
+		defer func() { _ = stmt.Close() }()
+
 		for _, row := range rows {
-			result, err := tx.conn().ExecContext(ctx, `
-				INSERT INTO nflverse_player_ids (
-					espn_id, gsis_id, pfr_id, updated_at
-				) VALUES (?, ?, ?, ?)
-				ON CONFLICT (espn_id) DO UPDATE SET
-					gsis_id = excluded.gsis_id,
-					pfr_id = excluded.pfr_id,
-					updated_at = excluded.updated_at
-				WHERE nflverse_player_ids.gsis_id IS NOT excluded.gsis_id
-					OR nflverse_player_ids.pfr_id IS NOT excluded.pfr_id`,
+			result, err := stmt.ExecContext(ctx,
 				row.ESPNID,
 				row.GSISID,
 				row.PFRID,
@@ -149,29 +158,38 @@ func (s *Store) NFLversePlayerIDByESPN(ctx context.Context, espnID string) (NFLv
 // UpsertNFLverseTeamWeeks writes each team-week row and reports whether any row
 // changed. Identical rows keep their existing updated_at.
 func (s *Store) UpsertNFLverseTeamWeeks(ctx context.Context, rows []NFLverseTeamWeek) (bool, error) {
+	if len(rows) == 0 {
+		return false, nil
+	}
 	changed := false
 	err := s.Tx(ctx, func(tx *Store) error {
+		stmt, err := tx.conn().PrepareContext(ctx, `
+			INSERT INTO nflverse_team_weeks (
+				season, season_type, week_num, team, off_pass_epa, off_rush_epa,
+				def_pass_epa_allowed, def_rush_epa_allowed, plays_per_game,
+				pass_rate, updated_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT (season, season_type, week_num, team) DO UPDATE SET
+				off_pass_epa = excluded.off_pass_epa,
+				off_rush_epa = excluded.off_rush_epa,
+				def_pass_epa_allowed = excluded.def_pass_epa_allowed,
+				def_rush_epa_allowed = excluded.def_rush_epa_allowed,
+				plays_per_game = excluded.plays_per_game,
+				pass_rate = excluded.pass_rate,
+				updated_at = excluded.updated_at
+			WHERE nflverse_team_weeks.off_pass_epa IS NOT excluded.off_pass_epa
+				OR nflverse_team_weeks.off_rush_epa IS NOT excluded.off_rush_epa
+				OR nflverse_team_weeks.def_pass_epa_allowed IS NOT excluded.def_pass_epa_allowed
+				OR nflverse_team_weeks.def_rush_epa_allowed IS NOT excluded.def_rush_epa_allowed
+				OR nflverse_team_weeks.plays_per_game IS NOT excluded.plays_per_game
+				OR nflverse_team_weeks.pass_rate IS NOT excluded.pass_rate`)
+		if err != nil {
+			return fmt.Errorf("prepare upsert nflverse team weeks: %w", err)
+		}
+		defer func() { _ = stmt.Close() }()
+
 		for _, row := range rows {
-			result, err := tx.conn().ExecContext(ctx, `
-				INSERT INTO nflverse_team_weeks (
-					season, season_type, week_num, team, off_pass_epa, off_rush_epa,
-					def_pass_epa_allowed, def_rush_epa_allowed, plays_per_game,
-					pass_rate, updated_at
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-				ON CONFLICT (season, season_type, week_num, team) DO UPDATE SET
-					off_pass_epa = excluded.off_pass_epa,
-					off_rush_epa = excluded.off_rush_epa,
-					def_pass_epa_allowed = excluded.def_pass_epa_allowed,
-					def_rush_epa_allowed = excluded.def_rush_epa_allowed,
-					plays_per_game = excluded.plays_per_game,
-					pass_rate = excluded.pass_rate,
-					updated_at = excluded.updated_at
-				WHERE nflverse_team_weeks.off_pass_epa IS NOT excluded.off_pass_epa
-					OR nflverse_team_weeks.off_rush_epa IS NOT excluded.off_rush_epa
-					OR nflverse_team_weeks.def_pass_epa_allowed IS NOT excluded.def_pass_epa_allowed
-					OR nflverse_team_weeks.def_rush_epa_allowed IS NOT excluded.def_rush_epa_allowed
-					OR nflverse_team_weeks.plays_per_game IS NOT excluded.plays_per_game
-					OR nflverse_team_weeks.pass_rate IS NOT excluded.pass_rate`,
+			result, err := stmt.ExecContext(ctx,
 				row.Season,
 				row.SeasonType,
 				row.WeekNum,
@@ -288,64 +306,73 @@ func (s *Store) NFLverseTeamWeeksForSeasonTypes(
 // UpsertNFLversePlayerWeeks writes each player-week row and reports whether
 // any row changed. Identical rows keep their existing updated_at.
 func (s *Store) UpsertNFLversePlayerWeeks(ctx context.Context, rows []NFLversePlayerWeek) (bool, error) {
+	if len(rows) == 0 {
+		return false, nil
+	}
 	changed := false
 	err := s.Tx(ctx, func(tx *Store) error {
+		stmt, err := tx.conn().PrepareContext(ctx, `
+			INSERT INTO nflverse_player_weeks (
+				espn_id, season, season_type, week_num, team, opponent,
+				player_name, position, offense_snaps, offense_pct,
+				target_share, air_yards_share, wopr, pass_att, pass_yds,
+				pass_tds, carries, rush_yds, rush_tds, targets,
+				receptions, rec_yds, rec_tds, kicker_pts, total_epa,
+				rz_opps, updated_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT (espn_id, season, season_type, week_num) DO UPDATE SET
+				team = excluded.team,
+				opponent = excluded.opponent,
+				player_name = excluded.player_name,
+				position = excluded.position,
+				offense_snaps = excluded.offense_snaps,
+				offense_pct = excluded.offense_pct,
+				target_share = excluded.target_share,
+				air_yards_share = excluded.air_yards_share,
+				wopr = excluded.wopr,
+				pass_att = excluded.pass_att,
+				pass_yds = excluded.pass_yds,
+				pass_tds = excluded.pass_tds,
+				carries = excluded.carries,
+				rush_yds = excluded.rush_yds,
+				rush_tds = excluded.rush_tds,
+				targets = excluded.targets,
+				receptions = excluded.receptions,
+				rec_yds = excluded.rec_yds,
+				rec_tds = excluded.rec_tds,
+				kicker_pts = excluded.kicker_pts,
+				total_epa = excluded.total_epa,
+				rz_opps = excluded.rz_opps,
+				updated_at = excluded.updated_at
+			WHERE nflverse_player_weeks.team IS NOT excluded.team
+				OR nflverse_player_weeks.opponent IS NOT excluded.opponent
+				OR nflverse_player_weeks.player_name IS NOT excluded.player_name
+				OR nflverse_player_weeks.position IS NOT excluded.position
+				OR nflverse_player_weeks.offense_snaps IS NOT excluded.offense_snaps
+				OR nflverse_player_weeks.offense_pct IS NOT excluded.offense_pct
+				OR nflverse_player_weeks.target_share IS NOT excluded.target_share
+				OR nflverse_player_weeks.air_yards_share IS NOT excluded.air_yards_share
+				OR nflverse_player_weeks.wopr IS NOT excluded.wopr
+				OR nflverse_player_weeks.pass_att IS NOT excluded.pass_att
+				OR nflverse_player_weeks.pass_yds IS NOT excluded.pass_yds
+				OR nflverse_player_weeks.pass_tds IS NOT excluded.pass_tds
+				OR nflverse_player_weeks.carries IS NOT excluded.carries
+				OR nflverse_player_weeks.rush_yds IS NOT excluded.rush_yds
+				OR nflverse_player_weeks.rush_tds IS NOT excluded.rush_tds
+				OR nflverse_player_weeks.targets IS NOT excluded.targets
+				OR nflverse_player_weeks.receptions IS NOT excluded.receptions
+				OR nflverse_player_weeks.rec_yds IS NOT excluded.rec_yds
+				OR nflverse_player_weeks.rec_tds IS NOT excluded.rec_tds
+				OR nflverse_player_weeks.kicker_pts IS NOT excluded.kicker_pts
+				OR nflverse_player_weeks.total_epa IS NOT excluded.total_epa
+				OR nflverse_player_weeks.rz_opps IS NOT excluded.rz_opps`)
+		if err != nil {
+			return fmt.Errorf("prepare upsert nflverse player weeks: %w", err)
+		}
+		defer func() { _ = stmt.Close() }()
+
 		for _, row := range rows {
-			result, err := tx.conn().ExecContext(ctx, `
-				INSERT INTO nflverse_player_weeks (
-					espn_id, season, season_type, week_num, team, opponent,
-					player_name, position, offense_snaps, offense_pct,
-					target_share, air_yards_share, wopr, pass_att, pass_yds,
-					pass_tds, carries, rush_yds, rush_tds, targets,
-					receptions, rec_yds, rec_tds, kicker_pts, total_epa,
-					rz_opps, updated_at
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-				ON CONFLICT (espn_id, season, season_type, week_num) DO UPDATE SET
-					team = excluded.team,
-					opponent = excluded.opponent,
-					player_name = excluded.player_name,
-					position = excluded.position,
-					offense_snaps = excluded.offense_snaps,
-					offense_pct = excluded.offense_pct,
-					target_share = excluded.target_share,
-					air_yards_share = excluded.air_yards_share,
-					wopr = excluded.wopr,
-					pass_att = excluded.pass_att,
-					pass_yds = excluded.pass_yds,
-					pass_tds = excluded.pass_tds,
-					carries = excluded.carries,
-					rush_yds = excluded.rush_yds,
-					rush_tds = excluded.rush_tds,
-					targets = excluded.targets,
-					receptions = excluded.receptions,
-					rec_yds = excluded.rec_yds,
-					rec_tds = excluded.rec_tds,
-					kicker_pts = excluded.kicker_pts,
-					total_epa = excluded.total_epa,
-					rz_opps = excluded.rz_opps,
-					updated_at = excluded.updated_at
-				WHERE nflverse_player_weeks.team IS NOT excluded.team
-					OR nflverse_player_weeks.opponent IS NOT excluded.opponent
-					OR nflverse_player_weeks.player_name IS NOT excluded.player_name
-					OR nflverse_player_weeks.position IS NOT excluded.position
-					OR nflverse_player_weeks.offense_snaps IS NOT excluded.offense_snaps
-					OR nflverse_player_weeks.offense_pct IS NOT excluded.offense_pct
-					OR nflverse_player_weeks.target_share IS NOT excluded.target_share
-					OR nflverse_player_weeks.air_yards_share IS NOT excluded.air_yards_share
-					OR nflverse_player_weeks.wopr IS NOT excluded.wopr
-					OR nflverse_player_weeks.pass_att IS NOT excluded.pass_att
-					OR nflverse_player_weeks.pass_yds IS NOT excluded.pass_yds
-					OR nflverse_player_weeks.pass_tds IS NOT excluded.pass_tds
-					OR nflverse_player_weeks.carries IS NOT excluded.carries
-					OR nflverse_player_weeks.rush_yds IS NOT excluded.rush_yds
-					OR nflverse_player_weeks.rush_tds IS NOT excluded.rush_tds
-					OR nflverse_player_weeks.targets IS NOT excluded.targets
-					OR nflverse_player_weeks.receptions IS NOT excluded.receptions
-					OR nflverse_player_weeks.rec_yds IS NOT excluded.rec_yds
-					OR nflverse_player_weeks.rec_tds IS NOT excluded.rec_tds
-					OR nflverse_player_weeks.kicker_pts IS NOT excluded.kicker_pts
-					OR nflverse_player_weeks.total_epa IS NOT excluded.total_epa
-					OR nflverse_player_weeks.rz_opps IS NOT excluded.rz_opps`,
+			result, err := stmt.ExecContext(ctx,
 				row.ESPNID,
 				row.Season,
 				row.SeasonType,
@@ -353,7 +380,7 @@ func (s *Store) UpsertNFLversePlayerWeeks(ctx context.Context, rows []NFLversePl
 				row.Team,
 				row.Opponent,
 				row.PlayerName,
-				normalizeNFLversePosition(row.Position),
+				NormalizePosition(row.Position),
 				row.OffenseSnaps,
 				row.OffensePct,
 				row.TargetShare,
@@ -531,7 +558,7 @@ func (s *Store) NFLversePlayerWeeksAgainstOpponent(
 	seasonTypes ...int,
 ) ([]NFLversePlayerWeek, error) {
 	opponent = strings.ToUpper(strings.TrimSpace(opponent))
-	position = normalizeNFLversePosition(position)
+	position = NormalizePosition(position)
 	if opponent == "" || position == "" || len(seasonTypes) == 0 {
 		return nil, nil
 	}
@@ -568,7 +595,7 @@ func (s *Store) NFLversePlayerWeeksForPositionTypes(
 	season int,
 	seasonTypes ...int,
 ) ([]NFLversePlayerWeek, error) {
-	position = normalizeNFLversePosition(position)
+	position = NormalizePosition(position)
 	if position == "" || len(seasonTypes) == 0 {
 		return nil, nil
 	}
@@ -599,7 +626,8 @@ func seasonTypePlaceholders(seasonTypes []int) (string, []any) {
 	return placeholders, args
 }
 
-func normalizeNFLversePosition(pos string) string {
+// NormalizePosition canonicalizes an NFL position code, mapping FB and HB to RB.
+func NormalizePosition(pos string) string {
 	pos = strings.ToUpper(strings.TrimSpace(pos))
 	switch pos {
 	case "FB", "HB":

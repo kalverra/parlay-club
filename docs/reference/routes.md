@@ -331,7 +331,7 @@ opens the same leg form with `game_id` set and `quick=1`.
 | -------------------------------------- | -------------------------------------------------------------------- | -------- |
 | `GET /research`                        | Full research page or target partial                                 | Full page or partial |
 | `GET /research/games/{id}`             | Game research: filtered injuries and prop player match list          | Partial |
-| `GET /research/players/{espnID}`       | Player research: last-5 hit bars, median, mean, and market stats      | Partial |
+| `GET /research/players/{espnID}`       | Player research: matchup strip, L5 and opp-defense charts, hit rates, usage | Partial |
 | `POST /research/matches`               | Save manual player match from `odds_name`, `team`, and `athlete_id`  | Partial (refreshed game research) |
 
 `GET /research` renders the week's game selector and player autocomplete picker. It accepts optional `?game_id=`,
@@ -342,10 +342,16 @@ opens the same leg form with `game_id` set and `quick=1`.
 positions (`QB`, `RB`, `WR`, `TE`, `LT`, `OT`, `C`, `CB`, `S`). It also lists sportsbook prop names with their matched
 ESPN athlete, and provides a form to manually link unmatched players.
 
-`GET /research/players/{espnID}` syncs game logs on demand (`espn:gamelog:{id}`). It renders last-5 hit bars (green when
-over the line, red when under), the last-5 median, the season mean, and total games played. When fresh nflverse data is
-cached, it also renders `Snap % (L3)`, `Target share`, `WOPR`, and `Opp Pass Def` / `Opp Rush Def` rank for the active
-market. If `market` or `line` is omitted, it resolves them from `?leg_id=` or the player's stored odds.
+`GET /research/players/{espnID}` syncs game logs on demand (`espn:gamelog:{id}`). It renders a matchup context strip
+(upcoming opponent, spread, game total, weather or `Indoor`, and injury badge when present), last-5 and season hit
+rates, last-5 min–max range, last-5 median, season mean, and total games played. Both the player's Last-5 chart and the
+opposing-defense Last-5 chart (leading opposing player at the same position against this week's opponent) share a
+horizontal dotted O/U line when a comparison line is available, with per-bar opponent and overall/position defense rank
+badges (`Def #N`, `vs POS #N`) on the player chart. When fresh nflverse data is cached, it also renders
+position-tailored L3 usage tiles (`Pass Att/g`, `EPA/g`, `Rush Att/g`, and `Opp Def` for `QB`; `Snap %`, `Carries/g`,
+`Targets/g`, and `RZ Opps/g` for `RB`; `Snap %`, `Target share`, `Air Yards %`, and `WOPR` for `WR`/`TE`). If `market`
+is omitted, it resolves from `?leg_id=` or the player's stored odds; switching market tabs resolves each market's own
+stored O/U line unless `?line=` is explicitly set.
 
 `POST /research/matches` accepts `odds_name`, `team`, and `athlete_id`. It saves a manual player match (`manual=1`) in
 `player_matches`, removes conflicting non-manual matches for that game, backfills `player_id` and `team` on matching
