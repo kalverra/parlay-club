@@ -209,3 +209,7 @@ Complexity: low (follows the same `SelectHighlights` seam on the pick board slat
       `internal/web/pick_test.go`.
 - [x] Docs: update `docs/concepts/slips.md`, `docs/concepts/analyzer.md`, and `docs/reference/routes.md` to document the
       A-grade highlights and `POST /slips/{id}/legs/batch`, then run `good-vibes docs lint`.
+
+## Reviews
+
+- [x] Final review: agy@gemini-4-neon-medium
