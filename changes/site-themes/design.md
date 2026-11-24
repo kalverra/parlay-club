@@ -163,4 +163,8 @@ Risk: low (secondary templates covered by existing handler tests and a grep chec
 
 - [x] Migrate `web/templates/record.html`, `research.html`, `analyzer_guide.html`, and `analyzer_results.html` to semantic tokens (including tabular mono stats, Parlay Terrorist stamp badge, and hit/miss bar classes) and update exact-class assertions in `internal/web/research_test.go`.
 - [x] Migrate `web/templates/groups.html`, `profile.html`, `join.html`, `login.html`, `dev-login.html`, and `sandbox.html` to semantic tokens, verify zero leftover raw `slate-*`/`sky-*` classes in `web/templates/` and `internal/web/` (excluding avatar swatches), and regenerate `web/static/app.css`.
-- [ ] Docs: document the `pc_theme` cookie and semantic theme token convention in `docs/reference/routes.md` (or the relevant UI/reference doc) and run `good-vibes docs lint`.
+- [x] Docs: document the `pc_theme` cookie and semantic theme token convention in `docs/reference/routes.md` (or the relevant UI/reference doc) and run `good-vibes docs lint`.
+
+## Reviews
+
+- [x] Final review: agy@gemini-4-neon-low

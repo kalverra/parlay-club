@@ -3,7 +3,7 @@ id: routes
 title: Routes
 type: reference
 summary: Every HTTP route the server serves, the middleware in front of them, and the status codes, HTMX headers, and SSE frames handlers return.
-tags: [routes, http, handlers, middleware, htmx, sse, props, prefill, research, schedules, wagers, record, analyzer, guide]
+tags: [routes, http, handlers, middleware, htmx, sse, props, prefill, research, schedules, wagers, record, analyzer, guide, themes]
 ---
 
 # Routes
@@ -428,6 +428,41 @@ outside the active group is 404.
 `POST /bug-reports` caps request bodies at 2 MiB and accepts `image/jpeg`, `image/png`, or `image/webp` `data:` URLs for
 `screenshot`. It persists the report in SQLite before attempting GitHub issue creation, so the user gets a 200
 confirmation even when GitHub is unconfigured or unreachable.
+
+## Themes
+
+### `pc_theme` cookie
+
+Every full-page handler reads the `pc_theme` cookie via `web.ThemeFromRequest(r)` and sets `Page.Theme` before rendering
+`web/templates/layout.html`. The cookie is an unsigned UI preference validated against a strict three-value allowlist in
+`internal/web/theme.go`:
+
+| `pc_theme` value | Label | `color-scheme` | `theme-color` | Notes |
+| ---------------- | ----- | -------------- | ------------- | ----- |
+| `paper-turf` | Paper & Turf | `dark` | `#0f1e16` | Default. Deep stadium felt chrome with cream ticket cards. |
+| `redzone` | RedZone | `dark` | `#090a0c` | Obsidian broadcast dark with turf green and gold accents. |
+| `almanac` | 90s Almanac | `light` | `#fff8e7` | Warm cream sports almanac with crisp white cards and ink borders. |
+
+Missing or unrecognized cookie values fall back to `paper-turf`. `layout.html` renders `data-theme="{{.ActiveTheme.ID}}"`
+on `<html>` along with `<meta name="color-scheme">` and `<meta name="theme-color">`, so SSR pages paint with the chosen
+theme immediately and without flicker.
+
+Clicking `[data-theme-cycle]` in the header cycles `paper-turf` -> `redzone` -> `almanac` in `web/static/app.js`, updates
+`document.documentElement.dataset.theme` and the meta tags in place, and writes `pc_theme=<id>; Path=/; Max-Age=31536000;
+SameSite=Lax` (adding `; Secure` over HTTPS) with no server round-trip.
+
+### Semantic theme tokens
+
+`web/tailwind/input.css` defines Tailwind v4 `@theme` color and font tokens backed by `[data-theme="..."]` CSS custom
+properties, compiled into `web/static/app.css` via `go generate ./...`:
+
+- **Page and chrome (`bg-page`, `text-page-ink`, `text-page-muted`, `bg-chrome`, `text-chrome-ink`, `text-chrome-muted`, `border-chrome-border`):** used on `<body>`, the sticky header, the bottom nav, and text sitting directly on the page background.
+- **Card and surface (`bg-surface`, `bg-surface-2`, `text-ink`, `text-ink-muted`, `text-ink-subtle`, `border-line`, `border-line-strong`):** used inside cards, dialogs, tables, and form inputs. Separating page/chrome tokens from surface tokens lets `paper-turf` pair dark felt chrome with light ticket cards without template conditionals.
+- **Accent and status (`accent`, `positive`, `warning`, `danger`, each with `-soft` and `-ink` variants):** used for actions, focus rings, callouts, and status pills.
+- **Component and Go-emitted classes:** `.ui-card`, `.ui-slip-card`, `.ui-next-card`, `.ui-odds`, `.ui-stamp`, `.ui-heads-up`, `.badge-*`, `.grade-*`, `.sev-*`, `.bar-*`, and `.trend-*`.
+
+Templates under `web/templates/` and view-model helpers in `internal/web/` use these semantic classes rather than raw
+`slate-*` or `sky-*` palette utilities (except per-user `db.AvatarColor` swatches).
 
 ## Responses
 
