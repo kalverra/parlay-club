@@ -195,7 +195,7 @@ lock/capacity invariants)
 - [x] Add `POST /slips/{id}/legs/batch` in `internal/web/slips.go` and `internal/web/routes.go` for atomic combo
       insertion with capacity/duplicate checks and `slip-updated` broadcast, plus handler tests in
       `internal/web/slips_test.go`.
-- [ ] Wire `LoadBoardSignals` and `board.SelectHighlights` into the hub render path (`internal/web/slips.go` +
+- [x] Wire `LoadBoardSignals` and `board.SelectHighlights` into the hub render path (`internal/web/slips.go` +
       `web/templates/partials.html`) to render the phone-first `"Top A-grade ideas"` strip during the viewer's `pick`
       step, with handler tests in `internal/web/slips_test.go`.
 

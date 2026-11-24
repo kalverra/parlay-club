@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/kalverra/parlay-club/internal/analyzer"
+	"github.com/kalverra/parlay-club/internal/board"
 	"github.com/kalverra/parlay-club/internal/db"
 	"github.com/kalverra/parlay-club/internal/parlay"
 	"github.com/kalverra/parlay-club/internal/slips"
@@ -114,13 +115,51 @@ func (h *slipHandlers) Routes(mux *http.ServeMux) {
 // and Creating turns the page into the create form.
 type SlipPage struct {
 	Page
-	LiveURL  string
-	Slip     *SlipView
-	Export   ExportView
-	Creating bool
-	Create   SlipCreateView
-	Next     NextView
-	Siblings []SiblingSlipView
+	LiveURL    string
+	Slip       *SlipView
+	Export     ExportView
+	Creating   bool
+	Create     SlipCreateView
+	Next       NextView
+	Highlights HighlightsView
+	Siblings   []SiblingSlipView
+}
+
+// HighlightsView is the phone-first strip of A-grade single legs and parlay
+// combos shown during the viewer's pick step.
+type HighlightsView struct {
+	Has            bool
+	RemainingSlots int
+	Legs           []LegHighlightView
+	Parlays        []ParlayHighlightView
+}
+
+// LegHighlightView is one A-grade leg idea with its grade, reason, and
+// one-tap add-leg form fields.
+type LegHighlightView struct {
+	GameID     string
+	Market     string
+	Team       string
+	PlayerName string
+	PlayerID   string
+	Side       string
+	Line       string
+	Odds       int
+	Price      string
+	Text       string
+	Grade      GradeView
+	Reason     string
+}
+
+// ParlayHighlightView is one A-grade 2- or 3-leg combo idea.
+type ParlayHighlightView struct {
+	Legs         []LegHighlightView
+	Grade        GradeView
+	CombinedOdds string
+	Label        string
+	Reason       string
+	LegCount     int
+	CanAddAll    bool
 }
 
 // SiblingSlipView is one choice in the sibling slip switcher.
@@ -1679,13 +1718,122 @@ func (h *slipHandlers) slipPageData(ctx context.Context, slip db.Slip) (SlipPage
 	}
 
 	next := slips.NextStep(slip, members, legs, games, viewerID, h.deps.now())
+	var highlights HighlightsView
+	if open && next.Step == slips.StepPick {
+		var err error
+		highlights, err = h.slipHighlights(ctx, slip, games, legs, viewerID, next.Need)
+		if err != nil {
+			return SlipPage{}, err
+		}
+	}
 	return SlipPage{
-		Page:     h.page(nil, slip.Name),
-		LiveURL:  slipLiveURL(slip),
-		Slip:     view,
-		Next:     nextView(next, slip, viewerID, games),
-		Siblings: siblings,
+		Page:       h.page(nil, slip.Name),
+		LiveURL:    slipLiveURL(slip),
+		Slip:       view,
+		Next:       nextView(next, slip, viewerID, games),
+		Highlights: highlights,
+		Siblings:   siblings,
 	}, nil
+}
+
+func (h *slipHandlers) slipHighlights(
+	ctx context.Context,
+	slip db.Slip,
+	games []db.Game,
+	legs []db.Leg,
+	viewerID int64,
+	remainingSlots int,
+) (HighlightsView, error) {
+	if len(games) == 0 || remainingSlots <= 0 {
+		return HighlightsView{}, nil
+	}
+	odds, err := h.deps.Store.OddsForWeek(ctx, slip.WeekID)
+	if err != nil {
+		return HighlightsView{}, err
+	}
+	if len(odds) == 0 {
+		return HighlightsView{}, nil
+	}
+	roster, err := h.deps.Store.RosterForTeams(ctx, weekTeams(games))
+	if err != nil {
+		return HighlightsView{}, err
+	}
+
+	_, homeBook, q := h.pickViewer(ctx, board.Query{})
+	mine := legsForUser(legs, viewerID)
+	now := q.Now
+
+	boardStart := time.Now()
+	rows := board.Build(games, odds, roster, homeBook, mine, now)
+	AddBoardTiming(ctx, time.Since(boardStart))
+	if len(rows) == 0 {
+		return HighlightsView{}, nil
+	}
+
+	playerIDs := make([]string, 0, len(rows))
+	for _, row := range rows {
+		if row.PlayerID != "" {
+			playerIDs = append(playerIDs, row.PlayerID)
+		}
+	}
+	boardGames, boardStats := analyzer.LoadBoardSignals(ctx, h.deps.Store, now, slip.WeekID, games, playerIDs)
+	set := board.SelectHighlights(rows, boardGames, boardStats, board.HighlightOptions{
+		ExcludePicked: true,
+	})
+	return highlightsView(set, remainingSlots), nil
+}
+
+func highlightsView(set board.HighlightSet, remainingSlots int) HighlightsView {
+	if len(set.Legs) == 0 && len(set.Parlays) == 0 {
+		return HighlightsView{}
+	}
+	legs := make([]LegHighlightView, 0, len(set.Legs))
+	for _, leg := range set.Legs {
+		legs = append(legs, legHighlightView(leg))
+	}
+	parlays := make([]ParlayHighlightView, 0, len(set.Parlays))
+	for _, p := range set.Parlays {
+		pLegs := make([]LegHighlightView, 0, len(p.Legs))
+		for _, leg := range p.Legs {
+			pLegs = append(pLegs, legHighlightView(leg))
+		}
+		parlays = append(parlays, ParlayHighlightView{
+			Legs:         pLegs,
+			Grade:        gradeView(p.Grade.Letter, p.Grade.Score, p.Grade.Summary, p.Grade.Factors),
+			CombinedOdds: formatOdds(p.CombinedOdds),
+			Label:        p.Label,
+			Reason:       p.Reason,
+			LegCount:     len(pLegs),
+			CanAddAll:    remainingSlots >= len(pLegs),
+		})
+	}
+	return HighlightsView{
+		Has:            true,
+		RemainingSlots: remainingSlots,
+		Legs:           legs,
+		Parlays:        parlays,
+	}
+}
+
+func legHighlightView(h board.LegHighlight) LegHighlightView {
+	line := ""
+	if h.Row.Line != nil {
+		line = formatFloat(*h.Row.Line)
+	}
+	return LegHighlightView{
+		GameID:     h.Row.GameID,
+		Market:     h.Row.Market,
+		Team:       h.Row.Team,
+		PlayerName: h.Row.PlayerName,
+		PlayerID:   h.Row.PlayerID,
+		Side:       h.Row.Side,
+		Line:       line,
+		Odds:       h.Row.Odds,
+		Price:      formatOdds(h.Row.Odds),
+		Text:       h.Row.Text,
+		Grade:      gradeView(h.Grade.Letter, h.Grade.Score, "", h.Grade.Factors),
+		Reason:     h.Reason,
+	}
 }
 
 // slipLiveURL returns the SSE endpoint for non-graded slips and empty once
