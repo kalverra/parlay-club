@@ -21,7 +21,7 @@ func (s *Service) scoreboardSource(games []db.Game, now time.Time) source {
 	return source{
 		key: ScoreboardSource,
 		due: func(_ context.Context, state db.SyncState) (bool, error) {
-			return scoreboardStale(state.FetchedAt, now, live), nil
+			return scoreboardStale(state.FetchedAt, now, games, live), nil
 		},
 		run: func(ctx context.Context) (bool, error) {
 			return s.syncScoreboard(ctx, now)

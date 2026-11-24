@@ -18,21 +18,65 @@ func slateGames() []db.Game {
 	}
 }
 
+// thanksgivingWeekGames is a Thanksgiving week slate: 3 Thanksgiving Thursday
+// games, 1 Black Friday game, and 1 Sunday game.
+func thanksgivingWeekGames() []db.Game {
+	return []db.Game{
+		{ID: "tg-early", Kickoff: novemberTime(26, 12, 30)},
+		{ID: "tg-mid", Kickoff: novemberTime(26, 16, 30)},
+		{ID: "tg-night", Kickoff: novemberTime(26, 20, 20)},
+		{ID: "bf", Kickoff: novemberTime(27, 15, 0)},
+		{ID: "sun", Kickoff: novemberTime(29, 13, 0)},
+	}
+}
+
+// christmasGames is a Wednesday Christmas 2024 doubleheader plus a Thursday game.
+func christmasGames() []db.Game {
+	return []db.Game{
+		{ID: "xmas-early", Kickoff: easternTime(2024, time.December, 25, 13, 0)},
+		{ID: "xmas-late", Kickoff: easternTime(2024, time.December, 25, 16, 30)},
+		{ID: "thu-night", Kickoff: easternTime(2024, time.December, 26, 20, 15)},
+	}
+}
+
+// playoffWeekendGames is a Wild Card / Divisional playoff slate with two
+// Saturday games and two Sunday games (no Thursday or Monday games).
+func playoffWeekendGames() []db.Game {
+	return []db.Game{
+		{ID: "sat-early", Kickoff: easternTime(2026, time.January, 10, 16, 30)},
+		{ID: "sat-night", Kickoff: easternTime(2026, time.January, 10, 20, 0)},
+		{ID: "sun-early", Kickoff: easternTime(2026, time.January, 11, 13, 0)},
+		{ID: "sun-late", Kickoff: easternTime(2026, time.January, 11, 16, 30)},
+	}
+}
+
+// easternTime builds an Eastern wall-clock time and returns it in UTC, the
+// form the database stores.
+func easternTime(year int, month time.Month, day, hour, minute int) time.Time {
+	return time.Date(year, month, day, hour, minute, 0, 0, eastern).UTC()
+}
+
 // novemberTime builds a 2026 November wall-clock time in America/New_York and
 // returns it in UTC, the form the database stores.
 func novemberTime(day, hour, minute int) time.Time {
-	return time.Date(2026, time.November, day, hour, minute, 0, 0, eastern).UTC()
+	return easternTime(2026, time.November, day, hour, minute)
 }
 
 func TestScoreboardStaleRules(t *testing.T) {
 	t.Parallel()
 
+	games := slateGames()
+	tgGames := thanksgivingWeekGames()
+	xmasGames := christmasGames()
+	poGames := playoffWeekendGames()
+
 	tests := []struct {
-		name string
-		last time.Time
-		now  time.Time
-		live bool
-		want bool
+		name  string
+		last  time.Time
+		now   time.Time
+		games []db.Game
+		live  bool
+		want  bool
 	}{
 		{
 			name: "never fetched",
@@ -40,66 +84,108 @@ func TestScoreboardStaleRules(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "live game waits five minutes",
-			last: novemberTime(8, 13, 0),
-			now:  novemberTime(8, 13, 4),
-			live: true,
-			want: false,
+			name:  "live game waits five minutes",
+			last:  novemberTime(8, 13, 0),
+			now:   novemberTime(8, 13, 4),
+			games: games,
+			live:  true,
+			want:  false,
 		},
 		{
-			name: "live game at five minutes",
-			last: novemberTime(8, 13, 0),
-			now:  novemberTime(8, 13, 5),
-			live: true,
-			want: true,
+			name:  "live game at five minutes",
+			last:  novemberTime(8, 13, 0),
+			now:   novemberTime(8, 13, 5),
+			games: games,
+			live:  true,
+			want:  true,
 		},
 		{
-			name: "game day waits fifteen minutes",
-			last: novemberTime(8, 13, 0),
-			now:  novemberTime(8, 13, 14),
-			want: false,
+			name:  "game day waits fifteen minutes",
+			last:  novemberTime(8, 13, 0),
+			now:   novemberTime(8, 13, 14),
+			games: games,
+			want:  false,
 		},
 		{
-			name: "game day at fifteen minutes",
-			last: novemberTime(8, 13, 0),
-			now:  novemberTime(8, 13, 15),
-			want: true,
+			name:  "game day at fifteen minutes",
+			last:  novemberTime(8, 13, 0),
+			now:   novemberTime(8, 13, 15),
+			games: games,
+			want:  true,
 		},
 		{
-			name: "monday is also a game day",
-			last: novemberTime(9, 12, 0),
-			now:  novemberTime(9, 12, 15),
-			want: true,
+			name:  "monday is also a game day when scheduled",
+			last:  novemberTime(9, 12, 0),
+			now:   novemberTime(9, 12, 15),
+			games: games,
+			want:  true,
 		},
 		{
-			name: "thursday is also a game day",
+			name: "cold DB falls back to thursday as game day",
 			last: novemberTime(5, 12, 0),
 			now:  novemberTime(5, 12, 15),
 			want: true,
 		},
 		{
-			name: "thursday waits fifteen minutes",
+			name: "cold DB thursday waits fifteen minutes",
 			last: novemberTime(5, 12, 0),
 			now:  novemberTime(5, 12, 14),
 			want: false,
 		},
 		{
-			name: "midweek waits two hours",
-			last: novemberTime(4, 12, 0),
-			now:  novemberTime(4, 13, 59),
-			want: false,
+			name:  "thanksgiving is a game day",
+			last:  novemberTime(26, 12, 0),
+			now:   novemberTime(26, 12, 15),
+			games: tgGames,
+			want:  true,
 		},
 		{
-			name: "midweek at two hours",
-			last: novemberTime(4, 12, 0),
-			now:  novemberTime(4, 14, 0),
-			want: true,
+			name:  "black friday is a game day",
+			last:  novemberTime(27, 12, 0),
+			now:   novemberTime(27, 12, 15),
+			games: tgGames,
+			want:  true,
+		},
+		{
+			name:  "christmas wednesday is a game day",
+			last:  easternTime(2024, time.December, 25, 12, 0),
+			now:   easternTime(2024, time.December, 25, 12, 15),
+			games: xmasGames,
+			want:  true,
+		},
+		{
+			name:  "playoff saturday is a game day",
+			last:  easternTime(2026, time.January, 10, 12, 0),
+			now:   easternTime(2026, time.January, 10, 12, 15),
+			games: poGames,
+			want:  true,
+		},
+		{
+			name:  "playoff thursday with no thursday games waits two hours",
+			last:  easternTime(2026, time.January, 8, 12, 0),
+			now:   easternTime(2026, time.January, 8, 13, 59),
+			games: poGames,
+			want:  false,
+		},
+		{
+			name:  "midweek waits two hours",
+			last:  novemberTime(4, 12, 0),
+			now:   novemberTime(4, 13, 59),
+			games: games,
+			want:  false,
+		},
+		{
+			name:  "midweek at two hours",
+			last:  novemberTime(4, 12, 0),
+			now:   novemberTime(4, 14, 0),
+			games: games,
+			want:  true,
 		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			assert.Equal(t, test.want, scoreboardStale(test.last, test.now, test.live))
+			assert.Equal(t, test.want, scoreboardStale(test.last, test.now, test.games, test.live))
 		})
 	}
 }
@@ -108,6 +194,10 @@ func TestOddsStaleRules(t *testing.T) {
 	t.Parallel()
 
 	games := slateGames()
+	tgGames := thanksgivingWeekGames()
+	xmasGames := christmasGames()
+	poGames := playoffWeekendGames()
+
 	tests := []struct {
 		name  string
 		last  time.Time
@@ -134,28 +224,28 @@ func TestOddsStaleRules(t *testing.T) {
 			want:  false,
 		},
 		{
-			name:  "wednesday waits twenty four hours",
+			name:  "non-game wednesday with no thursday game waits twenty four hours",
 			last:  novemberTime(4, 12, 0),
 			now:   novemberTime(5, 11, 59),
 			games: games,
 			want:  false,
 		},
 		{
-			name:  "wednesday at twenty four hours",
+			name:  "non-game day at twenty four hours",
 			last:  novemberTime(4, 12, 0),
 			now:   novemberTime(5, 12, 0),
 			games: games,
 			want:  true,
 		},
 		{
-			name:  "saturday waits twelve hours",
+			name:  "eve of sunday games waits twelve hours",
 			last:  novemberTime(7, 8, 0),
 			now:   novemberTime(7, 19, 59),
 			games: games,
 			want:  false,
 		},
 		{
-			name:  "saturday at twelve hours",
+			name:  "eve of sunday games at twelve hours",
 			last:  novemberTime(7, 8, 0),
 			now:   novemberTime(7, 20, 0),
 			games: games,
@@ -176,16 +266,16 @@ func TestOddsStaleRules(t *testing.T) {
 			want:  true,
 		},
 		{
-			name:  "sunday after the last kickoff waits three hours",
-			last:  novemberTime(8, 14, 30),
+			name:  "sunday after the last kickoff with monday game tomorrow waits twelve hours",
+			last:  novemberTime(8, 14, 0),
 			now:   novemberTime(8, 17, 0),
 			games: games,
 			want:  false,
 		},
 		{
-			name:  "sunday after the last kickoff at three hours",
-			last:  novemberTime(8, 14, 0),
-			now:   novemberTime(8, 17, 0),
+			name:  "sunday night after last kickoff at twelve hours from pre-kickoff sync",
+			last:  novemberTime(8, 11, 0),
+			now:   novemberTime(8, 23, 0),
 			games: games,
 			want:  true,
 		},
@@ -201,6 +291,111 @@ func TestOddsStaleRules(t *testing.T) {
 			last:  novemberTime(9, 15, 0),
 			now:   novemberTime(9, 18, 0),
 			games: games,
+			want:  true,
+		},
+		{
+			name:  "thanksgiving with three upcoming games waits forty five minutes",
+			last:  novemberTime(26, 10, 0),
+			now:   novemberTime(26, 10, 44),
+			games: tgGames,
+			want:  false,
+		},
+		{
+			name:  "thanksgiving with three upcoming games at forty five minutes",
+			last:  novemberTime(26, 10, 0),
+			now:   novemberTime(26, 10, 45),
+			games: tgGames,
+			want:  true,
+		},
+		{
+			name:  "thanksgiving with one upcoming game left waits three hours",
+			last:  novemberTime(26, 17, 0),
+			now:   novemberTime(26, 19, 59),
+			games: tgGames,
+			want:  false,
+		},
+		{
+			name:  "thanksgiving with one upcoming game left at three hours",
+			last:  novemberTime(26, 17, 0),
+			now:   novemberTime(26, 20, 0),
+			games: tgGames,
+			want:  true,
+		},
+		{
+			name:  "thanksgiving night after all thursday kickoffs with black friday tomorrow waits twelve hours",
+			last:  novemberTime(26, 19, 0),
+			now:   novemberTime(26, 23, 0),
+			games: tgGames,
+			want:  false,
+		},
+		{
+			name:  "black friday single game waits three hours",
+			last:  novemberTime(27, 10, 0),
+			now:   novemberTime(27, 12, 59),
+			games: tgGames,
+			want:  false,
+		},
+		{
+			name:  "black friday single game at three hours",
+			last:  novemberTime(27, 10, 0),
+			now:   novemberTime(27, 13, 0),
+			games: tgGames,
+			want:  true,
+		},
+		{
+			name:  "christmas wednesday doubleheader waits forty five minutes",
+			last:  easternTime(2024, time.December, 25, 11, 0),
+			now:   easternTime(2024, time.December, 25, 11, 45),
+			games: xmasGames,
+			want:  true,
+		},
+		{
+			name:  "playoff saturday doubleheader waits forty five minutes",
+			last:  easternTime(2026, time.January, 10, 11, 0),
+			now:   easternTime(2026, time.January, 10, 11, 45),
+			games: poGames,
+			want:  true,
+		},
+		{
+			name:  "friday eve of playoff saturday waits twelve hours",
+			last:  easternTime(2026, time.January, 9, 10, 0),
+			now:   easternTime(2026, time.January, 9, 21, 59),
+			games: poGames,
+			want:  false,
+		},
+		{
+			name:  "friday eve of playoff saturday at twelve hours",
+			last:  easternTime(2026, time.January, 9, 10, 0),
+			now:   easternTime(2026, time.January, 9, 22, 0),
+			games: poGames,
+			want:  true,
+		},
+		{
+			name:  "non-game tuesday before thanksgiving week waits twenty four hours",
+			last:  novemberTime(23, 12, 0),
+			now:   novemberTime(24, 11, 59),
+			games: tgGames,
+			want:  false,
+		},
+		{
+			name:  "non-game tuesday at twenty four hours",
+			last:  novemberTime(23, 12, 0),
+			now:   novemberTime(24, 12, 0),
+			games: tgGames,
+			want:  true,
+		},
+		{
+			name:  "wednesday eve of thanksgiving waits twelve hours",
+			last:  novemberTime(25, 0, 0),
+			now:   novemberTime(25, 11, 59),
+			games: tgGames,
+			want:  false,
+		},
+		{
+			name:  "wednesday eve of thanksgiving at twelve hours",
+			last:  novemberTime(25, 0, 0),
+			now:   novemberTime(25, 12, 0),
+			games: tgGames,
 			want:  true,
 		},
 	}
@@ -323,6 +518,7 @@ func TestOddsPropsStaleRules(t *testing.T) {
 
 	kickoff := novemberTime(8, 13, 0)
 	game := db.Game{ID: "401", Kickoff: kickoff}
+	satNightGame := db.Game{ID: "405", Kickoff: easternTime(2026, time.January, 10, 20, 0)}
 
 	tests := []struct {
 		name string
@@ -349,6 +545,13 @@ func TestOddsPropsStaleRules(t *testing.T) {
 			last: novemberTime(8, 9, 0),
 			now:  novemberTime(8, 9, 30),
 			game: game,
+			want: true,
+		},
+		{
+			name: "playoff saturday morning (>6h before kickoff) uses thirty minute game day window",
+			last: easternTime(2026, time.January, 10, 9, 0),
+			now:  easternTime(2026, time.January, 10, 9, 30),
+			game: satNightGame,
 			want: true,
 		},
 		{
@@ -416,6 +619,10 @@ func TestOddsPickLinesStaleRules(t *testing.T) {
 		{ID: "thu", Kickoff: novemberTime(5, 20, 15)},
 		{ID: "sun", Kickoff: novemberTime(8, 13, 0)},
 	}
+	tgGames := thanksgivingWeekGames()
+	xmasGames := christmasGames()
+	poGames := playoffWeekendGames()
+
 	tests := []struct {
 		name  string
 		last  time.Time
@@ -467,6 +674,27 @@ func TestOddsPickLinesStaleRules(t *testing.T) {
 			last:  novemberTime(9, 19, 0),
 			now:   novemberTime(9, 19, 15),
 			games: games,
+			want:  true,
+		},
+		{
+			name:  "black friday before kickoff at fifteen minutes",
+			last:  novemberTime(27, 10, 0),
+			now:   novemberTime(27, 10, 15),
+			games: tgGames,
+			want:  true,
+		},
+		{
+			name:  "christmas wednesday before kickoff at fifteen minutes",
+			last:  easternTime(2024, time.December, 25, 10, 0),
+			now:   easternTime(2024, time.December, 25, 10, 15),
+			games: xmasGames,
+			want:  true,
+		},
+		{
+			name:  "playoff saturday before kickoff at fifteen minutes",
+			last:  easternTime(2026, time.January, 10, 10, 0),
+			now:   easternTime(2026, time.January, 10, 10, 15),
+			games: poGames,
 			want:  true,
 		},
 		{
@@ -525,48 +753,64 @@ func TestPickCooldownStaleRules(t *testing.T) {
 func TestRosterStaleRules(t *testing.T) {
 	t.Parallel()
 
+	games := slateGames()
+	tgGames := thanksgivingWeekGames()
 	sunday := novemberTime(8, 12, 0)
 	saturday := novemberTime(7, 12, 0)
+	blackFriday := novemberTime(27, 12, 0)
 	tests := []struct {
-		name string
-		last time.Time
-		now  time.Time
-		want bool
+		name  string
+		last  time.Time
+		now   time.Time
+		games []db.Game
+		want  bool
 	}{
 		{
-			name: "never fetched",
-			now:  sunday,
-			want: true,
+			name:  "never fetched",
+			now:   sunday,
+			games: games,
+			want:  true,
 		},
 		{
-			name: "game day waits 2 hours",
-			last: sunday.Add(-2*time.Hour + time.Minute),
-			now:  sunday,
-			want: false,
+			name:  "game day waits 2 hours",
+			last:  sunday.Add(-2*time.Hour + time.Minute),
+			now:   sunday,
+			games: games,
+			want:  false,
 		},
 		{
-			name: "game day at 2 hours",
-			last: sunday.Add(-2 * time.Hour),
-			now:  sunday,
-			want: true,
+			name:  "game day at 2 hours",
+			last:  sunday.Add(-2 * time.Hour),
+			now:   sunday,
+			games: games,
+			want:  true,
 		},
 		{
-			name: "idle waits 6 hours",
-			last: saturday.Add(-6*time.Hour + time.Minute),
-			now:  saturday,
-			want: false,
+			name:  "black friday game day at 2 hours",
+			last:  blackFriday.Add(-2 * time.Hour),
+			now:   blackFriday,
+			games: tgGames,
+			want:  true,
 		},
 		{
-			name: "idle at 6 hours",
-			last: saturday.Add(-6 * time.Hour),
-			now:  saturday,
-			want: true,
+			name:  "idle waits 6 hours",
+			last:  saturday.Add(-6*time.Hour + time.Minute),
+			now:   saturday,
+			games: games,
+			want:  false,
+		},
+		{
+			name:  "idle at 6 hours",
+			last:  saturday.Add(-6 * time.Hour),
+			now:   saturday,
+			games: games,
+			want:  true,
 		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			assert.Equal(t, test.want, rosterStale(test.last, test.now))
+			assert.Equal(t, test.want, rosterStale(test.last, test.now, test.games))
 		})
 	}
 }
@@ -615,31 +859,38 @@ func TestSummaryStaleRules(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "near kickoff on non-game-day waits 15 minutes",
+			name: "near kickoff waits 15 minutes",
 			last: saturday.Add(-14 * time.Minute),
 			now:  saturday,
 			game: saturdayNearKickoff,
 			want: false,
 		},
 		{
-			name: "near kickoff on non-game-day at 15 minutes",
+			name: "near kickoff at 15 minutes",
 			last: saturday.Add(-15 * time.Minute),
 			now:  saturday,
 			game: saturdayNearKickoff,
 			want: true,
 		},
 		{
-			name: "idle waits 1 hour",
-			last: saturday.Add(-59 * time.Minute),
+			name: "saturday game far from kickoff on saturday still uses 15m game day window",
+			last: saturday.Add(-15 * time.Minute),
 			now:  saturday,
 			game: saturdayFarKickoff,
+			want: true,
+		},
+		{
+			name: "idle on non-game day waits 1 hour",
+			last: saturday.Add(-59 * time.Minute),
+			now:  saturday,
+			game: scheduledGame,
 			want: false,
 		},
 		{
-			name: "idle at 1 hour",
+			name: "idle on non-game day at 1 hour",
 			last: saturday.Add(-time.Hour),
 			now:  saturday,
-			game: saturdayFarKickoff,
+			game: scheduledGame,
 			want: true,
 		},
 	}
@@ -654,48 +905,64 @@ func TestSummaryStaleRules(t *testing.T) {
 func TestGameLogStaleRules(t *testing.T) {
 	t.Parallel()
 
+	games := slateGames()
+	poGames := playoffWeekendGames()
 	sunday := novemberTime(8, 12, 0)
 	saturday := novemberTime(7, 12, 0)
+	playoffSat := easternTime(2026, time.January, 10, 12, 0)
 	tests := []struct {
-		name string
-		last time.Time
-		now  time.Time
-		want bool
+		name  string
+		last  time.Time
+		now   time.Time
+		games []db.Game
+		want  bool
 	}{
 		{
-			name: "never fetched",
-			now:  sunday,
-			want: true,
+			name:  "never fetched",
+			now:   sunday,
+			games: games,
+			want:  true,
 		},
 		{
-			name: "game day waits 1 hour",
-			last: sunday.Add(-59 * time.Minute),
-			now:  sunday,
-			want: false,
+			name:  "game day waits 1 hour",
+			last:  sunday.Add(-59 * time.Minute),
+			now:   sunday,
+			games: games,
+			want:  false,
 		},
 		{
-			name: "game day at 1 hour",
-			last: sunday.Add(-time.Hour),
-			now:  sunday,
-			want: true,
+			name:  "game day at 1 hour",
+			last:  sunday.Add(-time.Hour),
+			now:   sunday,
+			games: games,
+			want:  true,
 		},
 		{
-			name: "idle waits 4 hours",
-			last: saturday.Add(-4*time.Hour + time.Minute),
-			now:  saturday,
-			want: false,
+			name:  "playoff saturday game day at 1 hour",
+			last:  playoffSat.Add(-time.Hour),
+			now:   playoffSat,
+			games: poGames,
+			want:  true,
 		},
 		{
-			name: "idle at 4 hours",
-			last: saturday.Add(-4 * time.Hour),
-			now:  saturday,
-			want: true,
+			name:  "idle waits 4 hours",
+			last:  saturday.Add(-4*time.Hour + time.Minute),
+			now:   saturday,
+			games: games,
+			want:  false,
+		},
+		{
+			name:  "idle at 4 hours",
+			last:  saturday.Add(-4 * time.Hour),
+			now:   saturday,
+			games: games,
+			want:  true,
 		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			assert.Equal(t, test.want, gameLogStale(test.last, test.now))
+			assert.Equal(t, test.want, gameLogStale(test.last, test.now, test.games))
 		})
 	}
 }
@@ -709,34 +976,114 @@ func TestPrefillStaleRules(t *testing.T) {
 	assert.True(t, prefillStale(now.Add(-15*time.Minute), now))
 }
 
-func TestGameDay(t *testing.T) {
+func TestIsGameDay(t *testing.T) {
 	t.Parallel()
 
+	tgGames := thanksgivingWeekGames()
+	xmasGames := christmasGames()
+	poGames := playoffWeekendGames()
+
 	tests := []struct {
-		name string
-		now  time.Time
-		want bool
+		name  string
+		games []db.Game
+		now   time.Time
+		want  bool
 	}{
-		{name: "Sunday", now: novemberTime(8, 12, 0), want: true},
-		{name: "Monday", now: novemberTime(9, 12, 0), want: true},
-		{name: "Tuesday", now: novemberTime(10, 12, 0), want: false},
-		{name: "Wednesday", now: novemberTime(4, 12, 0), want: false},
-		{name: "Thursday", now: novemberTime(5, 12, 0), want: true},
-		{name: "Friday", now: novemberTime(6, 12, 0), want: false},
-		{name: "Saturday", now: novemberTime(7, 12, 0), want: false},
+		// Cold DB (nil games) falls back to Thu/Sun/Mon.
+		{name: "cold DB Sunday", now: novemberTime(8, 12, 0), want: true},
+		{name: "cold DB Monday", now: novemberTime(9, 12, 0), want: true},
+		{name: "cold DB Tuesday", now: novemberTime(10, 12, 0), want: false},
+		{name: "cold DB Wednesday", now: novemberTime(4, 12, 0), want: false},
+		{name: "cold DB Thursday", now: novemberTime(5, 12, 0), want: true},
+		{name: "cold DB Friday", now: novemberTime(6, 12, 0), want: false},
+		{name: "cold DB Saturday", now: novemberTime(7, 12, 0), want: false},
+
+		// Scoreboard-derived irregular game days and non-game days.
+		{name: "Thanksgiving Thursday", games: tgGames, now: novemberTime(26, 9, 0), want: true},
+		{name: "Black Friday", games: tgGames, now: novemberTime(27, 9, 0), want: true},
+		{name: "Thanksgiving week Tuesday (non-game day)", games: tgGames, now: novemberTime(24, 12, 0), want: false},
+		{name: "Thanksgiving week Saturday (non-game day)", games: tgGames, now: novemberTime(28, 12, 0), want: false},
+		{name: "Christmas Wednesday", games: xmasGames, now: easternTime(2024, time.December, 25, 10, 0), want: true},
+		{
+			name:  "Christmas week Tuesday (non-game day)",
+			games: xmasGames,
+			now:   easternTime(2024, time.December, 24, 12, 0),
+			want:  false,
+		},
+		{name: "Playoff Saturday", games: poGames, now: easternTime(2026, time.January, 10, 10, 0), want: true},
+		{name: "Playoff Sunday", games: poGames, now: easternTime(2026, time.January, 11, 10, 0), want: true},
+		{
+			name:  "Playoff Thursday with no games (non-game day)",
+			games: poGames,
+			now:   easternTime(2026, time.January, 8, 12, 0),
+			want:  false,
+		},
+		{
+			name:  "Playoff Monday with no games (non-game day)",
+			games: poGames,
+			now:   easternTime(2026, time.January, 12, 12, 0),
+			want:  false,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			assert.Equal(t, tt.want, gameDay(tt.now))
+			assert.Equal(t, tt.want, isGameDay(tt.games, tt.now))
 		})
 	}
 }
 
-func TestSundayPrefillWindow(t *testing.T) {
+func TestGamesOnDateAndUpcomingGamesOnDate(t *testing.T) {
+	t.Parallel()
+
+	tgGames := thanksgivingWeekGames()
+	// Thanksgiving night game is 20:20 ET on Nov 26 (which is 01:20 UTC on Nov 27).
+	// Querying on Nov 26 at 18:00 ET must still include tg-night, and querying on
+	// Black Friday (Nov 27) must NOT include tg-night.
+	tgMidEvening := novemberTime(26, 18, 0)
+	onTG := gamesOnDate(tgGames, tgMidEvening)
+	assert.Len(t, onTG, 3)
+	upcomingTG := upcomingGamesOnDate(tgGames, tgMidEvening)
+	requireGameIDs(t, upcomingTG, []string{"tg-night"})
+
+	bfMorning := novemberTime(27, 8, 0)
+	onBF := gamesOnDate(tgGames, bfMorning)
+	requireGameIDs(t, onBF, []string{"bf"})
+	upcomingBF := upcomingGamesOnDate(tgGames, bfMorning)
+	requireGameIDs(t, upcomingBF, []string{"bf"})
+
+	// After Black Friday kickoff, gamesOnDate still returns bf, upcomingGamesOnDate is empty.
+	bfAfter := novemberTime(27, 15, 0)
+	requireGameIDs(t, gamesOnDate(tgGames, bfAfter), []string{"bf"})
+	assert.Empty(t, upcomingGamesOnDate(tgGames, bfAfter))
+
+	// Final games on the date are excluded from upcomingGamesOnDate.
+	finalGame := []db.Game{{ID: "done", Status: db.GameFinal, Kickoff: novemberTime(27, 15, 0)}}
+	requireGameIDs(t, gamesOnDate(finalGame, bfMorning), []string{"done"})
+	assert.Empty(t, upcomingGamesOnDate(finalGame, bfMorning))
+
+	// Non-game Tuesday returns empty for both.
+	tuesday := novemberTime(24, 12, 0)
+	assert.Empty(t, gamesOnDate(tgGames, tuesday))
+	assert.Empty(t, upcomingGamesOnDate(tgGames, tuesday))
+}
+
+func requireGameIDs(t *testing.T, games []db.Game, want []string) {
+	t.Helper()
+	got := make([]string, len(games))
+	for i, g := range games {
+		got[i] = g.ID
+	}
+	assert.Equal(t, want, got)
+}
+
+func TestGameDayPrefillWindow(t *testing.T) {
 	t.Parallel()
 
 	games := slateGames()
+	tgGames := thanksgivingWeekGames()
+	xmasGames := christmasGames()
+	poGames := playoffWeekendGames()
 	mondayOnly := []db.Game{
 		{ID: "mon", Kickoff: novemberTime(9, 20, 15)},
 	}
@@ -760,19 +1107,19 @@ func TestSundayPrefillWindow(t *testing.T) {
 			want:  false,
 		},
 		{
-			name:  "monday",
+			name:  "monday with monday game at 06:00 ET",
 			games: games,
-			now:   novemberTime(9, 8, 0),
-			want:  false,
+			now:   novemberTime(9, 6, 0),
+			want:  true,
 		},
 		{
-			name:  "thursday",
+			name:  "non-game thursday",
 			games: games,
 			now:   novemberTime(5, 8, 0),
 			want:  false,
 		},
 		{
-			name:  "saturday",
+			name:  "non-game saturday",
 			games: games,
 			now:   novemberTime(7, 23, 59),
 			want:  false,
@@ -813,16 +1160,70 @@ func TestSundayPrefillWindow(t *testing.T) {
 			now:   novemberTime(8, 20, 0),
 			want:  false,
 		},
+		{
+			name:  "thanksgiving 05:59 ET before start hour",
+			games: tgGames,
+			now:   novemberTime(26, 5, 59),
+			want:  false,
+		},
+		{
+			name:  "thanksgiving 06:00 ET triggers window",
+			games: tgGames,
+			now:   novemberTime(26, 6, 0),
+			want:  true,
+		},
+		{
+			name:  "thanksgiving after last kickoff with black friday remaining is false",
+			games: tgGames,
+			now:   novemberTime(26, 20, 20),
+			want:  false,
+		},
+		{
+			name:  "black friday 06:00 ET triggers window",
+			games: tgGames,
+			now:   novemberTime(27, 6, 0),
+			want:  true,
+		},
+		{
+			name:  "black friday after kickoff is false",
+			games: tgGames,
+			now:   novemberTime(27, 15, 0),
+			want:  false,
+		},
+		{
+			name:  "christmas wednesday 06:05 ET triggers window",
+			games: xmasGames,
+			now:   easternTime(2024, time.December, 25, 6, 5),
+			want:  true,
+		},
+		{
+			name:  "playoff saturday 06:05 ET triggers window",
+			games: poGames,
+			now:   easternTime(2026, time.January, 10, 6, 5),
+			want:  true,
+		},
+		{
+			name:  "playoff thursday with no games is false",
+			games: poGames,
+			now:   easternTime(2026, time.January, 8, 9, 0),
+			want:  false,
+		},
+		{
+			name:  "non-game tuesday is false",
+			games: tgGames,
+			now:   novemberTime(24, 9, 0),
+			want:  false,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			assert.Equal(t, tt.want, sundayPrefillWindow(tt.games, tt.now))
+			assert.Equal(t, tt.want, gameDayPrefillWindow(tt.games, tt.now))
 		})
 	}
 }
 
-func TestSundayPrefillStale(t *testing.T) {
+func TestGameDayPrefillStale(t *testing.T) {
 	t.Parallel()
 
 	fallBackMidnight := time.Date(2026, time.November, 1, 0, 30, 0, 0, eastern).UTC()
@@ -847,6 +1248,18 @@ func TestSundayPrefillStale(t *testing.T) {
 			name: "same eastern sunday",
 			last: novemberTime(8, 6, 0),
 			now:  novemberTime(8, 15, 0),
+			want: false,
+		},
+		{
+			name: "thanksgiving to black friday is stale on new game date",
+			last: novemberTime(26, 6, 5),
+			now:  novemberTime(27, 6, 5),
+			want: true,
+		},
+		{
+			name: "same black friday date is fresh",
+			last: novemberTime(27, 6, 5),
+			now:  novemberTime(27, 14, 0),
 			want: false,
 		},
 		{
@@ -883,7 +1296,7 @@ func TestSundayPrefillStale(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			assert.Equal(t, tt.want, sundayPrefillStale(tt.last, tt.now))
+			assert.Equal(t, tt.want, gameDayPrefillStale(tt.last, tt.now))
 		})
 	}
 }

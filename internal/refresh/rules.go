@@ -14,34 +14,71 @@ var eastern = tz.Eastern
 
 // scoreboardStale reports whether the slate is older than its window. A source
 // that has never run is always stale.
-func scoreboardStale(last, now time.Time, live bool) bool {
+func scoreboardStale(last, now time.Time, games []db.Game, live bool) bool {
 	if last.IsZero() {
 		return true
 	}
-	return !now.Before(last.Add(scoreboardAge(now, live)))
+	return !now.Before(last.Add(scoreboardAge(now, games, live)))
 }
 
 // scoreboardAge is the slate's freshness window: 5 minutes while a game is
-// live, 15 minutes on a Thursday, Sunday, or Monday, and 2 hours otherwise.
-func scoreboardAge(now time.Time, live bool) time.Duration {
+// live, 15 minutes on a scheduled game day, and 2 hours otherwise.
+func scoreboardAge(now time.Time, games []db.Game, live bool) time.Duration {
 	switch {
 	case live:
 		return scoreboardLiveAge
-	case gameDay(now):
+	case isGameDay(games, now):
 		return scoreboardGameDayAge
 	default:
 		return scoreboardIdleAge
 	}
 }
 
-// gameDay reports whether now falls on Thursday, Sunday, or Monday in America/New_York.
-func gameDay(now time.Time) bool {
-	switch now.In(eastern).Weekday() {
-	case time.Thursday, time.Sunday, time.Monday:
-		return true
-	default:
-		return false
+// sameEasternDate reports whether a and b fall on the same calendar date in
+// America/New_York.
+func sameEasternDate(a, b time.Time) bool {
+	ay, am, ad := a.In(eastern).Date()
+	by, bm, bd := b.In(eastern).Date()
+	return ay == by && am == bm && ad == bd
+}
+
+// gamesOnDate returns games whose kickoff falls on now's calendar date in
+// America/New_York.
+func gamesOnDate(games []db.Game, now time.Time) []db.Game {
+	var onDate []db.Game
+	for _, game := range games {
+		if !game.Kickoff.IsZero() && sameEasternDate(game.Kickoff, now) {
+			onDate = append(onDate, game)
+		}
 	}
+	return onDate
+}
+
+// upcomingGamesOnDate returns games on now's Eastern calendar date that have
+// not yet reached kickoff or finished.
+func upcomingGamesOnDate(games []db.Game, now time.Time) []db.Game {
+	var upcoming []db.Game
+	for _, game := range gamesOnDate(games, now) {
+		if game.Status != db.GameFinal && now.Before(game.Kickoff) {
+			upcoming = append(upcoming, game)
+		}
+	}
+	return upcoming
+}
+
+// isGameDay reports whether any game in games has a kickoff on now's calendar
+// date in America/New_York. When games is empty (cold DB before the first
+// scoreboard fetch), it falls back to Thursday, Sunday, or Monday.
+func isGameDay(games []db.Game, now time.Time) bool {
+	if len(games) == 0 {
+		switch now.In(eastern).Weekday() {
+		case time.Thursday, time.Sunday, time.Monday:
+			return true
+		default:
+			return false
+		}
+	}
+	return len(gamesOnDate(games, now)) > 0
 }
 
 // anyLive reports whether any game is in progress.
@@ -66,24 +103,24 @@ func oddsStale(last, now time.Time, games []db.Game) bool {
 	return !now.Before(last.Add(oddsAge(now, games)))
 }
 
-// oddsAge is the lines freshness window from the budget: 24 hours Monday
-// through Friday, 12 hours on Saturday, 45 minutes on Sunday before the last
-// Sunday kickoff, and 3 hours once only the Monday game remains.
+// oddsAge is the lines freshness window from the budget: 45 minutes on
+// multi-game days (2+ upcoming games today in ET), 3 hours on single-game days
+// (1 upcoming game today), 12 hours on the eve of a game day (tomorrow ET has
+// games), and 24 hours otherwise.
 func oddsAge(now time.Time, games []db.Game) time.Duration {
-	switch now.In(eastern).Weekday() {
-	case time.Sunday:
-		lastSunday := lastKickoffOn(games, time.Sunday)
-		if !lastSunday.IsZero() && now.Before(lastSunday) {
-			return oddsSundayAge
-		}
+	upcoming := upcomingGamesOnDate(games, now)
+	switch {
+	case len(upcoming) >= 2:
+		return oddsGameDayAge
+	case len(upcoming) == 1:
 		return oddsLateAge
-	case time.Monday:
-		return oddsLateAge
-	case time.Saturday:
-		return oddsSaturdayAge
-	default:
-		return oddsWeekdayAge
 	}
+	nowET := now.In(eastern)
+	tomorrowET := time.Date(nowET.Year(), nowET.Month(), nowET.Day()+1, 12, 0, 0, 0, eastern)
+	if len(gamesOnDate(games, tomorrowET)) > 0 {
+		return oddsEveAge
+	}
+	return oddsWeekdayAge
 }
 
 // oddsPickLinesStale reports whether the week's lines are stale for a player
@@ -101,14 +138,11 @@ func oddsPickLinesStale(last, now time.Time, games []db.Game) bool {
 	return !now.Before(last.Add(oddsPickLinesAge(now, games)))
 }
 
-// oddsPickLinesAge returns 15 minutes on game days (before the last kickoff on
-// that day) or within 2 hours of an upcoming kickoff, and 2 hours otherwise.
+// oddsPickLinesAge returns 15 minutes when today has upcoming games or within 2
+// hours of an upcoming kickoff, and 2 hours otherwise.
 func oddsPickLinesAge(now time.Time, games []db.Game) time.Duration {
-	if gameDay(now) {
-		lastOnDay := lastKickoffOn(games, now.In(eastern).Weekday())
-		if !lastOnDay.IsZero() && now.Before(lastOnDay) {
-			return oddsPickLinesGameDayAge
-		}
+	if len(upcomingGamesOnDate(games, now)) > 0 {
+		return oddsPickLinesGameDayAge
 	}
 	if withinNextKickoff(games, now, oddsPickLinesLookahead) {
 		return oddsPickLinesGameDayAge
@@ -146,7 +180,7 @@ func nfeloStale(last, now time.Time, week db.Week, games []db.Game) bool {
 	if last.IsZero() {
 		return true
 	}
-	return !now.Before(last.Add(gameDayAge(now, nfeloGameDayAge, nfeloIdleAge)))
+	return !now.Before(last.Add(gameDayAge(games, now, nfeloGameDayAge, nfeloIdleAge)))
 }
 
 // nflverseStale reports whether the season's nflverse team/player/snap sync is
@@ -168,19 +202,21 @@ func nflverseStale(last, now time.Time, week db.Week, games []db.Game) bool {
 			return false
 		}
 	}
-	return !now.Before(last.Add(nflverseAge(now)))
+	return !now.Before(last.Add(nflverseAge(games, now)))
 }
 
 // nflverseAge is the nflverse freshness window: 6 hours on Tuesday, Wednesday,
 // and game days (when weekly updates land or lineups shift) and 24 hours
 // otherwise.
-func nflverseAge(now time.Time) time.Duration {
+func nflverseAge(games []db.Game, now time.Time) time.Duration {
 	switch now.In(eastern).Weekday() {
-	case time.Tuesday, time.Wednesday, time.Thursday, time.Sunday, time.Monday:
+	case time.Tuesday, time.Wednesday:
 		return nflverseActiveAge
-	default:
-		return nflverseIdleAge
 	}
+	if isGameDay(games, now) {
+		return nflverseActiveAge
+	}
+	return nflverseIdleAge
 }
 
 // allFinal reports whether every game in the slice is final.
@@ -212,21 +248,6 @@ func allKickedOff(games []db.Game, now time.Time) bool {
 		}
 	}
 	return true
-}
-
-// lastKickoffOn returns the latest kickoff among games that fall on weekday,
-// or the zero time when the week has none.
-func lastKickoffOn(games []db.Game, weekday time.Weekday) time.Time {
-	var latest time.Time
-	for _, game := range games {
-		if game.Kickoff.In(eastern).Weekday() != weekday {
-			continue
-		}
-		if game.Kickoff.After(latest) {
-			latest = game.Kickoff
-		}
-	}
-	return latest
 }
 
 // weatherStale reports whether one game's forecast is due. It skips an indoor
@@ -263,8 +284,8 @@ func knownVenue(game db.Game) bool {
 }
 
 // oddsPropsStale reports whether a game's props are due. It skips a game once
-// it has kicked off. Inside the window props are good for 30 minutes on game
-// days or within 6 hours of kickoff, and 2 hours otherwise.
+// it has kicked off. Inside the window props are good for 30 minutes on the
+// game's day or within 6 hours of kickoff, and 2 hours otherwise.
 func oddsPropsStale(last, now time.Time, game db.Game) bool {
 	if !now.Before(game.Kickoff) {
 		return false
@@ -277,7 +298,7 @@ func oddsPropsStale(last, now time.Time, game db.Game) bool {
 
 // oddsPropsAgeFor returns the props freshness window for game at now.
 func oddsPropsAgeFor(now time.Time, game db.Game) time.Duration {
-	if gameDay(now) {
+	if !game.Kickoff.IsZero() && sameEasternDate(game.Kickoff, now) {
 		return oddsPropsGameDayAge
 	}
 	if !game.Kickoff.IsZero() && !now.Before(game.Kickoff.Add(-oddsPropsNearKickoff)) {
@@ -288,16 +309,16 @@ func oddsPropsAgeFor(now time.Time, game db.Game) time.Duration {
 
 // rosterStale reports whether a team's roster is due. Rosters are good for 2
 // hours on game days and 6 hours otherwise.
-func rosterStale(last, now time.Time) bool {
+func rosterStale(last, now time.Time, games []db.Game) bool {
 	if last.IsZero() {
 		return true
 	}
-	return !now.Before(last.Add(gameDayAge(now, rosterGameDayAge, rosterIdleAge)))
+	return !now.Before(last.Add(gameDayAge(games, now, rosterGameDayAge, rosterIdleAge)))
 }
 
 // summaryStale reports whether a game's summary is due. It skips games that
-// are final. Inside the window summaries are good for 15 minutes on game days
-// or within 4 hours of kickoff, and 1 hour otherwise.
+// are final. Inside the window summaries are good for 15 minutes on the game's
+// day or within 4 hours of kickoff, and 1 hour otherwise.
 func summaryStale(last, now time.Time, game db.Game) bool {
 	if game.Status == db.GameFinal {
 		return false
@@ -310,7 +331,7 @@ func summaryStale(last, now time.Time, game db.Game) bool {
 
 // summaryAgeFor returns the summary freshness window for game at now.
 func summaryAgeFor(now time.Time, game db.Game) time.Duration {
-	if gameDay(now) {
+	if !game.Kickoff.IsZero() && sameEasternDate(game.Kickoff, now) {
 		return summaryGameDayAge
 	}
 	if !game.Kickoff.IsZero() && !now.Before(game.Kickoff.Add(-summaryNearKickoff)) && now.Before(game.Kickoff) {
@@ -321,11 +342,11 @@ func summaryAgeFor(now time.Time, game db.Game) time.Duration {
 
 // gameLogStale reports whether an athlete's game log is due. Game logs are good
 // for 1 hour on game days and 4 hours otherwise.
-func gameLogStale(last, now time.Time) bool {
+func gameLogStale(last, now time.Time, games []db.Game) bool {
 	if last.IsZero() {
 		return true
 	}
-	return !now.Before(last.Add(gameDayAge(now, gameLogGameDayAge, gameLogIdleAge)))
+	return !now.Before(last.Add(gameDayAge(games, now, gameLogGameDayAge, gameLogIdleAge)))
 }
 
 // prefillStale reports whether a pre-fill managed source is older than the
@@ -337,33 +358,28 @@ func prefillStale(last, now time.Time) bool {
 	return !now.Before(last.Add(prefillIdempotencyAge))
 }
 
-// sundayPrefillWindow reports whether now falls in the Sunday morning-to-kickoff
-// pre-fill window in America/New_York while at least one Sunday game has not
-// yet kicked off.
-func sundayPrefillWindow(games []db.Game, now time.Time) bool {
-	nowET := now.In(eastern)
-	if nowET.Weekday() != time.Sunday || nowET.Hour() < sundayPrefillStartHour {
+// gameDayPrefillWindow reports whether now falls at or after 6:00 AM
+// America/New_York on a day with at least one upcoming game.
+func gameDayPrefillWindow(games []db.Game, now time.Time) bool {
+	if now.In(eastern).Hour() < prefillStartHour {
 		return false
 	}
-	lastSunday := lastKickoffOn(games, time.Sunday)
-	return !lastSunday.IsZero() && now.Before(lastSunday)
+	return len(upcomingGamesOnDate(games, now)) > 0
 }
 
-// sundayPrefillStale reports whether the one-shot Sunday pre-fill has not yet
-// run on now's calendar date in America/New_York.
-func sundayPrefillStale(last, now time.Time) bool {
+// gameDayPrefillStale reports whether the one-shot game-day pre-fill has not
+// yet run on now's calendar date in America/New_York.
+func gameDayPrefillStale(last, now time.Time) bool {
 	if last.IsZero() {
 		return true
 	}
-	ly, lm, ld := last.In(eastern).Date()
-	ny, nm, nd := now.In(eastern).Date()
-	return ly != ny || lm != nm || ld != nd
+	return !sameEasternDate(last, now)
 }
 
-// gameDayAge returns gd on Thursday, Sunday, or Monday in America/New_York and
-// idle otherwise.
-func gameDayAge(now time.Time, gd, idle time.Duration) time.Duration {
-	if gameDay(now) {
+// gameDayAge returns gd on a scheduled game day in America/New_York and idle
+// otherwise.
+func gameDayAge(games []db.Game, now time.Time, gd, idle time.Duration) time.Duration {
+	if isGameDay(games, now) {
 		return gd
 	}
 	return idle
