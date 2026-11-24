@@ -1,12 +1,15 @@
 ---
-slug: implied-chance-display
-status: implementing
-created: "2026-11-24"
-accepted_by:
-    - Adam Hamrick
-accepted_at: "2026-11-24T22:43:18Z"
-complexity: low
-risk: low
+id: adr-implied-chance-display
+title: Implied percentage chances on legs and parlays
+type: decision
+summary: Implied percentage chances on legs and parlays
+touched:
+    - internal/parlay
+    - internal/web
+    - web/templates
+related:
+    - odds-math
+    - slips
 ---
 
 # Implied percentage chances on legs and parlays
@@ -55,3 +58,36 @@ flowchart LR
 Using raw implied probability from the displayed price beats two-way de-vigging because it works for every leg (including single-sided props, custom picks, and historical slips without an opposite quote) and always matches the price shown next to it. Computing it on the fly from existing odds beats persisting it because it adds no schema state and stays in sync automatically when lines drift or legs push and void.
 
 `complexity: low` fits because the work is narrow and pattern-following across pure odds math, view models, and templates with no new state transitions or cross-package invariants. `risk: low` fits because display-only percentages have a small blast radius—they cannot corrupt stored bets or payouts—and deterministic unit and rendered-HTML tests cover the math and every view.
+
+## Overview
+
+```mermaid
+flowchart LR
+  OddsMath["Pure odds math (American & decimal implied probability)"] --> Formatter["Shared web chance formatter"]
+  Formatter --> SlipHub["Slip hub (leg rows, payout summary, A-grade highlights)"]
+  Formatter --> PickFlow["Pick flow (option buttons, tray legs, fixed dock)"]
+```
+
+## Consequences
+
+- `Easier:` Friends can read the market-implied chance of any leg or parlay at a glance beside its odds on both the slip hub and the pick flow.
+- `Easier:` Any new surface that needs an implied percentage can reuse one pure decimal probability helper and one boundary-tested formatter.
+- `Harder:` Phone-width rows and two-column pick buttons have less horizontal room, especially on moneyline legs that also show an `nfelo` model chip.
+- `Revisit:` Revisit raw implied probability if two-way market quotes become available for all prop and custom leg types and users want vig-free fair chances.
+
+## Alternatives considered
+
+- **Two-way de-vigged probabilities:** Rejected because one-sided props, custom picks, and historical slips often lack an opposite-side quote, and de-vigged percentages would not match the displayed price.
+- **Formatting percentage strings in the odds math package:** Rejected to keep `internal/parlay` pure math and match existing odds formatting in the web layer.
+- **Persisting implied percentages in SQLite:** Rejected because computing them from existing odds avoids schema state and stays accurate as lines move or legs push and void.
+- **Adding a new row to the slip payout summary grid:** Rejected in favor of inline text beside Combined and Reference odds so the 2x2 payout grid stays compact on phones.
+
+## Implementation notes
+
+- The implementation followed the design without deviations.
+- Displayed percentages are raw market-implied probabilities (`1 / decimal`), so they include sportsbook vig and assume independent legs rather than modeling same-game parlay correlation.
+- Empty or all-pushed/voided slips omit the implied percentage instead of showing `100%` when combined odds equal `1.0`.
+
+## Follow-ups
+
+None.
