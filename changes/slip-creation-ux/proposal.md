@@ -1,6 +1,6 @@
 ---
 slug: slip-creation-ux
-status: designed
+status: implementing
 created: "2026-11-24"
 accepted_by:
     - Adam Hamrick
