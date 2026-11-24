@@ -6,10 +6,10 @@
   <div class="flex items-center justify-between gap-3">
     <a
       href="/slips/{{.SlipID}}"
-      class="rounded-md border border-slate-700 px-2 py-1 text-sm text-slate-200 hover:bg-slate-800"
+      class="rounded-md border border-chrome-border bg-chrome px-2 py-1 text-sm text-chrome-ink hover:bg-chrome-border/40"
       >&larr; Slip</a
     >
-    <h1 class="min-w-0 truncate text-lg font-semibold">{{.SlipName}}</h1>
+    <h1 class="min-w-0 truncate font-display text-lg font-semibold">{{.SlipName}}</h1>
   </div>
 
   <div class="min-h-0 lg:flex-1">{{template "pick-body" .Body}}</div>
@@ -19,19 +19,19 @@
   <dialog id="pick-swap" class="leg-sheet" aria-label="Swap a pick">
     <div
       id="pick-swap-body"
-      class="rounded-t-2xl border border-slate-800 bg-slate-900 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-2xl"
+      class="rounded-t-2xl border border-line bg-surface p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] text-ink shadow-2xl"
     ></div>
   </dialog>
 
   <dialog id="pick-tray-sheet" class="leg-sheet" aria-label="Your picks">
     <div
-      class="rounded-t-2xl border border-slate-800 bg-slate-900 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-2xl"
+      class="rounded-t-2xl border border-line bg-surface p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] text-ink shadow-2xl"
     >
       <div class="flex items-center justify-between gap-3">
-        <h2 class="text-lg font-semibold">Your slip</h2>
+        <h2 class="font-display text-lg font-semibold">Your slip</h2>
         <button
           type="button"
-          class="rounded-md border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800"
+          class="rounded-md border border-line-strong px-2 py-1 text-xs text-ink-muted hover:bg-surface-2 hover:text-ink"
           data-close-dock
         >
           Close

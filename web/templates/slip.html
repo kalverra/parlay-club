@@ -6,48 +6,48 @@
         {{if .Create.WeekID}}Start {{.Page.WeekLabel}}&rsquo;s slip{{else}}Start a slip{{end}}
       </h1>
       {{if .Create.WeekID}}
-        <p class="text-sm text-slate-400">
+        <p class="text-sm text-page-muted">
           No slip for {{.Page.WeekLabel}} yet. Check who&rsquo;s picking, then everyone adds their legs.
         </p>
       {{else}}
-        <p class="text-sm text-slate-400">
+        <p class="text-sm text-page-muted">
           No week is loaded yet. Add a past week below to start a slip.
         </p>
       {{end}}
       {{if .Create.Solo}}
-        <p class="text-sm text-slate-500">
+        <p class="text-sm text-page-muted">
           It&rsquo;s just you for now. Invite friends from Groups whenever you like.
         </p>
       {{end}}
     </div>
     <form
-      class="space-y-4 rounded-xl border border-slate-800 bg-slate-900 p-4"
+      class="ui-card space-y-4 p-4"
       hx-post="/slips"
       hx-target="#content"
       hx-swap="innerHTML"
     >
       {{if .Create.Error}}
-        <p class="rounded-lg border border-rose-700 bg-rose-950 px-3 py-2 text-sm text-rose-200">
+        <p class="rounded-lg border border-danger bg-danger-soft px-3 py-2 text-sm text-danger-ink">
           {{.Create.Error}}
         </p>
       {{end}}
       {{if .Create.Weeks}}
-        <label class="block text-sm text-slate-300">
+        <label class="block text-sm text-ink">
           Week
-          <select name="week_id" class="mt-1 w-full rounded-md border border-slate-700 bg-slate-800 px-3 py-2">
+          <select name="week_id" class="mt-1 w-full rounded-md border border-line-strong bg-surface-2 px-3 py-2 text-ink">
             {{range .Create.Weeks}}
               <option value="{{.ID}}"{{if eq .ID $.Create.WeekID}} selected{{end}}>{{.Label}}</option>
             {{end}}
           </select>
         </label>
       {{end}}
-      <fieldset class="space-y-2 rounded-lg border border-slate-800 p-3">
-        <legend class="px-1 text-sm text-slate-300">Or add a past week</legend>
-        <p class="text-xs text-slate-500">
+      <fieldset class="space-y-2 rounded-lg border border-line p-3">
+        <legend class="px-1 text-sm text-ink">Or add a past week</legend>
+        <p class="text-xs text-ink-muted">
           Use this for a week the slate never stored. Filling both overrides the week above.
         </p>
         <div class="grid grid-cols-2 gap-2">
-          <label class="block text-sm text-slate-300">
+          <label class="block text-sm text-ink">
             Season
             <input
               type="number"
@@ -56,10 +56,10 @@
               max="2100"
               placeholder="2026"
               value="{{if .Create.Season}}{{.Create.Season}}{{end}}"
-              class="mt-1 w-full rounded-md border border-slate-700 bg-slate-800 px-3 py-2"
+              class="mt-1 w-full rounded-md border border-line-strong bg-surface-2 px-3 py-2 text-ink"
             >
           </label>
-          <label class="block text-sm text-slate-300">
+          <label class="block text-sm text-ink">
             Week number
             <input
               type="number"
@@ -68,30 +68,30 @@
               max="22"
               placeholder="9"
               value="{{if .Create.WeekNum}}{{.Create.WeekNum}}{{end}}"
-              class="mt-1 w-full rounded-md border border-slate-700 bg-slate-800 px-3 py-2"
+              class="mt-1 w-full rounded-md border border-line-strong bg-surface-2 px-3 py-2 text-ink"
             >
           </label>
         </div>
-        <label class="block text-sm text-slate-300">
+        <label class="block text-sm text-ink">
           Season type
-          <select name="season_type" class="mt-1 w-full rounded-md border border-slate-700 bg-slate-800 px-3 py-2">
+          <select name="season_type" class="mt-1 w-full rounded-md border border-line-strong bg-surface-2 px-3 py-2 text-ink">
             <option value="2"{{if ne .Create.SeasonType 3}} selected{{end}}>Regular season</option>
             <option value="3"{{if eq .Create.SeasonType 3}} selected{{end}}>Postseason</option>
           </select>
         </label>
       </fieldset>
-      <label class="block text-sm text-slate-300">
+      <label class="block text-sm text-ink">
         Name
         <input
           type="text"
           name="name"
           value="{{.Create.Name}}"
-          class="mt-1 w-full rounded-md border border-slate-700 bg-slate-800 px-3 py-2"
+          class="mt-1 w-full rounded-md border border-line-strong bg-surface-2 px-3 py-2 text-ink"
         >
       </label>
-      <label class="block text-sm text-slate-300">
+      <label class="block text-sm text-ink">
         Slate scope
-        <select name="slate_scope" class="mt-1 w-full rounded-md border border-slate-700 bg-slate-800 px-3 py-2">
+        <select name="slate_scope" class="mt-1 w-full rounded-md border border-line-strong bg-surface-2 px-3 py-2 text-ink">
           {{if .Create.SlateScopes}}
             {{range .Create.SlateScopes}}
               <option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>
@@ -103,7 +103,7 @@
           {{end}}
         </select>
       </label>
-      <label class="block text-sm text-slate-300">
+      <label class="block text-sm text-ink">
         Legs per member
         <input
           type="number"
@@ -111,13 +111,13 @@
           min="1"
           max="5"
           value="{{.Create.LegsPerMember}}"
-          class="mt-1 w-full rounded-md border border-slate-700 bg-slate-800 px-3 py-2"
+          class="mt-1 w-full rounded-md border border-line-strong bg-surface-2 px-3 py-2 text-ink"
         >
       </label>
       <fieldset class="space-y-2">
-        <legend class="text-sm text-slate-300">Members</legend>
+        <legend class="text-sm text-ink">Members</legend>
         {{range .Create.Members}}
-          <label class="flex items-center gap-2 text-sm text-slate-200">
+          <label class="flex items-center gap-2 text-sm text-ink">
             <input type="checkbox" name="member_id" value="{{.ID}}"{{if .Selected}} checked{{end}}>
             {{.Name}}
           </label>
@@ -125,7 +125,7 @@
       </fieldset>
       <button
         type="submit"
-        class="w-full rounded-lg bg-sky-600 px-3 py-2 text-sm font-semibold text-white hover:bg-sky-500"
+        class="w-full rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-accent-ink hover:opacity-90"
       >
         Create slip
       </button>
@@ -139,7 +139,7 @@
     {{template "leg-sheet" .}}
   {{else}}
     <h1 class="text-xl font-semibold">Slip</h1>
-    <p class="rounded-xl border border-dashed border-slate-700 bg-slate-900 p-4 text-sm text-slate-400">
+    <p class="ui-card border-dashed p-4 text-sm text-ink-muted">
       Slip contents show up here once the season starts.
     </p>
   {{end}}

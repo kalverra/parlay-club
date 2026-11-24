@@ -1398,7 +1398,7 @@ func TestPickControlsMeetTheTouchTarget(t *testing.T) {
 		"the sort chips reach 48px")
 	assert.Contains(t, body, "inline-flex min-h-12 items-center rounded-md border",
 		"the back link reaches 48px")
-	assert.Contains(t, body, "inline-flex min-h-12 shrink-0 items-center rounded-lg bg-sky-600 px-4 py-2",
+	assert.Contains(t, body, "inline-flex min-h-12 shrink-0 items-center rounded-lg bg-accent px-4 py-2",
 		"the dock button reaches 48px")
 }
 

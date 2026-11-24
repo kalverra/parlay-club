@@ -39,12 +39,12 @@
   hx-disinherit="hx-sync"
   hx-swap="outerHTML"
 >
-  <section class="rounded-xl border border-sky-800 bg-sky-950/50 p-4">
-    <p class="text-[11px] font-semibold uppercase tracking-wide text-sky-300">Next</p>
-    <h2 class="mt-1 text-lg font-semibold">{{.Next.Title}}</h2>
-    <p class="mt-1 text-sm text-slate-300">{{.Next.Detail}}</p>
+  <section class="ui-next-card p-4">
+    <p class="text-[11px] font-semibold uppercase tracking-wide text-chrome-muted">Next</p>
+    <h2 class="mt-1 font-display text-lg font-semibold">{{.Next.Title}}</h2>
+    <p class="mt-1 text-sm text-chrome-muted">{{.Next.Detail}}</p>
     {{with .Next.Deadline}}
-      <p class="mt-2 text-xs text-slate-400">
+      <p class="mt-2 text-xs text-chrome-muted">
         Picks close for {{.Matchup}} at <time datetime="{{.ISO}}">{{.Label}}</time>
       </p>
     {{end}}
@@ -52,7 +52,7 @@
       {{if .Href}}
         <a
           href="{{.Href}}"
-          class="mt-3 block w-full rounded-lg bg-sky-600 px-3 py-2 text-center text-sm font-semibold text-white hover:bg-sky-500"
+          class="mt-3 block w-full rounded-lg bg-accent px-3 py-2 text-center text-sm font-semibold text-accent-ink hover:opacity-90"
         >
           {{.Label}}
         </a>
@@ -66,7 +66,7 @@
           {{if .UserID}}<input type="hidden" name="user_id" value="{{.UserID}}">{{end}}
           <button
             type="submit"
-            class="w-full rounded-lg bg-sky-600 px-3 py-2 text-sm font-semibold text-white hover:bg-sky-500"
+            class="w-full rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-accent-ink hover:opacity-90"
           >
             {{.Label}}
           </button>
@@ -80,7 +80,7 @@
         data-nudge-slip="{{.SlipName}}"
         {{if .CloseISO}}data-nudge-close="{{.CloseISO}}"{{end}}
         data-nudge-path="{{.Path}}"
-        class="mt-2 w-full rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-200 hover:bg-slate-800"
+        class="mt-2 w-full rounded-lg border border-chrome-border bg-chrome/60 px-3 py-2 text-sm text-chrome-ink hover:bg-chrome-border/40"
       >
         Nudge {{.Name}}
       </button>
@@ -89,32 +89,32 @@
 
   {{template "highlights-strip" .Highlights}}
 
-  <header class="rounded-xl border border-slate-800 bg-slate-900 p-4">
+  <header class="ui-slip-card p-4">
     <div class="flex items-start justify-between gap-3">
       <div class="min-w-0">
-        <h1 class="truncate text-xl font-semibold">{{.Slip.Name}}</h1>
-        <p class="mt-1 text-sm text-slate-400">
+        <h1 class="truncate font-display text-xl font-semibold">{{.Slip.Name}}</h1>
+        <p class="mt-1 text-sm text-ink-muted">
           {{.Slip.LockedIn}}/{{.Slip.MemberCount}} locked in
           <span aria-hidden="true">·</span>
           {{.Slip.LegsPerMember}} leg{{if ne .Slip.LegsPerMember 1}}s{{end}} per member
         </p>
       </div>
       <span
-        class="shrink-0 rounded-full border px-2 py-1 text-xs font-medium {{if eq .Slip.Status "OPEN"}}border-sky-700 bg-sky-950 text-sky-300{{else if eq .Slip.Status "LOCKED"}}border-amber-700 bg-amber-950 text-amber-300{{else}}border-emerald-700 bg-emerald-950 text-emerald-300{{end}}"
+        class="shrink-0 rounded-full border px-2 py-1 text-xs font-medium {{if eq .Slip.Status "OPEN"}}border-accent bg-accent-soft text-ink{{else if eq .Slip.Status "LOCKED"}}border-warning bg-warning-soft text-warning-ink{{else}}border-positive bg-positive-soft text-positive-ink{{end}}"
       >
         {{.Slip.Status}}
       </span>
     </div>
     {{if gt (len .Siblings) 1}}
-      <nav class="mt-3 flex items-center gap-2 overflow-x-auto border-t border-slate-800 pt-3" aria-label="Sibling slips" data-sibling-switcher>
+      <nav class="mt-3 flex items-center gap-2 overflow-x-auto border-t border-line pt-3" aria-label="Sibling slips" data-sibling-switcher>
         {{range .Siblings}}
           <a
             href="/slips/{{.ID}}"
-            class="inline-flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition {{if .Current}}bg-sky-600 text-white shadow-sm{{else}}border border-slate-700 bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white{{end}}"
+            class="inline-flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition {{if .Current}}bg-accent text-accent-ink shadow-sm{{else}}border border-line-strong bg-surface-2 text-ink-muted hover:text-ink{{end}}"
             {{if .Current}}aria-current="page"{{end}}
           >
             <span>{{.Name}}</span>
-            <span class="{{if .Current}}text-sky-100{{else}}text-slate-400{{end}}">({{.Summary}})</span>
+            <span class="{{if .Current}}opacity-80{{else}}text-ink-subtle{{end}}">({{.Summary}})</span>
           </a>
         {{end}}
       </nav>
@@ -122,21 +122,21 @@
   </header>
 
   {{range .Slip.Members}}
-    <section class="rounded-xl border border-slate-800 bg-slate-900 p-4">
+    <section class="ui-slip-card p-4">
       <div class="flex items-center justify-between gap-2">
         <div class="flex min-w-0 items-center gap-2">
           {{template "avatar" .User}}
           <div class="min-w-0">
             <p class="truncate font-medium">
-              {{.User.Name}}{{if .IsCurrent}} <span class="text-xs font-normal text-slate-400">(you)</span>{{end}}
+              {{.User.Name}}{{if .IsCurrent}} <span class="text-xs font-normal text-ink-muted">(you)</span>{{end}}
             </p>
-            <p class="text-xs text-slate-400">
+            <p class="text-xs text-ink-muted">
               {{if .Locked}}Locked in{{else}}{{.LegCount}}/{{$.Slip.LegsPerMember}} legs{{end}}
             </p>
           </div>
         </div>
         {{if .Locked}}
-          <span class="shrink-0 rounded-full border border-emerald-800 bg-emerald-950 px-2 py-1 text-xs text-emerald-300">
+          <span class="shrink-0 rounded-full border border-positive bg-positive-soft px-2 py-1 text-xs text-positive-ink">
             Ready
           </span>
         {{end}}
@@ -145,7 +145,7 @@
       <ul class="mt-3 space-y-2">
         {{range .Legs}}
           {{$leg := .}}
-          <li class="flex items-start justify-between gap-3 rounded-lg border border-slate-800 px-3 py-2">
+          <li class="flex items-start justify-between gap-3 rounded-lg border border-line px-3 py-2">
             <div class="flex min-w-0 items-start gap-2.5">
               {{- if .PlayerHeadshot -}}
                 {{template "player-portrait" (dict "URL" .PlayerHeadshot "Initials" .PlayerInitials "Size" "h-7 w-7" "TextSize" "text-[10px]")}}
@@ -158,8 +158,8 @@
               {{- end -}}
               <div class="min-w-0">
                 <p class="truncate text-sm font-medium">{{.Selection}}</p>
-                <div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-400">
-                <span>{{.Odds}}</span>
+                <div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-ink-muted">
+                <span class="ui-odds">{{.Odds}}</span>
                 {{if .Votes.Has}}
                   <span class="flex items-center gap-1" data-votes>
                     {{if .Votes.CanVote}}
@@ -171,7 +171,7 @@
                         <input type="hidden" name="value" value="{{.Votes.UpValue}}">
                         <button
                           type="submit"
-                          class="rounded-full border px-1.5 py-0.5 {{if eq .Votes.Mine 1}}border-sky-600 bg-sky-950 text-sky-300{{else}}border-slate-700 bg-slate-950 text-slate-300{{end}}"
+                          class="rounded-full border px-1.5 py-0.5 {{if eq .Votes.Mine 1}}border-accent bg-accent-soft text-ink{{else}}border-line-strong bg-surface-2 text-ink-muted{{end}}"
                           title="{{if eq .Votes.Mine 1}}Clear your up vote{{else}}Up vote{{end}}"
                         >
                           &uarr; {{.Votes.Up}}
@@ -185,17 +185,17 @@
                         <input type="hidden" name="value" value="{{.Votes.DownValue}}">
                         <button
                           type="submit"
-                          class="rounded-full border px-1.5 py-0.5 {{if eq .Votes.Mine -1}}border-rose-600 bg-rose-950 text-rose-300{{else}}border-slate-700 bg-slate-950 text-slate-300{{end}}"
+                          class="rounded-full border px-1.5 py-0.5 {{if eq .Votes.Mine -1}}border-danger bg-danger-soft text-danger-ink{{else}}border-line-strong bg-surface-2 text-ink-muted{{end}}"
                           title="{{if eq .Votes.Mine -1}}Clear your down vote{{else}}Down vote{{end}}"
                         >
                           &darr; {{.Votes.Down}}
                         </button>
                       </form>
                     {{else}}
-                      <span class="rounded-full border border-slate-700 bg-slate-950 px-1.5 py-0.5">
+                      <span class="rounded-full border border-line-strong bg-surface-2 px-1.5 py-0.5 text-ink-muted">
                         &uarr; {{.Votes.Up}}
                       </span>
-                      <span class="rounded-full border border-slate-700 bg-slate-950 px-1.5 py-0.5">
+                      <span class="rounded-full border border-line-strong bg-surface-2 px-1.5 py-0.5 text-ink-muted">
                         &darr; {{.Votes.Down}}
                       </span>
                     {{end}}
@@ -204,13 +204,13 @@
                 {{if .ResearchURL}}
                   <a
                     href="{{.ResearchURL}}"
-                    class="font-medium text-sky-400 hover:text-sky-300"
+                    class="font-medium text-ink underline decoration-line-strong underline-offset-2 hover:opacity-75"
                     >Research &rarr;</a
                   >
                 {{end}}
                 {{if .Model}}
                   <span
-                    class="whitespace-nowrap rounded-full border border-slate-700 bg-slate-950 px-1.5 py-0.5 text-slate-300"
+                    class="whitespace-nowrap rounded-full border border-line-strong bg-surface-2 px-1.5 py-0.5 text-ink-muted"
                     >{{.Model}}</span
                   >
                 {{end}}
@@ -222,12 +222,12 @@
                     >
                       Grade {{.Grade.Letter}}
                     </summary>
-                    <div class="mt-1.5 w-64 max-w-full rounded-lg border border-slate-700 bg-slate-950 p-2.5 text-xs shadow-lg">
-                      <div class="flex items-center justify-between gap-2 border-b border-slate-800 pb-1.5">
-                        <span class="font-semibold text-slate-200">Leg grade: {{.Grade.Letter}} ({{.Grade.Score}})</span>
+                    <div class="mt-1.5 w-64 max-w-full rounded-lg border border-line-strong bg-surface p-2.5 text-xs text-ink shadow-lg">
+                      <div class="flex items-center justify-between gap-2 border-b border-line pb-1.5">
+                        <span class="font-semibold text-ink">Leg grade: {{.Grade.Letter}} ({{.Grade.Score}})</span>
                         <a
                           href="/analyzer/guide?from=/slips/{{$.Slip.ID}}#leg-grades"
-                          class="font-medium text-sky-400 hover:underline"
+                          class="font-medium text-ink underline decoration-line-strong underline-offset-2 hover:opacity-75"
                           >See full rubric</a
                         >
                       </div>
@@ -235,13 +235,13 @@
                         <ul class="mt-1.5 space-y-1">
                           {{range .Grade.Factors}}
                             <li class="flex items-start justify-between gap-2">
-                              <span class="min-w-0 text-slate-300">{{.Label}}</span>
-                              <span class="shrink-0 font-semibold {{if .Positive}}text-emerald-300{{else if .Negative}}text-amber-300{{else}}text-slate-300{{end}}">{{.DeltaText}}</span>
+                              <span class="min-w-0 text-ink-muted">{{.Label}}</span>
+                              <span class="shrink-0 font-semibold {{if .Positive}}text-positive-ink{{else if .Negative}}text-warning-ink{{else}}text-ink-muted{{end}}">{{.DeltaText}}</span>
                             </li>
                           {{end}}
                         </ul>
                       {{else}}
-                        <p class="mt-1.5 text-slate-400">Baseline 75 — no extra adjustments.</p>
+                        <p class="mt-1.5 text-ink-muted">Baseline 75 — no extra adjustments.</p>
                       {{end}}
                     </div>
                   </details>
@@ -255,7 +255,7 @@
                       {{resultLabel .Result .GradedBy}}
                     </summary>
                     <ul
-                      class="absolute right-0 z-20 mt-1 w-32 overflow-hidden rounded-lg border border-slate-700 bg-slate-900 py-1 shadow-xl"
+                      class="absolute right-0 z-20 mt-1 w-32 overflow-hidden rounded-lg border border-line-strong bg-surface py-1 shadow-xl"
                     >
                       {{range list "PENDING" "WON" "LOST" "PUSH" "VOID"}}
                         <li>
@@ -267,7 +267,7 @@
                             <input type="hidden" name="result" value="{{.}}">
                             <button
                               type="submit"
-                              class="block w-full px-3 py-1.5 text-left text-xs {{if eq . $leg.Result}}font-semibold text-sky-300{{else}}text-slate-200{{end}} hover:bg-slate-800"
+                              class="block w-full px-3 py-1.5 text-left text-xs {{if eq . $leg.Result}}bg-accent-soft font-semibold text-ink{{else}}text-ink{{end}} hover:bg-surface-2"
                             >
                               {{.}}
                             </button>
@@ -288,7 +288,7 @@
               <span class="flex shrink-0 items-center gap-2 text-xs">
                 <button
                   type="button"
-                  class="text-sky-400 hover:underline"
+                  class="font-medium text-ink underline decoration-line-strong underline-offset-2 hover:opacity-75"
                   hx-get="/legs/{{.ID}}/edit"
                   hx-target="#leg-sheet-body"
                   hx-swap="innerHTML"
@@ -296,13 +296,13 @@
                   Edit
                 </button>
                 <form hx-delete="/legs/{{.ID}}" hx-target="#slip-panel" hx-swap="outerHTML">
-                  <button type="submit" class="text-rose-400 hover:underline">Delete</button>
+                  <button type="submit" class="font-medium text-danger-ink hover:underline">Delete</button>
                 </form>
               </span>
             {{end}}
           </li>
         {{else}}
-          <li class="text-sm text-slate-500">No legs yet.</li>
+          <li class="text-sm text-ink-subtle">No legs yet.</li>
         {{end}}
       </ul>
     </section>
@@ -312,41 +312,41 @@
     <form hx-post="/slips/{{.Slip.ID}}/unlock" hx-target="#slip-panel" hx-swap="outerHTML">
       <button
         type="submit"
-        class="w-full rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-200 hover:bg-slate-800"
+        class="w-full rounded-lg border border-chrome-border bg-chrome px-3 py-2 text-sm text-chrome-ink hover:bg-chrome-border/40"
       >
         Unlock slip
       </button>
     </form>
   {{end}}
 
-  <section class="rounded-xl border border-slate-800 bg-slate-900 p-4">
+  <section class="ui-card p-4">
     <div class="flex items-center justify-between gap-2">
-      <h2 class="text-sm font-semibold text-slate-300">Analyzer</h2>
+      <h2 class="text-sm font-semibold text-ink">Analyzer</h2>
       <a
         href="/analyzer/guide?from=/slips/{{.Slip.ID}}"
-        class="text-xs font-medium text-sky-400 hover:underline"
+        class="text-xs font-medium text-ink underline decoration-line-strong underline-offset-2 hover:opacity-75"
         >How grading works</a
       >
     </div>
     {{if .Slip.Analyzer.Grade.Letter}}
-      <details class="mt-2 rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-2" data-slip-grade>
+      <details class="mt-2 rounded-lg border border-line bg-surface-2 px-3 py-2" data-slip-grade>
         <summary class="flex cursor-pointer list-none items-center justify-between gap-2 text-xs">
           <span class="flex min-w-0 items-center gap-2">
             <span class="shrink-0 rounded-full border px-2 py-0.5 font-semibold {{.Slip.Analyzer.Grade.Class}}">
               Slip grade: {{.Slip.Analyzer.Grade.Letter}}
             </span>
             {{if .Slip.Analyzer.Grade.Summary}}
-              <span class="truncate text-slate-300">{{.Slip.Analyzer.Grade.Summary}}</span>
+              <span class="truncate text-ink-muted">{{.Slip.Analyzer.Grade.Summary}}</span>
             {{end}}
           </span>
-          <span class="shrink-0 text-slate-400">Details &#9662;</span>
+          <span class="shrink-0 text-ink-subtle">Details &#9662;</span>
         </summary>
-        <div class="mt-2 space-y-1.5 border-t border-slate-800 pt-2 text-xs">
+        <div class="mt-2 space-y-1.5 border-t border-line pt-2 text-xs">
           <div class="flex items-center justify-between gap-2">
-            <span class="font-medium text-slate-300">Score: {{.Slip.Analyzer.Grade.Score}}/100</span>
+            <span class="font-medium text-ink">Score: {{.Slip.Analyzer.Grade.Score}}/100</span>
             <a
               href="/analyzer/guide?from=/slips/{{.Slip.ID}}#slip-grade"
-              class="font-medium text-sky-400 hover:underline"
+              class="font-medium text-ink underline decoration-line-strong underline-offset-2 hover:opacity-75"
               >See full rubric</a
             >
           </div>
@@ -354,19 +354,19 @@
             <ul class="space-y-1">
               {{range .Slip.Analyzer.Grade.Factors}}
                 <li class="flex items-start justify-between gap-2">
-                  <span class="min-w-0 text-slate-300">{{.Label}}{{if .Detail}} — {{.Detail}}{{end}}</span>
-                  <span class="shrink-0 font-semibold {{if .Positive}}text-emerald-300{{else if .Negative}}text-amber-300{{else}}text-slate-300{{end}}">{{.DeltaText}}</span>
+                  <span class="min-w-0 text-ink-muted">{{.Label}}{{if .Detail}} — {{.Detail}}{{end}}</span>
+                  <span class="shrink-0 font-semibold {{if .Positive}}text-positive-ink{{else if .Negative}}text-warning-ink{{else}}text-ink-muted{{end}}">{{.DeltaText}}</span>
                 </li>
               {{end}}
             </ul>
           {{else}}
-            <p class="text-slate-400">Weighted leg average with no extra correlation or drag adjustments.</p>
+            <p class="text-ink-muted">Weighted leg average with no extra correlation or drag adjustments.</p>
           {{end}}
         </div>
       </details>
     {{end}}
     {{if .Slip.Analyzer.Clean}}
-      <p class="mt-2 rounded-lg border border-emerald-800 bg-emerald-950 px-3 py-2 text-sm text-emerald-300">
+      <p class="mt-2 rounded-lg border border-positive bg-positive-soft px-3 py-2 text-sm text-positive-ink">
         Looks clean
       </p>
     {{else}}
@@ -383,9 +383,9 @@
             </div>
             <p class="mt-1 text-sm font-medium">{{.Message}}</p>
             {{if .Legs}}
-              <ul class="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-400">
+              <ul class="mt-2 flex flex-wrap items-center gap-2 text-xs">
                 {{range .Legs}}
-                  <li class="rounded-full border border-slate-700 bg-slate-800 px-2 py-0.5">
+                  <li class="rounded-full border border-line-strong bg-surface px-2 py-0.5 text-ink">
                     {{if .Owner}}{{.Owner}} · {{end}}{{.Selection}}
                   </li>
                 {{end}}
@@ -407,24 +407,24 @@
   hx-swap="outerHTML"
 >
   {{if .Locked}}
-    <section class="space-y-3 rounded-xl border border-slate-800 bg-slate-900 p-4">
+    <section class="ui-card space-y-3 p-4">
       <div class="flex items-start justify-between gap-3">
         <div class="min-w-0">
-          <h2 class="text-sm font-semibold text-slate-300">Export</h2>
-          <p class="mt-0.5 text-xs text-slate-400">Tap a pick to open it at the book.</p>
+          <h2 class="text-sm font-semibold text-ink">Export</h2>
+          <p class="mt-0.5 text-xs text-ink-muted">Tap a pick to open it at the book.</p>
         </div>
       </div>
       {{if .LinesAtISO}}
-        <p class="text-xs text-slate-500">
+        <p class="text-xs text-ink-subtle">
           Prices may have moved since <time datetime="{{.LinesAtISO}}">{{.LinesAtLabel}}</time>.
         </p>
       {{end}}
 
       {{range .Books}}
-        <div class="rounded-lg border border-slate-800 px-3 py-2">
-          <h3 class="text-xs font-semibold uppercase tracking-wide text-slate-400">{{.Label}}</h3>
+        <div class="rounded-lg border border-line px-3 py-2">
+          <h3 class="text-xs font-semibold uppercase tracking-wide text-ink-muted">{{.Label}}</h3>
           {{if .MultiGameNote}}
-            <p class="mt-1 text-xs text-slate-400">{{.MultiGameNote}}</p>
+            <p class="mt-1 text-xs text-ink-muted">{{.MultiGameNote}}</p>
           {{end}}
 
           {{if .OpenURL}}
@@ -432,37 +432,37 @@
               href="{{.OpenURL}}"
               target="_blank"
               rel="noopener"
-              class="mt-2 block w-full rounded-lg bg-sky-600 px-3 py-2 text-center text-sm font-semibold text-white hover:bg-sky-500"
+              class="mt-2 block w-full rounded-lg bg-accent px-3 py-2 text-center text-sm font-semibold text-accent-ink hover:opacity-90"
             >
               Open in {{.Label}}
             </a>
             {{range .Linked}}
               {{if .LineMoved}}
-                <p class="mt-1.5 text-xs text-amber-300">{{.Selection}}: {{.DriftNote}}</p>
+                <p class="mt-1.5 text-xs text-warning-ink">{{.Selection}}: {{.DriftNote}}</p>
               {{end}}
             {{end}}
           {{else if .Groups}}
             <div class="mt-2 space-y-2">
               {{range .Groups}}
                 {{if .CombinedURL}}
-                  <div class="rounded-md border border-sky-900/70 bg-sky-950/20 p-2">
+                  <div class="rounded-md border border-line-strong bg-surface-2 p-2">
                     <a
                       href="{{.CombinedURL}}"
                       target="_blank"
                       rel="noopener"
-                      class="block w-full rounded-lg bg-sky-600 px-3 py-2 text-center text-sm font-semibold text-white hover:bg-sky-500"
+                      class="block w-full rounded-lg bg-accent px-3 py-2 text-center text-sm font-semibold text-accent-ink hover:opacity-90"
                     >
                       Open {{.Label}} ({{len .Legs}} legs)
                     </a>
-                    <ul class="mt-1.5 space-y-0.5 text-xs text-slate-300">
+                    <ul class="mt-1.5 space-y-0.5 text-xs text-ink">
                       {{range .Legs}}
                         <li>
                           <span class="flex items-center justify-between gap-2">
                             <span class="min-w-0 truncate">{{.Selection}}</span>
-                            <span class="shrink-0 text-slate-400">{{.Price}}</span>
+                            <span class="ui-odds shrink-0">{{.Price}}</span>
                           </span>
                           {{if .LineMoved}}
-                            <span class="block text-amber-300">{{.DriftNote}}</span>
+                            <span class="block text-warning-ink">{{.DriftNote}}</span>
                           {{end}}
                         </li>
                       {{end}}
@@ -474,15 +474,15 @@
                       href="{{.URL}}"
                       target="_blank"
                       rel="noopener"
-                      class="flex items-center justify-between gap-2 rounded-md border border-sky-800 bg-sky-950/40 px-2 py-1.5 text-sm text-sky-300 hover:bg-sky-900/60"
+                      class="flex items-center justify-between gap-2 rounded-md border border-line-strong bg-surface-2 px-2 py-1.5 text-sm text-ink hover:border-accent"
                     >
                       <span class="min-w-0">
                         <span class="block min-w-0 truncate">{{.Selection}}</span>
                         {{if .LineMoved}}
-                          <span class="mt-0.5 block text-xs text-amber-300">{{.DriftNote}}</span>
+                          <span class="mt-0.5 block text-xs text-warning-ink">{{.DriftNote}}</span>
                         {{end}}
                       </span>
-                      <span class="shrink-0 text-xs text-slate-400">{{.Price}}</span>
+                      <span class="ui-odds shrink-0">{{.Price}}</span>
                     </a>
                   {{end}}
                 {{end}}
@@ -496,18 +496,18 @@
                     href="{{$link.URL}}"
                     target="_blank"
                     rel="noopener"
-                    class="flex items-center justify-between gap-2 rounded-md border border-sky-800 bg-sky-950/40 px-2 py-1.5 text-sm text-sky-300 hover:bg-sky-900/60"
+                    class="flex items-center justify-between gap-2 rounded-md border border-line-strong bg-surface-2 px-2 py-1.5 text-sm text-ink hover:border-accent"
                   >
                     <span class="min-w-0">
                       <span class="flex min-w-0 items-center gap-2">
-                        <span class="shrink-0 text-xs text-sky-400">{{inc $index}}.</span>
+                        <span class="shrink-0 text-xs text-ink-muted">{{inc $index}}.</span>
                         <span class="min-w-0 truncate">{{$link.Selection}}</span>
                       </span>
                       {{if $link.LineMoved}}
-                        <span class="mt-0.5 block text-xs text-amber-300">{{$link.DriftNote}}</span>
+                        <span class="mt-0.5 block text-xs text-warning-ink">{{$link.DriftNote}}</span>
                       {{end}}
                     </span>
-                    <span class="shrink-0 text-xs text-slate-400">{{$link.Price}}</span>
+                    <span class="ui-odds shrink-0">{{$link.Price}}</span>
                   </a>
                 </li>
               {{end}}
@@ -515,10 +515,10 @@
           {{end}}
 
           {{if .Manual}}
-            <ul class="mt-2 space-y-1 text-xs text-slate-400">
+            <ul class="mt-2 space-y-1 text-xs text-ink-muted">
               {{range .Manual}}
-                <li class="rounded-md border border-slate-800 px-2 py-1.5">
-                  <span class="font-medium text-slate-300">{{.Selection}}</span>
+                <li class="rounded-md border border-line px-2 py-1.5">
+                  <span class="font-medium text-ink">{{.Selection}}</span>
                   <span class="mt-0.5 block">{{.Note}}</span>
                 </li>
               {{end}}
@@ -526,7 +526,7 @@
           {{end}}
 
           {{if and (not .OpenURL) (not .Linked) (not .Manual)}}
-            <p class="mt-2 text-xs text-slate-500">No picks for this book yet.</p>
+            <p class="mt-2 text-xs text-ink-subtle">No picks for this book yet.</p>
           {{end}}
         </div>
       {{end}}
@@ -537,7 +537,7 @@
         <button
           type="button"
           data-copy-target="#slip-export-text"
-          class="w-full rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-200 hover:bg-slate-800"
+          class="w-full rounded-lg border border-line-strong bg-surface-2 px-3 py-2 text-sm text-ink hover:opacity-90"
         >
           Copy slip as text
         </button>
@@ -550,19 +550,19 @@
 {{define "slip-activity"}}
 <details
   id="slip-activity"
-  class="rounded-xl border border-slate-800 bg-slate-900"
+  class="ui-card"
   hx-get="/slips/{{.Slip.ID}}/activity"
   hx-trigger="slip-updated from:body"
   hx-swap="outerHTML"
 >
   <summary class="flex cursor-pointer list-none items-center justify-between gap-2 px-4 py-3">
-    <span class="text-sm font-semibold text-slate-300">Activity</span>
-    <span class="text-xs text-slate-500">{{len .Slip.Activity}} update{{if ne (len .Slip.Activity) 1}}s{{end}}</span>
+    <span class="text-sm font-semibold text-ink">Activity</span>
+    <span class="text-xs text-ink-subtle">{{len .Slip.Activity}} update{{if ne (len .Slip.Activity) 1}}s{{end}}</span>
   </summary>
-  <ul class="space-y-2 border-t border-slate-800 px-4 py-3 text-sm text-slate-400">
+  <ul class="space-y-2 border-t border-line px-4 py-3 text-sm text-ink-muted">
     {{range .Slip.Activity}}
       <li class="flex gap-2">
-        <time class="shrink-0 text-xs text-slate-500" datetime="{{.When}}">{{.When}}</time>
+        <time class="shrink-0 text-xs text-ink-subtle" datetime="{{.When}}">{{.When}}</time>
         <span class="min-w-0">{{.Message}}</span>
       </li>
     {{else}}
@@ -575,18 +575,18 @@
 {{define "slip-payout"}}
 <form
   id="slip-payout"
-  class="space-y-3 rounded-xl border border-slate-800 bg-slate-900 p-4"
+  class="ui-card space-y-3 p-4"
   hx-get="/slips/{{.SlipID}}/payout"
   hx-trigger="input changed delay:300ms, slip-updated from:body"
   hx-target="#slip-payout"
   hx-swap="outerHTML"
 >
   <div class="flex items-center justify-between gap-2">
-    <h2 class="text-sm font-semibold text-slate-300">Payout</h2>
-    <span class="text-xs text-slate-500">Updates as you type</span>
+    <h2 class="text-sm font-semibold text-ink">Payout</h2>
+    <span class="text-xs text-ink-subtle">Updates as you type</span>
   </div>
   <div class="grid grid-cols-2 gap-3">
-    <label class="block text-xs text-slate-400">
+    <label class="block text-xs text-ink-muted">
       Stake
       <input
         type="number"
@@ -595,10 +595,10 @@
         step="0.01"
         inputmode="decimal"
         value="{{.Stake}}"
-        class="mt-1 w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1 text-sm text-slate-100"
+        class="mt-1 w-full rounded-md border border-line-strong bg-surface-2 px-2 py-1 text-sm text-ink"
       >
     </label>
-    <label class="block text-xs text-slate-400">
+    <label class="block text-xs text-ink-muted">
       Boost %
       <input
         type="number"
@@ -607,31 +607,31 @@
         step="1"
         inputmode="decimal"
         value="{{.Boost}}"
-        class="mt-1 w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1 text-sm text-slate-100"
+        class="mt-1 w-full rounded-md border border-line-strong bg-surface-2 px-2 py-1 text-sm text-ink"
       >
     </label>
   </div>
   {{if .HasLegs}}
     <dl class="grid grid-cols-2 gap-2 text-sm">
       <div>
-        <dt class="text-xs text-slate-400">Combined</dt>
-        <dd class="font-medium">{{.Combined}} <span class="text-slate-400">({{.CombinedAmerican}})</span></dd>
+        <dt class="text-xs text-ink-muted">Combined</dt>
+        <dd class="font-medium">{{.Combined}} <span class="ui-odds">({{.CombinedAmerican}})</span></dd>
       </div>
       <div>
-        <dt class="text-xs text-slate-400">Reference</dt>
-        <dd class="font-medium">{{.Reference}} <span class="text-slate-400">({{.ReferenceAmerican}})</span></dd>
+        <dt class="text-xs text-ink-muted">Reference</dt>
+        <dd class="font-medium">{{.Reference}} <span class="ui-odds">({{.ReferenceAmerican}})</span></dd>
       </div>
       <div>
-        <dt class="text-xs text-slate-400">Return</dt>
+        <dt class="text-xs text-ink-muted">Return</dt>
         <dd class="font-medium">{{.Return}}</dd>
       </div>
       <div>
-        <dt class="text-xs text-slate-400">Profit</dt>
+        <dt class="text-xs text-ink-muted">Profit</dt>
         <dd class="font-medium">{{.Profit}}</dd>
       </div>
     </dl>
   {{else}}
-    <p class="rounded-lg border border-dashed border-slate-700 px-3 py-2 text-sm text-slate-500">
+    <p class="rounded-lg border border-dashed border-line-strong px-3 py-2 text-sm text-ink-subtle">
       Add a leg to see a payout.
     </p>
   {{end}}
@@ -641,22 +641,22 @@
 {{define "slip-wager"}}
 <form
   id="slip-wager"
-  class="space-y-3 rounded-xl border border-slate-800 bg-slate-900 p-4"
+  class="ui-card space-y-3 p-4"
   hx-put="/slips/{{.SlipID}}/wagers/me"
   hx-target="#slip-wager"
   hx-swap="outerHTML"
 >
   <div class="flex items-center justify-between gap-2">
-    <h2 class="text-sm font-semibold text-slate-300">My wager</h2>
+    <h2 class="text-sm font-semibold text-ink">My wager</h2>
     {{if .HasWager}}
-      <span class="rounded-full border border-emerald-800 bg-emerald-950 px-2 py-0.5 text-[11px] font-medium text-emerald-300">Saved</span>
+      <span class="rounded-full border border-positive bg-positive-soft px-2 py-0.5 text-[11px] font-medium text-positive-ink">Saved</span>
     {{else}}
-      <span class="text-xs text-slate-500">Tracked in Record Book</span>
+      <span class="text-xs text-ink-subtle">Tracked in Record Book</span>
     {{end}}
   </div>
-  <p data-form-error class="hidden rounded-lg border border-rose-700 bg-rose-950 px-3 py-2 text-xs text-rose-200"></p>
+  <p data-form-error class="hidden rounded-lg border border-danger bg-danger-soft px-3 py-2 text-xs text-danger-ink"></p>
   <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
-    <label class="block text-xs text-slate-400">
+    <label class="block text-xs text-ink-muted">
       Stake ($)
       <input
         type="number"
@@ -667,10 +667,10 @@
         placeholder="10.00"
         value="{{.Stake}}"
         required
-        class="mt-1 w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1 text-sm text-slate-100"
+        class="mt-1 w-full rounded-md border border-line-strong bg-surface-2 px-2 py-1 text-sm text-ink"
       >
     </label>
-    <label class="block text-xs text-slate-400">
+    <label class="block text-xs text-ink-muted">
       Odds
       <input
         type="number"
@@ -679,10 +679,10 @@
         placeholder="+350"
         value="{{.Odds}}"
         required
-        class="mt-1 w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1 text-sm text-slate-100"
+        class="mt-1 w-full rounded-md border border-line-strong bg-surface-2 px-2 py-1 text-sm text-ink"
       >
     </label>
-    <label class="block text-xs text-slate-400">
+    <label class="block text-xs text-ink-muted">
       Boost %
       <input
         type="number"
@@ -691,10 +691,10 @@
         step="1"
         inputmode="decimal"
         value="{{.Boost}}"
-        class="mt-1 w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1 text-sm text-slate-100"
+        class="mt-1 w-full rounded-md border border-line-strong bg-surface-2 px-2 py-1 text-sm text-ink"
       >
     </label>
-    <label class="block text-xs text-slate-400">
+    <label class="block text-xs text-ink-muted">
       Book
       <input
         type="text"
@@ -702,18 +702,18 @@
         maxlength="40"
         placeholder="DraftKings"
         value="{{.Book}}"
-        class="mt-1 w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1 text-sm text-slate-100"
+        class="mt-1 w-full rounded-md border border-line-strong bg-surface-2 px-2 py-1 text-sm text-ink"
       >
     </label>
   </div>
   {{if .HasWager}}
     <dl class="grid grid-cols-2 gap-2 text-sm">
       <div>
-        <dt class="text-xs text-slate-400">To return</dt>
+        <dt class="text-xs text-ink-muted">To return</dt>
         <dd class="font-medium">{{.Return}}</dd>
       </div>
       <div>
-        <dt class="text-xs text-slate-400">Profit</dt>
+        <dt class="text-xs text-ink-muted">Profit</dt>
         <dd class="font-medium">{{.Profit}}</dd>
       </div>
     </dl>
@@ -721,7 +721,7 @@
   <div class="flex items-center gap-2">
     <button
       type="submit"
-      class="rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-sky-500"
+      class="rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-accent-ink hover:opacity-90"
     >
       Save wager
     </button>
@@ -731,7 +731,7 @@
         hx-delete="/slips/{{.SlipID}}/wagers/me"
         hx-target="#slip-wager"
         hx-swap="outerHTML"
-        class="rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800"
+        class="rounded-lg border border-line-strong px-3 py-1.5 text-xs text-ink-muted hover:bg-surface-2 hover:text-ink"
       >
         Clear
       </button>
@@ -744,13 +744,13 @@
 <dialog id="leg-sheet" class="leg-sheet" aria-label="Add or edit a leg">
   <div
     id="leg-sheet-body"
-    class="rounded-t-2xl border border-slate-800 bg-slate-900 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-2xl"
+    class="rounded-t-2xl border border-line bg-surface p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] text-ink shadow-2xl"
   ></div>
 </dialog>
 {{end}}
 
 {{define "leg-added"}}
-<p class="text-xs font-medium text-emerald-300" role="status">Added {{.Selection}}</p>
+<p class="text-xs font-medium text-positive-ink" role="status">Added {{.Selection}}</p>
 {{end}}
 
 {{define "leg-form"}}
@@ -763,10 +763,10 @@
 >
   {{if .Quick}}<input type="hidden" name="quick" value="1">{{end}}
   <div class="flex items-center justify-between gap-3">
-    <h2 class="text-lg font-semibold">{{if .Editing}}Edit leg{{else}}Add a leg{{end}}</h2>
+    <h2 class="font-display text-lg font-semibold">{{if .Editing}}Edit leg{{else}}Add a leg{{end}}</h2>
     <button
       type="button"
-      class="rounded-md border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800"
+      class="rounded-md border border-line-strong px-2 py-1 text-xs text-ink-muted hover:bg-surface-2 hover:text-ink"
       data-close-leg-sheet
     >
       Close
@@ -774,15 +774,15 @@
   </div>
   <p
     data-form-error
-    class="hidden rounded-lg border border-rose-700 bg-rose-950 px-3 py-2 text-sm text-rose-200"
+    class="hidden rounded-lg border border-danger bg-danger-soft px-3 py-2 text-sm text-danger-ink"
     role="alert"
   ></p>
-  <label class="block text-xs text-slate-400">
+  <label class="block text-xs text-ink-muted">
     Game
     <select
       name="game_id"
       {{if not .GameOptional}}required{{end}}
-      class="mt-1 w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1 text-sm"
+      class="mt-1 w-full rounded-md border border-line-strong bg-surface-2 px-2 py-1 text-sm text-ink"
     >
       {{if .GameOptional}}<option value=""{{if not .GameID}} selected{{end}}>No game</option>{{end}}
       {{range .Games}}
@@ -790,46 +790,46 @@
       {{end}}
     </select>
   </label>
-  <label class="block text-xs text-slate-400">
+  <label class="block text-xs text-ink-muted">
     Market
-    <select name="market_type" class="mt-1 w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1 text-sm">
+    <select name="market_type" class="mt-1 w-full rounded-md border border-line-strong bg-surface-2 px-2 py-1 text-sm text-ink">
       {{range list "SPREAD" "ML" "TOTAL" "TEAM_TOTAL" "PASS_YDS" "PASS_TDS" "RUSH_YDS" "RUSH_ATT" "REC_YDS" "RECEPTIONS" "ANYTIME_TD" "KICKER_PTS" "OTHER"}}
         <option value="{{.}}"{{if eq . $.Market}} selected{{end}}>{{.}}</option>
       {{end}}
     </select>
   </label>
-  <label class="block text-xs text-slate-400">
+  <label class="block text-xs text-ink-muted">
     Selection
     <input
       type="text"
       name="selection"
       value="{{.Selection}}"
       placeholder="BUF -3.5"
-      class="mt-1 w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1 text-sm text-slate-100"
+      class="mt-1 w-full rounded-md border border-line-strong bg-surface-2 px-2 py-1 text-sm text-ink"
     >
   </label>
   <div class="grid grid-cols-2 gap-2">
-    <label class="block text-xs text-slate-400">
+    <label class="block text-xs text-ink-muted">
       Team
       <input
         type="text"
         name="team"
         value="{{.Team}}"
         placeholder="BUF"
-        class="mt-1 w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1 text-sm text-slate-100"
+        class="mt-1 w-full rounded-md border border-line-strong bg-surface-2 px-2 py-1 text-sm text-ink"
       >
     </label>
-    <label class="block text-xs text-slate-400">
+    <label class="block text-xs text-ink-muted">
       Side
       <input
         type="text"
         name="side"
         value="{{.Side}}"
         placeholder="OVER"
-        class="mt-1 w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1 text-sm text-slate-100"
+        class="mt-1 w-full rounded-md border border-line-strong bg-surface-2 px-2 py-1 text-sm text-ink"
       >
     </label>
-    <label class="block text-xs text-slate-400">
+    <label class="block text-xs text-ink-muted">
       Line
       <input
         type="number"
@@ -837,28 +837,28 @@
         step="0.5"
         inputmode="decimal"
         value="{{.Line}}"
-        class="mt-1 w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1 text-sm text-slate-100"
+        class="mt-1 w-full rounded-md border border-line-strong bg-surface-2 px-2 py-1 text-sm text-ink"
       >
     </label>
-    <label class="block text-xs text-slate-400">
+    <label class="block text-xs text-ink-muted">
       Odds
       <input
         type="number"
         name="odds"
         inputmode="numeric"
         value="{{.Odds}}"
-        class="mt-1 w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1 text-sm text-slate-100"
+        class="mt-1 w-full rounded-md border border-line-strong bg-surface-2 px-2 py-1 text-sm text-ink"
       >
     </label>
   </div>
-  <label class="block text-xs text-slate-400">
+  <label class="block text-xs text-ink-muted">
     Player
     <input
       type="text"
       name="player_name"
       list="player-names"
       value="{{.PlayerName}}"
-      class="mt-1 w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1 text-sm text-slate-100"
+      class="mt-1 w-full rounded-md border border-line-strong bg-surface-2 px-2 py-1 text-sm text-ink"
     >
     <datalist id="player-names">
       {{range .Players}}
@@ -868,7 +868,7 @@
   </label>
   <button
     type="submit"
-    class="w-full rounded-lg bg-sky-600 px-3 py-2 text-sm font-semibold text-white hover:bg-sky-500"
+    class="w-full rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-accent-ink hover:opacity-90"
   >
     {{if .Editing}}Save leg{{else}}Add leg{{end}}
   </button>
@@ -1394,15 +1394,15 @@
       >
         <button
           type="submit"
-          class="w-full rounded-lg border border-emerald-700 bg-emerald-950/50 px-3 py-2 text-left text-sm font-medium text-emerald-300 hover:bg-emerald-900/60"
+          class="w-full rounded-lg border border-positive bg-positive-soft px-3 py-2 text-left text-sm font-medium text-positive-ink hover:opacity-90"
         >
           <span class="block truncate">{{.Text}}</span>
-          <span class="block text-xs font-normal text-emerald-400/80">{{.Price}} &middot; tap to remove</span>
-          {{if .Badge}}<span class="mt-1 inline-block rounded-full border border-sky-700/70 bg-sky-950/70 px-1.5 py-0.5 text-[10px] font-medium text-sky-300">{{.Badge}}</span>{{end}}
+          <span class="mt-0.5 block text-xs font-normal opacity-85"><span class="ui-odds">{{.Price}}</span> &middot; tap to remove</span>
+          {{if .Badge}}<span class="mt-1 inline-block rounded-full border border-line-strong bg-surface px-1.5 py-0.5 text-[10px] font-medium text-ink">{{.Badge}}</span>{{end}}
         </button>
       </form>
       {{if .DriftNote}}
-        <div class="flex items-center justify-between gap-2 rounded-md border border-amber-700/60 bg-amber-950/40 px-2 py-1 text-[11px] text-amber-300">
+        <div class="flex items-center justify-between gap-2 rounded-md border border-warning bg-warning-soft px-2 py-1 text-[11px] text-warning-ink">
           <span class="truncate">{{.DriftNote}}</span>
           {{if .CanRefresh}}
             <form
@@ -1419,7 +1419,7 @@
               {{if .PlayerID}}<input type="hidden" name="player_id" value="{{.PlayerID}}">{{end}}
               {{if .Line}}<input type="hidden" name="line" value="{{.Line}}">{{end}}
               <input type="hidden" name="odds" value="{{.Odds}}">
-              <button type="submit" class="shrink-0 font-semibold text-sky-300 hover:underline">
+              <button type="submit" class="shrink-0 font-semibold text-ink underline hover:opacity-75">
                 Sync line
               </button>
             </form>
@@ -1444,24 +1444,24 @@
       <input type="hidden" name="odds" value="{{.Odds}}">
       <button
         type="submit"
-        class="w-full rounded-lg border border-slate-700 bg-slate-800/60 px-3 py-2 text-left text-sm font-medium text-slate-200 hover:bg-slate-800"
+        class="w-full rounded-lg border border-line-strong bg-surface-2 px-3 py-2 text-left text-sm font-medium text-ink hover:border-accent"
       >
         <span class="block truncate">{{.Text}}</span>
-        <span class="block text-xs font-normal text-slate-400">{{.Price}} &middot; tap to switch</span>
-        {{if .Badge}}<span class="mt-1 inline-block rounded-full border border-sky-700/70 bg-sky-950/70 px-1.5 py-0.5 text-[10px] font-medium text-sky-300">{{.Badge}}</span>{{end}}
+        <span class="mt-0.5 block text-xs font-normal text-ink-muted"><span class="ui-odds">{{.Price}}</span> &middot; tap to switch</span>
+        {{if .Badge}}<span class="mt-1 inline-block rounded-full border border-accent bg-accent-soft px-1.5 py-0.5 text-[10px] font-medium text-ink">{{.Badge}}</span>{{end}}
       </button>
     </form>
   {{else if .AtLimit}}
     <button
       type="button"
-      class="w-full rounded-lg border border-slate-700 bg-slate-800/60 px-3 py-2 text-left text-sm font-medium text-slate-200 hover:bg-slate-800"
+      class="w-full rounded-lg border border-line-strong bg-surface-2 px-3 py-2 text-left text-sm font-medium text-ink hover:border-accent"
       hx-get="{{.SwapURL}}"
       hx-target="#pick-swap-body"
       hx-swap="innerHTML"
     >
       <span class="block truncate">{{.Text}}</span>
-      <span class="block text-xs font-normal text-slate-400">{{.Price}} &middot; swap in</span>
-      {{if .Badge}}<span class="mt-1 inline-block rounded-full border border-sky-700/70 bg-sky-950/70 px-1.5 py-0.5 text-[10px] font-medium text-sky-300">{{.Badge}}</span>{{end}}
+      <span class="mt-0.5 block text-xs font-normal text-ink-muted"><span class="ui-odds">{{.Price}}</span> &middot; swap in</span>
+      {{if .Badge}}<span class="mt-1 inline-block rounded-full border border-accent bg-accent-soft px-1.5 py-0.5 text-[10px] font-medium text-ink">{{.Badge}}</span>{{end}}
     </button>
   {{else}}
     <form
@@ -1481,11 +1481,11 @@
       <input type="hidden" name="odds" value="{{.Odds}}">
       <button
         type="submit"
-        class="w-full rounded-lg border border-slate-700 bg-slate-800/60 px-3 py-2 text-left text-sm font-medium text-slate-200 hover:bg-slate-800"
+        class="w-full rounded-lg border border-line-strong bg-surface-2 px-3 py-2 text-left text-sm font-medium text-ink hover:border-accent"
       >
         <span class="block truncate">{{.Text}}</span>
-        <span class="block text-xs font-normal text-slate-400">{{.Price}} &middot; tap to add</span>
-        {{if .Badge}}<span class="mt-1 inline-block rounded-full border border-sky-700/70 bg-sky-950/70 px-1.5 py-0.5 text-[10px] font-medium text-sky-300">{{.Badge}}</span>{{end}}
+        <span class="mt-0.5 block text-xs font-normal text-ink-muted"><span class="ui-odds">{{.Price}}</span> &middot; tap to add</span>
+        {{if .Badge}}<span class="mt-1 inline-block rounded-full border border-accent bg-accent-soft px-1.5 py-0.5 text-[10px] font-medium text-ink">{{.Badge}}</span>{{end}}
       </button>
     </form>
   {{end}}
@@ -1501,7 +1501,7 @@
   {{with .Detail}}
     {{template "pick-detail" .}}
   {{else}}
-    <section class="hidden min-w-0 rounded-xl border border-dashed border-slate-800 p-6 text-sm text-slate-500 lg:flex lg:items-center lg:justify-center" aria-label="Game picks">
+    <section class="hidden min-w-0 rounded-xl border border-dashed border-chrome-border bg-chrome/40 p-6 text-sm text-page-muted lg:flex lg:items-center lg:justify-center" aria-label="Game picks">
       Pick a game to see its lines and props.
     </section>
   {{end}}
@@ -1523,7 +1523,7 @@
 >
   <div class="space-y-3">
     <form
-      class="rounded-xl border border-slate-800 bg-slate-900 p-3"
+      class="ui-card p-3"
       hx-get="/slips/{{.SlipID}}/pick/results"
       hx-target="#pick-body"
       hx-swap="outerHTML"
@@ -1539,7 +1539,7 @@
         hx-preserve
         placeholder="Search a team or player"
         autocomplete="off"
-        class="w-full rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500"
+        class="w-full rounded-md border border-line-strong bg-surface-2 px-3 py-2 text-sm text-ink placeholder:text-ink-subtle"
       >
       <input id="pick-cat" type="hidden" name="cat" value="{{.Category}}">
       <input id="pick-win" type="hidden" name="win" value="{{.Window}}">
@@ -1556,7 +1556,7 @@
             hx-target="#pick-body"
             hx-swap="outerHTML"
             hx-push-url="{{.PushURL}}"
-            class="inline-flex min-h-12 items-center rounded-full px-2.5 py-1 text-xs font-medium {{if .Active}}bg-sky-600 text-white{{else}}border border-slate-700 bg-slate-800 text-slate-300 hover:bg-slate-700{{end}}"
+            class="inline-flex min-h-12 items-center rounded-full px-2.5 py-1 text-xs font-medium {{if .Active}}bg-accent text-accent-ink{{else}}border border-chrome-border bg-chrome text-chrome-ink hover:bg-chrome-border/40{{end}}"
             >{{.Label}}{{if .Count}} <span class="opacity-70">{{.Count}}</span>{{end}}</a
           >
         {{end}}
@@ -1569,7 +1569,7 @@
           hx-target="#pick-body"
           hx-swap="outerHTML"
           hx-disabled-elt="this"
-          class="inline-flex min-h-12 shrink-0 items-center rounded-full border border-slate-700 bg-slate-800 px-3 py-1 text-xs font-medium text-slate-200 hover:bg-slate-700 disabled:opacity-50"
+          class="inline-flex min-h-12 shrink-0 items-center rounded-full border border-chrome-border bg-chrome px-3 py-1 text-xs font-medium text-chrome-ink hover:bg-chrome-border/40 disabled:opacity-50"
         >
           Refresh odds
         </button>
@@ -1578,7 +1578,7 @@
 
     {{range .Cards}}
       <div
-        class="rounded-xl border {{if .Active}}border-sky-500 bg-sky-950/40{{else}}border-slate-800 bg-slate-900 hover:bg-slate-800/60{{end}}"
+        class="ui-card transition {{if .Active}}ring-2 ring-accent bg-surface-2{{else}}hover:border-line-strong hover:bg-surface-2{{end}}"
       >
         <a
           href="{{.PushURL}}"
@@ -1595,37 +1595,37 @@
                 {{template "matchup-logos" (dict "AwayURL" .AwayLogo "HomeURL" .HomeLogo "Size" "h-5 w-5")}}
                 <p class="truncate font-semibold">{{.Matchup}}</p>
               </div>
-              <p class="mt-0.5 text-xs text-slate-500">
+              <p class="mt-0.5 text-xs text-ink-muted">
                 {{if .KickoffISO}}<time datetime="{{.KickoffISO}}">{{.KickoffFallback}}</time>{{end}}{{if .Venue}} &middot; {{.Venue}}{{end}}
               </p>
             </div>
             <div class="flex shrink-0 flex-col items-end gap-1">
               {{if .AGradeCount}}
-                <span class="rounded-full border border-emerald-700 bg-emerald-950 px-2 py-0.5 text-[11px] font-semibold text-emerald-300" data-game-a-grade-count>
+                <span class="rounded-full border border-positive bg-positive-soft px-2 py-0.5 text-[11px] font-semibold text-positive-ink" data-game-a-grade-count>
                   {{.AGradeCount}} A-grade
                 </span>
               {{end}}
-              <span class="rounded-full px-2 py-0.5 text-[11px] font-medium {{if .HasProps}}bg-slate-800 text-slate-300{{else}}text-slate-500{{end}}">
+              <span class="rounded-full px-2 py-0.5 text-[11px] font-medium {{if .HasProps}}bg-surface-2 text-ink{{else}}text-ink-subtle{{end}}">
                 {{if .HasProps}}Explore {{.Props}} prop{{if ne .Props 1}}s{{end}}{{else}}No props yet{{end}}
               </span>
             </div>
           </div>
           {{if or .Spread .Total .Moneyline}}
             <dl class="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
-              {{if .Spread}}<div class="min-w-0"><dt class="text-slate-500">Spread</dt><dd class="truncate text-slate-300">{{.Spread}}</dd></div>{{end}}
-              {{if .Total}}<div class="min-w-0"><dt class="text-slate-500">Total</dt><dd class="truncate text-slate-300">{{.Total}}</dd></div>{{end}}
-              {{if .Moneyline}}<div class="col-span-2 min-w-0"><dt class="text-slate-500">Moneyline</dt><dd class="truncate text-slate-300">{{.Moneyline}}</dd></div>{{end}}
+              {{if .Spread}}<div class="min-w-0"><dt class="text-ink-subtle">Spread</dt><dd class="truncate font-mono text-ink">{{.Spread}}</dd></div>{{end}}
+              {{if .Total}}<div class="min-w-0"><dt class="text-ink-subtle">Total</dt><dd class="truncate font-mono text-ink">{{.Total}}</dd></div>{{end}}
+              {{if .Moneyline}}<div class="col-span-2 min-w-0"><dt class="text-ink-subtle">Moneyline</dt><dd class="truncate font-mono text-ink">{{.Moneyline}}</dd></div>{{end}}
             </dl>
           {{end}}
         </a>
         {{if .Unloaded}}
-          <div class="flex items-center justify-between gap-3 border-t border-sky-800 px-3 py-2">
-            <p class="min-w-0 text-sm text-sky-200">
+          <div class="flex items-center justify-between gap-3 border-t border-line bg-surface-2 px-3 py-2">
+            <p class="min-w-0 text-sm text-ink">
               Props for {{.Matchup}} aren&rsquo;t loaded yet.
             </p>
             <button
               type="button"
-              class="inline-flex min-h-12 shrink-0 items-center rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-sky-500"
+              class="inline-flex min-h-12 shrink-0 items-center rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-accent-ink hover:opacity-90"
               hx-get="/games/{{.ID}}/props?slip={{.SlipID}}"
               hx-swap="none"
             >
@@ -1637,27 +1637,27 @@
     {{end}}
 
     {{if .NoGames}}
-      <p class="rounded-xl border border-dashed border-slate-700 bg-slate-900 p-4 text-sm text-slate-400">
+      <p class="ui-card border-dashed p-4 text-sm text-ink-muted">
         No games are stored for this week yet. The slate shows up after the next sync.
       </p>
     {{else if .NoLines}}
-      <p class="rounded-xl border border-dashed border-slate-700 bg-slate-900 p-4 text-sm text-slate-400">
+      <p class="ui-card border-dashed p-4 text-sm text-ink-muted">
         No lines for this week yet. They load on the next sync, so check back in a minute.
       </p>
     {{else if .AllStarted}}
-      <p class="rounded-xl border border-dashed border-slate-700 bg-slate-900 p-4 text-sm text-slate-400">
+      <p class="ui-card border-dashed p-4 text-sm text-ink-muted">
         Every game this week has kicked off. Picks are closed.
       </p>
     {{end}}
 
     {{if .Empty}}
-      <p class="rounded-xl border border-dashed border-slate-700 bg-slate-900 p-4 text-sm text-slate-400">
+      <p class="ui-card border-dashed p-4 text-sm text-ink-muted">
         Nothing matches that search. Try a team, a player, or a market.
       </p>
     {{end}}
 
     {{if and .Started (not .AllStarted)}}
-      <p class="px-1 text-xs text-slate-500">
+      <p class="px-1 text-xs text-page-muted">
         {{.Started}} game{{if ne .Started 1}}s{{end}} already kicked off and {{if eq .Started 1}}is{{else}}are{{end}} hidden.
       </p>
     {{end}}
@@ -1678,7 +1678,7 @@
   hx-swap="outerHTML"
   aria-label="Game picks"
 >
-  <div class="sticky top-14 z-10 -mx-1 border-b border-slate-800 bg-slate-950/95 px-1 pb-2 backdrop-blur lg:top-0">
+  <div class="sticky top-14 z-10 -mx-1 border-b border-chrome-border bg-page/95 px-1 pb-2 text-page-ink backdrop-blur lg:top-0">
     <div class="flex items-center justify-between gap-3">
       <a
         href="{{.BackPushURL}}"
@@ -1686,7 +1686,7 @@
         hx-target="#pick-body"
         hx-swap="outerHTML"
         hx-push-url="{{.BackPushURL}}"
-        class="inline-flex min-h-12 items-center rounded-md border border-slate-700 px-2 py-1 text-sm text-slate-200 hover:bg-slate-800"
+        class="inline-flex min-h-12 items-center rounded-md border border-chrome-border bg-chrome px-2 py-1 text-sm text-chrome-ink hover:bg-chrome-border/40"
         >&larr; All games</a
       >
       <div class="flex items-center gap-3">
@@ -1698,23 +1698,23 @@
             hx-target="#pick-body"
             hx-swap="outerHTML"
             hx-disabled-elt="this"
-            class="inline-flex min-h-12 shrink-0 items-center rounded-md border border-slate-700 bg-slate-800 px-2.5 py-1 text-xs font-medium text-slate-200 hover:bg-slate-700 disabled:opacity-50"
+            class="inline-flex min-h-12 shrink-0 items-center rounded-md border border-chrome-border bg-chrome px-2.5 py-1 text-xs font-medium text-chrome-ink hover:bg-chrome-border/40 disabled:opacity-50"
           >
             Refresh odds
           </button>
         {{end}}
         <a
           href="/research?game_id={{.GameID}}"
-          class="inline-flex min-h-12 items-center text-xs font-medium text-sky-400 hover:text-sky-300"
+          class="inline-flex min-h-12 items-center text-xs font-medium text-page-ink underline decoration-accent decoration-2 underline-offset-2 hover:opacity-80"
           >Research &rarr;</a
         >
       </div>
     </div>
     <div class="mt-2 flex min-w-0 items-center gap-2">
       {{template "matchup-logos" (dict "AwayURL" .AwayLogo "HomeURL" .HomeLogo "Size" "h-6 w-6")}}
-      <h2 class="min-w-0 truncate text-lg font-semibold">{{.Matchup}}</h2>
+      <h2 class="min-w-0 truncate font-display text-lg font-semibold">{{.Matchup}}</h2>
     </div>
-    <p class="mt-0.5 text-xs text-slate-500">
+    <p class="mt-0.5 text-xs text-page-muted">
       {{if .KickoffISO}}<time datetime="{{.KickoffISO}}">{{.KickoffFallback}}</time>{{end}}{{if .Venue}} &middot; {{.Venue}}{{end}}
     </p>
 
@@ -1728,7 +1728,7 @@
             hx-swap="outerHTML"
             hx-push-url="{{.PushURL}}"
             {{if .Active}}aria-current="true"{{end}}
-            class="inline-flex min-h-12 shrink-0 items-center rounded-full px-2.5 py-1 text-xs font-medium {{if .Active}}bg-sky-600 text-white{{else}}border border-slate-700 bg-slate-800 text-slate-300 hover:bg-slate-700{{end}}"
+            class="inline-flex min-h-12 shrink-0 items-center rounded-full px-2.5 py-1 text-xs font-medium {{if .Active}}bg-accent text-accent-ink{{else}}border border-chrome-border bg-chrome text-chrome-ink hover:bg-chrome-border/40{{end}}"
             >{{.Label}}{{if .Count}} <span class="opacity-70">{{.Count}}</span>{{end}}</a
           >
         {{end}}
@@ -1739,7 +1739,7 @@
   {{template "highlights-strip" .Highlights}}
 
   <div class="flex flex-wrap items-center gap-1.5">
-    <span class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Sort</span>
+    <span class="text-[11px] font-semibold uppercase tracking-wide text-page-muted">Sort</span>
     {{range .Sorts}}
       <a
         href="{{.PushURL}}"
@@ -1748,20 +1748,20 @@
         hx-swap="outerHTML"
         hx-push-url="{{.PushURL}}"
         {{if .Active}}aria-current="true"{{end}}
-        class="inline-flex min-h-12 items-center rounded-full px-2 py-0.5 text-xs font-medium {{if .Active}}text-sky-300 underline{{else}}text-slate-400 hover:text-slate-200{{end}}"
+        class="inline-flex min-h-12 items-center rounded-full px-2 py-0.5 text-xs font-medium {{if .Active}}text-page-ink underline decoration-accent decoration-2 underline-offset-4{{else}}text-page-muted hover:text-page-ink{{end}}"
         >{{.Label}}</a
       >
     {{end}}
   </div>
 
   {{if .Unloaded}}
-    <div class="flex items-center justify-between gap-3 rounded-xl border border-sky-800 bg-sky-950/40 p-3">
-      <p class="min-w-0 text-sm text-sky-200">
+    <div class="ui-card flex items-center justify-between gap-3 p-3">
+      <p class="min-w-0 text-sm text-ink">
         Props for this game aren&rsquo;t loaded yet.
       </p>
       <button
         type="button"
-        class="inline-flex min-h-12 shrink-0 items-center rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-sky-500"
+        class="inline-flex min-h-12 shrink-0 items-center rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-accent-ink hover:opacity-90"
         hx-get="/games/{{.GameID}}/props?slip={{.SlipID}}"
         hx-swap="none"
       >
@@ -1770,19 +1770,23 @@
     </div>
   {{end}}
 
-  {{range .Lines}}
-    {{template "pick-line-group" .}}
+  {{if .Lines}}
+    <div class="ui-card space-y-3 p-3">
+      {{range .Lines}}
+        {{template "pick-line-group" .}}
+      {{end}}
+    </div>
   {{end}}
 
   {{range .Players}}
-    <section class="rounded-xl border border-slate-800 bg-slate-900 p-3">
+    <section class="ui-card p-3">
       <header class="flex items-center justify-between gap-3">
         <div class="flex min-w-0 items-center gap-2.5">
           {{template "player-portrait" (dict "URL" .HeadshotURL "Initials" .Initials "Size" "h-8 w-8")}}
           <h3 class="min-w-0 truncate text-sm font-semibold">{{.Name}}</h3>
         </div>
         {{if or .Position .Team .TeamLogo}}
-          <p class="flex shrink-0 items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-slate-500">
+          <p class="flex shrink-0 items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-ink-muted">
             {{template "team-logo" (dict "URL" .TeamLogo "Size" "h-4 w-4")}}
             <span>{{.Position}}{{if and .Position .Team}} &middot; {{end}}{{.Team}}</span>
           </p>
@@ -1791,7 +1795,7 @@
       {{if .Tags}}
         <div class="mt-2 flex flex-wrap gap-1.5">
           {{range .Tags}}
-            <span class="rounded-full border border-emerald-800/70 bg-emerald-950/60 px-2 py-0.5 text-[10px] font-medium text-emerald-300">{{.}}</span>
+            <span class="rounded-full border border-positive bg-positive-soft px-2 py-0.5 text-[10px] font-medium text-positive-ink">{{.}}</span>
           {{end}}
         </div>
       {{end}}
@@ -1804,7 +1808,7 @@
   {{end}}
 
   {{if .Empty}}
-    <p class="rounded-xl border border-dashed border-slate-700 bg-slate-900 p-4 text-sm text-slate-400">
+    <p class="ui-card border-dashed p-4 text-sm text-ink-muted">
       {{if .Search}}Nothing matches that search. Try a team, a player, or a market.{{else}}No lines for this game yet. They load on the next sync.{{end}}
     </p>
   {{end}}
@@ -1818,7 +1822,7 @@
 
 {{define "pick-line-group"}}
 <div id="{{.ID}}" class="pick-line-group">
-  {{if .Label}}<p class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{{.Label}}</p>{{end}}
+  {{if .Label}}<p class="text-[11px] font-semibold uppercase tracking-wide text-ink-muted">{{.Label}}</p>{{end}}
   <div class="mt-1 grid gap-2 {{if eq (len .Options) 1}}grid-cols-1{{else}}grid-cols-2{{end}}">
     {{range .Options}}
       <div class="pick-row min-w-0">{{template "pick-option" .}}</div>
@@ -1830,7 +1834,7 @@
 {{define "pick-detail-empty"}}
 <section
   id="pick-detail"
-  class="min-w-0 rounded-xl border border-dashed border-slate-800 p-4 text-sm text-slate-500"
+  class="min-w-0 rounded-xl border border-dashed border-chrome-border bg-chrome/40 p-4 text-sm text-page-muted"
   aria-label="Game picks"
 >
   Pick a game to see its lines and props.
@@ -1840,23 +1844,23 @@
 {{define "pick-tray"}}
 <div
   id="pick-tray"
-  class="space-y-3 rounded-xl border border-slate-800 bg-slate-900 p-4"
+  class="ui-card space-y-3 p-4"
   hx-get="/slips/{{.SlipID}}/tray"
   hx-trigger="tray-updated from:body, slip-updated from:body"
   hx-swap="outerHTML"
 >
   <div class="flex items-center justify-between gap-3">
-    <h2 class="text-sm font-semibold text-slate-300">Your picks</h2>
-    <span class="text-xs text-slate-400">{{.Picked}} of {{.Limit}}</span>
+    <h2 class="text-sm font-semibold text-ink">Your picks</h2>
+    <span class="text-xs text-ink-muted">{{.Picked}} of {{.Limit}}</span>
   </div>
 
   <ul class="space-y-2">
     {{range .Legs}}
-      <li class="flex items-start justify-between gap-2 rounded-lg border border-slate-800 px-3 py-2">
+      <li class="flex items-start justify-between gap-2 rounded-lg border border-line px-3 py-2">
         <div class="min-w-0 flex-1">
           <p class="truncate text-sm font-medium">{{.Selection}}</p>
-          <div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-400">
-            <span>{{.Odds}}</span>
+          <div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-ink-muted">
+            <span class="ui-odds">{{.Odds}}</span>
             {{if .Grade.Letter}}
               <details class="min-w-0" data-leg-grade>
                 <summary
@@ -1865,12 +1869,12 @@
                 >
                   Grade {{.Grade.Letter}}
                 </summary>
-                <div class="mt-1.5 w-60 max-w-full rounded-lg border border-slate-700 bg-slate-950 p-2 text-xs shadow-lg">
-                  <div class="flex items-center justify-between gap-2 border-b border-slate-800 pb-1">
-                    <span class="font-semibold text-slate-200">Leg grade: {{.Grade.Letter}} ({{.Grade.Score}})</span>
+                <div class="mt-1.5 w-60 max-w-full rounded-lg border border-line-strong bg-surface p-2 text-xs text-ink shadow-lg">
+                  <div class="flex items-center justify-between gap-2 border-b border-line pb-1">
+                    <span class="font-semibold text-ink">Leg grade: {{.Grade.Letter}} ({{.Grade.Score}})</span>
                     <a
                       href="/analyzer/guide?from=/slips/{{$.SlipID}}/pick#leg-grades"
-                      class="font-medium text-sky-400 hover:underline"
+                      class="font-medium text-ink underline decoration-line-strong underline-offset-2 hover:opacity-75"
                       >See full rubric</a
                     >
                   </div>
@@ -1878,13 +1882,13 @@
                     <ul class="mt-1 space-y-1">
                       {{range .Grade.Factors}}
                         <li class="flex items-start justify-between gap-2">
-                          <span class="min-w-0 text-slate-300">{{.Label}}</span>
-                          <span class="shrink-0 font-semibold {{if .Positive}}text-emerald-300{{else if .Negative}}text-amber-300{{else}}text-slate-300{{end}}">{{.DeltaText}}</span>
+                          <span class="min-w-0 text-ink-muted">{{.Label}}</span>
+                          <span class="shrink-0 font-semibold {{if .Positive}}text-positive-ink{{else if .Negative}}text-warning-ink{{else}}text-ink-muted{{end}}">{{.DeltaText}}</span>
                         </li>
                       {{end}}
                     </ul>
                   {{else}}
-                    <p class="mt-1 text-slate-400">Baseline 75 — no extra adjustments.</p>
+                    <p class="mt-1 text-ink-muted">Baseline 75 — no extra adjustments.</p>
                   {{end}}
                 </div>
               </details>
@@ -1892,7 +1896,7 @@
           </div>
           {{if .DriftNote}}
             <div class="mt-1.5 flex flex-wrap items-center gap-2 text-xs">
-              <span class="rounded-full border border-amber-700/70 bg-amber-950/60 px-1.5 py-0.5 text-[11px] font-medium text-amber-300">{{.DriftNote}}</span>
+              <span class="rounded-full border border-warning bg-warning-soft px-1.5 py-0.5 text-[11px] font-medium text-warning-ink">{{.DriftNote}}</span>
               {{if .Refresh}}
                 <form
                   hx-put="/legs/{{.ID}}"
@@ -1908,48 +1912,48 @@
                   {{if .Refresh.PlayerID}}<input type="hidden" name="player_id" value="{{.Refresh.PlayerID}}">{{end}}
                   {{if .Refresh.Line}}<input type="hidden" name="line" value="{{.Refresh.Line}}">{{end}}
                   <input type="hidden" name="odds" value="{{.Refresh.Odds}}">
-                  <button type="submit" class="font-medium text-sky-400 hover:underline">Sync line</button>
+                  <button type="submit" class="font-medium text-ink underline decoration-line-strong underline-offset-2 hover:opacity-75">Sync line</button>
                 </form>
               {{end}}
             </div>
           {{end}}
         </div>
         {{if .Locked}}
-          <span class="shrink-0 text-xs text-slate-500">Locked</span>
+          <span class="shrink-0 text-xs text-ink-subtle">Locked</span>
         {{else}}
           <form
             hx-delete="/legs/{{.ID}}?from=tray"
             hx-target="#pick-tray"
             hx-swap="outerHTML"
           >
-            <button type="submit" class="text-xs text-rose-400 hover:underline">Remove</button>
+            <button type="submit" class="text-xs font-medium text-danger-ink hover:underline">Remove</button>
           </form>
         {{end}}
       </li>
     {{else}}
-      <li class="text-sm text-slate-500">No picks yet.</li>
+      <li class="text-sm text-ink-subtle">No picks yet.</li>
     {{end}}
   </ul>
 
   {{if .Grade.Letter}}
-    <details class="rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-2" data-slip-grade>
+    <details class="rounded-lg border border-line bg-surface-2 px-3 py-2" data-slip-grade>
       <summary class="flex cursor-pointer list-none items-center justify-between gap-2 text-xs">
         <span class="flex min-w-0 items-center gap-2">
           <span class="shrink-0 rounded-full border px-2 py-0.5 font-semibold {{.Grade.Class}}">
             Slip grade: {{.Grade.Letter}}
           </span>
           {{if .Grade.Summary}}
-            <span class="truncate text-slate-300">{{.Grade.Summary}}</span>
+            <span class="truncate text-ink-muted">{{.Grade.Summary}}</span>
           {{end}}
         </span>
-        <span class="shrink-0 text-slate-400">Details &#9662;</span>
+        <span class="shrink-0 text-ink-subtle">Details &#9662;</span>
       </summary>
-      <div class="mt-2 space-y-1.5 border-t border-slate-800 pt-2 text-xs">
+      <div class="mt-2 space-y-1.5 border-t border-line pt-2 text-xs">
         <div class="flex items-center justify-between gap-2">
-          <span class="font-medium text-slate-300">Score: {{.Grade.Score}}/100</span>
+          <span class="font-medium text-ink">Score: {{.Grade.Score}}/100</span>
           <a
             href="/analyzer/guide?from=/slips/{{.SlipID}}/pick#slip-grade"
-            class="font-medium text-sky-400 hover:underline"
+            class="font-medium text-ink underline decoration-line-strong underline-offset-2 hover:opacity-75"
             >See full rubric</a
           >
         </div>
@@ -1957,13 +1961,13 @@
           <ul class="space-y-1">
             {{range .Grade.Factors}}
               <li class="flex items-start justify-between gap-2">
-                <span class="min-w-0 text-slate-300">{{.Label}}{{if .Detail}} — {{.Detail}}{{end}}</span>
-                <span class="shrink-0 font-semibold {{if .Positive}}text-emerald-300{{else if .Negative}}text-amber-300{{else}}text-slate-300{{end}}">{{.DeltaText}}</span>
+                <span class="min-w-0 text-ink-muted">{{.Label}}{{if .Detail}} — {{.Detail}}{{end}}</span>
+                <span class="shrink-0 font-semibold {{if .Positive}}text-positive-ink{{else if .Negative}}text-warning-ink{{else}}text-ink-muted{{end}}">{{.DeltaText}}</span>
               </li>
             {{end}}
           </ul>
         {{else}}
-          <p class="text-slate-400">Weighted leg average with no extra correlation or drag adjustments.</p>
+          <p class="text-ink-muted">Weighted leg average with no extra correlation or drag adjustments.</p>
         {{end}}
       </div>
     </details>
@@ -1989,7 +1993,7 @@
 
   <a
     href="{{.ActionHref}}"
-    class="block w-full rounded-lg bg-sky-600 px-3 py-2 text-center text-sm font-semibold text-white hover:bg-sky-500"
+    class="block w-full rounded-lg bg-accent px-3 py-2 text-center text-sm font-semibold text-accent-ink hover:opacity-90"
   >
     {{.ActionLabel}}
   </a>
@@ -1999,21 +2003,21 @@
 {{define "pick-dock"}}
 <div
   id="pick-dock"
-  class="fixed inset-x-0 bottom-0 z-20 border-t border-slate-800 bg-slate-900/95 pb-[env(safe-area-inset-bottom)] backdrop-blur"
+  class="fixed inset-x-0 bottom-0 z-20 border-t border-chrome-border bg-chrome/95 text-chrome-ink pb-[env(safe-area-inset-bottom)] backdrop-blur"
   hx-get="/slips/{{.SlipID}}/pick/dock"
   hx-trigger="tray-updated from:body, slip-updated from:body"
   hx-swap="outerHTML"
 >
   <div class="mx-auto flex w-full max-w-6xl items-center gap-3 px-4 py-2">
     <div class="min-w-0 flex-1">
-      <p class="truncate text-sm font-semibold text-slate-200">Your picks</p>
-      <p class="truncate text-xs text-slate-400">
+      <p class="truncate text-sm font-semibold text-chrome-ink">Your picks</p>
+      <p class="truncate font-mono text-xs text-chrome-muted tabular-nums">
         {{.Picked}} of {{.Limit}}{{if .Legs}} &middot; {{.Combined}} ({{.CombinedAmerican}}){{end}}
       </p>
     </div>
     <button
       type="button"
-      class="inline-flex min-h-12 shrink-0 items-center rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-500"
+      class="inline-flex min-h-12 shrink-0 items-center rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-accent-ink hover:opacity-90"
       hx-get="/slips/{{.SlipID}}/tray"
       hx-trigger="click"
       hx-target="#pick-tray-body"
@@ -2028,16 +2032,16 @@
 {{define "pick-swap"}}
 <div class="space-y-3">
   <div class="flex items-center justify-between gap-3">
-    <h2 class="text-lg font-semibold">Swap which pick?</h2>
+    <h2 class="font-display text-lg font-semibold">Swap which pick?</h2>
     <button
       type="button"
-      class="rounded-md border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800"
+      class="rounded-md border border-line-strong px-2 py-1 text-xs text-ink-muted hover:bg-surface-2 hover:text-ink"
       data-close-swap-sheet
     >
       Close
     </button>
   </div>
-  <p class="text-sm text-slate-400">For {{.Text}}</p>
+  <p class="text-sm text-ink-muted">For {{.Text}}</p>
 
   <div class="space-y-2">
     {{range .Legs}}
@@ -2062,13 +2066,13 @@
         <input type="hidden" name="odds" value="{{$.Fields.Odds}}">
         <button
           type="submit"
-          class="w-full rounded-lg border border-slate-700 bg-slate-800/60 px-3 py-2 text-left text-sm font-medium text-slate-200 hover:bg-slate-800"
+          class="w-full rounded-lg border border-line-strong bg-surface-2 px-3 py-2 text-left text-sm font-medium text-ink hover:border-accent"
         >
           Swap out {{.Selection}}
         </button>
       </form>
     {{else}}
-      <p class="text-sm text-slate-500">Every one of your picks has kicked off.</p>
+      <p class="text-sm text-ink-subtle">Every one of your picks has kicked off.</p>
     {{end}}
   </div>
 </div>
@@ -2077,13 +2081,13 @@
 {{define "bug-report-dialog"}}
 <dialog id="bug-report-dialog" class="leg-sheet" aria-label="Report a bug">
   <div
-    class="rounded-t-2xl border border-slate-800 bg-slate-900 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-2xl sm:rounded-2xl"
+    class="rounded-t-2xl border border-line bg-surface p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] text-ink shadow-2xl sm:rounded-2xl"
   >
     <div class="flex items-center justify-between gap-3">
-      <h2 class="text-lg font-semibold">Report a bug</h2>
+      <h2 class="font-display text-lg font-semibold">Report a bug</h2>
       <button
         type="button"
-        class="rounded-md border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800"
+        class="rounded-md border border-line-strong px-2 py-1 text-xs text-ink-muted hover:bg-surface-2 hover:text-ink"
         data-bug-dialog-close
       >
         Close
@@ -2105,9 +2109,9 @@
         <input type="hidden" name="user_agent" id="bug-input-user-agent">
         <div
           id="bug-preview-slot"
-          class="hidden overflow-hidden rounded-lg border border-slate-800 bg-slate-950"
+          class="hidden overflow-hidden rounded-lg border border-line bg-surface-2"
         ></div>
-        <label class="block text-xs text-slate-400">
+        <label class="block text-xs text-ink-muted">
           What broke or looks wrong?
           <textarea
             name="description"
@@ -2115,12 +2119,12 @@
             required
             rows="3"
             placeholder="Describe what happened..."
-            class="mt-1 w-full rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-sky-500 focus:outline-none"
+            class="mt-1 w-full rounded-md border border-line-strong bg-surface-2 px-3 py-2 text-sm text-ink placeholder:text-ink-subtle focus:border-accent focus:outline-none"
           ></textarea>
         </label>
         <button
           type="submit"
-          class="w-full rounded-lg bg-sky-600 px-3 py-2 text-sm font-semibold text-white hover:bg-sky-500 disabled:opacity-50"
+          class="w-full rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-accent-ink hover:opacity-90 disabled:opacity-50"
         >
           Submit Bug Report
         </button>
@@ -2132,28 +2136,28 @@
 
 {{define "bug-report-success"}}
 <div class="space-y-3" data-bug-report-success>
-  <div class="rounded-lg border border-emerald-800 bg-emerald-950/60 p-3 text-sm text-emerald-200">
+  <div class="rounded-lg border border-positive bg-positive-soft p-3 text-sm text-positive-ink">
     <p class="font-semibold">Bug report submitted.</p>
     {{if .IssueURL}}
-      <p class="mt-1 text-emerald-300">
+      <p class="mt-1">
         Tracked on GitHub:
         <a
           href="{{.IssueURL}}"
           target="_blank"
           rel="noopener noreferrer"
-          class="font-medium underline hover:text-emerald-100"
+          class="font-medium underline hover:opacity-80"
         >
           {{if .IssueNum}}Issue #{{.IssueNum}}{{else}}View issue{{end}}
         </a>
       </p>
     {{else}}
-      <p class="mt-1 text-emerald-300">Saved locally for review.</p>
+      <p class="mt-1">Saved locally for review.</p>
     {{end}}
   </div>
   <button
     type="button"
     data-bug-dialog-close
-    class="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm font-medium text-slate-200 hover:bg-slate-700"
+    class="w-full rounded-lg border border-line-strong bg-surface-2 px-3 py-2 text-sm font-medium text-ink hover:opacity-90"
   >
     Done
   </button>
@@ -2164,7 +2168,7 @@
 <div
   data-bug-report-error
   role="alert"
-  class="rounded-lg border border-rose-800 bg-rose-950/60 p-3 text-sm text-rose-200"
+  class="rounded-lg border border-danger bg-danger-soft p-3 text-sm text-danger-ink"
 >
   {{.Message}}
 </div>
@@ -2178,24 +2182,24 @@
   {{if $fromBoard}}{{$guideFrom = printf "/slips/%d/pick" $slipID}}{{end}}
   {{$hxTarget := "#slip-panel"}}
   {{if $fromBoard}}{{$hxTarget = "#pick-body"}}{{end}}
-  <section class="rounded-xl border border-slate-800 bg-slate-900 p-4" data-highlights>
+  <section class="ui-card p-4" data-highlights>
     <div class="flex items-center justify-between gap-2">
-      <h2 class="text-sm font-semibold text-slate-200">{{if $fromBoard}}Top plays in this game{{else}}Top A-grade ideas{{end}}</h2>
+      <h2 class="text-sm font-semibold text-ink">{{if $fromBoard}}Top plays in this game{{else}}Top A-grade ideas{{end}}</h2>
       {{if not $fromBoard}}
         <a
           href="/slips/{{$slipID}}/pick"
-          class="text-xs font-medium text-sky-400 hover:underline"
+          class="text-xs font-medium text-ink underline decoration-line-strong underline-offset-2 hover:opacity-75"
         >Full board &rarr;</a>
       {{end}}
     </div>
     {{if .Legs}}
       <ul class="mt-3 space-y-2">
         {{range .Legs}}
-          <li class="rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-2.5" data-highlight-leg>
+          <li class="rounded-lg border border-line bg-surface-2 px-3 py-2.5" data-highlight-leg>
             <div class="flex items-start justify-between gap-2">
               <div class="min-w-0 flex-1">
-                <p class="truncate text-sm font-medium text-slate-100">{{.Text}}</p>
-                <div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-400">
+                <p class="truncate text-sm font-medium text-ink">{{.Text}}</p>
+                <div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-ink-muted">
                   <details class="min-w-0" data-leg-grade>
                     <summary
                       class="cursor-pointer list-none whitespace-nowrap rounded-full border px-1.5 py-0.5 font-semibold {{.Grade.Class}}"
@@ -2203,30 +2207,30 @@
                     >
                       {{.Grade.Letter}} ({{.Grade.Score}})
                     </summary>
-                    <div class="mt-1.5 w-64 max-w-full rounded-lg border border-slate-700 bg-slate-950 p-2.5 text-xs shadow-lg">
-                      <div class="flex items-center justify-between gap-2 border-b border-slate-800 pb-1.5">
-                        <span class="font-semibold text-slate-200">Leg grade: {{.Grade.Letter}} ({{.Grade.Score}})</span>
+                    <div class="mt-1.5 w-64 max-w-full rounded-lg border border-line-strong bg-surface p-2.5 text-xs text-ink shadow-lg">
+                      <div class="flex items-center justify-between gap-2 border-b border-line pb-1.5">
+                        <span class="font-semibold text-ink">Leg grade: {{.Grade.Letter}} ({{.Grade.Score}})</span>
                         <a
                           href="/analyzer/guide?from={{$guideFrom}}#leg-grades"
-                          class="font-medium text-sky-400 hover:underline"
+                          class="font-medium text-ink underline decoration-line-strong underline-offset-2 hover:opacity-75"
                         >See full rubric</a>
                       </div>
                       {{if .Grade.Factors}}
                         <ul class="mt-1.5 space-y-1">
                           {{range .Grade.Factors}}
                             <li class="flex items-start justify-between gap-2">
-                              <span class="min-w-0 text-slate-300">{{.Label}}</span>
-                              <span class="shrink-0 font-semibold {{if .Positive}}text-emerald-300{{else if .Negative}}text-amber-300{{else}}text-slate-300{{end}}">{{.DeltaText}}</span>
+                              <span class="min-w-0 text-ink-muted">{{.Label}}</span>
+                              <span class="shrink-0 font-semibold {{if .Positive}}text-positive-ink{{else if .Negative}}text-warning-ink{{else}}text-ink-muted{{end}}">{{.DeltaText}}</span>
                             </li>
                           {{end}}
                         </ul>
                       {{else}}
-                        <p class="mt-1.5 text-slate-400">Baseline 75 — no extra adjustments.</p>
+                        <p class="mt-1.5 text-ink-muted">Baseline 75 — no extra adjustments.</p>
                       {{end}}
                     </div>
                   </details>
-                  <span class="font-medium text-slate-300">{{.Price}}</span>
-                  {{if .Reason}}<span class="min-w-0 truncate text-slate-400">{{.Reason}}</span>{{end}}
+                  <span class="ui-odds">{{.Price}}</span>
+                  {{if .Reason}}<span class="min-w-0 truncate text-ink-muted">{{.Reason}}</span>{{end}}
                 </div>
               </div>
               <form
@@ -2247,7 +2251,7 @@
                 <input type="hidden" name="odds" value="{{.Odds}}">
                 <button
                   type="submit"
-                  class="rounded-lg bg-sky-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-sky-500"
+                  class="rounded-lg bg-accent px-2.5 py-1.5 text-xs font-semibold text-accent-ink hover:opacity-90"
                 >
                   + Add
                 </button>
@@ -2260,7 +2264,7 @@
     {{if .Parlays}}
       <div class="mt-3 space-y-2">
         {{range .Parlays}}
-          <div class="rounded-lg border border-slate-800 bg-slate-950/60 p-3" data-highlight-parlay>
+          <div class="rounded-lg border border-line bg-surface-2 p-3" data-highlight-parlay>
             <div class="flex items-start justify-between gap-2">
               <div class="min-w-0 flex-1">
                 <div class="flex flex-wrap items-center gap-2 text-xs">
@@ -2271,32 +2275,32 @@
                     >
                       {{.Grade.Letter}} ({{.Grade.Score}})
                     </summary>
-                    <div class="mt-1.5 w-64 max-w-full rounded-lg border border-slate-700 bg-slate-950 p-2.5 text-xs shadow-lg">
-                      <div class="flex items-center justify-between gap-2 border-b border-slate-800 pb-1.5">
-                        <span class="font-semibold text-slate-200">Slip grade: {{.Grade.Letter}} ({{.Grade.Score}})</span>
+                    <div class="mt-1.5 w-64 max-w-full rounded-lg border border-line-strong bg-surface p-2.5 text-xs text-ink shadow-lg">
+                      <div class="flex items-center justify-between gap-2 border-b border-line pb-1.5">
+                        <span class="font-semibold text-ink">Slip grade: {{.Grade.Letter}} ({{.Grade.Score}})</span>
                         <a
                           href="/analyzer/guide?from={{$guideFrom}}#slip-grade"
-                          class="font-medium text-sky-400 hover:underline"
+                          class="font-medium text-ink underline decoration-line-strong underline-offset-2 hover:opacity-75"
                         >See full rubric</a>
                       </div>
                       {{if .Grade.Factors}}
                         <ul class="mt-1.5 space-y-1">
                           {{range .Grade.Factors}}
                             <li class="flex items-start justify-between gap-2">
-                              <span class="min-w-0 text-slate-300">{{.Label}}{{if .Detail}} — {{.Detail}}{{end}}</span>
-                              <span class="shrink-0 font-semibold {{if .Positive}}text-emerald-300{{else if .Negative}}text-amber-300{{else}}text-slate-300{{end}}">{{.DeltaText}}</span>
+                              <span class="min-w-0 text-ink-muted">{{.Label}}{{if .Detail}} — {{.Detail}}{{end}}</span>
+                              <span class="shrink-0 font-semibold {{if .Positive}}text-positive-ink{{else if .Negative}}text-warning-ink{{else}}text-ink-muted{{end}}">{{.DeltaText}}</span>
                             </li>
                           {{end}}
                         </ul>
                       {{else}}
-                        <p class="mt-1.5 text-slate-400">Weighted leg average with no extra correlation or drag adjustments.</p>
+                        <p class="mt-1.5 text-ink-muted">Weighted leg average with no extra correlation or drag adjustments.</p>
                       {{end}}
                     </div>
                   </details>
-                  <span class="font-semibold text-slate-200">{{.Label}}</span>
-                  <span class="font-medium text-slate-300">{{.CombinedOdds}}</span>
+                  <span class="font-semibold text-ink">{{.Label}}</span>
+                  <span class="ui-odds">{{.CombinedOdds}}</span>
                 </div>
-                {{if .Reason}}<p class="mt-1 text-xs text-slate-400">{{.Reason}}</p>{{end}}
+                {{if .Reason}}<p class="mt-1 text-xs text-ink-muted">{{.Reason}}</p>{{end}}
               </div>
               {{if .CanAddAll}}
                 <form
@@ -2319,7 +2323,7 @@
                   {{end}}
                   <button
                     type="submit"
-                    class="rounded-lg bg-emerald-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-emerald-500"
+                    class="rounded-lg border border-positive bg-positive-soft px-2.5 py-1.5 text-xs font-semibold text-positive-ink hover:opacity-90"
                   >
                     Add all {{.LegCount}}
                   </button>
@@ -2328,18 +2332,18 @@
                 <button
                   type="button"
                   disabled
-                  class="shrink-0 cursor-not-allowed rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1.5 text-xs font-medium text-slate-400 opacity-60"
+                  class="shrink-0 cursor-not-allowed rounded-lg border border-line-strong bg-surface px-2.5 py-1.5 text-xs font-medium text-ink-muted opacity-60"
                 >
                   Needs {{.LegCount}} open slots
                 </button>
               {{end}}
             </div>
-            <ul class="mt-2 space-y-1.5 border-t border-slate-800/80 pt-2">
+            <ul class="mt-2 space-y-1.5 border-t border-line pt-2">
               {{range .Legs}}
                 <li class="flex items-center justify-between gap-2 text-xs">
                   <div class="min-w-0 flex-1">
-                    <span class="truncate font-medium text-slate-200">{{.Text}}</span>
-                    <span class="ml-1.5 text-slate-400">{{.Price}}</span>
+                    <span class="truncate font-medium text-ink">{{.Text}}</span>
+                    <span class="ui-odds ml-1.5">{{.Price}}</span>
                   </div>
                   <form
                     class="shrink-0"
@@ -2359,7 +2363,7 @@
                     <input type="hidden" name="odds" value="{{.Odds}}">
                     <button
                       type="submit"
-                      class="rounded border border-slate-700 bg-slate-800 px-2 py-0.5 text-[11px] font-medium text-slate-200 hover:bg-slate-700"
+                      class="rounded border border-line-strong bg-surface px-2 py-0.5 text-[11px] font-medium text-ink hover:border-accent"
                     >
                       + Add
                     </button>
