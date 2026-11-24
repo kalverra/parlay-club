@@ -175,5 +175,5 @@ partial, and adds progressive-enhancement shortcuts in `web/static/app.js`) Risk
 - [x] Redesign the create-slip form in `web/templates/slip.html` and add mode-toggle and slate-shortcut checkbox helpers
       in `web/static/app.js` for phone-first usability (One-off/Recurring toggle, dynamic weekday shortcuts, game
       checklist with kickoffs, live selected count).
-- [ ] Docs: update `docs/concepts/slips.md` to document upcoming-only slip creation, unified one-off vs. recurring
+- [x] Docs: update `docs/concepts/slips.md` to document upcoming-only slip creation, unified one-off vs. recurring
       creation, and custom per-game slip eligibility.
