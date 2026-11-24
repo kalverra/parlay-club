@@ -1088,7 +1088,7 @@ func formatSignedNumber(val float64) string {
 }
 
 func (h *researchHandlers) page(r *http.Request) Page {
-	p := Page{Title: "Research"}
+	p := Page{Title: "Research", Theme: ThemeFromRequest(r).ID}
 	if h.deps.UserFrom != nil {
 		if user, ok := h.deps.UserFrom(r.Context()); ok {
 			view := NewUser(user)

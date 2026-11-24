@@ -2590,7 +2590,7 @@ func (h *slipHandlers) page(r *http.Request, title string) Page {
 // pageWithTab builds the shell's data for a page with an explicit tab. An empty
 // tab leaves the bottom bar off.
 func (h *slipHandlers) pageWithTab(r *http.Request, title string, tab Tab) Page {
-	page := Page{Title: title, Tab: tab}
+	page := Page{Title: title, Tab: tab, Theme: ThemeFromRequest(r).ID}
 	if r == nil {
 		return page
 	}

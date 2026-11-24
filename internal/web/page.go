@@ -51,6 +51,14 @@ type Page struct {
 	// Wide widens the header and main column for a two-pane screen. Pages
 	// without it keep the one-column max-w-3xl layout.
 	Wide bool
+	// Theme selects the active site style; empty defaults to ThemePaperTurf.
+	Theme ThemeID
+}
+
+// ActiveTheme returns the allowlisted Theme for the page, defaulting to
+// ThemePaperTurf when Theme is empty or unrecognized.
+func (p Page) ActiveTheme() Theme {
+	return themeOrDefault(p.Theme)
 }
 
 // CurrentGroup returns the name of the active group, or "" when the page has
