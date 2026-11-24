@@ -171,7 +171,7 @@ Risk: low (UI labels and navigation only, no schema or sync changes, verified by
 Complexity: low (localized view-model state and pure priority ranking in `internal/web`, plus concept doc refresh)
 Risk: low (read-only display and form presentation changes with focused unit and handler test coverage)
 
-- [ ] Add `HasExistingSlips` to `SlipCreateView` (`internal/web/slips.go`), update `web/templates/slip.html` so
+- [x] Add `HasExistingSlips` to `SlipCreateView` (`internal/web/slips.go`), update `web/templates/slip.html` so
   existing-slip weeks show accurate copy and *"Or add a past week"* collapses inside a `<details>` unless no weeks exist
   or past-week fields were submitted, and add handler tests in `internal/web/slips_test.go` and
   `internal/web/home_test.go`.

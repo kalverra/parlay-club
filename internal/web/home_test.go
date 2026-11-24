@@ -338,6 +338,8 @@ func TestGroupWeekShowsTheCreateFormWithNoSlip(t *testing.T) {
 
 	assert.Contains(t, body, "Start Week 9’s slip", "the create screen names the week")
 	assert.Contains(t, body, "No slip for Week 9 yet.", "the empty state explains why the form is here")
+	assert.Contains(t, body, "data-past-week>")
+	assert.NotContains(t, body, "data-past-week open")
 	assert.Contains(t, body, "Create slip")
 	assert.Contains(t, body, ">Lake House</span>", "the top bar shows the group the page acts in")
 	assert.Contains(t, body, fmt.Sprintf(`href="/groups/%d/week"`, fixture.second.ID))
@@ -376,6 +378,7 @@ func TestGroupWeekCreateFormWithoutAWeekSaysSo(t *testing.T) {
 	assert.Contains(t, body, "No week is loaded yet. Add a past week below to start a slip.")
 	assert.NotContains(t, body, `name="week_id"`, "an empty week picker is not offered")
 	assert.Contains(t, body, "Or add a past week", "the typed-week fields still start a slip")
+	assert.Contains(t, body, "data-past-week open>")
 }
 
 func TestGroupWeekRefusesANonMember(t *testing.T) {
