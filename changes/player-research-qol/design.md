@@ -118,7 +118,7 @@ Complexity: low (follows existing ingest, migration, and store upsert patterns a
 Risk: low (additive schema columns with safe defaults; existing `stats_json` contract unchanged and covered by fixture tests)
 
 - [x] Extend `internal/ingest/espn/gamelog.go` to decode the `events` map into `GameLog.Entries` (aligned with `Markets`), add migration `internal/db/migrations/0015_research_context.sql` with `player_gamelogs.games_json` and the new `nflverse_player_weeks` columns and opponent/position index, and update `internal/db/players.go` and `internal/refresh/research.go` to store `games_json`, with unit tests against saved ESPN fixtures.
-- [ ] Extend `internal/ingest/nflverse/player_stats.go`, `internal/db/nflverse.go`, and `internal/refresh/nflverse.go` to parse, upsert, and query weekly opponent, player name, position, passing/rushing/receiving/kicking stats (`NFLversePlayerWeeksAgainstOpponent`, `NFLversePlayerWeeksForPositionTypes`), with fixture and store round-trip tests.
+- [x] Extend `internal/ingest/nflverse/player_stats.go`, `internal/db/nflverse.go`, and `internal/refresh/nflverse.go` to parse, upsert, and query weekly opponent, player name, position, passing/rushing/receiving/kicking stats (`NFLversePlayerWeeksAgainstOpponent`, `NFLversePlayerWeeksForPositionTypes`), with fixture and store round-trip tests.
 - [ ] Docs: update `docs/reference/schema.md` and `docs/reference/data-sources.md` for migration `0015_research_context.sql`, `player_gamelogs.games_json`, and the expanded `nflverse_player_weeks` columns.
 
 ### Phase 2: Compute defense ranks, opponent L5 history, and market-specific O/U lookup
