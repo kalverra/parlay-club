@@ -5,6 +5,7 @@
 ## Decision
 
 - [Unify player identity across sportsbooks](canonical-player-identity.md): Normalize and resolve player identity once during prop ingest (stripping trailing `(TEAM)` tags, normalizing punctuation/suffixes/casing, and matching against team rosters) so stored odds and board grouping share one canonical player ID, name, and team rather than raw provider strings.
+- [Deepen eval replay and comparison fidelity](deepen-eval-fidelity.md): Deepen eval replay and comparison fidelity
 - [Deepen pick-board read assembly and current-odds filtering](deepen-pick-board.md): Filter superseded odds rows at the storage seam and deepen the board module to own scoped board assembly, signal attachment on paired line groups, and picked-leg drift state across full-page and partial views.
 - [Deepen analyzer and board signal loading](deepen-signal-loader.md): Deepen analyzer and board signal loading
 - [Track prop selections dynamically when lines move](dynamic-line-tracking.md): Separate selection identity (`game`, `canonical player`, `market`, `side`) from the quoted `line` and `odds`, so board matching, leg updates, and sportsbook export look up the target selection dynamically and resolve each book's current line, price, and deep-link selection ID.
