@@ -112,7 +112,7 @@ Risk: medium (mistakes in pre-fill gating or prop scoping could overspend monthl
 
 - [x] Replace hardcoded weekday checks in `internal/refresh/rules.go` (`gameDay`, `oddsAge`, `sundayPrefillWindow`, `sundayPrefillStale`) with scoreboard-derived `isGameDay`, `gamesOnDate`, `upcomingGamesOnDate`, `gameDayPrefillWindow`, and `gameDayPrefillStale`, with unit tests covering Thanksgiving, Black Friday, Christmas, playoff Saturdays, and non-game days.
 - [x] Update `internal/refresh/refresh.go` (`maybeRunGameDayPrefill`, `RunPrefill`, `GameDayPrefillSource = "prefill:gameday"`) to trigger once per ET game date and scope automatic Parlay-only prop warming to that date's upcoming games, with integration tests verifying credit conservation and multi-day idempotency.
-- [ ] Docs: update `docs/concepts/data-refresh.md` and the Free-tier guardrails in `AGENTS.md` to document per-game-day pre-fill (`prefill:gameday`) and date-scoped prop warming.
+- [x] Docs: update `docs/concepts/data-refresh.md` and the Free-tier guardrails in `AGENTS.md` to document per-game-day pre-fill (`prefill:gameday`) and date-scoped prop warming.
 
 ### Phase 2: Schedule-aware recurring slip auto-creation and weekend slate scope
 
