@@ -937,17 +937,17 @@ func buildBarChart(bars []HitBarView, comparisonLine *float64) BarChartView {
 		if comparisonLine != nil {
 			switch {
 			case bar.Value > *comparisonLine:
-				bar.ResultClass = "bg-emerald-500 border-emerald-400 text-emerald-300"
+				bar.ResultClass = "bar-hit"
 				bar.ResultText = "OVER"
 			case bar.Value < *comparisonLine:
-				bar.ResultClass = "bg-rose-500 border-rose-400 text-rose-300"
+				bar.ResultClass = "bar-miss"
 				bar.ResultText = "UNDER"
 			default:
-				bar.ResultClass = "bg-amber-500 border-amber-400 text-amber-300"
+				bar.ResultClass = "bar-push"
 				bar.ResultText = "PUSH"
 			}
 		} else {
-			bar.ResultClass = "bg-sky-500 border-sky-400 text-sky-300"
+			bar.ResultClass = "bar-neutral"
 		}
 		out[i] = bar
 	}
@@ -1024,12 +1024,12 @@ func newDefRankBadge(rank int, label string) *DefRankBadge {
 	if rank <= 0 {
 		return nil
 	}
-	badgeClass := "border-slate-700 bg-slate-800/80 text-slate-300"
+	badgeClass := "badge-void"
 	switch {
 	case rank <= 10:
-		badgeClass = "border-rose-700/60 bg-rose-950/50 text-rose-300"
+		badgeClass = "badge-lost"
 	case rank >= 23:
-		badgeClass = "border-emerald-700/60 bg-emerald-950/50 text-emerald-300"
+		badgeClass = "badge-won"
 	}
 	return &DefRankBadge{
 		Rank:       rank,

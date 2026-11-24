@@ -146,7 +146,7 @@ Risk: low (additive token layer and allowlisted cookie read; existing templates 
 Complexity: medium (replaces raw Tailwind color class strings emitted by server view builders across slips, analyzer, and research with theme-aware semantic classes).
 Risk: low (isolated to three view-model helpers and their existing unit/handler test assertions).
 
-- [ ] Replace raw Tailwind class strings in `internal/web/slips.go` (`resultClass`), `internal/web/analyzer.go` (`gradeClass`, `severityBadge`), and `internal/web/research.go` (`ResultClass`, `badgeClass`) with semantic CSS classes defined in Phase 1, and update the corresponding assertions in `internal/web/slips_test.go`, `internal/web/analyzer_test.go`, and `internal/web/research_test.go`.
+- [x] Replace raw Tailwind class strings in `internal/web/slips.go` (`resultClass`), `internal/web/analyzer.go` (`gradeClass`, `severityBadge`), and `internal/web/research.go` (`ResultClass`, `badgeClass`) with semantic CSS classes defined in Phase 1, and update the corresponding assertions in `internal/web/slips_test.go`, `internal/web/analyzer_test.go`, and `internal/web/research_test.go`.
 
 ### Phase 3: Migrate shell, slip, and pick-board templates to semantic tokens
 

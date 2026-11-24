@@ -1316,7 +1316,7 @@ func TestSlipPanelRendersGradedByAndNeedsGradingAmberChip(t *testing.T) {
 
 	assert.Contains(t, body, "WON · Auto")
 	assert.Contains(t, body, "LOST · "+fixture.user.Name)
-	assert.Contains(t, body, "border-amber-700 bg-amber-950 text-amber-300")
+	assert.Contains(t, body, "badge-push")
 	assert.Contains(t, body, "Needs grading")
 	for _, result := range []string{"PENDING", "WON", "LOST", "PUSH", "VOID"} {
 		assert.Contains(t, body, fmt.Sprintf(`name="result" value="%s"`, result))
@@ -1333,7 +1333,7 @@ func TestSlipPanelRendersGradedByAndNeedsGradingAmberChip(t *testing.T) {
 	overrideBody := override.Body.String()
 	assert.Contains(t, overrideBody, "WON · "+fixture.user.Name)
 	assert.NotContains(t, overrideBody, "Needs grading")
-	assert.NotContains(t, overrideBody, "border-amber-700 bg-amber-950 text-amber-300")
+	assert.NotContains(t, overrideBody, "badge-push")
 }
 
 func TestAddLegsBatchInsertsAtomicallyAndPublishesSlipUpdated(t *testing.T) {
@@ -1630,7 +1630,7 @@ func TestSlipHubRendersTopAGradeIdeasDuringPickStep(t *testing.T) {
 	assert.Contains(t, body, "Top A-grade ideas")
 	assert.Contains(t, body, "data-highlight-leg")
 	assert.Contains(t, body, "data-highlight-parlay")
-	assert.Contains(t, body, "border-emerald-700 bg-emerald-950 text-emerald-300")
+	assert.Contains(t, body, "grade-a")
 	assert.Contains(t, body, "Josh Allen")
 	assert.Contains(t, body, "James Cook")
 	assert.Contains(t, body, "Add all 2")
