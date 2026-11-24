@@ -193,7 +193,7 @@ func TestLandingRefetchesTheListForHTMX(t *testing.T) {
 	assert.NotContains(t, body, "<title>", "an HTMX refresh returns the list, not the page")
 }
 
-func TestGroupWeekSwitchesTheGroupAndOpensTheNewestSlip(t *testing.T) {
+func TestGroupWeekSwitchesTheGroupAndRendersSpotlightForSingleSlip(t *testing.T) {
 	t.Parallel()
 
 	fixture := newLandingFixture(t)
@@ -210,9 +210,22 @@ func TestGroupWeekSwitchesTheGroupAndOpensTheNewestSlip(t *testing.T) {
 	require.NoError(t, err)
 
 	recorder := fixture.get(t, fmt.Sprintf("/groups/%d/week", fixture.second.ID))
-	require.Equal(t, http.StatusSeeOther, recorder.Code)
-	assert.Equal(t, fmt.Sprintf("/slips/%d", created.ID), recorder.Header().Get("Location"))
+	require.Equal(t, http.StatusOK, recorder.Code)
+	body := html.UnescapeString(recorder.Body.String())
+
 	assert.Equal(t, []int64{fixture.second.ID}, fixture.selections)
+	assert.Contains(t, body, "Lake House")
+	assert.Contains(t, body, "Lake House Week 9")
+	assert.Contains(t, body, fmt.Sprintf(`/slips/%d/pick`, created.ID))
+	assert.Contains(t, body, "Pick 2 more")
+	assert.Contains(t, body, "Group record")
+	assert.Contains(t, body, `href="/record"`)
+	assert.Contains(t, body, "Recent slips")
+	assert.Contains(t, body, "Recurring schedules")
+	assert.Contains(t, body, `href="/slips/new?mode=recurring"`)
+	assert.Contains(t, body, "Members")
+	assert.Contains(t, body, `href="/groups"`)
+	assert.Contains(t, body, "Ada")
 }
 
 func TestGroupWeekRendersMultiSlipViewWhenMultipleSlipsExist(t *testing.T) {
@@ -270,14 +283,17 @@ func TestGroupWeekRendersMultiSlipViewWhenMultipleSlipsExist(t *testing.T) {
 	require.Equal(t, http.StatusOK, recorder.Code)
 	body := html.UnescapeString(recorder.Body.String())
 
-	assert.Contains(t, body, "This week's slips")
+	assert.Contains(t, body, "Lake House")
 	assert.Contains(t, body, "Thursday Night")
 	assert.Contains(t, body, "Thursday Slate")
 	assert.Contains(t, body, "Sunday Main")
 	assert.Contains(t, body, "Sunday Slate")
+	assert.Less(t, strings.Index(body, "Thursday Night"), strings.Index(body, "Sunday Main"),
+		"earlier deadline spotlight card appears first")
 	assert.Contains(t, body, fmt.Sprintf(`/slips/%d`, thuSlip.ID))
 	assert.Contains(t, body, fmt.Sprintf(`/slips/%d`, sunSlip.ID))
-	assert.Contains(t, body, "+ Add one-off slip")
+	assert.Contains(t, body, fmt.Sprintf(`/slips/%d/pick`, thuSlip.ID))
+	assert.Contains(t, body, "+ New slip")
 	assert.Contains(t, body, fmt.Sprintf(`/slips/new?week=%d`, fixture.week.ID))
 	assert.Contains(t, body, "Pick 2 more")
 	assert.Contains(t, body, "1 member · 0/2 picks")
@@ -318,18 +334,16 @@ func TestGroupWeekAutoCreatesMultipleScheduledSlipsAndRendersView(t *testing.T) 
 	require.Equal(t, http.StatusOK, recorder.Code)
 	body := html.UnescapeString(recorder.Body.String())
 
-	assert.Contains(t, body, "This week's slips")
 	assert.Contains(t, body, "Thursday Night")
 	assert.Contains(t, body, "Thursday Slate")
 	assert.Contains(t, body, "Sunday Main")
 	assert.Contains(t, body, "Sunday Slate")
 	assert.Contains(t, body, "Playoff Weekend")
 	assert.Contains(t, body, "Weekend Slate")
-	assert.Contains(t, body, `<option value="weekend">Weekend Slate</option>`)
-	assert.Contains(t, body, "+ Add one-off slip")
+	assert.Contains(t, body, "+ New slip")
 	assert.Contains(t, body, "Recurring schedules")
+	assert.Contains(t, body, `href="/slips/new?mode=recurring"`)
 	assert.Contains(t, body, fmt.Sprintf(`/groups/%d/schedules`, fixture.second.ID))
-	assert.Contains(t, body, "Save schedule")
 	assert.Equal(t, []int64{fixture.second.ID}, fixture.selections)
 }
 
@@ -451,20 +465,23 @@ func TestGroupWeekSkipsSchedulesWithoutUpcomingGames(t *testing.T) {
 		require.Equal(t, http.StatusOK, recorder.Code)
 		body := html.UnescapeString(recorder.Body.String())
 
+		assert.Contains(t, body, "No active slip right now")
 		assert.Contains(t, body, "No upcoming games are loaded yet.")
+		assert.Contains(t, body, "+ Start a slip")
 		createdSlips, err := fixture.store.SlipsForWeek(t.Context(), fixture.second.ID, fixture.week.ID)
 		require.NoError(t, err)
 		assert.Empty(t, createdSlips)
 	})
 }
 
-func TestGroupWeekShowsTheCreateFormWithNoSlip(t *testing.T) {
+func TestGroupWeekRendersQuietStateWithRecentSlipsAndRecord(t *testing.T) {
 	t.Parallel()
 
 	fixture := newLandingFixture(t)
 	now := time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC)
 	fixture.clock = func() time.Time { return now }
 	fixture.handler = fixture.build()
+
 	_, err := fixture.store.UpsertGame(t.Context(), db.Game{
 		ID:         "401900099",
 		WeekID:     fixture.week.ID,
@@ -487,57 +504,31 @@ func TestGroupWeekShowsTheCreateFormWithNoSlip(t *testing.T) {
 		require.NoError(t, err)
 	}
 
+	gradedSlip, err := fixture.store.CreateSlip(
+		t.Context(), fixture.second.ID, fixture.week.ID, nil, "Completed Week 9", db.SlateScopeSundayMain, 2,
+		[]int64{fixture.user.ID},
+	)
+	require.NoError(t, err)
+	require.NoError(t, fixture.store.SetSlipGrade(t.Context(), gradedSlip.ID, parlay.Won, db.SlipGraded))
+
 	recorder := fixture.get(t, fmt.Sprintf("/groups/%d/week", fixture.second.ID))
 	require.Equal(t, http.StatusOK, recorder.Code)
 	body := html.UnescapeString(recorder.Body.String())
 
-	assert.Contains(t, body, "Start Week 9’s slip", "the create screen names the week")
-	assert.Contains(t, body, "No slip for Week 9 yet.", "the empty state explains why the form is here")
-	assert.NotContains(t, body, "Or add a past week")
-	assert.Contains(t, body, "Create slip")
+	assert.Contains(t, body, "No active slip right now")
+	assert.Contains(t, body, "Next up: Week 9.")
+	assert.Contains(t, body, "+ Start a slip")
+	assert.Contains(t, body, fmt.Sprintf(`/slips/new?week=%d`, fixture.week.ID))
+	assert.Contains(t, body, "Completed Week 9")
+	assert.Contains(t, body, "Won")
+	assert.Contains(t, body, "1-0")
+	assert.Contains(t, body, "W1")
 	assert.Contains(t, body, ">Lake House</span>", "the top bar shows the group the page acts in")
 	assert.Contains(t, body, fmt.Sprintf(`href="/groups/%d/week"`, fixture.second.ID))
 	assert.Equal(t, []int64{fixture.second.ID}, fixture.selections)
 }
 
-func TestGroupWeekCreateFormWelcomesTheOnlyMember(t *testing.T) {
-	t.Parallel()
-
-	fixture := newLandingFixture(t)
-	now := time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC)
-	fixture.clock = func() time.Time { return now }
-	fixture.handler = fixture.build()
-	_, err := fixture.store.UpsertGame(t.Context(), db.Game{
-		ID:         "401900100",
-		WeekID:     fixture.week.ID,
-		HomeTeam:   "KC",
-		AwayTeam:   "BUF",
-		HomeName:   "Kansas City Chiefs",
-		AwayName:   "Buffalo Bills",
-		HomeESPNID: "12",
-		AwayESPNID: "2",
-		Kickoff:    now.Add(72 * time.Hour),
-		Status:     db.GameScheduled,
-		UpdatedAt:  now,
-	})
-	require.NoError(t, err)
-
-	schedules, err := fixture.store.GroupSlipSchedules(t.Context(), fixture.second.ID)
-	require.NoError(t, err)
-	for _, s := range schedules {
-		_, err := fixture.store.SetGroupSlipScheduleActive(t.Context(), s.ID, false)
-		require.NoError(t, err)
-	}
-
-	body := html.UnescapeString(
-		fixture.get(t, fmt.Sprintf("/groups/%d/week", fixture.second.ID)).Body.String())
-
-	assert.Contains(t, body, "It’s just you for now.",
-		"a first run in a solo group says who is picking")
-	assert.Contains(t, body, "Invite friends from Groups whenever you like.")
-}
-
-func TestGroupWeekCreateFormWithoutAWeekSaysSo(t *testing.T) {
+func TestGroupWeekQuietStateWithoutAWeekSaysSo(t *testing.T) {
 	t.Parallel()
 
 	fixture := newLandingFixtureWithWeek(t, false)
@@ -546,11 +537,14 @@ func TestGroupWeekCreateFormWithoutAWeekSaysSo(t *testing.T) {
 	require.Equal(t, http.StatusOK, recorder.Code)
 	body := html.UnescapeString(recorder.Body.String())
 
-	assert.Contains(t, body, "Start a slip")
+	assert.Contains(t, body, "No active slip right now")
 	assert.Contains(t, body, "No upcoming games are loaded yet.")
-	assert.NotContains(t, body, `name="week_id"`, "an empty week picker is not offered")
-	assert.NotContains(t, body, "Or add a past week")
-	assert.NotContains(t, body, "Create slip")
+	assert.Contains(t, body, "+ Start a slip")
+	assert.Contains(t, body, `href="/slips/new"`)
+	assert.Contains(t, body, "0-0")
+	assert.Contains(t, body, "No finished slips yet.")
+	assert.Contains(t, body, "Members")
+	assert.Contains(t, body, "Ada")
 }
 
 func TestGroupWeekRefusesANonMember(t *testing.T) {
