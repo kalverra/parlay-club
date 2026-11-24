@@ -43,8 +43,8 @@ const (
 	NfeloProjectionsSource = "nfelo:projections"
 	// GradeSource is the sync_state key for auto-grading pending legs on final games.
 	GradeSource = "grade"
-	// SundayPrefillSource is the sync_state key for the one-shot Sunday pre-fill.
-	SundayPrefillSource = "prefill:sunday"
+	// GameDayPrefillSource is the sync_state key for the one-shot per-game-day pre-fill.
+	GameDayPrefillSource = "prefill:gameday"
 	// weatherSourcePrefix keys per-game forecasts.
 	weatherSourcePrefix = "weather:"
 	// oddsPropsEnrichSourcePrefix keys per-game prop link enrichment from The Odds API.
@@ -421,7 +421,7 @@ func (s *Service) kick(ctx context.Context) {
 		return
 	}
 
-	if s.maybeRunSundayPrefill(ctx, games, now) {
+	if s.maybeRunGameDayPrefill(ctx, games, now) {
 		return
 	}
 
@@ -433,17 +433,17 @@ func (s *Service) kick(ctx context.Context) {
 	s.runSources(ctx, now, sources)
 }
 
-// maybeRunSundayPrefill triggers RunPrefill once per Sunday morning when
-// upcoming Sunday games remain, deduplicating concurrent page loads with
+// maybeRunGameDayPrefill triggers RunPrefill once per Eastern game date when
+// upcoming games remain on that date, deduplicating concurrent page loads with
 // singleflight and backing off for 5 minutes on zero-progress failures so
 // kick can still fall back to freeSourcesFor.
-func (s *Service) maybeRunSundayPrefill(ctx context.Context, games []db.Game, now time.Time) bool {
-	if !gameDayPrefillWindow(games, now) || s.paused(SundayPrefillSource, now) {
+func (s *Service) maybeRunGameDayPrefill(ctx context.Context, games []db.Game, now time.Time) bool {
+	if !gameDayPrefillWindow(games, now) || s.paused(GameDayPrefillSource, now) {
 		return false
 	}
 
 	src := source{
-		key: SundayPrefillSource,
+		key: GameDayPrefillSource,
 		due: func(_ context.Context, state db.SyncState) (bool, error) {
 			return gameDayPrefillStale(state.FetchedAt, now), nil
 		},
@@ -451,8 +451,8 @@ func (s *Service) maybeRunSundayPrefill(ctx context.Context, games []db.Game, no
 	due, err := s.shouldRun(ctx, src)
 	if err != nil {
 		if !s.stopping() {
-			s.logger.Error().Err(err).Str("source", SundayPrefillSource).Msg("check sunday prefill")
-			s.backOff(SundayPrefillSource, now)
+			s.logger.Error().Err(err).Str("source", GameDayPrefillSource).Msg("check game-day prefill")
+			s.backOff(GameDayPrefillSource, now)
 		}
 		return false
 	}
@@ -460,7 +460,7 @@ func (s *Service) maybeRunSundayPrefill(ctx context.Context, games []db.Game, no
 		return false
 	}
 
-	res, err, _ := s.flight.Do(SundayPrefillSource, func() (any, error) {
+	res, err, _ := s.flight.Do(GameDayPrefillSource, func() (any, error) {
 		due, err := s.shouldRun(ctx, src)
 		if err != nil || !due {
 			return false, err
@@ -474,18 +474,18 @@ func (s *Service) maybeRunSundayPrefill(ctx context.Context, games []db.Game, no
 			return false, err
 		}
 		if err != nil && !s.stopping() {
-			s.logger.Error().Err(err).Str("source", SundayPrefillSource).Msg("sunday prefill partial failure")
+			s.logger.Error().Err(err).Str("source", GameDayPrefillSource).Msg("game-day prefill partial failure")
 		}
 		return true, nil
 	})
 	if err != nil {
 		if !s.stopping() {
-			s.logger.Error().Err(err).Str("source", SundayPrefillSource).Msg("sunday prefill failed")
-			s.backOff(SundayPrefillSource, now)
+			s.logger.Error().Err(err).Str("source", GameDayPrefillSource).Msg("game-day prefill failed")
+			s.backOff(GameDayPrefillSource, now)
 		}
 		return false
 	}
-	s.clearBackoff(SundayPrefillSource)
+	s.clearBackoff(GameDayPrefillSource)
 	ran, _ := res.(bool)
 	return ran
 }
@@ -547,11 +547,13 @@ type PrefillReport struct {
 	ParlayRemaining *int  `json:"parlay_remaining,omitempty"`
 }
 
-// RunPrefill runs the Sunday morning pre-fill sweep synchronously: scoreboard
-// first, then odds:lines (with 15m idempotency so retries do not double-spend),
-// then free sources (weather, summaries, unique week-team rosters, nfelo,
-// grade, gamelogs), and finally bounded-parallel Parlay-only bulk props for
-// upcoming games (with 15m idempotency and no fallback EventProps calls).
+// RunPrefill runs the game-day pre-fill sweep synchronously: scoreboard first,
+// then odds:lines (with 15m idempotency so retries do not double-spend), then
+// free sources (weather, summaries, unique week-team rosters, nfelo, grade,
+// gamelogs), and finally bounded-parallel Parlay-only bulk props for today's
+// upcoming games in America/New_York (falling back to all upcoming week games
+// when invoked manually with no upcoming games today, always with 15m
+// idempotency and no fallback EventProps calls).
 func (s *Service) RunPrefill(ctx context.Context) (PrefillReport, error) {
 	s.stopMu.Lock()
 	if s.stopping() {
@@ -619,11 +621,9 @@ func (s *Service) RunPrefill(ctx context.Context) (PrefillReport, error) {
 	report.FreeSourcesRun = len(freeSources)
 	errs = append(errs, s.runBoundedSources(ctx, now, freeSources, prefillConcurrency)...)
 
-	upcoming := make([]db.Game, 0, len(games))
-	for _, game := range games {
-		if now.Before(game.Kickoff) {
-			upcoming = append(upcoming, game)
-		}
+	upcoming := upcomingGamesOnDate(games, now)
+	if len(upcoming) == 0 {
+		upcoming = upcomingWeekGames(games, now)
 	}
 	report.UpcomingGames = len(upcoming)
 
@@ -644,12 +644,22 @@ func (s *Service) RunPrefill(ctx context.Context) (PrefillReport, error) {
 	if !s.stopping() && (len(errs) == 0 || report.LinesSynced || report.PropsSynced > 0) {
 		recordCtx, cancelRecord := context.WithTimeout(s.stopCtx, syncTimeout)
 		defer cancelRecord()
-		if err := s.store.RecordSync(recordCtx, SundayPrefillSource, now, nil); err != nil {
-			errs = append(errs, fmt.Errorf("record %s: %w", SundayPrefillSource, err))
+		if err := s.store.RecordSync(recordCtx, GameDayPrefillSource, now, nil); err != nil {
+			errs = append(errs, fmt.Errorf("record %s: %w", GameDayPrefillSource, err))
 		}
 	}
 
 	return report, errors.Join(errs...)
+}
+
+func upcomingWeekGames(games []db.Game, now time.Time) []db.Game {
+	upcoming := make([]db.Game, 0, len(games))
+	for _, game := range games {
+		if game.Status != db.GameFinal && now.Before(game.Kickoff) {
+			upcoming = append(upcoming, game)
+		}
+	}
+	return upcoming
 }
 
 // runBoundedSources runs sources across at most limit concurrent workers.
