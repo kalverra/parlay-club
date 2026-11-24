@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
@@ -257,6 +258,7 @@ func TestEvalResultsGroupIsolationAndFilters(t *testing.T) {
 	assert.NotContains(t, bodyDefault, "1-3-0")
 	assert.Contains(t, bodyDefault, "2026 REG Wk 1")
 	assert.NotContains(t, bodyDefault, "2025 REG Wk 1")
+	assert.NotContains(t, bodyDefault, "Slip Factor Attribution")
 
 	// ?season=2025 filters to 2025.
 	rec2025 := httptest.NewRecorder()
@@ -385,4 +387,63 @@ func TestEvalResultsDefaultsNilEvalCache(t *testing.T) {
 	handler.ServeHTTP(rec, httptest.NewRequestWithContext(ctx, http.MethodGet, "/analyzer/results?season=2026", nil))
 	require.Equal(t, http.StatusOK, rec.Code)
 	assert.Contains(t, rec.Body.String(), "1-0-0")
+}
+
+func TestEvalResultsSlipFactors(t *testing.T) {
+	t.Parallel()
+
+	f := newEvalResultsFixture(t)
+	ctx := t.Context()
+
+	_, err := f.store.UpsertGame(ctx, db.Game{
+		ID:       "g1",
+		WeekID:   f.week2026.ID,
+		HomeTeam: "BUF",
+		AwayTeam: "MIA",
+		HomeName: "Buffalo Bills",
+		AwayName: "Miami Dolphins",
+		Kickoff:  time.Date(2026, 9, 13, 17, 0, 0, 0, time.UTC),
+		Status:   db.GameFinal,
+		Indoor:   true,
+	})
+	require.NoError(t, err)
+
+	slip, err := f.store.CreateSlip(
+		ctx,
+		f.group.ID,
+		f.week2026.ID,
+		nil,
+		"4-Legger",
+		db.SlateScopeFullWeek,
+		4,
+		[]int64{f.user.ID},
+	)
+	require.NoError(t, err)
+
+	for _, sel := range []string{"BUF ML", "KC ML", "DET ML", "PHI ML"} {
+		leg, err := f.store.CreateLeg(
+			ctx,
+			db.Leg{
+				SlipID:     slip.ID,
+				UserID:     f.user.ID,
+				GameID:     new("g1"),
+				MarketType: "ML",
+				Selection:  sel,
+				Odds:       -250,
+			},
+		)
+		require.NoError(t, err)
+		require.NoError(t, f.store.SetLegResult(ctx, leg.ID, parlay.Won, f.user.Name))
+	}
+	require.NoError(t, f.store.SetSlipGrade(ctx, slip.ID, parlay.Won, db.SlipGraded))
+
+	rec := httptest.NewRecorder()
+	f.handler.ServeHTTP(rec, httptest.NewRequestWithContext(ctx, http.MethodGet, "/analyzer/results?season=2026", nil))
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	body := html.UnescapeString(rec.Body.String())
+	assert.Contains(t, body, "Slip Factor Attribution")
+	assert.Contains(t, body, "Parlay length drag")
+	assert.Contains(t, body, "Extra chalk drag")
+	assert.Contains(t, body, "1-0")
 }

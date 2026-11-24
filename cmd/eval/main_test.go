@@ -96,6 +96,7 @@ func TestEvalCLI(t *testing.T) {
 		assert.Contains(t, text, "Leg Calibration:")
 		assert.Contains(t, text, "Factor Attribution:")
 		assert.Contains(t, text, "Slip Calibration:")
+		assert.NotContains(t, text, "Slip Factor Attribution:")
 	})
 
 	t.Run("single rubric json format", func(t *testing.T) {
@@ -198,6 +199,20 @@ func TestEvalCLI(t *testing.T) {
 		assert.Contains(t, md, "| Band | Total | Decided | W-L-P |")
 		assert.Contains(t, md, "#### Slip Calibration")
 		assert.Contains(t, md, "#### Top Factor Attribution")
+		assert.Contains(t, md, "#### Slip Factor Attribution")
+		assert.Contains(t, md, "blowout_passing")
+	})
+
+	t.Run("dataset single rubric text format", func(t *testing.T) {
+		t.Parallel()
+		datasetPath := filepath.Join("..", "..", "internal", "eval", "testdata", "benchmark_dataset.json")
+		var out, errBuf bytes.Buffer
+		err := run(t.Context(), []string{"--dataset", datasetPath, "--format", "text"}, &out, &errBuf)
+		require.NoError(t, err)
+
+		text := out.String()
+		assert.Contains(t, text, "Slip Factor Attribution:")
+		assert.Contains(t, text, "blowout_passing")
 	})
 
 	t.Run("dataset all rubrics json format", func(t *testing.T) {
@@ -241,6 +256,8 @@ func TestEvalCLI(t *testing.T) {
 		assert.Contains(t, md, "#### Leg Calibration")
 		assert.Contains(t, md, "#### Slip Calibration")
 		assert.Contains(t, md, "#### Top Factor Attribution")
+		assert.Contains(t, md, "#### Slip Factor Attribution")
+		assert.Contains(t, md, "blowout_passing")
 	})
 
 	t.Run("dataset compare markdown format", func(t *testing.T) {
@@ -275,5 +292,6 @@ func TestEvalCLI(t *testing.T) {
 		assert.Contains(t, md, "#### Slip Calibration Diff")
 		assert.Contains(t, md, "#### Leg Band Migrations")
 		assert.Contains(t, md, "### Candidate Factor Attribution (`v2-candidate`)")
+		assert.Contains(t, md, "### Candidate Slip Factor Attribution (`v2-candidate`)")
 	})
 }
