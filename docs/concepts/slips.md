@@ -50,8 +50,8 @@ stays one column at every width.
 When the slip is `OPEN` and the viewer is in the `pick` step (has remaining leg slots), `#slip-panel` renders a compact
 **"Top A-grade ideas"** strip below the step banner. It runs `analyzer.LoadBoardSignals` and `board.SelectHighlights`
 over cached SQLite odds and signals—making zero external API calls—to surface up to 3 A-grade legs and up to 2 A-grade
-2–3 leg parlay combos. Each card shows its `A` pill, a concise reason, odds, an inline `<details>` factor breakdown, and
-one-tap `+ Add` (or `"Add all N"` via `POST /slips/{id}/legs/batch`, which disables as `"Needs N open slots"` when fewer
+2–3 leg parlay combos. Each card shows its `A` pill, a concise reason, odds with a muted implied percentage chance (and
+combined implied chance on combo headers), an inline `<details>` factor breakdown, and one-tap `+ Add` (or `"Add all N"` via `POST /slips/{id}/legs/batch`, which disables as `"Needs N open slots"` when fewer
 than `N` slots remain). When no A-grade plays exist or the viewer finishes picking, the strip hides cleanly.
 
 `slips.NextStep` is one pure function over the slip, its members, its legs, the week's games, the viewer, and `now`. It
@@ -194,8 +194,8 @@ line, American odds, and a display `selection` generated from those fields.
 - A leg needs a game, except on a slip for a past week, where the game is optional and `OTHER` is the usual market.
 - `OTHER` legs skip the analyzer and grade by hand.
 
-The slip panel draws each leg as a row: a leading media badge when available, then the selection, the odds, a "Research
-&rarr;" link when the leg has a resolved player or game, the model chip, and the result. A matched player leg shows the
+The slip panel draws each leg as a row: a leading media badge when available, then the selection, the odds with a muted
+implied percentage chance (e.g., `-110 (52%)`), a "Research &rarr;" link when the leg has a resolved player or game, the model chip, and the result. A matched player leg shows the
 player's portrait (or the team logo if no headshot URL is stored, or player initials if neither image exists); a
 team-scoped leg shows the team logo; a game `TOTAL` leg shows paired away and home logos; and an unlinked custom or
 historical leg stays plain text. A `SPREAD` or `ML` leg with a fresh nfelo model shows it beside the odds, from that
@@ -206,8 +206,7 @@ missing row, a fetch older than 72 hours, or a live game leaves it off.
 
 The slip's **reference odds** multiply each leg's reference price: the median of the prices the slip members' home books
 carry for that leg via `db.MatchBookOdds` (one price per book, preferring an exact `Line` match and falling back to the
-book's current line for the same selection). A leg whose members' books do not price it keeps its own price. The formulas
-are in [Odds math](../reference/odds-math.md).
+book's current line for the same selection). A leg whose members' books do not price it keeps its own price. The payout calculator shows muted implied percentage chances inline beside both **Combined** and **Reference** odds, omitting them when no legs count (empty or all-`PUSH`/`VOID` slips). The formulas are in [Odds math](../reference/odds-math.md).
 
 ### Selection identity
 
