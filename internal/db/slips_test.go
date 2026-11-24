@@ -585,7 +585,7 @@ func TestSlateScopeLabel(t *testing.T) {
 	t.Parallel()
 
 	assert.Equal(t, "Sunday Slate", db.SlateScopeSundayMain.Label())
-	assert.Equal(t, "Thursday Night", db.SlateScopeThursday.Label())
+	assert.Equal(t, "Thursday Slate", db.SlateScopeThursday.Label())
 	assert.Equal(t, "Full Week", db.SlateScopeFullWeek.Label())
 	assert.Equal(t, "Sunday Slate", db.SlateScope("unknown").Label())
 	assert.Equal(t, "Sunday Slate", db.SlateScope("").Label())

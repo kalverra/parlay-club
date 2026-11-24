@@ -1041,16 +1041,16 @@ func TestCreateSlipFormSlateScopeSelection(t *testing.T) {
 	bodyDefault := recDefault.Body.String()
 	assert.Contains(t, bodyDefault, `<select name="slate_scope"`)
 	assert.Contains(t, bodyDefault, `<option value="sunday_main" selected>Sunday Slate</option>`)
-	assert.Contains(t, bodyDefault, `<option value="thursday">Thursday Night</option>`)
+	assert.Contains(t, bodyDefault, `<option value="thursday">Thursday Slate</option>`)
 	assert.Contains(t, bodyDefault, `<option value="full_week">Full Week</option>`)
 
-	// Pre-select Thursday Night via ?scope=thursday.
+	// Pre-select Thursday Slate via ?scope=thursday.
 	reqThu := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/slips/new?scope=thursday", nil)
 	recThu := httptest.NewRecorder()
 	fixture.handler.ServeHTTP(recThu, reqThu)
 	require.Equal(t, http.StatusOK, recThu.Code)
 	bodyThu := recThu.Body.String()
-	assert.Contains(t, bodyThu, `<option value="thursday" selected>Thursday Night</option>`)
+	assert.Contains(t, bodyThu, `<option value="thursday" selected>Thursday Slate</option>`)
 	assert.Contains(t, bodyThu, `<option value="sunday_main">Sunday Slate</option>`)
 
 	// Pre-select Full Week via ?slate_scope=full_week.
