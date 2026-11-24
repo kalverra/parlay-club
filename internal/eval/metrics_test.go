@@ -750,4 +750,221 @@ func TestEvaluateEarlyBustedSlip(t *testing.T) {
 	assert.Equal(t, 1, hitRate.Count)
 	assert.Equal(t, 1, hitRate.Losses)
 	assert.Len(t, report.legOutcomes, 1)
+
+	parlayDrag, ok := factorByRule(report.SlipFactors, "parlay_drag")
+	require.True(t, ok)
+	assert.Equal(t, 1, parlayDrag.Count)
+	assert.Equal(t, 1, parlayDrag.Losses)
+}
+
+func TestEvaluateSlipFactors(t *testing.T) {
+	t.Parallel()
+
+	games := testGame()
+	stats := testStats()
+
+	makeLeg := func(id int64, odds int, res parlay.Result) ReplayedLeg {
+		return ReplayedLeg{
+			Leg: analyzer.Leg{
+				ID:       id,
+				GameID:   "g1",
+				Market:   "REC_YDS",
+				Team:     "BUF",
+				PlayerID: "p_hot",
+				Side:     "OVER",
+				Line:     new(55.5),
+				Odds:     odds,
+			},
+			Result:      res,
+			DecimalOdds: parlay.AmericanToDecimal(odds),
+		}
+	}
+
+	// Custom rubric to verify GradeRubricFor(rubric) labels and deltas are used.
+	rubric := analyzer.RubricV1
+	rubric.Name = "custom-slip-factors"
+	rubric.ParlayDragPerLeg = -5
+	rubric.ChalkDragPerExtraLeg = -8
+
+	dataset := ReplayDataset{
+		Weeks: []ReplayedWeek{
+			{
+				Season:  2025,
+				WeekNum: 5,
+				Games:   games,
+				Stats:   stats,
+				Slips: []ReplayedSlip{
+					{
+						// 4-leg Won slip -> triggers parlay_drag (2 * -5 = -10), 4.0 decimal odds (implied 0.25)
+						SlipID:       1,
+						Result:       parlay.Won,
+						CombinedOdds: 4.0,
+						Legs: []ReplayedLeg{
+							makeLeg(1, 100, parlay.Won),
+							makeLeg(2, 100, parlay.Won),
+							makeLeg(3, 100, parlay.Won),
+							makeLeg(4, 100, parlay.Won),
+						},
+					},
+					{
+						// 4-leg Lost slip with 2 heavy chalk legs (-600) -> triggers parlay_drag (-10) and chalk_drag (-8), 2.0 decimal odds (implied 0.50)
+						SlipID:       2,
+						Result:       parlay.Lost,
+						CombinedOdds: 2.0,
+						Legs: []ReplayedLeg{
+							makeLeg(5, -600, parlay.Lost),
+							makeLeg(6, -600, parlay.Won),
+							makeLeg(7, 100, parlay.Won),
+							makeLeg(8, 100, parlay.Won),
+						},
+					},
+					{
+						// Push slip -> must be excluded from SlipFactors even though it has 4 legs
+						SlipID:       3,
+						Result:       parlay.Push,
+						CombinedOdds: 4.0,
+						Legs: []ReplayedLeg{
+							makeLeg(9, 100, parlay.Push),
+							makeLeg(10, 100, parlay.Push),
+							makeLeg(11, 100, parlay.Push),
+							makeLeg(12, 100, parlay.Push),
+						},
+					},
+				},
+			},
+		},
+	}
+
+	report := Evaluate(dataset, rubric)
+	doc := analyzer.GradeRubricFor(rubric)
+	expectedLabels := make(map[string]string, len(doc.SlipFactors))
+	for _, f := range doc.SlipFactors {
+		expectedLabels[f.Rule] = f.Label
+	}
+
+	parlayDrag, ok := factorByRule(report.SlipFactors, "parlay_drag")
+	require.True(t, ok)
+	assert.Equal(t, expectedLabels["parlay_drag"], parlayDrag.Label)
+	assert.Equal(t, 2, parlayDrag.Count)
+	assert.Equal(t, 1, parlayDrag.Wins)
+	assert.Equal(t, 1, parlayDrag.Losses)
+	assert.InDelta(t, 0.5, parlayDrag.WinRate, 1e-9)
+	assert.InDelta(t, 0.375, parlayDrag.AvgImpliedProb, 1e-9)
+	assert.InDelta(t, 0.125, parlayDrag.Lift, 1e-9)
+	assert.InDelta(t, -5.0, parlayDrag.AvgDelta, 1e-9)
+
+	chalkDrag, ok := factorByRule(report.SlipFactors, "chalk_drag")
+	require.True(t, ok)
+	assert.Equal(t, expectedLabels["chalk_drag"], chalkDrag.Label)
+	assert.Equal(t, 1, chalkDrag.Count)
+	assert.Equal(t, 0, chalkDrag.Wins)
+	assert.Equal(t, 1, chalkDrag.Losses)
+	assert.InDelta(t, 0.0, chalkDrag.WinRate, 1e-9)
+	assert.InDelta(t, 0.5, chalkDrag.AvgImpliedProb, 1e-9)
+	assert.InDelta(t, -0.5, chalkDrag.Lift, 1e-9)
+	assert.InDelta(t, -8.0, chalkDrag.AvgDelta, 1e-9)
+}
+
+func TestCompareRubricsAndIdentityMigrations(t *testing.T) {
+	t.Parallel()
+
+	games := testGame()
+	stats := testStats()
+
+	dataset := ReplayDataset{
+		Weeks: []ReplayedWeek{
+			{
+				Season:  2025,
+				WeekNum: 4,
+				Games:   games,
+				Stats:   stats,
+				Slips: []ReplayedSlip{
+					{
+						SlipID:       1,
+						Result:       parlay.Won,
+						CombinedOdds: 2.0,
+						Legs: []ReplayedLeg{
+							{
+								Leg: analyzer.Leg{
+									ID: 101, GameID: "g1", Market: "REC_YDS",
+									Team: "BUF", PlayerID: "p_hot", Side: "OVER", Line: new(55.5), Odds: 100,
+								},
+								Result:      parlay.Won,
+								DecimalOdds: 2.0,
+							},
+							{
+								Leg: analyzer.Leg{
+									ID: 102, GameID: "g1", Market: "REC_YDS",
+									Team: "BUF", PlayerID: "p_cold", Side: "OVER", Line: new(55.5), Odds: 100,
+								},
+								Result:      parlay.Lost,
+								DecimalOdds: 2.0,
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	cand := analyzer.RubricV1
+	cand.Name = "v2-test"
+	cand.HitRate = 0
+	cand.MedianTrap = 0
+
+	baseReport, candReport, diff := CompareRubrics(dataset, analyzer.RubricV1, cand)
+	assert.Equal(t, Compare(baseReport, candReport), diff)
+	require.Len(t, diff.Migrations, 2)
+
+	// Reordering candidate legOutcomes must produce the exact same migrations.
+	reorderedCand := candReport
+	reorderedCand.legOutcomes = []legOutcome{candReport.legOutcomes[1], candReport.legOutcomes[0]}
+	assert.Equal(t, diff.Migrations, Compare(baseReport, reorderedCand).Migrations)
+
+	// Mismatched / subset legOutcomes must only migrate matching (SlipID, LegID) keys.
+	subsetCand := candReport
+	subsetCand.legOutcomes = []legOutcome{
+		{slipID: 999, legID: 999, band: "F", decided: true, won: false},
+		candReport.legOutcomes[0],
+	}
+	subsetDiff := Compare(baseReport, subsetCand)
+	require.Len(t, subsetDiff.Migrations, 1)
+	assert.Equal(t, MigrationCell{
+		FromBand: "A",
+		ToBand:   "B",
+		Total:    1,
+		Decided:  1,
+		Wins:     1,
+		Losses:   0,
+		WinRate:  1.0,
+	}, subsetDiff.Migrations[0])
+
+	// Empty legOutcomes (e.g., reports decoded from JSON) must return empty migrations cleanly.
+	emptyCand := candReport
+	emptyCand.legOutcomes = nil
+	assert.Empty(t, Compare(baseReport, emptyCand).Migrations)
+
+	// Zero-ID fixtures fall back to (SlipID, legIdx).
+	zeroIDBase := Report{
+		RubricName: "base",
+		legOutcomes: []legOutcome{
+			{slipID: 7, legID: 0, legIdx: 0, band: "A", decided: true, won: true},
+			{slipID: 7, legID: 0, legIdx: 1, band: "C", decided: true, won: false},
+		},
+	}
+	zeroIDCand := Report{
+		RubricName: "cand",
+		legOutcomes: []legOutcome{
+			{slipID: 7, legID: 0, legIdx: 1, band: "B", decided: true, won: false},
+			{slipID: 7, legID: 0, legIdx: 0, band: "B", decided: true, won: true},
+		},
+	}
+	zeroIDDiff := Compare(zeroIDBase, zeroIDCand)
+	require.Len(t, zeroIDDiff.Migrations, 2)
+	assert.Equal(t, "A", zeroIDDiff.Migrations[0].FromBand)
+	assert.Equal(t, "B", zeroIDDiff.Migrations[0].ToBand)
+	assert.Equal(t, 1, zeroIDDiff.Migrations[0].Wins)
+	assert.Equal(t, "C", zeroIDDiff.Migrations[1].FromBand)
+	assert.Equal(t, "B", zeroIDDiff.Migrations[1].ToBand)
+	assert.Equal(t, 1, zeroIDDiff.Migrations[1].Losses)
 }

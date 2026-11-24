@@ -124,7 +124,7 @@ Complexity: medium (touches replay leg retention, odds aggregation, and settled-
 Complexity: medium (adds `SlipFactors` aggregation using `GradeRubricFor(rubric)` and identity-keyed
 `Compare`/`CompareRubrics`) Risk: low (pure metrics and comparison logic verified by table-driven tests)
 
-- [ ] Switch `rubricFactorLabels` in `internal/eval/metrics.go` to `analyzer.GradeRubricFor(rubric)`, add
+- [x] Switch `rubricFactorLabels` in `internal/eval/metrics.go` to `analyzer.GradeRubricFor(rubric)`, add
       `SlipFactors []FactorStats` to `eval.Report` accumulated from `slipGrade.Factors` on decided slips, and key
       `legOutcome` by `(SlipID, LegID)` (with `(SlipID, index)` fallback for zero-ID fixtures) alongside
       `CompareRubrics`, with unit tests covering slip factors and mismatched/reordered comparisons.

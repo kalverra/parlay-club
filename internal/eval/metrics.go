@@ -62,6 +62,7 @@ type Report struct {
 	SlipBands        []BandStats   `json:"slip_bands"`
 	Weekly           []WeekSummary `json:"weekly"`
 	Factors          []FactorStats `json:"factors"`
+	SlipFactors      []FactorStats `json:"slip_factors,omitempty"`
 	LegMonotonic     bool          `json:"leg_monotonic"`
 	LegMonotonicWin  bool          `json:"leg_monotonic_win"`
 	LegMonotonicLift bool          `json:"leg_monotonic_lift"`
@@ -109,9 +110,33 @@ type DiffReport struct {
 }
 
 type legOutcome struct {
+	slipID  int64
+	legID   int64
+	legIdx  int
 	band    string
 	decided bool
 	won     bool
+}
+
+type legOutcomeKey struct {
+	slipID   int64
+	legID    int64
+	legIdx   int
+	hasLegID bool
+}
+
+func (o legOutcome) key() legOutcomeKey {
+	if o.legID != 0 {
+		return legOutcomeKey{
+			slipID:   o.slipID,
+			legID:    o.legID,
+			hasLegID: true,
+		}
+	}
+	return legOutcomeKey{
+		slipID: o.slipID,
+		legIdx: o.legIdx,
+	}
 }
 
 type bandAccum struct {
@@ -238,6 +263,44 @@ func rubricFactorLabels(rubric analyzer.Rubric) map[string]string {
 	return labels
 }
 
+func recordFactors(
+	acc map[string]*factorAccum,
+	labels map[string]string,
+	applied []analyzer.GradeFactor,
+	result parlay.Result,
+	decimalOdds float64,
+) {
+	for _, f := range applied {
+		fa, ok := acc[f.Rule]
+		if !ok {
+			label := labels[f.Rule]
+			if label == "" {
+				label = f.Rule
+			}
+			fa = &factorAccum{rule: f.Rule, label: label}
+			acc[f.Rule] = fa
+		}
+		fa.add(result, decimalOdds, f.Delta)
+	}
+}
+
+func finalizeFactorStats(acc map[string]*factorAccum) []FactorStats {
+	if len(acc) == 0 {
+		return nil
+	}
+	out := make([]FactorStats, 0, len(acc))
+	for _, fa := range acc {
+		out = append(out, fa.stats())
+	}
+	slices.SortFunc(out, func(a, b FactorStats) int {
+		if c := cmp.Compare(b.Count, a.Count); c != 0 {
+			return c
+		}
+		return cmp.Compare(a.Rule, b.Rule)
+	})
+	return out
+}
+
 // Evaluate scores every slip and leg in dataset under rubric and returns leg
 // and slip calibration by band, weekly progression, lift over implied odds,
 // flat ROI, per-factor attribution, and monotonicity checks.
@@ -245,6 +308,7 @@ func Evaluate(dataset ReplayDataset, rubric analyzer.Rubric) Report {
 	legBands := newBandAccumMap()
 	slipBands := newBandAccumMap()
 	factors := make(map[string]*factorAccum)
+	slipFactors := make(map[string]*factorAccum)
 	factorLabels := rubricFactorLabels(rubric)
 	var outcomes []legOutcome
 	weekly := make([]WeekSummary, 0, len(dataset.Weeks))
@@ -265,6 +329,9 @@ func Evaluate(dataset ReplayDataset, rubric analyzer.Rubric) Report {
 			slipDec := slipDecimalOdds(slip)
 			slipBands[slipBand].add(slip.Result, slipDec)
 			weekSlipBands[slipBand].add(slip.Result, slipDec)
+			if slip.Result == parlay.Won || slip.Result == parlay.Lost {
+				recordFactors(slipFactors, factorLabels, slipGrade.Factors, slip.Result, slipDec)
+			}
 
 			for i, rl := range slip.Legs {
 				if !isSettledResult(rl.Result) {
@@ -282,6 +349,9 @@ func Evaluate(dataset ReplayDataset, rubric analyzer.Rubric) Report {
 
 				decided := rl.Result == parlay.Won || rl.Result == parlay.Lost
 				outcomes = append(outcomes, legOutcome{
+					slipID:  slip.SlipID,
+					legID:   rl.Leg.ID,
+					legIdx:  i,
 					band:    band,
 					decided: decided,
 					won:     rl.Result == parlay.Won,
@@ -290,18 +360,7 @@ func Evaluate(dataset ReplayDataset, rubric analyzer.Rubric) Report {
 				if !decided {
 					continue
 				}
-				for _, f := range lg.Factors {
-					fa, ok := factors[f.Rule]
-					if !ok {
-						label := factorLabels[f.Rule]
-						if label == "" {
-							label = f.Rule
-						}
-						fa = &factorAccum{rule: f.Rule, label: label}
-						factors[f.Rule] = fa
-					}
-					fa.add(rl.Result, dec, f.Delta)
-				}
+				recordFactors(factors, factorLabels, lg.Factors, rl.Result, dec)
 			}
 		}
 
@@ -333,24 +392,14 @@ func Evaluate(dataset ReplayDataset, rubric analyzer.Rubric) Report {
 	slipBandStats := finalizeBandStats(slipBands)
 	monoWin, monoLift := checkMonotonicity(legBandStats)
 
-	factorStats := make([]FactorStats, 0, len(factors))
-	for _, fa := range factors {
-		factorStats = append(factorStats, fa.stats())
-	}
-	slices.SortFunc(factorStats, func(a, b FactorStats) int {
-		if c := cmp.Compare(b.Count, a.Count); c != 0 {
-			return c
-		}
-		return cmp.Compare(a.Rule, b.Rule)
-	})
-
 	return Report{
 		RubricName:       rubric.Name,
 		Coverage:         dataset.Coverage,
 		LegBands:         legBandStats,
 		SlipBands:        slipBandStats,
 		Weekly:           weekly,
-		Factors:          factorStats,
+		Factors:          finalizeFactorStats(factors),
+		SlipFactors:      finalizeFactorStats(slipFactors),
 		LegMonotonic:     monoWin && monoLift,
 		LegMonotonicWin:  monoWin,
 		LegMonotonicLift: monoLift,
@@ -385,6 +434,14 @@ func weekTypeRank(weekType string) int {
 		return 1
 	}
 	return 0
+}
+
+// CompareRubrics evaluates baseline and candidate rubrics against dataset and
+// returns both reports along with their DiffReport.
+func CompareRubrics(dataset ReplayDataset, baseline, candidate analyzer.Rubric) (Report, Report, DiffReport) {
+	baseReport := Evaluate(dataset, baseline)
+	candReport := Evaluate(dataset, candidate)
+	return baseReport, candReport, Compare(baseReport, candReport)
 }
 
 // Compare computes per-band calibration deltas and the leg band migration
@@ -508,7 +565,14 @@ func diffBandStats(base, cand []BandStats) []BandDiff {
 }
 
 func computeMigrations(base, cand []legOutcome) []MigrationCell {
-	n := min(len(base), len(cand))
+	if len(base) == 0 || len(cand) == 0 {
+		return nil
+	}
+	candByKey := make(map[legOutcomeKey]legOutcome, len(cand))
+	for _, c := range cand {
+		candByKey[c.key()] = c
+	}
+
 	type key struct {
 		from string
 		to   string
@@ -519,16 +583,20 @@ func computeMigrations(base, cand []legOutcome) []MigrationCell {
 		losses int
 	}
 	cells := make(map[key]*counts)
-	for i := range n {
-		k := key{from: base[i].band, to: cand[i].band}
+	for _, b := range base {
+		candOutcome, ok := candByKey[b.key()]
+		if !ok {
+			continue
+		}
+		k := key{from: b.band, to: candOutcome.band}
 		c, ok := cells[k]
 		if !ok {
 			c = &counts{}
 			cells[k] = c
 		}
 		c.total++
-		if base[i].decided {
-			if base[i].won {
+		if b.decided {
+			if b.won {
 				c.wins++
 			} else {
 				c.losses++
