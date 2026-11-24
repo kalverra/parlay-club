@@ -271,6 +271,7 @@ func TestGroupWeekRendersMultiSlipViewWhenMultipleSlipsExist(t *testing.T) {
 
 	assert.Contains(t, body, "This week's slips")
 	assert.Contains(t, body, "Thursday Night")
+	assert.Contains(t, body, "Thursday Slate")
 	assert.Contains(t, body, "Sunday Main")
 	assert.Contains(t, body, "Sunday Slate")
 	assert.Contains(t, body, fmt.Sprintf(`/slips/%d`, thuSlip.ID))
@@ -310,6 +311,7 @@ func TestGroupWeekAutoCreatesMultipleScheduledSlipsAndRendersView(t *testing.T) 
 
 	assert.Contains(t, body, "This week's slips")
 	assert.Contains(t, body, "Thursday Night")
+	assert.Contains(t, body, "Thursday Slate")
 	assert.Contains(t, body, "Sunday Main")
 	assert.Contains(t, body, "Sunday Slate")
 	assert.Contains(t, body, "+ Add one-off slip")

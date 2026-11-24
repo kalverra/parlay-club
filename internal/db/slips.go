@@ -62,7 +62,7 @@ func (s SlateScope) Valid() bool {
 func (s SlateScope) Label() string {
 	switch s {
 	case SlateScopeThursday:
-		return "Thursday Night"
+		return "Thursday Slate"
 	case SlateScopeFullWeek:
 		return "Full Week"
 	case SlateScopeSundayMain:
