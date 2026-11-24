@@ -99,8 +99,8 @@ const (
 	weatherAge              = 30 * time.Minute
 	weatherLookahead        = 48 * time.Hour
 	oddsWeekdayAge          = 24 * time.Hour
-	oddsSaturdayAge         = 12 * time.Hour
-	oddsSundayAge           = 45 * time.Minute
+	oddsEveAge              = 12 * time.Hour
+	oddsGameDayAge          = 45 * time.Minute
 	oddsLateAge             = 3 * time.Hour
 	oddsPickLinesGameDayAge = 15 * time.Minute
 	oddsPickLinesIdleAge    = 2 * time.Hour
@@ -124,7 +124,7 @@ const (
 	prefillIdempotencyAge   = 15 * time.Minute
 	prefillConcurrency      = 4
 	prefillKickTimeout      = 2 * time.Minute
-	sundayPrefillStartHour  = 6
+	prefillStartHour        = 6
 	failureBackoff          = 5 * time.Minute
 	syncTimeout             = 30 * time.Second
 	requestTimeout          = 10 * time.Second
@@ -438,14 +438,14 @@ func (s *Service) kick(ctx context.Context) {
 // singleflight and backing off for 5 minutes on zero-progress failures so
 // kick can still fall back to freeSourcesFor.
 func (s *Service) maybeRunSundayPrefill(ctx context.Context, games []db.Game, now time.Time) bool {
-	if !sundayPrefillWindow(games, now) || s.paused(SundayPrefillSource, now) {
+	if !gameDayPrefillWindow(games, now) || s.paused(SundayPrefillSource, now) {
 		return false
 	}
 
 	src := source{
 		key: SundayPrefillSource,
 		due: func(_ context.Context, state db.SyncState) (bool, error) {
-			return sundayPrefillStale(state.FetchedAt, now), nil
+			return gameDayPrefillStale(state.FetchedAt, now), nil
 		},
 	}
 	due, err := s.shouldRun(ctx, src)
@@ -712,13 +712,13 @@ func (s *Service) freeSourcesFor(
 			if game.HomeESPNID != "" && game.HomeTeam != "" {
 				if _, seen := seenTeams[game.HomeESPNID]; !seen {
 					seenTeams[game.HomeESPNID] = struct{}{}
-					sources = append(sources, s.rosterSource(game.HomeTeam, game.HomeESPNID, now))
+					sources = append(sources, s.rosterSource(game.HomeTeam, game.HomeESPNID, games, now))
 				}
 			}
 			if game.AwayESPNID != "" && game.AwayTeam != "" {
 				if _, seen := seenTeams[game.AwayESPNID]; !seen {
 					seenTeams[game.AwayESPNID] = struct{}{}
-					sources = append(sources, s.rosterSource(game.AwayTeam, game.AwayESPNID, now))
+					sources = append(sources, s.rosterSource(game.AwayTeam, game.AwayESPNID, games, now))
 				}
 			}
 		}
@@ -756,7 +756,7 @@ func (s *Service) freeSourcesFor(
 		}
 	}
 	for athleteID := range athletes {
-		sources = append(sources, s.gameLogSource(athleteID, now))
+		sources = append(sources, s.gameLogSource(athleteID, games, now))
 	}
 	return sources, errors.Join(errs...)
 }
@@ -915,13 +915,22 @@ func (s *Service) SyncGameResearch(ctx context.Context, gameID string) error {
 		errs = append(errs, err)
 	}
 	if !now.Before(game.Kickoff) {
+		gameSlice := []db.Game{game}
 		if game.HomeESPNID != "" && game.HomeTeam != "" {
-			if err := s.refreshSync(ctx, s.rosterSource(game.HomeTeam, game.HomeESPNID, now), now); err != nil {
+			if err := s.refreshSync(
+				ctx,
+				s.rosterSource(game.HomeTeam, game.HomeESPNID, gameSlice, now),
+				now,
+			); err != nil {
 				errs = append(errs, err)
 			}
 		}
 		if game.AwayESPNID != "" && game.AwayTeam != "" {
-			if err := s.refreshSync(ctx, s.rosterSource(game.AwayTeam, game.AwayESPNID, now), now); err != nil {
+			if err := s.refreshSync(
+				ctx,
+				s.rosterSource(game.AwayTeam, game.AwayESPNID, gameSlice, now),
+				now,
+			); err != nil {
 				errs = append(errs, err)
 			}
 		}
@@ -937,8 +946,13 @@ func (s *Service) SyncPlayerResearch(ctx context.Context, athleteID string) erro
 	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
 	defer cancel()
 
+	_, games, err := s.currentWeek(ctx)
+	if err != nil {
+		return err
+	}
+
 	now := s.now()
-	return s.refreshSync(ctx, s.gameLogSource(athleteID, now), now)
+	return s.refreshSync(ctx, s.gameLogSource(athleteID, games, now), now)
 }
 
 // SyncPickLines refreshes the week's game lines for an open pick screen if

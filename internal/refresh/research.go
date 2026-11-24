@@ -15,11 +15,11 @@ import (
 )
 
 // rosterSource syncs one team's roster.
-func (s *Service) rosterSource(teamAbbr, espnTeamID string, now time.Time) source {
+func (s *Service) rosterSource(teamAbbr, espnTeamID string, games []db.Game, now time.Time) source {
 	return source{
 		key: RosterSource(espnTeamID),
 		due: func(_ context.Context, state db.SyncState) (bool, error) {
-			return rosterStale(state.FetchedAt, now), nil
+			return rosterStale(state.FetchedAt, now, games), nil
 		},
 		run: func(ctx context.Context) (bool, error) {
 			return s.syncRoster(ctx, teamAbbr, espnTeamID, now)
@@ -106,11 +106,11 @@ func (s *Service) syncSummary(ctx context.Context, game db.Game, now time.Time) 
 }
 
 // gameLogSource syncs one athlete's game log.
-func (s *Service) gameLogSource(athleteID string, now time.Time) source {
+func (s *Service) gameLogSource(athleteID string, games []db.Game, now time.Time) source {
 	return source{
 		key: GameLogSource(athleteID),
 		due: func(_ context.Context, state db.SyncState) (bool, error) {
-			return gameLogStale(state.FetchedAt, now), nil
+			return gameLogStale(state.FetchedAt, now, games), nil
 		},
 		run: func(ctx context.Context) (bool, error) {
 			return s.syncGameLog(ctx, athleteID, now)
@@ -440,13 +440,22 @@ func (s *Service) syncOddsProps(ctx context.Context, game db.Game, now time.Time
 
 	// 1. Sync rosters for both teams before matching props.
 	if s.espn != nil {
+		gameSlice := []db.Game{game}
 		if game.HomeESPNID != "" && game.HomeTeam != "" {
-			if err := s.refreshSync(ctx, s.rosterSource(game.HomeTeam, game.HomeESPNID, now), now); err != nil {
+			if err := s.refreshSync(
+				ctx,
+				s.rosterSource(game.HomeTeam, game.HomeESPNID, gameSlice, now),
+				now,
+			); err != nil {
 				s.logger.Warn().Err(err).Str("team", game.HomeTeam).Msg("sync home roster")
 			}
 		}
 		if game.AwayESPNID != "" && game.AwayTeam != "" {
-			if err := s.refreshSync(ctx, s.rosterSource(game.AwayTeam, game.AwayESPNID, now), now); err != nil {
+			if err := s.refreshSync(
+				ctx,
+				s.rosterSource(game.AwayTeam, game.AwayESPNID, gameSlice, now),
+				now,
+			); err != nil {
 				s.logger.Warn().Err(err).Str("team", game.AwayTeam).Msg("sync away roster")
 			}
 		}
