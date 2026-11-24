@@ -139,5 +139,5 @@ API-budget impact; verified by handler and template tests)
       overview with the conditional active/upcoming slip spotlight, quiet-state CTA, record snapshot, recent slips,
       recurring schedules (linking to `/slips/new?mode=recurring`), and members strip; update
       `internal/web/home_test.go` for active, multi-slip, quiet, and non-member cases.
-- [ ] Docs: update `docs/concepts/groups.md` and `docs/concepts/slips.md` to describe the per-group overview landing
+- [x] Docs: update `docs/concepts/groups.md` and `docs/concepts/slips.md` to describe the per-group overview landing
       page and spotlight behavior.
