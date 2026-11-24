@@ -156,7 +156,7 @@ slip-game filtering call sites to `FilterGamesForSlip`) Risk: medium (touches pi
 validation across `internal/db`, `internal/slips`, and `internal/web`; covered by unit and integration tests for custom
 and legacy scopes)
 
-- [ ] Add migration `0017_slip_games.sql`, `SlateScopeCustom`, `ErrSlipGamesRequired`, `Slip.GameIDs` hydration,
+- [x] Add migration `0017_slip_games.sql`, `SlateScopeCustom`, `ErrSlipGamesRequired`, `Slip.GameIDs` hydration,
       `CreateSlip` custom-game persistence, and `Store.UpcomingWeeks(ctx, now)` in `internal/db/slips.go` and
       `internal/db/weeks.go`, with store tests.
 - [ ] Add `slips.FilterGamesForSlip(games, slip)` in `internal/slips/next.go`, switch `NextStep`,
