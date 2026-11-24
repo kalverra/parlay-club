@@ -8,13 +8,13 @@
     loading="lazy"
     referrerpolicy="no-referrer"
     data-fallback-img
-    class="{{if .Size}}{{.Size}}{{else}}h-5 w-5{{end}} shrink-0 rounded bg-slate-800/80 object-contain p-0.5 ring-1 ring-slate-700/60"
+    class="{{if .Size}}{{.Size}}{{else}}h-5 w-5{{end}} shrink-0 rounded bg-surface-2 object-contain p-0.5 ring-1 ring-line"
   >
   {{- end -}}
   {{- if .Fallback -}}
   <span
     data-fallback-badge
-    class="{{if .URL}}hidden{{else}}flex{{end}} {{if .Size}}{{.Size}}{{else}}h-5 w-5{{end}} shrink-0 items-center justify-center rounded bg-slate-800 text-[10px] font-semibold uppercase tracking-tight text-slate-300 ring-1 ring-slate-700/60"
+    class="{{if .URL}}hidden{{else}}flex{{end}} {{if .Size}}{{.Size}}{{else}}h-5 w-5{{end}} shrink-0 items-center justify-center rounded bg-surface-2 text-[10px] font-semibold uppercase tracking-tight text-ink-muted ring-1 ring-line"
   >{{.Fallback}}</span>
   {{- end -}}
 </span>
@@ -31,12 +31,12 @@
     loading="lazy"
     referrerpolicy="no-referrer"
     data-fallback-img
-    class="{{if .Size}}{{.Size}}{{else}}h-9 w-9{{end}} shrink-0 rounded-full bg-slate-800 object-cover object-top ring-1 ring-slate-700/60"
+    class="{{if .Size}}{{.Size}}{{else}}h-9 w-9{{end}} shrink-0 rounded-full bg-surface-2 object-cover object-top ring-1 ring-line"
   >
   {{- end -}}
   <span
     data-fallback-badge
-    class="{{if .URL}}hidden{{else}}flex{{end}} {{if .Size}}{{.Size}}{{else}}h-9 w-9{{end}} shrink-0 items-center justify-center rounded-full bg-slate-800 {{if .TextSize}}{{.TextSize}}{{else}}text-xs{{end}} font-semibold text-slate-200 ring-1 ring-slate-700/60"
+    class="{{if .URL}}hidden{{else}}flex{{end}} {{if .Size}}{{.Size}}{{else}}h-9 w-9{{end}} shrink-0 items-center justify-center rounded-full bg-surface-2 {{if .TextSize}}{{.TextSize}}{{else}}text-xs{{end}} font-semibold text-ink ring-1 ring-line"
   >{{.Initials}}</span>
 </span>
 {{- end -}}
