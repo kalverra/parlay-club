@@ -667,3 +667,87 @@ func TestEvaluateAll(t *testing.T) {
 	assert.Equal(t, "v2-test", multi.Diffs[0].CandidateName)
 	assert.Equal(t, Compare(multi.Reports[0], multi.Reports[1]), multi.Diffs[0])
 }
+
+func TestEvaluateEarlyBustedSlip(t *testing.T) {
+	t.Parallel()
+
+	games := testGame()
+	stats := testStats()
+	makeLeg := func(id int64, res parlay.Result) ReplayedLeg {
+		return ReplayedLeg{
+			Leg: analyzer.Leg{
+				ID:       id,
+				GameID:   "g1",
+				Market:   "REC_YDS",
+				Team:     "BUF",
+				PlayerID: "p_hot",
+				Side:     "OVER",
+				Line:     new(55.5),
+				Odds:     100,
+			},
+			Result:      res,
+			DecimalOdds: 2.0,
+		}
+	}
+
+	legs := []ReplayedLeg{
+		makeLeg(1, parlay.Lost),
+		makeLeg(2, parlay.Pending),
+		makeLeg(3, parlay.Pending),
+		makeLeg(4, parlay.NeedsGrading),
+	}
+
+	analyzerLegs := make([]analyzer.Leg, len(legs))
+	for i, rl := range legs {
+		analyzerLegs[i] = rl.Leg
+	}
+	fullGrade := analyzer.ScoreSlipWithRubric(analyzerLegs, games, stats, analyzer.RubricV1)
+	singleGrade := analyzer.ScoreSlipWithRubric(analyzerLegs[:1], games, stats, analyzer.RubricV1)
+	require.NotEqual(t, singleGrade.Letter, fullGrade.Letter, "4-leg parlay drag must change slip grade band")
+
+	dataset := ReplayDataset{
+		Coverage: DataCoverage{TotalLegs: 4, WithGameLogs: 4},
+		Weeks: []ReplayedWeek{
+			{
+				Season:  2025,
+				WeekNum: 4,
+				Games:   games,
+				Stats:   stats,
+				Slips: []ReplayedSlip{
+					{
+						SlipID: 10,
+						Result: parlay.Lost,
+						Legs:   legs,
+					},
+				},
+			},
+		},
+	}
+
+	report := Evaluate(dataset, analyzer.RubricV1)
+
+	// Slip is scored using all 4 pre-kickoff legs (including unsettled legs).
+	slipBand, ok := bandByName(report.SlipBands, normalizeBand(fullGrade.Letter))
+	require.True(t, ok)
+	assert.Equal(t, 1, slipBand.Total)
+	assert.Equal(t, 1, slipBand.Decided)
+	assert.Equal(t, 1, slipBand.Losses)
+	assert.InDelta(t, 0.5, slipBand.AvgImpliedProb, 1e-9)
+
+	// Only the 1 settled leg is accumulated into leg bands, factors, weekly summary, and legOutcomes.
+	bandA, ok := bandByName(report.LegBands, "A")
+	require.True(t, ok)
+	assert.Equal(t, 1, bandA.Total)
+	assert.Equal(t, 1, bandA.Decided)
+	assert.Equal(t, 1, bandA.Losses)
+	assert.Equal(t, 0, bandA.Wins)
+
+	require.Len(t, report.Weekly, 1)
+	assert.Equal(t, 1, report.Weekly[0].DecidedLegs)
+
+	hitRate, ok := factorByRule(report.Factors, "hit_rate")
+	require.True(t, ok)
+	assert.Equal(t, 1, hitRate.Count)
+	assert.Equal(t, 1, hitRate.Losses)
+	assert.Len(t, report.legOutcomes, 1)
+}

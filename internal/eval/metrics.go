@@ -267,6 +267,9 @@ func Evaluate(dataset ReplayDataset, rubric analyzer.Rubric) Report {
 			weekSlipBands[slipBand].add(slip.Result, slipDec)
 
 			for i, rl := range slip.Legs {
+				if !isSettledResult(rl.Result) {
+					continue
+				}
 				var lg analyzer.LegGrade
 				if i < len(slipGrade.LegGrades) {
 					lg = slipGrade.LegGrades[i]
@@ -437,7 +440,7 @@ func slipDecimalOdds(rs ReplayedSlip) float64 {
 	}
 	parlayLegs := make([]parlay.Leg, 0, len(rs.Legs))
 	for _, rl := range rs.Legs {
-		if !rl.Result.Counts() {
+		if !isSettledResult(rl.Result) || !rl.Result.Counts() {
 			continue
 		}
 		dec := legDecimalOdds(rl)
