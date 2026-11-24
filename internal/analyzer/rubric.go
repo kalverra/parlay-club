@@ -30,12 +30,20 @@ type Rubric struct {
 	QBDrag           int `json:"qb_drag"`
 
 	// Line & Price leg factor deltas.
-	NfeloCushion   int `json:"nfelo_cushion"`
-	Hook           int `json:"hook"`
-	HookSoftened   int `json:"hook_softened"`
-	TotalKeyNumber int `json:"total_key_number"`
-	ChalkMin       int `json:"chalk_min"`
-	ChalkMax       int `json:"chalk_max"`
+	NfeloCushion            int `json:"nfelo_cushion"`
+	Hook                    int `json:"hook"`
+	HookSoftened            int `json:"hook_softened"`
+	TotalKeyNumber          int `json:"total_key_number"`
+	ChalkMin                int `json:"chalk_min"`
+	ChalkMax                int `json:"chalk_max"`
+	SharpLineEdge           int `json:"sharp_line_edge"`
+	SharpLineEdgeConsensus  int `json:"sharp_line_edge_consensus"`
+	SharpLineFade           int `json:"sharp_line_fade"`
+	SharpLineFadeConsensus  int `json:"sharp_line_fade_consensus"`
+	SharpPriceEdge          int `json:"sharp_price_edge"`
+	SharpPriceEdgeConsensus int `json:"sharp_price_edge_consensus"`
+	SharpPriceFade          int `json:"sharp_price_fade"`
+	SharpPriceFadeConsensus int `json:"sharp_price_fade_consensus"`
 
 	// Slip-level adjustments.
 	StackBonus           int `json:"stack_bonus"`
@@ -78,12 +86,20 @@ var RubricV1 = Rubric{
 	FakeWeather:      -3,
 	QBDrag:           -8,
 
-	NfeloCushion:   8,
-	Hook:           -10,
-	HookSoftened:   -4,
-	TotalKeyNumber: -5,
-	ChalkMin:       -10,
-	ChalkMax:       -18,
+	NfeloCushion:            8,
+	Hook:                    -10,
+	HookSoftened:            -4,
+	TotalKeyNumber:          -5,
+	ChalkMin:                -10,
+	ChalkMax:                -18,
+	SharpLineEdge:           8,
+	SharpLineEdgeConsensus:  5,
+	SharpLineFade:           -8,
+	SharpLineFadeConsensus:  -5,
+	SharpPriceEdge:          6,
+	SharpPriceEdgeConsensus: 4,
+	SharpPriceFade:          -6,
+	SharpPriceFadeConsensus: -4,
 
 	StackBonus:           8,
 	WarnConflict:         -12,

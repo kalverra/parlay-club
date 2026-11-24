@@ -12,16 +12,8 @@ import (
 const (
 	chalkMaxOdds = -500
 
-	sharpLineEdgeDelta           = 8
-	sharpLineEdgeConsensusDelta  = 5
-	sharpLineFadeDelta           = -8
-	sharpLineFadeConsensusDelta  = -5
-	sharpPriceEdgeDelta          = 6
-	sharpPriceEdgeConsensusDelta = 4
-	sharpPriceFadeDelta          = -6
-	sharpPriceFadeConsensusDelta = -4
-	sharpPriceEdgeThreshold      = 0.025
-	sharpPriceFadeThreshold      = -0.045
+	sharpPriceEdgeThreshold = 0.025
+	sharpPriceFadeThreshold = -0.045
 )
 
 // GradeFactor is one scoring adjustment applied to a leg or slip grade.
@@ -465,12 +457,12 @@ func scoreLineAndPrice(leg Leg, game Game, rubric Rubric) []GradeFactor {
 		})
 	}
 
-	candidates = append(candidates, scoreSharpBenchmark(leg, game)...)
+	candidates = append(candidates, scoreSharpBenchmark(leg, game, rubric)...)
 
 	return clampCategoryFactors(candidates, rubric.LinePriceMin, rubric.LinePriceMax)
 }
 
-func scoreSharpBenchmark(leg Leg, game Game) []GradeFactor {
+func scoreSharpBenchmark(leg Leg, game Game, rubric Rubric) []GradeFactor {
 	if len(game.Sharp) == 0 {
 		return nil
 	}
@@ -502,7 +494,7 @@ func scoreSharpBenchmark(leg Leg, game Game) []GradeFactor {
 			return []GradeFactor{{
 				Rule:   ruleSharpLineEdge,
 				Label:  "Sharp line edge",
-				Delta:  sharpTierDelta(sharp.Tier, sharpLineEdgeDelta, sharpLineEdgeConsensusDelta),
+				Delta:  sharpTierDelta(sharp.Tier, rubric.SharpLineEdge, rubric.SharpLineEdgeConsensus),
 				Detail: fmt.Sprintf("Getting %s while %s sits at %s.", selection(leg), source, sharpLine),
 			}}
 		}
@@ -514,7 +506,7 @@ func scoreSharpBenchmark(leg Leg, game Game) []GradeFactor {
 			return []GradeFactor{{
 				Rule:  ruleSharpLineFade,
 				Label: "Sharp line fade",
-				Delta: sharpTierDelta(sharp.Tier, sharpLineFadeDelta, sharpLineFadeConsensusDelta),
+				Delta: sharpTierDelta(sharp.Tier, rubric.SharpLineFade, rubric.SharpLineFadeConsensus),
 				Detail: fmt.Sprintf(
 					"%s sits at %s, so %s gives up %s.",
 					source,
@@ -542,7 +534,7 @@ func scoreSharpBenchmark(leg Leg, game Game) []GradeFactor {
 		return []GradeFactor{{
 			Rule:  ruleSharpPriceEdge,
 			Label: "Sharp price edge",
-			Delta: sharpTierDelta(sharp.Tier, sharpPriceEdgeDelta, sharpPriceEdgeConsensusDelta),
+			Delta: sharpTierDelta(sharp.Tier, rubric.SharpPriceEdge, rubric.SharpPriceEdgeConsensus),
 			Detail: fmt.Sprintf(
 				"Strong price at %s vs. %s fair price near %s.",
 				americanOddsText(leg.Odds),
@@ -555,7 +547,7 @@ func scoreSharpBenchmark(leg Leg, game Game) []GradeFactor {
 		return []GradeFactor{{
 			Rule:  ruleSharpPriceFade,
 			Label: "Steep price vs. sharp",
-			Delta: sharpTierDelta(sharp.Tier, sharpPriceFadeDelta, sharpPriceFadeConsensusDelta),
+			Delta: sharpTierDelta(sharp.Tier, rubric.SharpPriceFade, rubric.SharpPriceFadeConsensus),
 			Detail: fmt.Sprintf(
 				"Steep price at %s vs. %s fair price near %s.",
 				americanOddsText(leg.Odds),

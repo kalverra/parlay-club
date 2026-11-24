@@ -2108,4 +2108,68 @@ func TestScoreLegSharpBenchmarks(t *testing.T) {
 			assertFriendlyTone(t, f.Description)
 		}
 	})
+
+	t.Run("ScoreLegWithRubric and GradeRubricFor respect custom sharp rubric deltas", func(t *testing.T) {
+		t.Parallel()
+
+		custom := analyzer.RubricV1
+		custom.SharpLineEdge = 11
+		custom.SharpLineEdgeConsensus = 7
+		custom.SharpLineFade = -10
+		custom.SharpLineFadeConsensus = -6
+		custom.SharpPriceEdge = 9
+		custom.SharpPriceEdgeConsensus = 5
+		custom.SharpPriceFade = -9
+		custom.SharpPriceFadeConsensus = -5
+
+		games := map[string]analyzer.Game{
+			"buf-mia": {
+				ID:   "buf-mia",
+				Home: "BUF",
+				Away: "MIA",
+				Sharp: map[analyzer.SharpKey]analyzer.SharpQuote{
+					{MarketType: "SPREAD", Team: "BUF", Side: "TEAM"}: {
+						Line:   new(-3.5),
+						Source: "LowVig",
+						Tier:   2,
+					},
+					{MarketType: "TOTAL", Side: "OVER"}: {
+						Line:         new(45.5),
+						FairProb:     0.52,
+						FairAmerican: -108,
+						Source:       "market consensus",
+						Tier:         3,
+					},
+				},
+			},
+		}
+
+		spreadGrade := analyzer.ScoreLegWithRubric(
+			analyzer.Leg{ID: 1, GameID: "buf-mia", Market: "SPREAD", Team: "BUF", Side: "TEAM", Line: new(-2.5), Odds: -110},
+			games,
+			nil,
+			custom,
+		)
+		require.Len(t, spreadGrade.Factors, 1)
+		assert.Equal(t, 11, spreadGrade.Factors[0].Delta)
+
+		priceGrade := analyzer.ScoreLegWithRubric(
+			analyzer.Leg{ID: 2, GameID: "buf-mia", Market: "TOTAL", Side: "OVER", Line: new(45.5), Odds: 105},
+			games,
+			nil,
+			custom,
+		)
+		require.Len(t, priceGrade.Factors, 1)
+		assert.Equal(t, 5, priceGrade.Factors[0].Delta)
+
+		doc := analyzer.GradeRubricFor(custom)
+		byRule := make(map[string]analyzer.FactorDoc, len(doc.LegFactors))
+		for _, f := range doc.LegFactors {
+			byRule[f.Rule] = f
+		}
+		assert.Equal(t, "+11 (+7 consensus)", byRule["sharp_line_edge"].Delta)
+		assert.Equal(t, "-10 (-6 consensus)", byRule["sharp_line_fade"].Delta)
+		assert.Equal(t, "+9 (+5 consensus)", byRule["sharp_price_edge"].Delta)
+		assert.Equal(t, "-9 (-5 consensus)", byRule["sharp_price_fade"].Delta)
+	})
 }
