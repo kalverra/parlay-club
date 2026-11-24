@@ -21,8 +21,9 @@ one model projection per game. `0007_props_research.sql` adds `roster_players` a
 `0012_nflverse_signals.sql` adds `nflverse_player_ids`, `nflverse_team_weeks`, and `nflverse_player_weeks` for nflverse
 team efficiency, player usage, and snap-count signals. `0013_canonical_players.sql` (paired with the `Migrate` backfill
 hook) refreshes `roster_players.norm_name`, deduplicates colliding `odds` rows onto canonical `player_name` and `team`
-values, and backfills missing `legs.player_id` and `legs.team` values. `0014_roster_injuries.sql` adds `injury_status`
-and `injury_date` to `roster_players`.
+values, and backfills missing `legs.player_id` and `legs.team` values. `0014_roster_injuries.sql` adds `injury_status` and `injury_date` to `roster_players`. `0015_research_context.sql` adds
+`games_json` to `player_gamelogs` and adds opponent, player name, position, passing/rushing/receiving/kicking stat
+columns, and `idx_nflverse_player_weeks_opp_pos` to `nflverse_player_weeks`.
 
 ## Connection settings
 
@@ -54,7 +55,7 @@ writer handle.
 - `db.Migrate` applies every file whose number is greater than `PRAGMA user_version`, in number order.
 - Each file runs in its own transaction. The migration's statements and its `user_version` bump commit together, so a
   failed migration leaves neither behind.
-- A fresh database ends at version 14 with every table below.
+- A fresh database ends at version 15 with every table below.
 - `0001_init.sql` creates `groups`, `group_members`, and `slips.group_id`. A database created before groups existed has
   the old `slips` shape, so delete it and let the migrations rebuild.
 - `0002_google_identity.sql` rebuilds `users` in its transaction with the SQLite 12-step method and
@@ -82,7 +83,10 @@ writer handle.
   `legs.player_name`, and upserts auto-discovered `player_matches`.
 - `0014_roster_injuries.sql` adds `injury_status TEXT NOT NULL DEFAULT ''` and `injury_date TEXT NOT NULL DEFAULT ''` to
   `roster_players`.
-- Never edit an applied file. Add `0015_name.sql` and up.
+- `0015_research_context.sql` adds `games_json TEXT NOT NULL DEFAULT '[]'` to `player_gamelogs`, adds `opponent`,
+  `player_name`, `position`, `pass_att`, `pass_yds`, `pass_tds`, `rush_yds`, `rush_tds`, `receptions`, `rec_yds`,
+  `rec_tds`, and `kicker_pts` to `nflverse_player_weeks`, and creates `idx_nflverse_player_weeks_opp_pos`.
+- Never edit an applied file. Add `0016_name.sql` and up.
 - `PRAGMA user_version` on the database file is the only record of what ran.
 
 ## Tables
@@ -98,7 +102,7 @@ writer handle.
 | `nfelo_games`     | nfelo's pre-game model spread, win probability, and QB adjustments per game. |
 | `nflverse_player_ids`   | Crosswalk mapping ESPN athlete IDs to nflverse GSIS and PFR IDs. |
 | `nflverse_team_weeks`   | Weekly team offensive and defensive-allowed EPA, play volume, and pass rate. |
-| `nflverse_player_weeks` | Weekly player snaps, target/air-yards share, WOPR, volume, and total EPA. |
+| `nflverse_player_weeks` | Weekly player snaps, target/air-yards share, WOPR, volume, total EPA, opponent, position, and box stats. |
 | `slips`           | One shared parlay per group per week, with status and result.  |
 | `slip_members`    | Who is on a slip and when they locked in.                     |
 | `legs`            | Picks on a slip, with market, selection, line, odds, and result. |
@@ -106,7 +110,7 @@ writer handle.
 | `wagers`          | Optional stake, odds, and boost per member per slip.          |
 | `player_matches`  | Odds player name to ESPN athlete ID, per team.                |
 | `roster_players`  | ESPN NFL team rosters by athlete ID with normalized names and injury status. |
-| `player_gamelogs` | ESPN athlete game logs and market stats by athlete ID.        |
+| `player_gamelogs` | ESPN athlete game logs, market stats, and per-game opponent metadata by athlete ID. |
 | `activity`        | Human-readable slip history; `user_id` is NULL for system entries. |
 | `sync_state`      | Last fetch time per outside data source, plus remaining odds credits. |
 | `api_bodies`      | Raw external response bodies, gzipped and keyed by the SHA-256 of the uncompressed bytes. |
@@ -261,8 +265,22 @@ CREATE TABLE nflverse_player_weeks (
   total_epa       REAL    NOT NULL,
   rz_opps         INTEGER NOT NULL DEFAULT 0,
   updated_at      TEXT    NOT NULL,            -- RFC 3339 UTC
+  opponent        TEXT    NOT NULL DEFAULT '', -- ESPN abbreviation
+  player_name     TEXT    NOT NULL DEFAULT '',
+  position        TEXT    NOT NULL DEFAULT '', -- QB, RB (FB/HB normalized), WR, TE, K
+  pass_att        INTEGER NOT NULL DEFAULT 0,
+  pass_yds        INTEGER NOT NULL DEFAULT 0,
+  pass_tds        INTEGER NOT NULL DEFAULT 0,
+  rush_yds        INTEGER NOT NULL DEFAULT 0,
+  rush_tds        INTEGER NOT NULL DEFAULT 0,
+  receptions      INTEGER NOT NULL DEFAULT 0,
+  rec_yds         INTEGER NOT NULL DEFAULT 0,
+  rec_tds         INTEGER NOT NULL DEFAULT 0,
+  kicker_pts      INTEGER NOT NULL DEFAULT 0,  -- 3*fg_made + pat_made
   PRIMARY KEY (espn_id, season, season_type, week_num)
 );
+CREATE INDEX idx_nflverse_player_weeks_opp_pos
+  ON nflverse_player_weeks (season, season_type, opponent, position, week_num DESC);
 
 CREATE TABLE odds (
   game_id     TEXT NOT NULL REFERENCES games(id),
@@ -362,7 +380,8 @@ CREATE TABLE player_gamelogs (
   athlete_id   TEXT PRIMARY KEY,
   games_played INTEGER NOT NULL DEFAULT 0,
   stats_json   TEXT NOT NULL DEFAULT '{}',
-  updated_at   TEXT NOT NULL
+  updated_at   TEXT NOT NULL,
+  games_json   TEXT NOT NULL DEFAULT '[]'      -- JSON array of GameLogEntry, most recent first
 );
 
 CREATE TABLE activity (
@@ -442,7 +461,7 @@ how to read it.
 - `odds.player_name` stores the canonical `roster_players.full_name` when matched (with trailing `(TEAM)` tags stripped)
   or a batch-unified spelling when unmatched; `odds.team` stores the matched team or valid `(TEAM)` tag hint.
 - `games.home_logo` and `games.away_logo` store validated `https://` ESPN team logo URLs (`NULL` when missing).
-- `player_gamelogs.stats_json` stores parsed season market values as a JSON map of float arrays, ordered most recent first.
+- `player_gamelogs.stats_json` stores parsed season market values as a JSON map of float arrays, ordered most recent first. `player_gamelogs.games_json` stores the aligned JSON array of `espn.GameLogEntry` objects (`eventId`, `week`, `opponent`, `atVs`, `result`, `score`) in the same most-recent-first order.
 - `player_matches` maps normalized sportsbook player names and teams to ESPN athlete IDs. A row with `manual = 1` was
   corrected by a user and is never overwritten by automated matching.
 - `games.injuries_json` stores the raw ESPN summary injuries JSON array.
