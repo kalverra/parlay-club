@@ -138,9 +138,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 
-	baseReport := eval.Evaluate(dataset, baseRubric)
-	candReport := eval.Evaluate(dataset, candRubric)
-	diff := eval.Compare(baseReport, candReport)
+	baseReport, candReport, diff := eval.CompareRubrics(dataset, baseRubric, candRubric)
 
 	switch *format {
 	case "json":
