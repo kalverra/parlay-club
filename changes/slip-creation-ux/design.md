@@ -177,3 +177,7 @@ partial, and adds progressive-enhancement shortcuts in `web/static/app.js`) Risk
       checklist with kickoffs, live selected count).
 - [x] Docs: update `docs/concepts/slips.md` to document upcoming-only slip creation, unified one-off vs. recurring
       creation, and custom per-game slip eligibility.
+
+## Reviews
+
+- [x] Final review: agy@gemini-4-neon-medium

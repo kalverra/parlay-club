@@ -52,7 +52,7 @@ func NextStep(
 	viewerID int64,
 	now time.Time,
 ) Next {
-	games = FilterGamesByScope(games, slip.SlateScope)
+	games = FilterGamesForSlip(games, slip)
 
 	next := Next{
 		Result:   slip.Result,
@@ -192,6 +192,41 @@ func membersShort(members []db.SlipMember, legs []db.Leg, limit int) []string {
 		}
 	}
 	return names
+}
+
+// FilterGamesForSlip retains only games eligible for slip. Custom slips keep
+// only games listed in slip.GameIDs; all other scopes delegate to
+// FilterGamesByScope.
+func FilterGamesForSlip(games []db.Game, slip db.Slip) []db.Game {
+	if slip.SlateScope == db.SlateScopeCustom {
+		if len(games) == 0 || len(slip.GameIDs) == 0 {
+			return nil
+		}
+		allowed := make(map[string]struct{}, len(slip.GameIDs))
+		for _, id := range slip.GameIDs {
+			allowed[id] = struct{}{}
+		}
+		filtered := make([]db.Game, 0, len(slip.GameIDs))
+		for _, game := range games {
+			if _, ok := allowed[game.ID]; ok {
+				filtered = append(filtered, game)
+			}
+		}
+		return filtered
+	}
+	return FilterGamesByScope(games, slip.SlateScope)
+}
+
+// ScopeBadge returns the display label for a slip's slate scope badge.
+// Custom slips render "1 Game" or "N Games".
+func ScopeBadge(slip db.Slip) string {
+	if slip.SlateScope == db.SlateScopeCustom {
+		if len(slip.GameIDs) == 1 {
+			return "1 Game"
+		}
+		return fmt.Sprintf("%d Games", len(slip.GameIDs))
+	}
+	return slip.SlateScope.Label()
 }
 
 // FilterGamesByScope retains only games that match the slip's slate scope.

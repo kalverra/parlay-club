@@ -38,8 +38,8 @@ with their own stake, and no money passes through the app.
 
 `GET /slips/{id}` is the hub. A step banner leads, then the slip header card, the members and their legs, the export card,
 the payout calculator, the **My wager** form (`slip-wager`), and the activity feed. The header shows the slip title,
-its scope badge (`Thursday Slate`, `Sunday Slate`, `Weekend Slate`, or `Full Week`), status, and a `+ New slip` link to
-`/slips/new?week={id}`. On a single-slip week, `+ New slip` sits in the header metadata row. When a group has multiple
+its scope badge (`Thursday Slate`, `Sunday Slate`, `Weekend Slate`, `Full Week`, or `1 Game` / `N Games` for custom
+slips), status, and a `+ New slip` link to `/slips/new?week={id}`. On a single-slip week, `+ New slip` sits in the header metadata row. When a group has multiple
 slips in the active week, one horizontal sibling pill switcher bar (`[data-sibling-switcher]`) sits below the title
 with links to each sibling slip, their status summary (`(Locked)`, `(1/2 Picks)`, `(Won)`), and `+ New slip` as a
 trailing pill. In the `export` step the export card moves above the banner, because placing the picks is the one thing
@@ -97,34 +97,33 @@ schedule whose `slate_scope` has no upcoming non-final game (`now < kickoff`), s
 gain empty or dead slips; existing slips stay untouched, and cold weeks with no stored games still create every active
 schedule. If the group has no slips for the week, it shows the create-slip form. If one slip exists, it redirects
 directly to `/slips/{id}`. If multiple slips exist, it renders the multi-slip week hub with cards for each slip and a
-button to add a one-off slip.
+button to add a slip.
 
-A member can create an ad-hoc one-off slip at `/slips/new` (with optional `?week=` and `?slate_scope=` or `?scope=`).
-One-off slips belong only to that week and do not create recurring schedules.
+A member can create either a one-off slip or a recurring schedule at `/slips/new` (with optional `?week=`, `?mode=`, and
+`?slate_scope=` or `?scope=`). `GET /slips/new` queries `Store.UpcomingWeeks` (`kickoff_utc > now`, soonest first) and
+never shows past or completed weeks.
 
-The create screen adapts to whether the target week already has slips or stored weeks exist:
+The create screen adapts to whether upcoming weeks and existing slips are present:
 
-- **Empty week:** With a stored week and no slips yet, it reads *"Start {Week}'s slip"* and *"No slip for {Week} yet"*.
+- **No upcoming weeks:** When `UpcomingWeeks` is empty, it displays *"No upcoming games are loaded yet"* and hides the
+  form.
+- **Empty week:** With an upcoming week and no slips yet, it reads *"Start {Week}'s slip"* and *"No slip for {Week} yet"*.
 - **Existing-slip week:** When the target week already has at least one slip, it reads *"Add a slip for {Week}"* and
-  *"Pick a slate, legs per member, and who's in."*
-- **No stored weeks:** It says no week is loaded yet and hides the empty week picker.
-- **Past-week fields:** *"Or add a past week"* sits inside a `<details>` element that stays collapsed by default when
-  stored weeks exist, and opens only when no stored weeks exist or past-week fields (`season` or `week`) were submitted.
+  *"Pick a mode, games or slate, legs per member, and who's in."*
 - **Solo group:** A group with only the viewer adds *"It's just you for now"* and points at Groups for an invite.
 
-- Week defaults to the latest week. The picker lists every stored week with its season. A past week the slate never
-  stored can be typed in by season, season type, and week number, and the form creates the week. A typed week later than
-  the latest stored week is refused.
-- Name defaults to the week label, `Week 9`, then `Week 9 #2`.
-- `slate_scope` defaults to `sunday_main`, with options for `Sunday Slate` (`sunday_main`), `Thursday Slate`
-  (`thursday`), `Weekend Slate` (`weekend`), and `Full Week` (`full_week`).
-- `legs_per_member` defaults to 2 and allows 1–5.
-- Members default to the previous slip's members.
+A mode toggle switches between **One-off** (default) and **Recurring**:
 
-`slips.CreateDefaults` copies from the group's previous slip: the latest slip in that week or any earlier week. A second
-slip in the same week copies that week's first. With no previous slip it returns `DefaultLegsPerMember` (2) and no
-members. `db.Store.CreateSlip` trims the name, refuses a blank name, enforces the 1–5 range, validates the slate scope,
-requires at least one member, and ignores repeat member IDs.
+- **One-off (`mode=one_off`):** Picks an upcoming week (switching weeks loads `GET /slips/new/games` via HTMX), shows
+  dynamic weekday shortcut chips derived from that week's upcoming games in Eastern time (`All Sunday`, `All Thursday`,
+  `All Monday`, `All Saturday`, `All Friday`, `All games`, `Clear`), pre-selects Sunday games when present (otherwise all
+  upcoming games), and persists `SlateScopeCustom` with the selected `game_id` rows via `db.Store.CreateSlipWithGames`.
+  Submitting zero games returns 422 (`ErrSlipGamesRequired`).
+- **Recurring (`mode=recurring`):** Picks a repeating `slate_scope` (`ValidForSchedule`: `sunday_main`, `thursday`,
+  `weekend`, `full_week`), creates a `GroupSlipSchedule`, runs `slips.EnsureWeekSlips` on the first upcoming week, and
+  redirects to the materialized slip (or `/groups/{id}/week` if no matching game is upcoming).
+- Name defaults to the week label, `Week 9`, then `Week 9 #2`. `legs_per_member` defaults to 2 and allows 1–5. Members
+  default to the previous slip's members via `slips.CreateDefaults`.
 
 ## Slate scopes
 
@@ -136,15 +135,16 @@ Every slip belongs to a **slate scope** (`internal/db/slips.go`):
 | Sunday Main | `sunday_main` | Games kicking off on Sunday or Monday in Eastern time (default). |
 | Weekend | `weekend` | Games kicking off on Saturday, Sunday, or Monday in Eastern time. |
 | Full Week | `full_week` | Every game in the week. |
+| Custom | `custom` | Explicit `slip_games` rows chosen at one-off creation (not allowed on recurring schedules). |
 
-Scopes isolate deadlines and pick boundaries:
+Scopes isolate deadlines and pick boundaries through `slips.FilterGamesForSlip`:
 
-- **Deadlines:** `slips.NextStep` filters games by the slip's scope before finding the earliest upcoming kickoff. A
-  Thursday game does not pull a Sunday Main slip's deadline forward.
-- **Picks:** A pick must belong to a game matching the slip's scope. Adding a pick for a game outside the scope returns
-  `ErrGameOutsideScope`.
-- **Closure:** Once all games in a slip's scope kick off, an incomplete slip enters `closed`. Other slips in the same
-  week stay open if their own games have not kicked off.
+- **Deadlines:** `slips.NextStep` filters games with `FilterGamesForSlip` before finding the earliest upcoming kickoff. A
+  Thursday game does not pull a Sunday Main or custom Sunday slip's deadline forward.
+- **Picks:** A pick must belong to a game allowed by the slip's scope (or `slip_games` for `custom`). Adding a pick for
+  an ineligible game returns `ErrGameOutsideScope`.
+- **Closure:** Once all eligible games in a slip's scope kick off, an incomplete slip enters `closed`. Other slips in
+  the same week stay open if their own games have not kicked off.
 
 ## Members
 
@@ -229,7 +229,7 @@ header, main, and dock widen to `max-w-6xl`, and carries the slip's `data-live-u
 page. The dock is only on this screen; the hub keeps its panel and banner.
 
 `internal/board` turns the week's stored odds into rows. It reads nothing itself. Before building rows and cards, the
-pick board filters the week's games by the active slip's `slate_scope` using `slips.FilterGamesByScope`. Games outside
+pick board filters the week's games for the active slip using `slips.FilterGamesForSlip`. Games outside
 the slip's scope are omitted from the slate, window chips, and detail drilldowns. `db.CurrentOdds` (applied by
 `Store.OddsForWeek` and `Store.OddsForGame`) drops rows from older odds syncs at the storage seam, then `board.Build`
 folds one row per selection, using the viewer's home book when it prices the selection and the median across every book

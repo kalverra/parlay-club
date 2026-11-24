@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -912,6 +913,12 @@ func checkKickoff(
 	}
 	if !now.Before(kickoff) {
 		return ErrKickoffLocked
+	}
+	if slip.SlateScope == db.SlateScopeCustom {
+		if !slices.Contains(slip.GameIDs, *gameID) {
+			return ErrGameOutsideScope
+		}
+		return nil
 	}
 	if !slip.SlateScope.Matches(kickoff) {
 		return ErrGameOutsideScope

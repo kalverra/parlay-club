@@ -338,3 +338,20 @@ func TestDeleteGroupSlipScheduleSuccessAndMissing(t *testing.T) {
 	err = store.DeleteGroupSlipSchedule(t.Context(), sched.ID)
 	require.ErrorIs(t, err, db.ErrScheduleNotFound)
 }
+
+func TestGroupSlipScheduleRejectsCustomSlateScope(t *testing.T) {
+	t.Parallel()
+
+	store, _ := openTestStore(t)
+	user := createUser(t, store, "Ada")
+	group := createTestGroup(t, store, user)
+
+	_, err := store.CreateGroupSlipSchedule(t.Context(), group.ID, "Custom", db.SlateScopeCustom, 2)
+	require.ErrorIs(t, err, db.ErrSlateScopeInvalid)
+
+	sched, err := store.CreateGroupSlipSchedule(t.Context(), group.ID, "Sunday", db.SlateScopeSundayMain, 2)
+	require.NoError(t, err)
+
+	_, err = store.UpdateGroupSlipSchedule(t.Context(), sched.ID, "Sunday", db.SlateScopeCustom, 2)
+	require.ErrorIs(t, err, db.ErrSlateScopeInvalid)
+}

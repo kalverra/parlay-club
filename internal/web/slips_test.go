@@ -531,14 +531,32 @@ func TestLegResultRefusesAnUnknownResult(t *testing.T) {
 	assert.Contains(t, response.Body.String(), "that result isn't valid")
 }
 
-// TestCreateFormListsPastWeeks checks the week picker offers earlier weeks and
-// tells seasons apart.
-func TestCreateFormListsPastWeeks(t *testing.T) {
+// TestCreateFormListsOnlyUpcomingWeeks checks /slips/new excludes past and
+// completed weeks and omits the legacy past-week form.
+func TestCreateFormListsOnlyUpcomingWeeks(t *testing.T) {
 	t.Parallel()
 
-	fixture := newSlipFixture(t, 2)
-	past, err := fixture.store.UpsertWeek(t.Context(), 2025, 2, 7)
+	now := time.Date(2026, 11, 18, 12, 0, 0, 0, time.UTC)
+	fixture := newSlipFixtureAt(t, 2, func() time.Time { return now })
+
+	wk10, err := fixture.store.UpsertWeek(t.Context(), 2026, 2, 10)
 	require.NoError(t, err)
+	wk11, err := fixture.store.UpsertWeek(t.Context(), 2026, 2, 11)
+	require.NoError(t, err)
+	wk12, err := fixture.store.UpsertWeek(t.Context(), 2026, 2, 12)
+	require.NoError(t, err)
+
+	addGame := func(id string, weekID int64, kickoff time.Time, status db.GameStatus) {
+		_, err := fixture.store.UpsertGame(t.Context(), db.Game{
+			ID: id, WeekID: weekID, HomeTeam: "BUF", AwayTeam: "KC",
+			HomeName: "Buffalo Bills", AwayName: "Kansas City Chiefs",
+			HomeESPNID: "2", AwayESPNID: "12", Kickoff: kickoff, Status: status, UpdatedAt: now,
+		})
+		require.NoError(t, err)
+	}
+	addGame("g-10", wk10.ID, now.Add(-10*24*time.Hour), db.GameFinal)
+	addGame("g-11", wk11.ID, now.Add(-1*time.Hour), db.GameLive)
+	addGame("g-12", wk12.ID, now.Add(4*24*time.Hour), db.GameScheduled)
 
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/slips/new", nil)
@@ -546,124 +564,137 @@ func TestCreateFormListsPastWeeks(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, recorder.Code)
 	body := recorder.Body.String()
-	assert.Contains(t, body, fmt.Sprintf(`<option value="%d"`, past.ID))
-	assert.Contains(t, body, "2025 Week 7")
-	assert.Contains(t, body, "Or add a past week")
+	assert.NotContains(t, body, fmt.Sprintf(`<option value="%d"`, wk10.ID))
+	assert.NotContains(t, body, fmt.Sprintf(`<option value="%d"`, wk11.ID))
+	assert.Contains(t, body, fmt.Sprintf(`<option value="%d"`, wk12.ID))
+	assert.NotContains(t, body, "Or add a past week")
 }
 
-// TestCreateSlipAcceptsAPastWeekWithFreeTextOtherLegs creates a slip for a week
-// the slate never stored, then adds a free-text OTHER leg with no game.
-func TestCreateSlipAcceptsAPastWeekWithFreeTextOtherLegs(t *testing.T) {
+// TestCreateSlipRejectsPastAndCompletedWeeks verifies POST /slips refuses
+// completed weeks, legacy season/week fields, and empty game selections with 422.
+func TestCreateSlipRejectsPastAndCompletedWeeks(t *testing.T) {
 	t.Parallel()
 
-	fixture := newSlipFixture(t, 1)
-	response := postForm(t, fixture.handler, "/slips", url.Values{
-		"week_id":         {strconv.FormatInt(fixture.week.ID, 10)},
+	now := time.Date(2026, 11, 18, 12, 0, 0, 0, time.UTC)
+	fixture := newSlipFixtureAt(t, 2, func() time.Time { return now })
+
+	wk11, err := fixture.store.UpsertWeek(t.Context(), 2026, 2, 11)
+	require.NoError(t, err)
+	wk12, err := fixture.store.UpsertWeek(t.Context(), 2026, 2, 12)
+	require.NoError(t, err)
+
+	_, err = fixture.store.UpsertGame(t.Context(), db.Game{
+		ID: "g-11", WeekID: wk11.ID, HomeTeam: "BUF", AwayTeam: "KC",
+		HomeName: "Buffalo Bills", AwayName: "Kansas City Chiefs",
+		HomeESPNID: "2", AwayESPNID: "12", Kickoff: now.Add(-2 * time.Hour), Status: db.GameFinal, UpdatedAt: now,
+	})
+	require.NoError(t, err)
+	_, err = fixture.store.UpsertGame(t.Context(), db.Game{
+		ID:         "g-12",
+		WeekID:     wk12.ID,
+		HomeTeam:   "DET",
+		AwayTeam:   "GB",
+		HomeName:   "Detroit Lions",
+		AwayName:   "Green Bay Packers",
+		HomeESPNID: "8",
+		AwayESPNID: "9",
+		Kickoff:    now.Add(4 * 24 * time.Hour),
+		Status:     db.GameScheduled,
+		UpdatedAt:  now,
+	})
+	require.NoError(t, err)
+
+	// Completed Week 11 rejected with 422.
+	recPast := postForm(t, fixture.handler, "/slips", url.Values{
+		"mode":            {"one_off"},
+		"week_id":         {strconv.FormatInt(wk11.ID, 10)},
+		"name":            {"Week 11"},
+		"legs_per_member": {"2"},
+		"member_id":       {strconv.FormatInt(fixture.user.ID, 10)},
+		"game_id":         {"g-11"},
+	})
+	assert.Equal(t, http.StatusUnprocessableEntity, recPast.Code)
+
+	// Legacy season/week fields rejected with 422.
+	recLegacy := postForm(t, fixture.handler, "/slips", url.Values{
+		"week_id":         {strconv.FormatInt(wk12.ID, 10)},
 		"season":          {"2025"},
 		"season_type":     {"2"},
 		"week":            {"7"},
 		"name":            {"Week 7"},
 		"legs_per_member": {"1"},
 		"member_id":       {strconv.FormatInt(fixture.user.ID, 10)},
+		"game_id":         {"g-12"},
 	})
-	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	assert.Equal(t, http.StatusUnprocessableEntity, recLegacy.Code)
 
-	location := response.Header().Get("Hx-Redirect")
-	require.NotEmpty(t, location)
-	slipID, err := strconv.ParseInt(strings.TrimPrefix(location, "/slips/"), 10, 64)
-	require.NoError(t, err)
-
-	slip, err := fixture.store.SlipByID(t.Context(), slipID)
-	require.NoError(t, err)
-	assert.Equal(t, db.WeekID(2025, 2, 7), slip.WeekID, "the typed week wins over the picker")
-
-	leg := postForm(t, fixture.handler, fmt.Sprintf("/slips/%d/legs", slipID), url.Values{
-		"market_type": {"OTHER"},
-		"selection":   {"BUF -3.5"},
-		"odds":        {"-110"},
-	})
-	require.Equal(t, http.StatusOK, leg.Code, leg.Body.String())
-	assert.Contains(t, leg.Body.String(), "BUF -3.5")
-
-	legs, err := fixture.store.LegsForSlip(t.Context(), slipID)
-	require.NoError(t, err)
-	require.Len(t, legs, 1)
-	assert.Equal(t, "OTHER", legs[0].MarketType)
-	assert.Equal(t, "BUF -3.5", legs[0].Selection)
-	assert.Nil(t, legs[0].GameID, "a past-week OTHER leg needs no game")
-}
-
-// TestCreateFormRefusesAFutureWeek keeps a typed week from running ahead of the
-// slate.
-func TestCreateFormRefusesAFutureWeek(t *testing.T) {
-	t.Parallel()
-
-	fixture := newSlipFixture(t, 2)
-	response := postForm(t, fixture.handler, "/slips", url.Values{
-		"week_id":         {strconv.FormatInt(fixture.week.ID, 10)},
-		"season":          {"2026"},
-		"season_type":     {"2"},
-		"week":            {"10"},
-		"name":            {"Week 10"},
+	// Zero games selected returns 422 (ErrSlipGamesRequired).
+	recEmpty := postForm(t, fixture.handler, "/slips", url.Values{
+		"mode":            {"one_off"},
+		"week_id":         {strconv.FormatInt(wk12.ID, 10)},
+		"name":            {"Week 12 Empty"},
 		"legs_per_member": {"2"},
 		"member_id":       {strconv.FormatInt(fixture.user.ID, 10)},
 	})
-
-	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
-	assert.Contains(t, response.Body.String(), "started yet")
-	_, err := fixture.store.WeekByID(t.Context(), db.WeekID(2026, 2, 10))
-	require.ErrorIs(t, err, db.ErrWeekNotFound, "a refused week is not stored")
+	assert.Equal(t, http.StatusUnprocessableEntity, recEmpty.Code)
+	assert.Contains(t, recEmpty.Body.String(), db.ErrSlipGamesRequired.Error())
 }
 
-// TestCreateFormStates verifies existing-slip copy and past-week details state.
+// TestCreateFormStates verifies existing-slip copy, empty-week copy, and zero-upcoming state.
 func TestCreateFormStates(t *testing.T) {
 	t.Parallel()
 
-	fixture := newSlipFixture(t, 2)
-	past, err := fixture.store.UpsertWeek(t.Context(), 2025, 2, 7)
-	require.NoError(t, err)
+	now := time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC)
+	fixture := newSlipFixtureAt(t, 2, func() time.Time { return now })
 
-	// Existing slip in Week 9: shows "Add a slip for" copy and collapsed details.
+	// With zero upcoming games, /slips/new shows empty state and hides the form.
+	recNone := httptest.NewRecorder()
+	reqNone := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/slips/new", nil)
+	fixture.handler.ServeHTTP(recNone, reqNone)
+	require.Equal(t, http.StatusOK, recNone.Code)
+	assert.Contains(t, recNone.Body.String(), "No upcoming games are loaded yet.")
+	assert.NotContains(t, recNone.Body.String(), "data-slip-create-form")
+
+	// Add upcoming games to Week 9 (has existing slip) and Week 10 (no slip yet).
+	wk10, err := fixture.store.UpsertWeek(t.Context(), 2026, 2, 10)
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		id     string
+		weekID int64
+		kick   time.Time
+	}{
+		{"g-9", fixture.week.ID, now.Add(72 * time.Hour)},
+		{"g-10", wk10.ID, now.Add(10 * 24 * time.Hour)},
+	} {
+		_, err := fixture.store.UpsertGame(t.Context(), db.Game{
+			ID: tc.id, WeekID: tc.weekID, HomeTeam: "BUF", AwayTeam: "KC",
+			HomeName: "Buffalo Bills", AwayName: "Kansas City Chiefs",
+			HomeESPNID: "2", AwayESPNID: "12", Kickoff: tc.kick, Status: db.GameScheduled, UpdatedAt: now,
+		})
+		require.NoError(t, err)
+	}
+
 	recExisting := httptest.NewRecorder()
 	reqExisting := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/slips/new", nil)
 	fixture.handler.ServeHTTP(recExisting, reqExisting)
 	require.Equal(t, http.StatusOK, recExisting.Code)
 	bodyExisting := html.UnescapeString(recExisting.Body.String())
 	assert.Contains(t, bodyExisting, "Add a slip for Week 9")
-	assert.Contains(t, bodyExisting, "Pick a slate, legs per member, and who’s in.")
 	assert.NotContains(t, bodyExisting, "No slip for Week 9 yet")
-	assert.Contains(t, bodyExisting, "data-past-week>")
-	assert.NotContains(t, bodyExisting, "data-past-week open")
+	assert.NotContains(t, bodyExisting, "data-past-week")
 
-	// Empty week (Week 7): shows "No slip for ... yet" copy and collapsed details.
 	recEmpty := httptest.NewRecorder()
 	reqEmpty := httptest.NewRequestWithContext(
 		t.Context(),
 		http.MethodGet,
-		fmt.Sprintf("/slips/new?week=%d", past.ID),
+		fmt.Sprintf("/slips/new?week=%d", wk10.ID),
 		nil,
 	)
 	fixture.handler.ServeHTTP(recEmpty, reqEmpty)
 	require.Equal(t, http.StatusOK, recEmpty.Code)
 	bodyEmpty := html.UnescapeString(recEmpty.Body.String())
-	assert.Contains(t, bodyEmpty, "Start Week 7’s slip")
-	assert.Contains(t, bodyEmpty, "No slip for Week 7 yet.")
-	assert.NotContains(t, bodyEmpty, "Add a slip for")
-	assert.Contains(t, bodyEmpty, "data-past-week>")
-	assert.NotContains(t, bodyEmpty, "data-past-week open")
-
-	// Past-week form error: details renders open.
-	recErr := postForm(t, fixture.handler, "/slips", url.Values{
-		"week_id":         {strconv.FormatInt(fixture.week.ID, 10)},
-		"season":          {"2026"},
-		"season_type":     {"2"},
-		"week":            {"10"},
-		"name":            {"Week 10"},
-		"legs_per_member": {"2"},
-		"member_id":       {strconv.FormatInt(fixture.user.ID, 10)},
-	})
-	require.Equal(t, http.StatusOK, recErr.Code)
-	assert.Contains(t, recErr.Body.String(), "data-past-week open>")
+	assert.Contains(t, bodyEmpty, "Start Week 10’s slip")
+	assert.Contains(t, bodyEmpty, "No slip for Week 10 yet.")
 }
 
 // postForm sends one already-encoded form as the browser's HTMX layer would.
@@ -1094,112 +1125,142 @@ func TestSiblingSlipSwitcher(t *testing.T) {
 func TestCreateSlipFormSlateScopeSelection(t *testing.T) {
 	t.Parallel()
 
-	fixture := newSlipFixture(t, 2)
+	// Thanksgiving week: Thu, Fri, Sun, Mon upcoming games.
+	now := time.Date(2026, 11, 24, 12, 0, 0, 0, time.UTC)
+	fixture := newSlipFixtureAt(t, 2, func() time.Time { return now })
 
-	// Default renders Sunday Slate as selected.
+	for _, tc := range []struct {
+		id   string
+		kick time.Time
+	}{
+		{"g-thu", time.Date(2026, 11, 26, 17, 30, 0, 0, time.UTC)},
+		{"g-fri", time.Date(2026, 11, 27, 20, 0, 0, 0, time.UTC)},
+		{"g-sun", time.Date(2026, 11, 29, 18, 0, 0, 0, time.UTC)},
+		{"g-mon", time.Date(2026, 12, 1, 1, 15, 0, 0, time.UTC)},
+	} {
+		_, err := fixture.store.UpsertGame(t.Context(), db.Game{
+			ID: tc.id, WeekID: fixture.week.ID, HomeTeam: "BUF", AwayTeam: "KC",
+			HomeName: "Buffalo Bills", AwayName: "Kansas City Chiefs",
+			HomeESPNID: "2", AwayESPNID: "12", Kickoff: tc.kick, Status: db.GameScheduled, UpdatedAt: now,
+		})
+		require.NoError(t, err)
+	}
+
+	// Default one-off mode renders dynamic weekday shortcuts and pre-selects Sunday games.
 	reqDefault := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/slips/new", nil)
 	recDefault := httptest.NewRecorder()
 	fixture.handler.ServeHTTP(recDefault, reqDefault)
 	require.Equal(t, http.StatusOK, recDefault.Code)
 	bodyDefault := recDefault.Body.String()
-	assert.Contains(t, bodyDefault, `<select name="slate_scope"`)
-	assert.Contains(t, bodyDefault, `<option value="sunday_main" selected>Sunday Slate</option>`)
-	assert.Contains(t, bodyDefault, `<option value="thursday">Thursday Slate</option>`)
-	assert.Contains(t, bodyDefault, `<option value="weekend">Weekend Slate</option>`)
-	assert.Contains(t, bodyDefault, `<option value="full_week">Full Week</option>`)
+	assert.Contains(t, bodyDefault, `data-slate-shortcut="thursday"`)
+	assert.Contains(t, bodyDefault, `data-slate-shortcut="friday"`)
+	assert.Contains(t, bodyDefault, `data-slate-shortcut="sunday"`)
+	assert.Contains(t, bodyDefault, `data-slate-shortcut="monday"`)
+	assert.NotContains(t, bodyDefault, `data-slate-shortcut="saturday"`)
+	assert.Contains(t, bodyDefault, `data-slate-shortcut="all"`)
+	assert.Contains(t, bodyDefault, `data-slate-shortcut="clear"`)
+	assert.Contains(t, bodyDefault, "1 game selected")
 
-	// Pre-select Thursday Slate via ?scope=thursday.
-	reqThu := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/slips/new?scope=thursday", nil)
+	// ?mode=recurring&scope=thursday pre-selects recurring mode and Thursday Slate.
+	reqThu := httptest.NewRequestWithContext(
+		t.Context(), http.MethodGet, "/slips/new?mode=recurring&scope=thursday", nil,
+	)
 	recThu := httptest.NewRecorder()
 	fixture.handler.ServeHTTP(recThu, reqThu)
 	require.Equal(t, http.StatusOK, recThu.Code)
 	bodyThu := recThu.Body.String()
+	assert.Contains(t, bodyThu, `value="recurring" data-slip-mode-input`)
 	assert.Contains(t, bodyThu, `<option value="thursday" selected>Thursday Slate</option>`)
-	assert.Contains(t, bodyThu, `<option value="sunday_main">Sunday Slate</option>`)
 
-	// Pre-select Weekend Slate via ?slate_scope=weekend.
-	reqWeekend := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/slips/new?slate_scope=weekend", nil)
-	recWeekend := httptest.NewRecorder()
-	fixture.handler.ServeHTTP(recWeekend, reqWeekend)
-	require.Equal(t, http.StatusOK, recWeekend.Code)
-	assert.Contains(t, recWeekend.Body.String(), `<option value="weekend" selected>Weekend Slate</option>`)
-
-	// Pre-select Full Week via ?slate_scope=full_week.
-	reqFull := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/slips/new?slate_scope=full_week", nil)
-	recFull := httptest.NewRecorder()
-	fixture.handler.ServeHTTP(recFull, reqFull)
-	require.Equal(t, http.StatusOK, recFull.Code)
-	bodyFull := recFull.Body.String()
-	assert.Contains(t, bodyFull, `<option value="full_week" selected>Full Week</option>`)
+	// GET /slips/new/games returns partial for the selected week.
+	reqGames := httptest.NewRequestWithContext(
+		t.Context(), http.MethodGet, fmt.Sprintf("/slips/new/games?week_id=%d", fixture.week.ID), nil,
+	)
+	recGames := httptest.NewRecorder()
+	fixture.handler.ServeHTTP(recGames, reqGames)
+	require.Equal(t, http.StatusOK, recGames.Code)
+	assert.Contains(t, recGames.Body.String(), "All Thursday")
+	assert.Contains(t, recGames.Body.String(), "g-thu")
 }
 
 func TestCreateSlipWithSlateScope(t *testing.T) {
 	t.Parallel()
 
-	fixture := newSlipFixture(t, 2)
+	now := time.Date(2026, 11, 24, 12, 0, 0, 0, time.UTC)
+	fixture := newSlipFixtureAt(t, 2, func() time.Time { return now })
 
-	// 1. Explicit slate_scope: "thursday"
-	resThu := postForm(t, fixture.handler, "/slips", url.Values{
+	for _, tc := range []struct {
+		id, away, home string
+		kick           time.Time
+	}{
+		{"g-sun-1", "KC", "BUF", time.Date(2026, 11, 29, 18, 0, 0, 0, time.UTC)},
+		{"g-sun-2", "GB", "DET", time.Date(2026, 11, 29, 18, 0, 0, 0, time.UTC)},
+		{"g-sun-3", "PHI", "DAL", time.Date(2026, 11, 29, 21, 25, 0, 0, time.UTC)},
+	} {
+		_, err := fixture.store.UpsertGame(t.Context(), db.Game{
+			ID: tc.id, WeekID: fixture.week.ID, HomeTeam: tc.home, AwayTeam: tc.away,
+			HomeName: tc.home, AwayName: tc.away,
+			HomeESPNID: "1", AwayESPNID: "2", Kickoff: tc.kick, Status: db.GameScheduled, UpdatedAt: now,
+		})
+		require.NoError(t, err)
+	}
+
+	// 1. One-off slip with 2 selected Sunday games creates SlateScopeCustom.
+	resOneOff := postForm(t, fixture.handler, "/slips", url.Values{
+		"mode":            {"one_off"},
 		"week_id":         {strconv.FormatInt(fixture.week.ID, 10)},
-		"name":            {"Thursday One-Off"},
+		"name":            {"Two Sunday Games"},
+		"legs_per_member": {"2"},
+		"member_id":       {strconv.FormatInt(fixture.user.ID, 10)},
+		"game_id":         {"g-sun-1", "g-sun-2"},
+	})
+	require.Equal(t, http.StatusOK, resOneOff.Code, resOneOff.Body.String())
+	locOneOff := resOneOff.Header().Get("Hx-Redirect")
+	require.NotEmpty(t, locOneOff)
+	idOneOff, err := strconv.ParseInt(strings.TrimPrefix(locOneOff, "/slips/"), 10, 64)
+	require.NoError(t, err)
+	customSlip, err := fixture.store.SlipByID(t.Context(), idOneOff)
+	require.NoError(t, err)
+	assert.Equal(t, db.SlateScopeCustom, customSlip.SlateScope)
+	assert.Equal(t, []string{"g-sun-1", "g-sun-2"}, customSlip.GameIDs)
+
+	// Pick board shows only the 2 selected games, and leg for 3rd game is rejected (422).
+	recPick := httptest.NewRecorder()
+	reqPick := httptest.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf("/slips/%d/pick", idOneOff), nil)
+	fixture.handler.ServeHTTP(recPick, reqPick)
+	require.Equal(t, http.StatusOK, recPick.Code)
+	assert.Contains(t, recPick.Body.String(), "KC @ BUF")
+	assert.Contains(t, recPick.Body.String(), "GB @ DET")
+	assert.NotContains(t, recPick.Body.String(), "PHI @ DAL")
+
+	recOutside := postForm(t, fixture.handler, fmt.Sprintf("/slips/%d/legs", idOneOff), url.Values{
+		"game_id":     {"g-sun-3"},
+		"market_type": {"ML"},
+		"selection":   {"DAL ML"},
+		"odds":        {"-110"},
+	})
+	assert.Equal(t, http.StatusUnprocessableEntity, recOutside.Code)
+
+	// 2. Recurring mode creates GroupSlipSchedule and redirects to /groups/{id}/week
+	// when no matching Thursday game is upcoming.
+	resRec := postForm(t, fixture.handler, "/slips", url.Values{
+		"mode":            {"recurring"},
+		"name":            {"Thursday Night"},
 		"slate_scope":     {"thursday"},
 		"legs_per_member": {"2"},
-		"member_id":       {strconv.FormatInt(fixture.user.ID, 10)},
 	})
-	require.Equal(t, http.StatusOK, resThu.Code, resThu.Body.String())
-	locThu := resThu.Header().Get("Hx-Redirect")
-	require.NotEmpty(t, locThu)
-	idThu, err := strconv.ParseInt(strings.TrimPrefix(locThu, "/slips/"), 10, 64)
-	require.NoError(t, err)
-	slipThu, err := fixture.store.SlipByID(t.Context(), idThu)
-	require.NoError(t, err)
-	assert.Equal(t, db.SlateScopeThursday, slipThu.SlateScope)
+	require.Equal(t, http.StatusOK, resRec.Code, resRec.Body.String())
+	assert.Equal(t, fmt.Sprintf("/groups/%d/week", fixture.group.ID), resRec.Header().Get("Hx-Redirect"))
 
-	// 1b. Explicit slate_scope: "weekend"
-	resWeekend := postForm(t, fixture.handler, "/slips", url.Values{
-		"week_id":         {strconv.FormatInt(fixture.week.ID, 10)},
-		"name":            {"Weekend One-Off"},
-		"slate_scope":     {"weekend"},
-		"legs_per_member": {"2"},
-		"member_id":       {strconv.FormatInt(fixture.user.ID, 10)},
-	})
-	require.Equal(t, http.StatusOK, resWeekend.Code, resWeekend.Body.String())
-	locWeekend := resWeekend.Header().Get("Hx-Redirect")
-	require.NotEmpty(t, locWeekend)
-	idWeekend, err := strconv.ParseInt(strings.TrimPrefix(locWeekend, "/slips/"), 10, 64)
-	require.NoError(t, err)
-	slipWeekend, err := fixture.store.SlipByID(t.Context(), idWeekend)
-	require.NoError(t, err)
-	assert.Equal(t, db.SlateScopeWeekend, slipWeekend.SlateScope)
-
-	// 2. Default slate_scope (omitted) defaults to Sunday Main
-	resDefault := postForm(t, fixture.handler, "/slips", url.Values{
-		"week_id":         {strconv.FormatInt(fixture.week.ID, 10)},
-		"name":            {"Default Sunday One-Off"},
-		"legs_per_member": {"2"},
-		"member_id":       {strconv.FormatInt(fixture.user.ID, 10)},
-	})
-	require.Equal(t, http.StatusOK, resDefault.Code, resDefault.Body.String())
-	locDefault := resDefault.Header().Get("Hx-Redirect")
-	require.NotEmpty(t, locDefault)
-	idDefault, err := strconv.ParseInt(strings.TrimPrefix(locDefault, "/slips/"), 10, 64)
-	require.NoError(t, err)
-	slipDefault, err := fixture.store.SlipByID(t.Context(), idDefault)
-	require.NoError(t, err)
-	assert.Equal(t, db.SlateScopeSundayMain, slipDefault.SlateScope)
-
-	// 3. Invalid slate_scope triggers 422 error and renders form with error message
+	// 3. Invalid slate_scope in recurring mode triggers 422.
 	resInvalid := postForm(t, fixture.handler, "/slips", url.Values{
-		"week_id":         {strconv.FormatInt(fixture.week.ID, 10)},
+		"mode":            {"recurring"},
 		"name":            {"Invalid Scope Slip"},
 		"slate_scope":     {"bogus_scope"},
 		"legs_per_member": {"2"},
-		"member_id":       {strconv.FormatInt(fixture.user.ID, 10)},
 	})
-	require.Equal(t, http.StatusOK, resInvalid.Code)
-	bodyInvalid := resInvalid.Body.String()
-	assert.Contains(t, bodyInvalid, "invalid slate scope")
-	assert.Contains(t, bodyInvalid, "Invalid Scope Slip")
+	require.Equal(t, http.StatusUnprocessableEntity, resInvalid.Code)
+	assert.Contains(t, resInvalid.Body.String(), db.ErrSlateScopeInvalid.Error())
 }
 
 func TestSlipPanelRendersLegLogosAndPortraits(t *testing.T) {

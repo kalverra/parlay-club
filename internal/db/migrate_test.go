@@ -15,7 +15,7 @@ import (
 )
 
 // latestSchemaVersion is the version the last migration records.
-const latestSchemaVersion = 15
+const latestSchemaVersion = 17
 
 func TestMigrateFreshDatabase(t *testing.T) {
 	t.Parallel()
@@ -43,6 +43,7 @@ func TestMigrateFreshDatabase(t *testing.T) {
 		"player_gamelogs",
 		"player_matches",
 		"roster_players",
+		"slip_games",
 		"slip_members",
 		"slips",
 		"sync_state",

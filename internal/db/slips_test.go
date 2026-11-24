@@ -676,3 +676,111 @@ func TestSlateScopeMatches(t *testing.T) {
 		assert.True(t, db.SlateScopeFullWeek.Matches(kickoff))
 	}
 }
+
+func TestCreateSlipWithGamesCustomScope(t *testing.T) {
+	t.Parallel()
+
+	store, _ := openTestStore(t)
+	ada := createUser(t, store, "Ada")
+	group := createTestGroup(t, store, ada)
+	week := createTestWeek(t, store, 10)
+	now := time.Date(2026, 11, 12, 12, 0, 0, 0, time.UTC)
+
+	for _, id := range []string{"g-2", "g-1", "g-3"} {
+		_, err := store.UpsertGame(t.Context(), db.Game{
+			ID:         id,
+			WeekID:     week.ID,
+			HomeTeam:   "BUF",
+			AwayTeam:   "KC",
+			HomeName:   "Buffalo Bills",
+			AwayName:   "Kansas City Chiefs",
+			HomeESPNID: "2",
+			AwayESPNID: "12",
+			Kickoff:    now.Add(48 * time.Hour),
+			Status:     db.GameScheduled,
+			UpdatedAt:  now,
+		})
+		require.NoError(t, err)
+	}
+
+	slip, err := store.CreateSlipWithGames(
+		t.Context(),
+		group.ID,
+		week.ID,
+		nil,
+		"Custom Two",
+		db.SlateScopeCustom,
+		2,
+		[]int64{ada.ID},
+		[]string{"g-2", "g-1", "g-2", "  "},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, db.SlateScopeCustom, slip.SlateScope)
+	assert.Equal(t, []string{"g-1", "g-2"}, slip.GameIDs)
+
+	byID, err := store.SlipByID(t.Context(), slip.ID)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"g-1", "g-2"}, byID.GameIDs)
+
+	forWeek, err := store.SlipsForWeek(t.Context(), group.ID, week.ID)
+	require.NoError(t, err)
+	require.Len(t, forWeek, 1)
+	assert.Equal(t, []string{"g-1", "g-2"}, forWeek[0].GameIDs)
+
+	withLegs, err := store.SlipsWithLegsForWeek(t.Context(), week.ID, group.ID, "")
+	require.NoError(t, err)
+	require.Len(t, withLegs, 1)
+	assert.Equal(t, []string{"g-1", "g-2"}, withLegs[0].Slip.GameIDs)
+
+	newest, err := store.NewestSlipForWeek(t.Context(), group.ID, week.ID)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"g-1", "g-2"}, newest.GameIDs)
+
+	prev, err := store.PreviousSlip(t.Context(), group.ID, week.ID)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"g-1", "g-2"}, prev.GameIDs)
+}
+
+func TestCreateSlipWithGamesRejectsEmptyOrInvalidGames(t *testing.T) {
+	t.Parallel()
+
+	store, _ := openTestStore(t)
+	ada := createUser(t, store, "Ada")
+	group := createTestGroup(t, store, ada)
+	week10 := createTestWeek(t, store, 10)
+	week11 := createTestWeek(t, store, 11)
+	now := time.Date(2026, 11, 12, 12, 0, 0, 0, time.UTC)
+
+	_, err := store.UpsertGame(t.Context(), db.Game{
+		ID:         "g-wk11",
+		WeekID:     week11.ID,
+		HomeTeam:   "BUF",
+		AwayTeam:   "KC",
+		HomeName:   "Buffalo Bills",
+		AwayName:   "Kansas City Chiefs",
+		HomeESPNID: "2",
+		AwayESPNID: "12",
+		Kickoff:    now.Add(7 * 24 * time.Hour),
+		Status:     db.GameScheduled,
+		UpdatedAt:  now,
+	})
+	require.NoError(t, err)
+
+	_, err = store.CreateSlipWithGames(
+		t.Context(), group.ID, week10.ID, nil, "Empty Custom",
+		db.SlateScopeCustom, 2, []int64{ada.ID}, nil,
+	)
+	require.ErrorIs(t, err, db.ErrSlipGamesRequired)
+
+	_, err = store.CreateSlipWithGames(
+		t.Context(), group.ID, week10.ID, nil, "Missing Game",
+		db.SlateScopeCustom, 2, []int64{ada.ID}, []string{"does-not-exist"},
+	)
+	require.ErrorIs(t, err, db.ErrGameNotFound)
+
+	_, err = store.CreateSlipWithGames(
+		t.Context(), group.ID, week10.ID, nil, "Wrong Week",
+		db.SlateScopeCustom, 2, []int64{ada.ID}, []string{"g-wk11"},
+	)
+	require.ErrorIs(t, err, db.ErrGameNotFound)
+}

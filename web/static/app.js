@@ -769,3 +769,76 @@ if (bugTrigger && bugDialog) {
   bugTrigger.addEventListener("click", openBugDialog);
   bugDialog.addEventListener("close", resetBugDialog);
 }
+
+// Slip creation form: mode toggle (one-off vs recurring), weekday shortcut
+// chips, and live selected-game count.
+function updateSelectedGamesCount(form) {
+  const counter = form.querySelector("[data-selected-games-count]");
+  if (!counter) {
+    return;
+  }
+  const checked = form.querySelectorAll('input[name="game_id"][data-game-day]:checked').length;
+  counter.textContent = `${checked} ${checked === 1 ? "game" : "games"} selected`;
+}
+
+document.addEventListener("click", (event) => {
+  const target = event.target instanceof Element ? event.target : null;
+  if (!target) {
+    return;
+  }
+
+  const modeBtn = target.closest("[data-slip-mode-btn]");
+  if (modeBtn) {
+    const form = modeBtn.closest("[data-slip-create-form]");
+    if (!form) {
+      return;
+    }
+    const mode = modeBtn.getAttribute("data-slip-mode-btn");
+    const input = form.querySelector("[data-slip-mode-input]");
+    if (input && mode) {
+      input.value = mode;
+    }
+    for (const btn of form.querySelectorAll("[data-slip-mode-btn]")) {
+      const active = btn.getAttribute("data-slip-mode-btn") === mode;
+      btn.setAttribute("aria-pressed", active ? "true" : "false");
+      btn.classList.toggle("bg-accent", active);
+      btn.classList.toggle("text-accent-ink", active);
+      btn.classList.toggle("text-ink-muted", !active);
+    }
+    for (const panel of form.querySelectorAll("[data-slip-mode-panel]")) {
+      panel.hidden = panel.getAttribute("data-slip-mode-panel") !== mode;
+    }
+    return;
+  }
+
+  const shortcutBtn = target.closest("[data-slate-shortcut]");
+  if (shortcutBtn) {
+    const form = shortcutBtn.closest("[data-slip-create-form]");
+    if (!form) {
+      return;
+    }
+    const key = shortcutBtn.getAttribute("data-slate-shortcut");
+    const boxes = form.querySelectorAll('input[name="game_id"][data-game-day]');
+    for (const box of boxes) {
+      if (key === "all") {
+        box.checked = true;
+      } else if (key === "clear") {
+        box.checked = false;
+      } else {
+        box.checked = box.getAttribute("data-game-day") === key;
+      }
+    }
+    updateSelectedGamesCount(form);
+  }
+});
+
+document.addEventListener("change", (event) => {
+  const input = event.target instanceof HTMLInputElement ? event.target : null;
+  if (!input || !input.matches('input[name="game_id"][data-game-day]')) {
+    return;
+  }
+  const form = input.closest("[data-slip-create-form]");
+  if (form) {
+    updateSelectedGamesCount(form);
+  }
+});

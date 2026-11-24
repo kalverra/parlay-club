@@ -59,8 +59,8 @@ type WeekSlipCard struct {
 }
 
 // scopeBadge returns the display label for a slip's slate scope badge.
-func scopeBadge(scope db.SlateScope) string {
-	return scope.Label()
+func scopeBadge(slip db.Slip) string {
+	return slips.ScopeBadge(slip)
 }
 
 // home lists every group the person belongs to, oldest first. A person with one
@@ -248,7 +248,7 @@ func (h *slipHandlers) groupWeek(w http.ResponseWriter, r *http.Request) {
 
 	week, err := h.deps.Store.LatestWeek(r.Context())
 	if errors.Is(err, db.ErrWeekNotFound) {
-		h.renderCreate(w, r, page, user, group, nil, nil)
+		h.renderCreate(w, r, page, user, group, nil, nil, nil)
 		return
 	}
 	if err != nil {
@@ -264,7 +264,18 @@ func (h *slipHandlers) groupWeek(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(groupSlips) == 0 {
-		h.renderCreate(w, r, page, user, group, &week, nil)
+		upcoming, err := h.deps.Store.UpcomingWeeks(r.Context(), now)
+		if err != nil {
+			h.serverError(w, err)
+			return
+		}
+		var selected *db.Week
+		if containsWeekID(upcoming, week.ID) {
+			selected = &week
+		} else if len(upcoming) > 0 {
+			selected = &upcoming[0]
+		}
+		h.renderCreate(w, r, page, user, group, upcoming, selected, nil)
 		return
 	}
 	if len(groupSlips) == 1 {
@@ -313,7 +324,7 @@ func (h *slipHandlers) groupWeek(w http.ResponseWriter, r *http.Request) {
 		cards = append(cards, WeekSlipCard{
 			ID:          slip.ID,
 			Name:        slip.Name,
-			ScopeBadge:  scopeBadge(slip.SlateScope),
+			ScopeBadge:  scopeBadge(slip),
 			NextStep:    next.Label(),
 			Deadline:    deadline,
 			MemberCount: len(members),

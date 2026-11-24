@@ -55,7 +55,7 @@ writer handle.
 - `db.Migrate` applies every file whose number is greater than `PRAGMA user_version`, in number order.
 - Each file runs in its own transaction. The migration's statements and its `user_version` bump commit together, so a
   failed migration leaves neither behind.
-- A fresh database ends at version 15 with every table below.
+- A fresh database ends at version 17 with every table below.
 - `0001_init.sql` creates `groups`, `group_members`, and `slips.group_id`. A database created before groups existed has
   the old `slips` shape, so delete it and let the migrations rebuild.
 - `0002_google_identity.sql` rebuilds `users` in its transaction with the SQLite 12-step method and
@@ -86,7 +86,9 @@ writer handle.
 - `0015_research_context.sql` adds `games_json TEXT NOT NULL DEFAULT '[]'` to `player_gamelogs`, adds `opponent`,
   `player_name`, `position`, `pass_att`, `pass_yds`, `pass_tds`, `rush_yds`, `rush_tds`, `receptions`, `rec_yds`,
   `rec_tds`, and `kicker_pts` to `nflverse_player_weeks`, and creates `idx_nflverse_player_weeks_opp_pos`.
-- Never edit an applied file. Add `0016_name.sql` and up.
+- `0017_slip_games.sql` creates `slip_games` (`slip_id`, `game_id`) with `idx_slip_games_slip_id` to store explicit
+  eligible games for slips with `slate_scope = 'custom'`.
+- Never edit an applied file. Add `0018_name.sql` and up.
 - `PRAGMA user_version` on the database file is the only record of what ran.
 
 ## Tables
@@ -103,7 +105,8 @@ writer handle.
 | `nflverse_player_ids`   | Crosswalk mapping ESPN athlete IDs to nflverse GSIS and PFR IDs. |
 | `nflverse_team_weeks`   | Weekly team offensive and defensive-allowed EPA, play volume, and pass rate. |
 | `nflverse_player_weeks` | Weekly player snaps, target/air-yards share, WOPR, volume, total EPA, opponent, position, and box stats. |
-| `slips`           | One shared parlay per group per week, with status and result.  |
+| `slips`           | One shared parlay per group per week, with status, `slate_scope` (`thursday`, `sunday_main`, `weekend`, `full_week`, `custom`), and result. |
+| `slip_games`      | Explicit eligible games for `custom` one-off slips.          |
 | `slip_members`    | Who is on a slip and when they locked in.                     |
 | `legs`            | Picks on a slip, with market, selection, line, odds, and result. |
 | `leg_votes`       | Up and down votes members cast on each other's legs.          |
@@ -308,6 +311,12 @@ CREATE TABLE slips (
   result          TEXT NOT NULL DEFAULT 'PENDING',  -- PENDING, WON, LOST, PUSH
   created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
   UNIQUE (group_id, week_id, name)
+);
+
+CREATE TABLE slip_games (
+  slip_id INTEGER NOT NULL REFERENCES slips(id) ON DELETE CASCADE,
+  game_id TEXT NOT NULL REFERENCES games(id),
+  PRIMARY KEY (slip_id, game_id)
 );
 
 CREATE TABLE slip_members (

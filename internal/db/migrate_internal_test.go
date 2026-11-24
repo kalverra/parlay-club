@@ -96,7 +96,7 @@ func TestMigration0002PreservesData(t *testing.T) {
 
 	require.NoError(t, Migrate(t.Context(), database))
 
-	assert.Equal(t, 15, userVersionOf(t, database))
+	assert.Equal(t, 17, userVersionOf(t, database))
 	counts := map[string]int{
 		"SELECT count(*) FROM users":                2,
 		"SELECT count(*) FROM groups":               1,
