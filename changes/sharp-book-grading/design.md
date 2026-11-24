@@ -182,7 +182,7 @@ Complexity: medium (requires accurate two-way pairing across game lines and prop
 overround guards) Risk: low (pure functions in `internal/parlay` and `internal/analyzer` with no live request-path
 impact yet)
 
-- [ ] Add `ImpliedProb`, `DevigTwoWay`, and `PriceEdge` to `internal/parlay/parlay.go` with table-driven tests in
+- [x] Add `ImpliedProb`, `DevigTwoWay`, and `PriceEdge` to `internal/parlay/parlay.go` with table-driven tests in
       `internal/parlay/parlay_test.go`, and document the formulas in `docs/reference/odds-math.md`.
 - [ ] Add `SharpKey`, `SharpQuote`, and `BuildSharpBenchmarks` in `internal/analyzer/sharp.go` with unit tests covering
       tier precedence, two-way pairing for all markets, one-sided fail-soft, and captured `regions=us` fixture payloads.

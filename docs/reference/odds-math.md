@@ -2,10 +2,8 @@
 id: odds-math
 title: Odds math
 type: reference
-summary: The formulas in internal/parlay for converting American and decimal odds, combining legs, picking a reference price, and computing payout and units.
-tags: [odds, parlay, math, payout, units, reference-price]
-sources: [internal/parlay/parlay.go, internal/parlay/parlay_test.go]
-last_verified: 2026-11-07
+summary: The formulas in internal/parlay for converting American and decimal odds, computing implied probability and two-way de-vigging, measuring price edge, combining legs, picking a reference price, and computing payout and units.
+tags: [odds, parlay, math, payout, units, reference-price, implied-probability, devig, price-edge]
 ---
 
 # Odds math
@@ -93,6 +91,52 @@ stake + stake × (D − 1) × (1 + boost/100)
 | `PUSH`, `VOID`             | `0`     |
 | `PENDING`, `NEEDS_GRADING` | `0`     |
 
+## Implied probability and de-vigging
+
+### Implied probability
+
+`ImpliedProb` converts an American price `a` to its raw implied probability using `AmericanToDecimal(a)`:
+
+```text
+p = 1 / AmericanToDecimal(a)
+```
+
+An invalid price of `0` returns `0`.
+
+| American | Implied probability |
+| -------- | ------------------- |
+| `-110`   | `0.5238…` (`110/210`) |
+| `+100`   | `0.5000`            |
+| `+150`   | `0.4000`            |
+| `-200`   | `0.6667…` (`2/3`)   |
+
+### Two-way de-vigging
+
+`DevigTwoWay(priceA, priceB)` removes bookmaker vig from a two-way market by normalizing both raw implied probabilities
+to sum to `1`:
+
+```text
+pA = ImpliedProb(priceA)
+pB = ImpliedProb(priceB)
+overround = pA + pB
+probA = pA / overround
+probB = pB / overround
+```
+
+It returns `ok = false` (and `0, 0`) if either price is invalid (`0`) or if `overround` falls outside `[0.95, 1.25]`,
+which guards against corrupt or mispaired quotes.
+
+### Price edge
+
+`PriceEdge(retailAmerican, fairProb)` compares a retail American price against a sharp fair probability:
+
+```text
+edge = fairProb - ImpliedProb(retailAmerican)
+```
+
+Positive values mean the retail price pays better than the sharp fair probability; negative values mean extra juice or
+shading. Invalid inputs (`retailAmerican == 0` or `fairProb` outside `(0, 1)`) return `0`.
+
 ## Where it shows up
 
 The Slip tab uses reference odds and `Payout` for its payout calculator. Quick-add pills prefill the user's home-book
@@ -101,12 +145,15 @@ profit term, `stake × (D − 1) × (1 + boost/100)`, for dollar P/L on slips wh
 
 ## API
 
-| Function                                                    | Returns                                     |
-| ----------------------------------------------------------- | ------------------------------------------- |
-| `AmericanToDecimal(american int) float64`                   | Decimal price, or `0` for an invalid price. |
-| `DecimalToAmerican(decimal float64) int`                    | Rounded American price, or `0` for `d ≤ 1`. |
-| `CombinedOdds(legs []Leg) float64`                          | Product of counting leg decimals, or `1`.   |
-| `ReferencePrice(candidates []float64, own float64) float64` | Candidate median, or `own` when empty.      |
-| `Payout(stake, decimal, boostPct float64) float64`          | Total return including the stake.           |
-| `Units(result Result, decimal float64) float64`             | Profit in units for a graded slip.          |
-| `Result.Counts() bool`                                      | False for `PUSH` and `VOID`.                |
+| Function                                                    | Returns                                                 |
+| ----------------------------------------------------------- | ------------------------------------------------------- |
+| `AmericanToDecimal(american int) float64`                   | Decimal price, or `0` for an invalid price.             |
+| `DecimalToAmerican(decimal float64) int`                    | Rounded American price, or `0` for `d ≤ 1`.             |
+| `ImpliedProb(american int) float64`                         | Raw implied probability in `(0, 1)`, or `0` for `0`.    |
+| `DevigTwoWay(priceA, priceB int) (float64, float64, bool)`  | Fair probabilities `(probA, probB)` and `ok`.           |
+| `PriceEdge(retailAmerican int, fairProb float64) float64`   | `fairProb - ImpliedProb(retailAmerican)`, or `0`.       |
+| `CombinedOdds(legs []Leg) float64`                          | Product of counting leg decimals, or `1`.               |
+| `ReferencePrice(candidates []float64, own float64) float64` | Candidate median, or `own` when empty.                  |
+| `Payout(stake, decimal, boostPct float64) float64`          | Total return including the stake.                       |
+| `Units(result Result, decimal float64) float64`             | Profit in units for a graded slip.                      |
+| `Result.Counts() bool`                                      | False for `PUSH` and `VOID`.                            |

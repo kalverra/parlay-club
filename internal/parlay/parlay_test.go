@@ -264,3 +264,169 @@ func TestResultValidity(t *testing.T) {
 		})
 	}
 }
+
+func TestImpliedProb(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		american int
+		want     float64
+	}{
+		{name: "minus 110", american: -110, want: 110.0 / 210.0},
+		{name: "plus 100", american: 100, want: 0.5},
+		{name: "minus 100", american: -100, want: 0.5},
+		{name: "plus 150", american: 150, want: 100.0 / 250.0},
+		{name: "minus 200", american: -200, want: 200.0 / 300.0},
+		{name: "zero is invalid", american: 0, want: 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.InDelta(t, tt.want, parlay.ImpliedProb(tt.american), 1e-12)
+		})
+	}
+}
+
+func TestDevigTwoWay(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		priceA    int
+		priceB    int
+		wantProbA float64
+		wantProbB float64
+		wantOK    bool
+	}{
+		{
+			name:      "standard minus 110 both sides",
+			priceA:    -110,
+			priceB:    -110,
+			wantProbA: 0.5,
+			wantProbB: 0.5,
+			wantOK:    true,
+		},
+		{
+			name:      "asymmetric minus 150 and plus 130",
+			priceA:    -150,
+			priceB:    130,
+			wantProbA: 0.6 / (0.6 + 100.0/230.0),
+			wantProbB: (100.0 / 230.0) / (0.6 + 100.0/230.0),
+			wantOK:    true,
+		},
+		{
+			name:      "even money no vig",
+			priceA:    100,
+			priceB:    100,
+			wantProbA: 0.5,
+			wantProbB: 0.5,
+			wantOK:    true,
+		},
+		{
+			name:   "invalid zero side A",
+			priceA: 0,
+			priceB: -110,
+			wantOK: false,
+		},
+		{
+			name:   "invalid zero side B",
+			priceA: -110,
+			priceB: 0,
+			wantOK: false,
+		},
+		{
+			name:   "corrupt under-round below 0.95",
+			priceA: 200,
+			priceB: 200,
+			wantOK: false,
+		},
+		{
+			name:   "corrupt over-round above 1.25",
+			priceA: -300,
+			priceB: -300,
+			wantOK: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			probA, probB, ok := parlay.DevigTwoWay(tt.priceA, tt.priceB)
+			assert.Equal(t, tt.wantOK, ok)
+			if !tt.wantOK {
+				assert.Zero(t, probA)
+				assert.Zero(t, probB)
+				return
+			}
+			assert.InDelta(t, tt.wantProbA, probA, 1e-12)
+			assert.InDelta(t, tt.wantProbB, probB, 1e-12)
+			assert.InDelta(t, 1.0, probA+probB, 1e-12)
+		})
+	}
+}
+
+func TestPriceEdge(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name           string
+		retailAmerican int
+		fairProb       float64
+		want           float64
+	}{
+		{
+			name:           "positive edge at plus 105 vs 52 percent fair",
+			retailAmerican: 105,
+			fairProb:       0.52,
+			want:           0.52 - 100.0/205.0,
+		},
+		{
+			name:           "standard retail minus 110 vs 50 percent fair",
+			retailAmerican: -110,
+			fairProb:       0.50,
+			want:           0.50 - 110.0/210.0,
+		},
+		{
+			name:           "steep retail minus 135 vs 53 percent fair",
+			retailAmerican: -135,
+			fairProb:       0.53,
+			want:           0.53 - 135.0/235.0,
+		},
+		{
+			name:           "zero edge at fair price",
+			retailAmerican: 100,
+			fairProb:       0.50,
+			want:           0,
+		},
+		{
+			name:           "invalid zero retail price",
+			retailAmerican: 0,
+			fairProb:       0.50,
+			want:           0,
+		},
+		{
+			name:           "invalid fair prob zero",
+			retailAmerican: -110,
+			fairProb:       0,
+			want:           0,
+		},
+		{
+			name:           "invalid fair prob one",
+			retailAmerican: -110,
+			fairProb:       1,
+			want:           0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.InDelta(t, tt.want, parlay.PriceEdge(tt.retailAmerican, tt.fairProb), 1e-12)
+		})
+	}
+}
