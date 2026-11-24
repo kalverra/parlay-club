@@ -136,5 +136,5 @@ Complexity: low (additive presentation in `cmd/eval` and `internal/web` mirrorin
 
 - [x] Render `SlipFactors` in `cmd/eval/main.go` (text and markdown outputs) and in `internal/web/eval_results.go` +
       `web/templates/analyzer-results.html`, updating `cmd/eval/main_test.go` and `internal/web/eval_results_test.go`.
-- [ ] Docs: update `docs/concepts/analyzer.md` to document slip-level factor attribution and full-slip replay behavior
+- [x] Docs: update `docs/concepts/analyzer.md` to document slip-level factor attribution and full-slip replay behavior
       on `/analyzer/results` and `cmd/eval`, then run `good-vibes docs lint`.
