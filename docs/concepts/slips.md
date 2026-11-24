@@ -91,13 +91,20 @@ group member who is not on the slip sees `join`; a person outside the group gets
 
 ## Creating a slip
 
-Opening a group's week (`GET /groups/{id}/week`) switches the active group and calls `slips.EnsureWeekSlips` to create
-slips for active recurring schedules. When the week already has stored games, `EnsureWeekSlips` skips any missing
-schedule whose `slate_scope` has no upcoming non-final game (`now < kickoff`), so playoff or completed weeks do not
-gain empty or dead slips; existing slips stay untouched, and cold weeks with no stored games still create every active
-schedule. If the group has no slips for the week, it shows the create-slip form. If one slip exists, it redirects
-directly to `/slips/{id}`. If multiple slips exist, it renders the multi-slip week hub with cards for each slip and a
-button to add a slip.
+Opening a group's week (`GET /groups/{id}/week`) switches the active group, picks the first upcoming week from
+`Store.UpcomingWeeks` (or `LatestWeek`), and runs `slips.EnsureWeekSlips` for active recurring schedules. When games
+already exist, `EnsureWeekSlips` skips missing schedules whose `slate_scope` has no upcoming non-final game
+(`now < kickoff`), avoiding empty or dead slips while leaving existing slips untouched (cold weeks create all active
+schedules). The route always renders the per-group overview page:
+
+- **Spotlight slips:** Active or upcoming slips from that week appear in the hero spotlight (`isSpotlightSlip`): any
+  non-graded slip whose next step is `pick`, `lock_in`, `join`, `waiting`, or `export`, or a locked slip with an
+  eligible live or upcoming game (`now < kickoff`). Cards sort by urgency and earliest deadline, with a primary button
+  ("Pick N more" to `/slips/{id}/pick` when in `pick`, otherwise "Open slip" to `/slips/{id}`).
+- **Quiet state & overview sections:** With no spotlight slips, the hero shows "No active slip right now", notes the
+  next upcoming week if loaded, and offers "+ Start a slip" (`/slips/new`). Below it sit the group record snapshot
+  (`/record`), recent non-spotlight slips, recurring schedules (`+ Add recurring slip` to `/slips/new?mode=recurring`),
+  and the members strip (`/groups`).
 
 A member can create either a one-off slip or a recurring schedule at `/slips/new` (with optional `?week=`, `?mode=`, and
 `?slate_scope=` or `?scope=`). `GET /slips/new` queries `Store.UpcomingWeeks` (`kickoff_utc > now`, soonest first) and
@@ -533,9 +540,10 @@ Thursday Slate slip and Sunday Slate slip) or as one-off slips.
 
 When a week has multiple slips:
 
-- **Week hub (`GET /groups/{id}/week`):** Renders a card for each slip in the week showing its name, scope badge
-  (`Thursday Slate`, `Sunday Slate`, `Weekend Slate`, `Full Week`), next-step banner summary, reader-localized deadline,
-  and pick progress, plus a button to "+ Add one-off slip".
+- **Group overview (`GET /groups/{id}/week`):** Renders a spotlight card for each active or upcoming slip in the week
+  (ordered by urgency and earliest deadline) showing its name, scope badge (Thursday Slate, Sunday Slate, Weekend
+  Slate, Full Week, or custom game count), next-step pill, reader-localized deadline, pick/lock progress, and primary
+  action button, alongside "+ New slip" in the header.
 - **Single sibling pill switcher (`GET /slips/{id}`):** The slip header card renders one horizontal pill bar below the
   title with links to each sibling slip, their status summary (`(Locked)`, `(1/2 Picks)`, `(Won)`), and `+ New slip` at
   the end. It updates live on `slip-updated`.

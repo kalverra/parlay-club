@@ -81,9 +81,10 @@ Handlers read the chosen group with `groups.From` and pass its ID into queries. 
 themselves. The top bar reads `groups.Options`, which lists the person's groups from what `Scope` already loaded, with
 the active one marked.
 
-Opening `/groups/{id}/week` makes that group active and then opens the group's newest slip of the latest week, or its
-create-slip form. The route refuses a group the person does not belong to with a 404. Opening a slip from another of
-their groups switches the active group the same way, so a shared link always lands in the right club.
+Opening `/groups/{id}/week` makes that group active and always renders the per-group overview page rather than
+redirecting to a single slip or showing an inline create-slip form. The route refuses a group the person does not belong
+to with a 404. Opening a slip from another of their groups switches the active group the same way, so a shared link
+always lands in the right club.
 
 Logging out clears `pc_group` with the session, so a shared browser forgets the choice. Leaving the active group moves
 the cookie to another group.
@@ -135,8 +136,16 @@ the schema, the scope check, and the group screens.
 
 `/` is the landing page. It lists one card per group, oldest first, each showing the group name and the viewer's next
 step on that group's newest slip of the latest week ("Pick 1 more", "Waiting on Ben", "Ready to place", or "No slip
-yet"). Each card opens that group's week. A person with one group skips the list: `/` sends them straight to
-`/groups/{id}/week`. The list holds no live stream; the browser refetches it when the tab becomes visible.
+yet"). Each card opens that group's overview at `/groups/{id}/week`. A person with one group skips the list: `/` sends
+them straight to `/groups/{id}/week`. The list holds no live stream; the browser refetches it when the tab becomes
+visible.
+
+`/groups/{id}/week` is the per-group overview landing page. It opens with the group name and `+ New slip`, then a hero
+section that spotlights active or upcoming slips (ordered by urgency and earliest deadline) or shows a quiet-state
+`"No active slip right now"` card with `+ Start a slip` when none qualify. Below the hero, it always renders the
+3-metric group record snapshot (`W–L`, `Streak`, `Graded`, linking to `/record`), recent non-spotlight slips across
+weeks, recurring schedules with inline active/leg/delete controls and `+ Add recurring slip` (`/slips/new?mode=recurring`),
+and the members strip linking to `/groups`.
 
 `/groups` manages the caller's groups. Each card shows the invite link with copy and reset, a leave button when the
 person has more than one group, and a note when they do not. A create form names and starts a new group.
