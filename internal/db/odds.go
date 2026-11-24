@@ -557,6 +557,15 @@ func scanOdds(row rowScanner) (Odds, error) {
 
 // LatestPropForPlayer returns the newest prop odds row for a player with a line.
 func (s *Store) LatestPropForPlayer(ctx context.Context, athleteID, playerName, team string) (Odds, bool, error) {
+	return s.LatestPropForPlayerMarket(ctx, athleteID, playerName, team, "")
+}
+
+// LatestPropForPlayerMarket returns the newest prop odds row for a player with
+// a line, filtered to market when non-empty.
+func (s *Store) LatestPropForPlayerMarket(
+	ctx context.Context,
+	athleteID, playerName, team, market string,
+) (Odds, bool, error) {
 	candidates := make([]string, 0, 4)
 	if playerName != "" {
 		candidates = append(candidates, playerName)
@@ -584,7 +593,7 @@ func (s *Store) LatestPropForPlayer(ctx context.Context, athleteID, playerName, 
 
 	placeholders := strings.Repeat("?,", len(candidates))
 	placeholders = placeholders[:len(placeholders)-1]
-	args := make([]any, 0, len(candidates)+1)
+	args := make([]any, 0, len(candidates)+2)
 	for _, c := range candidates {
 		args = append(args, c)
 	}
@@ -596,6 +605,10 @@ func (s *Store) LatestPropForPlayer(ctx context.Context, athleteID, playerName, 
 	if team != "" {
 		query += " AND (team = ? OR team = '')"
 		args = append(args, team)
+	}
+	if market = strings.TrimSpace(market); market != "" {
+		query += " AND market_type = ?"
+		args = append(args, market)
 	}
 	query += " ORDER BY fetched_at DESC LIMIT 1"
 
