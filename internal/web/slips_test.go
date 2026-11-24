@@ -1533,3 +1533,150 @@ func TestAddLegsBatchRefusesLockedMemberAndSupportsBoardPartial(t *testing.T) {
 	assert.Equal(t, http.StatusUnprocessableEntity, lockedResp.Code)
 	assert.Contains(t, lockedResp.Body.String(), "the slip is locked")
 }
+
+func seedAGradeBoardForHubTest(t *testing.T, fixture *slipFixture, game db.Game) {
+	t.Helper()
+
+	now := time.Now().UTC()
+	require.NoError(t, fixture.store.UpsertRosterPlayers(t.Context(), []db.RosterPlayer{
+		{AthleteID: "p-allen", FullName: "Josh Allen", Team: "BUF", Position: "QB"},
+		{AthleteID: "p-cook", FullName: "James Cook", Team: "BUF", Position: "RB"},
+	}))
+	require.NoError(t, fixture.store.UpsertPlayerGameLog(t.Context(), db.PlayerGameLog{
+		AthleteID:   "p-allen",
+		GamesPlayed: 5,
+		StatsJSON:   `{"PASS_YDS":[280.0, 290.0, 300.0, 295.0, 310.0]}`,
+		UpdatedAt:   now,
+	}))
+	require.NoError(t, fixture.store.UpsertPlayerGameLog(t.Context(), db.PlayerGameLog{
+		AthleteID:   "p-cook",
+		GamesPlayed: 5,
+		StatsJSON:   `{"RUSH_YDS":[85.0, 90.0, 95.0, 100.0, 88.0]}`,
+		UpdatedAt:   now,
+	}))
+
+	_, err := fixture.store.UpsertOdds(t.Context(), []db.Odds{
+		{
+			GameID:     game.ID,
+			Book:       "draftkings",
+			MarketType: "PASS_YDS",
+			Team:       "BUF",
+			PlayerName: "Josh Allen",
+			Side:       "OVER",
+			Line:       new(245.5),
+			Price:      -105,
+			FetchedAt:  now,
+		},
+		{
+			GameID:     game.ID,
+			Book:       "draftkings",
+			MarketType: "PASS_YDS",
+			Team:       "BUF",
+			PlayerName: "Josh Allen",
+			Side:       "UNDER",
+			Line:       new(245.5),
+			Price:      -115,
+			FetchedAt:  now,
+		},
+		{
+			GameID:     game.ID,
+			Book:       "draftkings",
+			MarketType: "RUSH_YDS",
+			Team:       "BUF",
+			PlayerName: "James Cook",
+			Side:       "OVER",
+			Line:       new(65.5),
+			Price:      -105,
+			FetchedAt:  now,
+		},
+		{
+			GameID:     game.ID,
+			Book:       "draftkings",
+			MarketType: "RUSH_YDS",
+			Team:       "BUF",
+			PlayerName: "James Cook",
+			Side:       "UNDER",
+			Line:       new(65.5),
+			Price:      -115,
+			FetchedAt:  now,
+		},
+	})
+	require.NoError(t, err)
+}
+
+func TestSlipHubRendersTopAGradeIdeasDuringPickStep(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	game := addGame(t, fixture, gameKickoff())
+
+	get := func(path string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
+		fixture.handler.ServeHTTP(rec, req)
+		return rec
+	}
+
+	// Before any odds are cached, the strip stays hidden.
+	emptyPage := get(fmt.Sprintf("/slips/%d", fixture.slip.ID))
+	require.Equal(t, http.StatusOK, emptyPage.Code)
+	assert.NotContains(t, emptyPage.Body.String(), "Top A-grade ideas")
+
+	seedAGradeBoardForHubTest(t, fixture, game)
+
+	pageResp := get(fmt.Sprintf("/slips/%d", fixture.slip.ID))
+	require.Equal(t, http.StatusOK, pageResp.Code)
+	body := pageResp.Body.String()
+	assert.Contains(t, body, "Top A-grade ideas")
+	assert.Contains(t, body, "data-highlight-leg")
+	assert.Contains(t, body, "data-highlight-parlay")
+	assert.Contains(t, body, "border-emerald-700 bg-emerald-950 text-emerald-300")
+	assert.Contains(t, body, "Josh Allen")
+	assert.Contains(t, body, "James Cook")
+	assert.Contains(t, body, "Add all 2")
+	assert.Contains(t, body, fmt.Sprintf(`hx-post="/slips/%d/legs/batch"`, fixture.slip.ID))
+	assert.Contains(t, body, fmt.Sprintf(`hx-post="/slips/%d/legs"`, fixture.slip.ID))
+
+	// Panel partial also renders the strip.
+	panelResp := get(fmt.Sprintf("/slips/%d/panel", fixture.slip.ID))
+	require.Equal(t, http.StatusOK, panelResp.Code)
+	assert.Contains(t, panelResp.Body.String(), "Top A-grade ideas")
+}
+
+func TestSlipHubHighlightsHideAndDisableWhenSlotsFullOrLocked(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	game := addGame(t, fixture, gameKickoff())
+	seedAGradeBoardForHubTest(t, fixture, game)
+
+	// Fill 1 of 2 slots: 1 slot remains, so 2-leg combo disables bulk add.
+	addOne := postForm(t, fixture.handler, fmt.Sprintf("/slips/%d/legs", fixture.slip.ID), url.Values{
+		"game_id":     {game.ID},
+		"market_type": {"ML"},
+		"team":        {"BUF"},
+		"side":        {"TEAM"},
+		"odds":        {"-110"},
+	})
+	require.Equal(t, http.StatusOK, addOne.Code, addOne.Body.String())
+	partialBody := addOne.Body.String()
+	assert.Contains(t, partialBody, "Top A-grade ideas")
+	assert.Contains(t, partialBody, "Needs 2 open slots")
+	assert.NotContains(t, partialBody, "Add all 2")
+
+	// Fill the 2nd slot -> StepLockIn -> highlights strip disappears.
+	addTwo := postForm(t, fixture.handler, fmt.Sprintf("/slips/%d/legs", fixture.slip.ID), url.Values{
+		"game_id":     {game.ID},
+		"market_type": {"TOTAL"},
+		"side":        {"OVER"},
+		"line":        {"47.5"},
+		"odds":        {"-110"},
+	})
+	require.Equal(t, http.StatusOK, addTwo.Code, addTwo.Body.String())
+	assert.NotContains(t, addTwo.Body.String(), "Top A-grade ideas")
+
+	// Lock in -> StepExport -> highlights strip stays hidden.
+	lockResp := postForm(t, fixture.handler, fmt.Sprintf("/slips/%d/lock", fixture.slip.ID), url.Values{})
+	require.Equal(t, http.StatusOK, lockResp.Code, lockResp.Body.String())
+	assert.NotContains(t, lockResp.Body.String(), "Top A-grade ideas")
+}
