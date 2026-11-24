@@ -207,5 +207,5 @@ Complexity: low (follows the same `SelectHighlights` seam on the pick board slat
 - [x] Surface per-game A-grade counts on `#pick-slate` cards and the `"Top plays in this game"` strip at the top of
       `#pick-detail` (`internal/web/pick.go` + `web/templates/partials.html`) with handler tests in
       `internal/web/pick_test.go`.
-- [ ] Docs: update `docs/concepts/slips.md`, `docs/concepts/analyzer.md`, and `docs/reference/routes.md` to document the
+- [x] Docs: update `docs/concepts/slips.md`, `docs/concepts/analyzer.md`, and `docs/reference/routes.md` to document the
       A-grade highlights and `POST /slips/{id}/legs/batch`, then run `good-vibes docs lint`.

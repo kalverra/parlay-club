@@ -12,14 +12,17 @@ tags: [analyzer, warnings, grades, banner, severity, tone, slips, weather, rules
 
 The analyzer is the sharp-friend layer on every slip. It reads the picks people made and points out where they fight each other, the weather, key numbers, price, player history, nfelo's model, or nflverse team and usage trends. It also computes deterministic A–F quality grades for each leg and for the slip as a whole. It never blocks a pick: every leg stays allowed.
 
-`internal/analyzer`'s rule and grading functions (`AnalyzeSlip`, `ScoreLeg`, `ScoreSlip`) are pure Go: no I/O, no clock, no network calls, and no LLM. They run on every slip and tray render, and their output is not stored. The rule list, thresholds, and grading rubric live in [Analyzer rules](../reference/analyzer-rules.md).
+`internal/analyzer`'s rule and grading functions (`AnalyzeSlip`, `ScoreLeg`, `ScoreSlip`) are pure Go: no I/O, no clock, no network calls, and no LLM. They run on every slip and tray render, and their output is not stored. The same `ScoreLeg` and `ScoreSlip` engine also powers board-wide A-grade highlights on the hub and pick board using cached SQLite data only. The rule list, thresholds, and grading rubric live in [Analyzer rules](../reference/analyzer-rules.md).
 
 ```mermaid
 flowchart LR
   Inputs["Legs + Games (Weather, nfelo, nflverse EPA) + PlayerStats (ESPN Logs, nflverse Usage)"] --> Rules["AnalyzeSlip (Warnings)"]
   Inputs --> Grades["ScoreLeg / ScoreSlip (A–F Grades + Factors)"]
+  Board["Cached Board Rows + LoadBoardSignals"] --> Highlights["board.SelectHighlights (A-Grade Legs & Combos)"]
+  Grades --> Highlights
   Rules --> UI["Slip Panel & Pick Tray"]
   Grades --> UI
+  Highlights --> UI
   UI -->|"tap Why? or rubric"| Guide["GET /analyzer/guide"]
   Guide <-->|"results / how grading works"| Results["GET /analyzer/results"]
   EngineDocs["RuleDocs() + GradeRubric()"] --> Guide
@@ -54,6 +57,15 @@ The clamped 0–100 score maps to A (85–100), B (73–84), C (60–72), D (48�
 
 `ScoreSlip` averages the numeric scores of all graded legs, then applies slip-level adjustments: +8 per positive stack (shootout or clock-drain), -12 per Warn script conflict (blowout passing), -20 per Danger conflict (trailing RB, total contradiction), -3 per leg beyond 3 legs, and -5 per heavy chalk leg beyond the first.
 
+## A-grade highlights
+
+While a slip is open and the viewer still needs picks, `board.SelectHighlights` (`internal/board/highlights.go`) surfaces top A-grade plays from cached SQLite odds without triggering any external API calls:
+
+- **Batched board signals**: `LoadBoardSignals` loads games, weather, nfelo, nflverse team EPA and usage, sharp-book benchmarks, and player game logs for all matched players on the board in batched SQLite queries.
+- **Leg selection**: `SelectHighlights` scores unpicked, non-OTHER board rows with `ScoreLeg`, keeps A-grade legs (score >= 85), ranks by score and payout, and caps at 1 leg per player (up to 3 legs by default).
+- **Bounded combo generation**: From a bounded pool of up to 12 top A-grade legs (plus up to 6 B-grade same-game stack partners for shootout or clock-drain stacks), it evaluates conflict-free 2- and 3-leg combos with `ScoreSlip`, rejects any combo with a Warn or Danger conflict, and keeps A-grade combos (up to 2 on the hub, or 1 same-game combo in `#pick-detail`).
+- **Consistency**: Because highlights run through `ScoreLeg` and `ScoreSlip`, adding a highlighted leg or combo lands on the slip with the exact same grade. When nothing reaches A, the strip hides cleanly.
+
 ### Versioned rubrics and offline evals
 
 Scoring weights, category clamps, slip adjustments, and A–F cutoffs live in Rubric (`internal/analyzer/rubric.go`) rather than hardcoded constants. RubricV1 holds the baseline production weights, ActiveRubric selects the live rubric, and BuiltInRubrics exposes all registered rubrics in order. ScoreLeg, ScoreSlip, and GradeRubric all read from ActiveRubric, while ScoreLegWithRubric and ScoreSlipWithRubric accept any rubric value without mutating live state.
@@ -86,16 +98,16 @@ AnalyzeSlip, ScoreLeg, and ScoreSlip take three plain values:
 | games | home and away teams, indoor flag, weather (wind, gusts, precipitation, temperature), nfelo model (spread, win probability, QB adjustments), nflverse team EPA & pace, merged team injuries, de-vigged sharp-book benchmarks |
 | stats | per-player ESPN game logs per market (most recent game first, this season only), ESPN position, and nflverse weekly snap/target/opportunity usage |
 
-`internal/analyzer` (`LoadSlipSignals`) builds games and stats from the week's games, stored odds, player game logs, `roster_players`, `nfelo_games`, and nflverse tables when `internal/web` renders the panel or tray (with `LoadGameSignals` and `LoadPlayerResearchSignals` serving the pick board and player research). It keys the games map by the same GameID each leg carries, so no leg loses its game.
+`internal/analyzer` (`LoadSlipSignals`) builds games and stats from the week's games, stored odds, player game logs, `roster_players`, `nfelo_games`, and nflverse tables when `internal/web` renders the panel or tray (with `LoadBoardSignals`, `LoadGameSignals`, and `LoadPlayerResearchSignals` serving highlights, the pick board, and player research). It keys the games map by the same GameID each leg carries, so no leg loses its game.
 
 For team injuries, `LoadSlipSignals` (via `MergeGameInjuries` and `espn.MergeTeamInjuries`) merges `games.injuries_json` from ESPN's game summary with key-position injuries from `roster_players.injury_status`. Summary entries stay primary for their richer detail and 15-minute game-day refresh, while roster injuries backfill any key-position player truncated past ESPN's 5-per-team summary cap. `ScoreLeg` uses the merged `Game.Injuries` list and `PlayerStats.Position` for deterministic teammate-out grading.
 
-stats maps ESPN athlete IDs to season game logs across markets (PASS_YDS, RUSH_YDS, REC_YDS, RECEPTIONS, PASS_TDS, RUSH_ATT, ANYTIME_TD, KICKER_PTS) and optional nflverse usage weeks. `internal/analyzer` loads `player_gamelogs` and `nflverse_player_weeks` for every distinct matched PlayerID on the slip. An unmatched player, a missing game log, or a market/usage history with fewer than 3 games leaves player-stat and usage rules quiet.
+stats maps ESPN athlete IDs to season game logs across markets (PASS_YDS, RUSH_YDS, REC_YDS, RECEPTIONS, PASS_TDS, RUSH_ATT, ANYTIME_TD, KICKER_PTS) and optional nflverse usage weeks. `internal/analyzer` loads player game logs and nflverse player weeks for every distinct matched PlayerID on the slip. An unmatched player, a missing game log, or a market/usage history with fewer than 3 games leaves player-stat and usage rules quiet.
 
 External models and efficiency data are optional inputs, not requirements:
 
-- **nfelo**: `internal/analyzer` attaches it only when the game is SCHEDULED and a successful `nfelo:projections` fetch is under 72 hours old. Otherwise the model is nil and QB drag / model sentences stay quiet.
-- **nflverse**: `internal/analyzer` attaches HomeEPA, AwayEPA, and Usage only when `nflverse:season:{year}` is under 7 days old. Missing or stale nflverse rows leave those fields nil so nflverse warnings and EPA/usage grade factors fail soft.
+- **nfelo**: `internal/analyzer` attaches it only when the game is SCHEDULED and a successful nfelo projections fetch is under 72 hours old. Otherwise the model is nil and QB drag / model sentences stay quiet.
+- **nflverse**: `internal/analyzer` attaches HomeEPA, AwayEPA, and Usage only when the season nflverse sync is under 7 days old. Missing or stale nflverse rows leave those fields nil so nflverse warnings and EPA/usage grade factors fail soft.
 - **Sharp benchmarks**: LoadSlipSignals builds Game.Sharp in memory from current two-way odds rows in three tiers: Tier 1 (Pinnacle, Circa, Bookmaker), Tier 2 (LowVig, BetOnline), and Tier 3 (market consensus across at least 3 traditional sportsbooks quoting the same line, excluding DFS pick'em apps and peer-to-peer exchanges). One-sided markets (like anytime TD), unpaired quotes, and missing odds fail soft cleanly.
 
 The underlying rows come from [Data sources](../reference/data-sources.md) through [Data refresh](data-refresh.md).
