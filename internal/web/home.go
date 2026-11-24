@@ -27,10 +27,11 @@ type HomeCard struct {
 // WeekPage is the multi-slip hub rendered for a group's week when multiple slips exist.
 type WeekPage struct {
 	Page
-	Group     db.Group
-	Week      db.Week
-	Cards     []WeekSlipCard
-	Schedules []ScheduleView
+	Group       db.Group
+	Week        db.Week
+	Cards       []WeekSlipCard
+	Schedules   []ScheduleView
+	SlateScopes []SlateScopeOption
 }
 
 // ScheduleView holds schedule data formatted for templates.
@@ -341,11 +342,12 @@ func (h *slipHandlers) groupWeek(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.renderPage(w, "week", WeekPage{
-		Page:      page,
-		Group:     group,
-		Week:      week,
-		Cards:     cards,
-		Schedules: schedViews,
+		Page:        page,
+		Group:       group,
+		Week:        week,
+		Cards:       cards,
+		Schedules:   schedViews,
+		SlateScopes: defaultSlateScopeOptions(""),
 	})
 }
 

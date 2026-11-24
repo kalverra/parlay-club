@@ -1392,7 +1392,12 @@ func defaultSlateScopeOptions(selected string) []SlateScopeOption {
 	if selected == "" {
 		selected = string(db.SlateScopeSundayMain)
 	}
-	scopes := []db.SlateScope{db.SlateScopeSundayMain, db.SlateScopeThursday, db.SlateScopeFullWeek}
+	scopes := []db.SlateScope{
+		db.SlateScopeSundayMain,
+		db.SlateScopeThursday,
+		db.SlateScopeWeekend,
+		db.SlateScopeFullWeek,
+	}
 	options := make([]SlateScopeOption, len(scopes))
 	for i, scope := range scopes {
 		options[i] = SlateScopeOption{

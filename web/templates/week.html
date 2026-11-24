@@ -140,9 +140,16 @@
             name="slate_scope"
             class="w-full rounded-md border border-line-strong bg-surface-2 px-2 py-1.5 text-sm text-ink focus:border-accent focus:outline-none"
           >
-            <option value="sunday_main">Sunday Slate</option>
-            <option value="thursday">Thursday Slate</option>
-            <option value="full_week">Full Week</option>
+            {{if .SlateScopes}}
+              {{range .SlateScopes}}
+                <option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>
+              {{end}}
+            {{else}}
+              <option value="sunday_main">Sunday Slate</option>
+              <option value="thursday">Thursday Slate</option>
+              <option value="weekend">Weekend Slate</option>
+              <option value="full_week">Full Week</option>
+            {{end}}
           </select>
         </div>
 

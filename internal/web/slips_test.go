@@ -1105,6 +1105,7 @@ func TestCreateSlipFormSlateScopeSelection(t *testing.T) {
 	assert.Contains(t, bodyDefault, `<select name="slate_scope"`)
 	assert.Contains(t, bodyDefault, `<option value="sunday_main" selected>Sunday Slate</option>`)
 	assert.Contains(t, bodyDefault, `<option value="thursday">Thursday Slate</option>`)
+	assert.Contains(t, bodyDefault, `<option value="weekend">Weekend Slate</option>`)
 	assert.Contains(t, bodyDefault, `<option value="full_week">Full Week</option>`)
 
 	// Pre-select Thursday Slate via ?scope=thursday.
@@ -1115,6 +1116,13 @@ func TestCreateSlipFormSlateScopeSelection(t *testing.T) {
 	bodyThu := recThu.Body.String()
 	assert.Contains(t, bodyThu, `<option value="thursday" selected>Thursday Slate</option>`)
 	assert.Contains(t, bodyThu, `<option value="sunday_main">Sunday Slate</option>`)
+
+	// Pre-select Weekend Slate via ?slate_scope=weekend.
+	reqWeekend := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/slips/new?slate_scope=weekend", nil)
+	recWeekend := httptest.NewRecorder()
+	fixture.handler.ServeHTTP(recWeekend, reqWeekend)
+	require.Equal(t, http.StatusOK, recWeekend.Code)
+	assert.Contains(t, recWeekend.Body.String(), `<option value="weekend" selected>Weekend Slate</option>`)
 
 	// Pre-select Full Week via ?slate_scope=full_week.
 	reqFull := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/slips/new?slate_scope=full_week", nil)
@@ -1146,6 +1154,23 @@ func TestCreateSlipWithSlateScope(t *testing.T) {
 	slipThu, err := fixture.store.SlipByID(t.Context(), idThu)
 	require.NoError(t, err)
 	assert.Equal(t, db.SlateScopeThursday, slipThu.SlateScope)
+
+	// 1b. Explicit slate_scope: "weekend"
+	resWeekend := postForm(t, fixture.handler, "/slips", url.Values{
+		"week_id":         {strconv.FormatInt(fixture.week.ID, 10)},
+		"name":            {"Weekend One-Off"},
+		"slate_scope":     {"weekend"},
+		"legs_per_member": {"2"},
+		"member_id":       {strconv.FormatInt(fixture.user.ID, 10)},
+	})
+	require.Equal(t, http.StatusOK, resWeekend.Code, resWeekend.Body.String())
+	locWeekend := resWeekend.Header().Get("Hx-Redirect")
+	require.NotEmpty(t, locWeekend)
+	idWeekend, err := strconv.ParseInt(strings.TrimPrefix(locWeekend, "/slips/"), 10, 64)
+	require.NoError(t, err)
+	slipWeekend, err := fixture.store.SlipByID(t.Context(), idWeekend)
+	require.NoError(t, err)
+	assert.Equal(t, db.SlateScopeWeekend, slipWeekend.SlateScope)
 
 	// 2. Default slate_scope (omitted) defaults to Sunday Main
 	resDefault := postForm(t, fixture.handler, "/slips", url.Values{

@@ -43,6 +43,10 @@ func TestCreateGroupSlipScheduleExplicitThursdayScopeAndCustomLegs(t *testing.T)
 	assert.Equal(t, db.SlateScopeThursday, sched.SlateScope)
 	assert.Equal(t, 3, sched.LegsPerMember)
 	assert.True(t, sched.IsActive)
+
+	weekend, err := store.CreateGroupSlipSchedule(t.Context(), group.ID, "Playoff Weekend", db.SlateScopeWeekend, 2)
+	require.NoError(t, err)
+	assert.Equal(t, db.SlateScopeWeekend, weekend.SlateScope)
 }
 
 func TestCreateGroupSlipScheduleRefusesBlankName(t *testing.T) {
