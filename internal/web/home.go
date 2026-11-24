@@ -257,7 +257,8 @@ func (h *slipHandlers) groupWeek(w http.ResponseWriter, r *http.Request) {
 	}
 	page.WeekLabel = weekLabel(week)
 
-	groupSlips, err := slips.EnsureWeekSlips(r.Context(), h.deps.Store, group.ID, week.ID)
+	now := h.deps.now()
+	groupSlips, err := slips.EnsureWeekSlips(r.Context(), h.deps.Store, group.ID, week.ID, now)
 	if err != nil {
 		h.serverError(w, err)
 		return
@@ -277,7 +278,6 @@ func (h *slipHandlers) groupWeek(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	now := h.deps.now()
 	cards := make([]WeekSlipCard, 0, len(groupSlips))
 	for _, slip := range groupSlips {
 		members, err := h.deps.Store.SlipMembers(r.Context(), slip.ID)
