@@ -92,8 +92,8 @@ type DevLoginPage struct {
 }
 
 // loginForm shows the sign-in screen.
-func (h *Handlers) loginForm(w http.ResponseWriter, _ *http.Request) {
-	h.renderLogin(w, http.StatusOK, "")
+func (h *Handlers) loginForm(w http.ResponseWriter, r *http.Request) {
+	h.renderLogin(w, r, http.StatusOK, "")
 }
 
 // logout clears the session and active-group cookies and returns to the
@@ -137,19 +137,19 @@ func (h *Handlers) googleStart(w http.ResponseWriter, r *http.Request) {
 func (h *Handlers) googleCallback(w http.ResponseWriter, r *http.Request) {
 	saved, ok := h.cookies.OAuthState(r)
 	if !ok {
-		h.renderLogin(w, http.StatusBadRequest, signInFailed)
+		h.renderLogin(w, r, http.StatusBadRequest, signInFailed)
 		return
 	}
 	if r.URL.Query().Get("state") != saved.State {
 		h.cookies.ClearOAuth(w)
-		h.renderLogin(w, http.StatusBadRequest, signInFailed)
+		h.renderLogin(w, r, http.StatusBadRequest, signInFailed)
 		return
 	}
 
 	code := r.URL.Query().Get("code")
 	if code == "" {
 		h.cookies.ClearOAuth(w)
-		h.renderLogin(w, http.StatusBadRequest, signInFailed)
+		h.renderLogin(w, r, http.StatusBadRequest, signInFailed)
 		return
 	}
 
@@ -157,7 +157,7 @@ func (h *Handlers) googleCallback(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		h.logger.Warn().Err(err).Msg("google sign-in")
 		h.cookies.ClearOAuth(w)
-		h.renderLogin(w, http.StatusBadRequest, signInFailed)
+		h.renderLogin(w, r, http.StatusBadRequest, signInFailed)
 		return
 	}
 
@@ -172,8 +172,8 @@ func (h *Handlers) googleCallback(w http.ResponseWriter, r *http.Request) {
 }
 
 // devLoginForm shows the local sign-in form.
-func (h *Handlers) devLoginForm(w http.ResponseWriter, _ *http.Request) {
-	h.renderDevLogin(w, http.StatusOK, "", "", "")
+func (h *Handlers) devLoginForm(w http.ResponseWriter, r *http.Request) {
+	h.renderDevLogin(w, r, http.StatusOK, "", "", "")
 }
 
 // devLogin signs in a local identity without Google.
@@ -187,7 +187,7 @@ func (h *Handlers) devLogin(w http.ResponseWriter, r *http.Request) {
 	email := strings.TrimSpace(form.Get("email"))
 	name := strings.TrimSpace(form.Get("name"))
 	if !validEmail(email) {
-		h.renderDevLogin(w, http.StatusUnprocessableEntity, email, name, blankEmail)
+		h.renderDevLogin(w, r, http.StatusUnprocessableEntity, email, name, blankEmail)
 		return
 	}
 
@@ -217,7 +217,7 @@ func (h *Handlers) signIn(
 	user, err := SignIn(r.Context(), h.store, identity)
 	switch {
 	case errors.Is(err, ErrIncompleteIdentity):
-		h.renderLogin(w, http.StatusBadRequest, signInFailed)
+		h.renderLogin(w, r, http.StatusBadRequest, signInFailed)
 		return db.User{}, false
 	case err != nil:
 		h.serverError(w, err)
@@ -227,10 +227,10 @@ func (h *Handlers) signIn(
 }
 
 // renderLogin writes the sign-in screen with an optional error.
-func (h *Handlers) renderLogin(w http.ResponseWriter, status int, message string) {
+func (h *Handlers) renderLogin(w http.ResponseWriter, r *http.Request, status int, message string) {
 	//nolint:modernize // naming the embedded layout field keeps the data readable.
 	page := LoginPage{
-		Page:   webui.Page{Title: "Sign in"},
+		Page:   webui.Page{Title: "Sign in", Theme: webui.ThemeFromRequest(r).ID},
 		Error:  message,
 		Google: h.provider != nil,
 		Dev:    h.dev,
@@ -242,12 +242,13 @@ func (h *Handlers) renderLogin(w http.ResponseWriter, status int, message string
 // and name are what the fields should keep showing after a rejected submit.
 func (h *Handlers) renderDevLogin(
 	w http.ResponseWriter,
+	r *http.Request,
 	status int,
 	email, name, message string,
 ) {
 	//nolint:modernize // naming the embedded layout field keeps the data readable.
 	page := DevLoginPage{
-		Page:  webui.Page{Title: "Dev sign-in"},
+		Page:  webui.Page{Title: "Dev sign-in", Theme: webui.ThemeFromRequest(r).ID},
 		Error: message,
 		Email: email,
 		Name:  name,

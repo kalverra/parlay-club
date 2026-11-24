@@ -268,6 +268,62 @@ func TestLayoutMatchesAppJSBugReportIDs(t *testing.T) {
 	}
 }
 
+func TestLayoutThemeSSR(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		theme      webui.ThemeID
+		wantID     string
+		wantScheme string
+		wantColor  string
+	}{
+		{
+			name:       "default theme",
+			wantID:     "paper-turf",
+			wantScheme: "dark",
+			wantColor:  "#0f1e16",
+		},
+		{
+			name:       "redzone theme",
+			theme:      webui.ThemeRedZone,
+			wantID:     "redzone",
+			wantScheme: "dark",
+			wantColor:  "#090a0c",
+		},
+		{
+			name:       "almanac theme",
+			theme:      webui.ThemeAlmanac,
+			wantID:     "almanac",
+			wantScheme: "light",
+			wantColor:  "#fff8e7",
+		},
+		{
+			name:       "invalid theme falls back to paper-turf",
+			theme:      webui.ThemeID("evil"),
+			wantID:     "paper-turf",
+			wantScheme: "dark",
+			wantColor:  "#0f1e16",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			out := renderPage(t, "slip", webui.Page{
+				Title: "Slip",
+				Tab:   webui.TabWeek,
+				Theme: test.theme,
+			})
+
+			assert.Contains(t, out, `data-theme="`+test.wantID+`"`)
+			assert.Contains(t, out, `<meta name="color-scheme" content="`+test.wantScheme+`">`)
+			assert.Contains(t, out, `<meta name="theme-color" content="`+test.wantColor+`">`)
+		})
+	}
+}
+
 // renderPage parses the layout and one page file the way the server does, then
 // returns the HTML.
 func renderPage(t *testing.T, page string, data webui.Page) string {
