@@ -169,7 +169,7 @@ Complexity: medium (combines one-off and recurring creation flows in `internal/w
 partial, and adds progressive-enhancement shortcuts in `web/static/app.js`) Risk: low (contained to `/slips/new` and
 `POST /slips` with full handler tests covering validation, one-off custom games, and recurring schedule creation)
 
-- [ ] Update `GET /slips/new`, add `GET /slips/new/games`, and update `POST /slips` in `internal/web/slips.go` to
+- [x] Update `GET /slips/new`, add `GET /slips/new/games`, and update `POST /slips` in `internal/web/slips.go` to
       restrict to `UpcomingWeeks`, remove past-week entry, handle `mode=one_off` (per-game selection) and
       `mode=recurring` (schedule creation + `EnsureWeekSlips`), and update `internal/web/slips_test.go`.
 - [ ] Redesign the create-slip form in `web/templates/slip.html` and add mode-toggle and slate-shortcut checkbox helpers
