@@ -10,6 +10,7 @@ import (
 
 	"github.com/kalverra/parlay-club/internal/db"
 	"github.com/kalverra/parlay-club/internal/ingest/archive"
+	"github.com/kalverra/parlay-club/internal/ingest/espn"
 	"github.com/kalverra/parlay-club/internal/ingest/odds"
 )
 
@@ -132,10 +133,20 @@ func (s *Service) syncGameLog(ctx context.Context, athleteID string, now time.Ti
 		return false, fmt.Errorf("marshal gamelog stats %s: %w", athleteID, err)
 	}
 
+	entries := log.Entries
+	if entries == nil {
+		entries = []espn.GameLogEntry{}
+	}
+	gamesBytes, err := json.Marshal(entries)
+	if err != nil {
+		return false, fmt.Errorf("marshal gamelog entries %s: %w", athleteID, err)
+	}
+
 	dbLog := db.PlayerGameLog{
 		AthleteID:   athleteID,
 		GamesPlayed: log.GamesPlayed,
 		StatsJSON:   string(statsBytes),
+		GamesJSON:   string(gamesBytes),
 		UpdatedAt:   now,
 	}
 

@@ -38,10 +38,11 @@ type PlayerGameLog struct {
 	AthleteID   string
 	GamesPlayed int
 	StatsJSON   string
+	GamesJSON   string
 	UpdatedAt   time.Time
 }
 
-const gameLogColumns = `athlete_id, games_played, stats_json, updated_at`
+const gameLogColumns = `athlete_id, games_played, stats_json, games_json, updated_at`
 
 // PlayerMatch connects a normalized sportsbook player name and team to an ESPN athlete ID.
 type PlayerMatch struct {
@@ -368,16 +369,22 @@ func (s *Store) UpsertPlayerGameLog(ctx context.Context, log PlayerGameLog) erro
 	if statsJSON == "" {
 		statsJSON = "{}"
 	}
+	gamesJSON := log.GamesJSON
+	if gamesJSON == "" {
+		gamesJSON = "[]"
+	}
 	_, err := s.conn().ExecContext(ctx, `
-		INSERT INTO player_gamelogs (athlete_id, games_played, stats_json, updated_at)
-		VALUES (?, ?, ?, ?)
+		INSERT INTO player_gamelogs (athlete_id, games_played, stats_json, games_json, updated_at)
+		VALUES (?, ?, ?, ?, ?)
 		ON CONFLICT (athlete_id) DO UPDATE SET
 			games_played = excluded.games_played,
 			stats_json = excluded.stats_json,
+			games_json = excluded.games_json,
 			updated_at = excluded.updated_at`,
 		log.AthleteID,
 		log.GamesPlayed,
 		statsJSON,
+		gamesJSON,
 		formatTimestamp(log.UpdatedAt),
 	)
 	if err != nil {
@@ -638,7 +645,7 @@ func scanPlayerGameLog(row rowScanner) (PlayerGameLog, error) {
 		g         PlayerGameLog
 		updatedAt string
 	)
-	if err := row.Scan(&g.AthleteID, &g.GamesPlayed, &g.StatsJSON, &updatedAt); err != nil {
+	if err := row.Scan(&g.AthleteID, &g.GamesPlayed, &g.StatsJSON, &g.GamesJSON, &updatedAt); err != nil {
 		return PlayerGameLog{}, err
 	}
 	t, err := scanTimestamp(updatedAt)

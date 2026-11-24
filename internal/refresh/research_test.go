@@ -448,6 +448,9 @@ func TestSyncPlayerResearchGameLog(t *testing.T) {
 				Markets: map[string][]float64{
 					"PASS_YDS": {280.0, 310.0, 240.0},
 				},
+				Entries: []espn.GameLogEntry{
+					{EventID: "401", Week: 9, Opponent: "BAL", AtVs: "vs", Result: "W", Score: "31-24"},
+				},
 			},
 		},
 	}
@@ -470,6 +473,11 @@ func TestSyncPlayerResearchGameLog(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 6, log.GamesPlayed)
 	assert.JSONEq(t, `{"PASS_YDS":[280.0,310.0,240.0]}`, log.StatsJSON)
+	assert.JSONEq(
+		t,
+		`[{"eventId":"401","week":9,"opponent":"BAL","atVs":"vs","result":"W","score":"31-24"}]`,
+		log.GamesJSON,
+	)
 
 	// Within 1h game-day window, no second fetch.
 	clock.Advance(30 * time.Minute)

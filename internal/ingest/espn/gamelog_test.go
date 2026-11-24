@@ -46,6 +46,16 @@ func TestGameLogFromJoshAllenFixture(t *testing.T) {
 	assert.NotContains(t, log.Markets, "REC_YDS")
 	assert.NotContains(t, log.Markets, "RECEPTIONS")
 	assert.NotContains(t, log.Markets, "KICKER_PTS")
+
+	assert.Equal(t, []espn.GameLogEntry{
+		{EventID: "401873026", Week: 8, Opponent: "BAL", AtVs: "vs", Result: "W", Score: "36-10"},
+		{EventID: "401873005", Week: 6, Opponent: "LV", AtVs: "@", Result: "W", Score: "33-30"},
+		{EventID: "401872994", Week: 5, Opponent: "LAR", AtVs: "@", Result: "W", Score: "37-34 OT"},
+		{EventID: "401872971", Week: 4, Opponent: "NE", AtVs: "vs", Result: "L", Score: "29-26"},
+		{EventID: "401872953", Week: 3, Opponent: "LAC", AtVs: "vs", Result: "W", Score: "24-16"},
+		{EventID: "401872932", Week: 2, Opponent: "DET", AtVs: "vs", Result: "W", Score: "41-31"},
+		{EventID: "401872660", Week: 1, Opponent: "HOU", AtVs: "@", Result: "W", Score: "36-31"},
+	}, log.Entries)
 }
 
 func TestGameLogFromTylerBassFixture(t *testing.T) {
@@ -162,4 +172,57 @@ func TestGameLogReceiverAndReturner(t *testing.T) {
 	// Game 200: 0 rush + 1 rec + 1 ret = 2
 	// Game 100: 1 rush + 1 rec + 0 ret = 2
 	assert.Equal(t, []float64{2, 2}, log.Markets["ANYTIME_TD"])
+	assert.Equal(t, []espn.GameLogEntry{
+		{EventID: "200"},
+		{EventID: "100"},
+	}, log.Entries)
+}
+
+func TestGameLogEntriesFromFixtures(t *testing.T) {
+	t.Parallel()
+
+	wantBengalsEntries := []espn.GameLogEntry{
+		{EventID: "401873038", Week: 9, Opponent: "ATL", AtVs: "vs", Result: "W", Score: "34-17"},
+		{EventID: "401873031", Week: 8, Opponent: "TEN", AtVs: "vs", Result: "W", Score: "43-36 OT"},
+		{EventID: "401873012", Week: 7, Opponent: "BAL", AtVs: "@", Result: "W", Score: "35-13"},
+		{EventID: "401872982", Week: 5, Opponent: "MIA", AtVs: "@", Result: "W", Score: "31-24"},
+		{EventID: "401872969", Week: 4, Opponent: "JAX", AtVs: "vs", Result: "L", Score: "22-17"},
+		{EventID: "401872950", Week: 3, Opponent: "PIT", AtVs: "@", Result: "L", Score: "30-27"},
+		{EventID: "401872934", Week: 2, Opponent: "HOU", AtVs: "@", Result: "W", Score: "20-6"},
+		{EventID: "401872925", Week: 1, Opponent: "TB", AtVs: "vs", Result: "W", Score: "33-27"},
+	}
+
+	cases := []struct {
+		name      string
+		fixture   string
+		athleteID string
+		market    string
+	}{
+		{name: "chase", fixture: "gamelog_chase.json", athleteID: "4362628", market: "REC_YDS"},
+		{name: "burrow", fixture: "gamelog_burrow.json", athleteID: "3915511", market: "PASS_YDS"},
+		{name: "mcpherson", fixture: "gamelog_mcpherson.json", athleteID: "4360234", market: "KICKER_PTS"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			raw, err := os.ReadFile(filepath.Join("testdata", tc.fixture))
+			require.NoError(t, err)
+
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write(raw)
+			}))
+			t.Cleanup(server.Close)
+
+			client := espn.NewClient(server.URL, server.Client())
+			log, err := client.GameLog(t.Context(), tc.athleteID)
+			require.NoError(t, err)
+
+			assert.Equal(t, len(wantBengalsEntries), log.GamesPlayed)
+			assert.Len(t, log.Markets[tc.market], len(wantBengalsEntries))
+			assert.Equal(t, wantBengalsEntries, log.Entries)
+		})
+	}
 }
