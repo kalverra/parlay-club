@@ -110,15 +110,23 @@ type DiffReport struct {
 }
 
 type legOutcome struct {
-	slipID  int64
-	legID   int64
-	legIdx  int
-	band    string
-	decided bool
-	won     bool
+	season   int
+	weekType string
+	weekNum  int
+	isMarket bool
+	slipID   int64
+	legID    int64
+	legIdx   int
+	band     string
+	decided  bool
+	won      bool
 }
 
 type legOutcomeKey struct {
+	season   int
+	weekType string
+	weekNum  int
+	isMarket bool
 	slipID   int64
 	legID    int64
 	legIdx   int
@@ -128,14 +136,19 @@ type legOutcomeKey struct {
 func (o legOutcome) key() legOutcomeKey {
 	if o.legID != 0 {
 		return legOutcomeKey{
+			isMarket: o.isMarket,
 			slipID:   o.slipID,
 			legID:    o.legID,
 			hasLegID: true,
 		}
 	}
 	return legOutcomeKey{
-		slipID: o.slipID,
-		legIdx: o.legIdx,
+		season:   o.season,
+		weekType: o.weekType,
+		weekNum:  o.weekNum,
+		isMarket: o.isMarket,
+		slipID:   o.slipID,
+		legIdx:   o.legIdx,
 	}
 }
 
@@ -318,6 +331,32 @@ func Evaluate(dataset ReplayDataset, rubric analyzer.Rubric) Report {
 		weekSlipBands := newBandAccumMap()
 		weekOverallLegs := &bandAccum{band: "all"}
 
+		recordLeg := func(rl ReplayedLeg, lg analyzer.LegGrade, slipID int64, legIdx int, isMarket bool) {
+			band := normalizeBand(lg.Letter)
+			dec := legDecimalOdds(rl)
+			legBands[band].add(rl.Result, dec)
+			weekLegBands[band].add(rl.Result, dec)
+			weekOverallLegs.add(rl.Result, dec)
+
+			decided := rl.Result == parlay.Won || rl.Result == parlay.Lost
+			outcomes = append(outcomes, legOutcome{
+				season:   week.Season,
+				weekType: week.WeekType,
+				weekNum:  week.WeekNum,
+				isMarket: isMarket,
+				slipID:   slipID,
+				legID:    rl.Leg.ID,
+				legIdx:   legIdx,
+				band:     band,
+				decided:  decided,
+				won:      rl.Result == parlay.Won,
+			})
+
+			if decided {
+				recordFactors(factors, factorLabels, lg.Factors, rl.Result, dec)
+			}
+		}
+
 		for _, slip := range week.Slips {
 			analyzerLegs := make([]analyzer.Leg, len(slip.Legs))
 			for i, rl := range slip.Legs {
@@ -341,27 +380,16 @@ func Evaluate(dataset ReplayDataset, rubric analyzer.Rubric) Report {
 				if i < len(slipGrade.LegGrades) {
 					lg = slipGrade.LegGrades[i]
 				}
-				band := normalizeBand(lg.Letter)
-				dec := legDecimalOdds(rl)
-				legBands[band].add(rl.Result, dec)
-				weekLegBands[band].add(rl.Result, dec)
-				weekOverallLegs.add(rl.Result, dec)
-
-				decided := rl.Result == parlay.Won || rl.Result == parlay.Lost
-				outcomes = append(outcomes, legOutcome{
-					slipID:  slip.SlipID,
-					legID:   rl.Leg.ID,
-					legIdx:  i,
-					band:    band,
-					decided: decided,
-					won:     rl.Result == parlay.Won,
-				})
-
-				if !decided {
-					continue
-				}
-				recordFactors(factors, factorLabels, lg.Factors, rl.Result, dec)
+				recordLeg(rl, lg, slip.SlipID, i, false)
 			}
+		}
+
+		for i, rl := range week.MarketLegs {
+			if !isSettledResult(rl.Result) {
+				continue
+			}
+			lg := analyzer.ScoreLegWithRubric(rl.Leg, week.Games, week.Stats, rubric)
+			recordLeg(rl, lg, 0, i, true)
 		}
 
 		overall := weekOverallLegs.stats()

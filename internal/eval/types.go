@@ -7,6 +7,17 @@ import (
 	"github.com/kalverra/parlay-club/internal/parlay"
 )
 
+// ReplayMode selects whether LoadDataset replays settled user slips or
+// market-wide candidate legs.
+type ReplayMode string
+
+const (
+	// ModeSlips replays settled user slips and their legs.
+	ModeSlips ReplayMode = "slips"
+	// ModeMarket replays deduplicated pre-kickoff market-wide candidate legs.
+	ModeMarket ReplayMode = "market"
+)
+
 // DataCoverage records how many replayed legs had each historical signal
 // available before kickoff.
 type DataCoverage struct {
@@ -35,15 +46,16 @@ type ReplayedSlip struct {
 	Legs         []ReplayedLeg `json:"legs"`
 }
 
-// ReplayedWeek holds all pre-kickoff analyzer inputs and settled slips for one
-// week.
+// ReplayedWeek holds all pre-kickoff analyzer inputs and settled slips or
+// market-wide candidate legs for one week.
 type ReplayedWeek struct {
-	Season   int                             `json:"season"`
-	WeekNum  int                             `json:"week_num"`
-	WeekType string                          `json:"week_type,omitempty"`
-	Games    map[string]analyzer.Game        `json:"games"`
-	Stats    map[string]analyzer.PlayerStats `json:"stats"`
-	Slips    []ReplayedSlip                  `json:"slips"`
+	Season     int                             `json:"season"`
+	WeekNum    int                             `json:"week_num"`
+	WeekType   string                          `json:"week_type,omitempty"`
+	Games      map[string]analyzer.Game        `json:"games"`
+	Stats      map[string]analyzer.PlayerStats `json:"stats"`
+	Slips      []ReplayedSlip                  `json:"slips"`
+	MarketLegs []ReplayedLeg                   `json:"market_legs,omitempty"`
 }
 
 // ReplayDataset is the leak-free historical input consumed by Evaluate.
