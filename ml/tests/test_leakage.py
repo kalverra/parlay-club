@@ -6,8 +6,8 @@ import numpy as np
 import polars as pl
 import pytest
 
-from features import build_leak_free_features, fit_role_priors
-from train import build_walk_forward_folds
+from features import MARKET_SPECS, build_leak_free_features, fit_role_priors
+from train import _baseline_market_grid, build_walk_forward_folds
 
 
 def test_mutating_week_w_and_future_does_not_change_week_w_features(
@@ -88,3 +88,27 @@ def test_walk_forward_folds_strict_chronology() -> None:
 
     with pytest.raises(ValueError, match="at least 4"):
         build_walk_forward_folds([2022, 2023, 2024], min_held_out=3)
+
+
+def test_anytime_td_baseline_market_grid_does_not_leak_test_outcomes(
+    synthetic_nfl_data: tuple[pl.DataFrame, pl.DataFrame],
+) -> None:
+    player_df, team_df = synthetic_nfl_data
+    feat_df = build_leak_free_features(player_df, team_df)
+    tr_df = feat_df[feat_df["season"] < 2024].copy()
+    te_df = feat_df[feat_df["season"] == 2024].copy()
+    priors = fit_role_priors(tr_df)
+
+    spec = MARKET_SPECS["ANYTIME_TD"]
+    grid_base = _baseline_market_grid(te_df, spec, priors)
+
+    te_all_td = te_df.copy()
+    te_all_td["anytime_td"] = 1.0
+    grid_all_td = _baseline_market_grid(te_all_td, spec, priors)
+
+    te_no_td = te_df.copy()
+    te_no_td["anytime_td"] = 0.0
+    grid_no_td = _baseline_market_grid(te_no_td, spec, priors)
+
+    np.testing.assert_array_equal(grid_base["p_market"].to_numpy(), grid_all_td["p_market"].to_numpy())
+    np.testing.assert_array_equal(grid_base["p_market"].to_numpy(), grid_no_td["p_market"].to_numpy())

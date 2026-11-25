@@ -4,10 +4,8 @@ import (
 	"cmp"
 	"math"
 	"slices"
-	"strings"
 
 	"github.com/kalverra/parlay-club/internal/analyzer"
-	"github.com/kalverra/parlay-club/internal/db"
 	"github.com/kalverra/parlay-club/internal/parlay"
 )
 
@@ -18,7 +16,6 @@ const (
 	minBinSpreadRatio      = 0.80
 	minCalibProb           = 1e-6
 	maxCalibProb           = 1.0 - 1e-6
-	sharpLineMatchEps      = 1e-6
 )
 
 var bandOrder = []string{"A", "B", "C", "D", "F", ungradedBand}
@@ -940,60 +937,15 @@ func resolveMarketBaselineProb(rl ReplayedLeg, lg analyzer.LegGrade, games map[s
 	if lg.MarketProb > 0 && lg.MarketProb < 1 {
 		return lg.MarketProb
 	}
-	if p := lookupSharpMarketProb(games, rl.Leg); p > 0 && p < 1 {
-		return p
+	if rl.Leg.GameID != "" {
+		if g, ok := games[rl.Leg.GameID]; ok {
+			if p, ok := analyzer.SharpMarketProb(g, rl.Leg); ok {
+				return p
+			}
+		}
 	}
 	if dec := legDecimalOdds(rl); dec > 1 {
 		return 1.0 / dec
-	}
-	return 0
-}
-
-func lookupSharpMarketProb(games map[string]analyzer.Game, leg analyzer.Leg) float64 {
-	if leg.GameID == "" {
-		return 0
-	}
-	g, ok := games[leg.GameID]
-	if !ok || len(g.Sharp) == 0 {
-		return 0
-	}
-
-	market := strings.ToUpper(strings.TrimSpace(leg.Market))
-	if market == "MONEYLINE" {
-		market = "ML"
-	}
-	team := strings.ToUpper(strings.TrimSpace(leg.Team))
-	if market == "TOTAL" {
-		team = ""
-	}
-	side := strings.ToUpper(strings.TrimSpace(leg.Side))
-	if (market == "ML" || market == "SPREAD") && side == "" {
-		side = "TEAM"
-	}
-	var player string
-	if db.IsPlayerMarket(market) || strings.TrimSpace(leg.PlayerName) != "" {
-		player = db.NormalizePlayerName(leg.PlayerName)
-	}
-
-	sq, ok := g.Sharp[analyzer.SharpKey{
-		MarketType: market,
-		Team:       team,
-		PlayerName: player,
-		Side:       side,
-	}]
-	if !ok {
-		return 0
-	}
-	linesMatch := (leg.Line == nil && sq.Line == nil) ||
-		(leg.Line != nil && sq.Line != nil && math.Abs(*leg.Line-*sq.Line) <= sharpLineMatchEps)
-	if !linesMatch {
-		return 0
-	}
-	if sq.PowerFairProb > 0 && sq.PowerFairProb < 1 {
-		return sq.PowerFairProb
-	}
-	if sq.FairProb > 0 && sq.FairProb < 1 {
-		return sq.FairProb
 	}
 	return 0
 }

@@ -567,3 +567,28 @@ func medianFloat64(values []float64) float64 {
 	}
 	return (sorted[mid-1] + sorted[mid]) / 2
 }
+
+// SharpMarketProb returns the de-vigged sharp benchmark probability for leg
+// within game when a matching sharp quote exists at leg's line, preferring
+// PowerFairProb and falling back to FairProb.
+func SharpMarketProb(game Game, leg Leg) (float64, bool) {
+	if len(game.Sharp) == 0 {
+		return 0, false
+	}
+	sq, ok := game.Sharp[sharpKeyForLeg(leg)]
+	if !ok {
+		return 0, false
+	}
+	linesMatch := (leg.Line == nil && sq.Line == nil) ||
+		(leg.Line != nil && sq.Line != nil && math.Abs(*leg.Line-*sq.Line) <= lineMatchEpsilon)
+	if !linesMatch {
+		return 0, false
+	}
+	if sq.PowerFairProb > 0 && sq.PowerFairProb < 1 {
+		return sq.PowerFairProb, true
+	}
+	if sq.FairProb > 0 && sq.FairProb < 1 {
+		return sq.FairProb, true
+	}
+	return 0, false
+}

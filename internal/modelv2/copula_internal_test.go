@@ -84,13 +84,14 @@ func TestSobolNormalsQualityAcrossAllDimensions(t *testing.T) {
 func TestNormInvRoundTrip(t *testing.T) {
 	t.Parallel()
 
-	assert.True(t, math.IsInf(normInv(0), -1))
-	assert.True(t, math.IsInf(normInv(1), 1))
-	assert.InDelta(t, 0.0, normInv(0.5), 1e-12)
+	assert.True(t, math.IsInf(NormInv(0), -1))
+	assert.True(t, math.IsInf(NormInv(1), 1))
+	assert.InDelta(t, 0.0, NormInv(0.5), 1e-12)
+	assert.InDelta(t, 0.5, NormCDF(math.NaN()), 1e-12)
 
 	for _, p := range []float64{1e-6, 1e-4, 0.01, 0.02425, 0.1, 0.25, 0.5, 0.75, 0.9, 0.97575, 0.99, 1 - 1e-4, 1 - 1e-6} {
-		z := normInv(p)
-		roundTrip := 0.5 * math.Erfc(-z/math.Sqrt2)
+		z := NormInv(p)
+		roundTrip := NormCDF(z)
 		assert.InDelta(t, p, roundTrip, 1e-9, "p=%v", p)
 	}
 }

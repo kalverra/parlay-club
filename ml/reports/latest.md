@@ -3,17 +3,17 @@
 - **Version:** `v2.1.0`
 - **Trained seasons:** `[2019, 2020, 2021, 2022, 2023, 2024, 2025]`
 - **Held-out seasons:** `[2023, 2024, 2025]`
-- **Built at:** `2026-11-25T21:32:24Z`
+- **Built at:** `2026-11-25T23:48:25Z`
 
 ## Calibration & Scoring Gates
 
 | Metric | Value | Baseline / Target |
 | --- | --- | --- |
-| Walk-forward Log Loss | `0.603842` | Market `0.624456` |
-| Walk-forward Brier | `0.208705` | Market `0.216135` |
-| Classwise ECE | `0.008341` | Lower is better |
+| Walk-forward Log Loss | `0.603852` | Market `0.624527` |
+| Walk-forward Brier | `0.208707` | Market `0.216153` |
+| Classwise ECE | `0.008518` | Lower is better |
 | Populated bins | `9/10` | `>= 80%` |
-| Copula SGP Log Loss | `0.609369` | Naive `0.640466` |
+| Copula SGP Log Loss | `0.590423` | Naive `0.618393` |
 | EWMA half-life +/-1w MAE | `0.009546` | `<= 0.05` |
 
 ## Per-Market Calibration & Collinearity Pruning

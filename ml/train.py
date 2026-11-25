@@ -394,8 +394,15 @@ def _baseline_market_grid(
     mu_mkt = np.maximum(anchor * scale, 0.10 if spec.is_discrete else 1.0)
 
     if spec.market == "ANYTIME_TD":
-        # Binary market has threshold 0.5; market probability has realistic mild shading/dispersion.
-        p_mkt = np.clip(0.85 * anchor * scale + 0.15 * float(np.mean(y_actual > 0.5)), 0.04, 0.85)
+        # Binary market has threshold 0.5; use strictly training-only prior base rate
+        # (never test-set outcomes) for mild dispersion around the causal anchor.
+        td_prior_means = [
+            float(v["mean"])
+            for k, v in priors.items()
+            if k.startswith("ANYTIME_TD:") and isinstance(v, dict) and np.isfinite(float(v.get("mean", np.nan)))
+        ]
+        td_base_rate = float(np.mean(td_prior_means)) if td_prior_means else 0.18
+        p_mkt = np.clip(0.85 * anchor * scale + 0.15 * td_base_rate, 0.04, 0.85)
         out = shrunk[["game_id", "player_id", "player_name", "position", "role", "team", "opponent", "season", "week", "games_played"]].copy()
         out["line"] = 0.5
         out["y_hit"] = (y_actual > 0.5).astype(np.float64)
@@ -619,10 +626,10 @@ def _train_and_eval_market_fold(
     p_blend_te = w_blend * p_mkt_te + (1.0 - w_blend) * p_model_te
     p_cal_te = calibrator.calibrate(p_blend_te)
 
-    # Collect main-line prediction lookup for SGP evaluation
+    # Collect main-line prediction lookup (including line threshold) for SGP evaluation
     main_lines = te_grid.iloc[len(te_sub) : 2 * len(te_sub)] if len(te_grid) >= 2 * len(te_sub) else te_grid
     main_probs = p_cal_te[len(te_sub) : 2 * len(te_sub)] if len(te_grid) >= 2 * len(te_sub) else p_cal_te
-    sgp_leg_rows = main_lines[["game_id", "player_id"]].copy()
+    sgp_leg_rows = main_lines[["game_id", "player_id", "line"]].copy()
     sgp_leg_rows["market"] = spec.market
     sgp_leg_rows["prob"] = main_probs
 
