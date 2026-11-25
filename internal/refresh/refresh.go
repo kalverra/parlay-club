@@ -260,8 +260,9 @@ type Service struct {
 
 	flight singleflight.Group
 
-	mu      sync.Mutex
-	backoff map[string]time.Time
+	mu                 sync.Mutex
+	backoff            map[string]time.Time
+	onMarketDataChange func()
 
 	// stopCtx cancels the work Shutdown must not outlive: a sync still
 	// fetching or writing while the database closes. stopMu makes the check
@@ -335,6 +336,23 @@ func New(deps Deps) *Service {
 		backoff:       make(map[string]time.Time),
 		stopCtx:       stopCtx,
 		stopCancel:    stopCancel,
+	}
+}
+
+// SetOnMarketDataChange registers a callback invoked after scoreboard or
+// nflverse syncs commit new final-game or nflverse data.
+func (s *Service) SetOnMarketDataChange(fn func()) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.onMarketDataChange = fn
+}
+
+func (s *Service) notifyMarketDataChange() {
+	s.mu.Lock()
+	fn := s.onMarketDataChange
+	s.mu.Unlock()
+	if fn != nil {
+		fn()
 	}
 }
 

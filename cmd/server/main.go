@@ -140,6 +140,7 @@ func run() error {
 		refresher = runtime.refresher
 		slipService = runtime.slips
 		slipService.SetOnGradeChange(evalCache.InvalidateGroup)
+		refresher.SetOnMarketDataChange(evalCache.InvalidateMarket)
 		appNow = runtime.scenario.Now
 		kick = runtime.Kick
 		drain = runtime.Shutdown
@@ -272,6 +273,9 @@ func newProdServices(
 		Publisher:     hub,
 		Logger:        logger,
 	})
+	if evalCache != nil {
+		refresher.SetOnMarketDataChange(evalCache.InvalidateMarket)
+	}
 	return refresher, slipService
 }
 

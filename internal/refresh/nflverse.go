@@ -76,6 +76,7 @@ func (s *Service) syncNFLverse(ctx context.Context, week db.Week, now time.Time)
 	}
 	if changed {
 		s.publishWeek(ctx, week.ID)
+		s.notifyMarketDataChange()
 	}
 	return changed, nil
 }

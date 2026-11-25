@@ -68,6 +68,7 @@ func (s *Service) syncScoreboard(ctx context.Context, now time.Time) (bool, erro
 	}
 
 	changed := false
+	newlyFinal := false
 	var weekID int64
 	err = s.store.Tx(ctx, func(tx *db.Store) error {
 		week, err := tx.UpsertWeek(ctx, board.Season.Year, board.Season.Type, board.Week.Number)
@@ -93,6 +94,9 @@ func (s *Service) syncScoreboard(ctx context.Context, now time.Time) (bool, erro
 			if !found || !reflect.DeepEqual(old, stored) {
 				changed = true
 			}
+			if stored.Status == db.GameFinal && (!found || old.Status != db.GameFinal) {
+				newlyFinal = true
+			}
 		}
 
 		return tx.RecordSync(ctx, ScoreboardSource, now, nil)
@@ -102,6 +106,9 @@ func (s *Service) syncScoreboard(ctx context.Context, now time.Time) (bool, erro
 	}
 	if changed {
 		s.publishWeek(ctx, weekID)
+	}
+	if newlyFinal {
+		s.notifyMarketDataChange()
 	}
 	return changed, nil
 }
