@@ -64,12 +64,12 @@ func (s *Service) syncRoster(ctx context.Context, teamAbbr, espnTeamID string, n
 	return len(dbPlayers) > 0, nil
 }
 
-// summarySource syncs one game's ESPN summary and injuries.
-func (s *Service) summarySource(game db.Game, now time.Time) source {
+// summarySource syncs one game's ESPN summary, injuries, and (when live) box score.
+func (s *Service) summarySource(game db.Game, now time.Time, hasSlipLegs bool) source {
 	return source{
 		key: SummarySource(game.ID),
 		due: func(_ context.Context, state db.SyncState) (bool, error) {
-			return summaryStale(state.FetchedAt, now, game), nil
+			return summaryStale(state.FetchedAt, now, game, hasSlipLegs), nil
 		},
 		run: func(ctx context.Context) (bool, error) {
 			return s.syncSummary(ctx, game, now)
@@ -77,23 +77,46 @@ func (s *Service) summarySource(game db.Game, now time.Time) source {
 	}
 }
 
-// syncSummary fetches one game's summary and writes injuries_json.
+// syncSummary fetches one game's summary and writes injuries_json (and
+// boxscore_json when the game is live).
 func (s *Service) syncSummary(ctx context.Context, game db.Game, now time.Time) (bool, error) {
 	if s.espn == nil || game.Status == db.GameFinal {
 		return false, nil
 	}
-	rawInjuries, err := s.espn.SummaryInjuries(ctx, game.ID)
-	if err != nil {
-		return false, fmt.Errorf("summary %s: %w", game.ID, err)
+
+	var (
+		rawInjuries  string
+		boxscoreJSON *string
+	)
+	if sc, ok := s.espn.(summaryClient); ok {
+		summary, err := sc.Summary(ctx, game.ID)
+		if err != nil {
+			return false, fmt.Errorf("summary %s: %w", game.ID, err)
+		}
+		rawInjuries = summary.InjuriesJSON
+		if game.Status == db.GameLive {
+			encoded, err := json.Marshal(summary.BoxScore)
+			if err != nil {
+				return false, fmt.Errorf("marshal boxscore %s: %w", game.ID, err)
+			}
+			encodedStr := string(encoded)
+			boxscoreJSON = &encodedStr
+		}
+	} else {
+		var err error
+		rawInjuries, err = s.espn.SummaryInjuries(ctx, game.ID)
+		if err != nil {
+			return false, fmt.Errorf("summary %s: %w", game.ID, err)
+		}
 	}
 
 	changed := false
-	err = s.store.Tx(ctx, func(tx *db.Store) error {
-		injuriesChanged, err := tx.SetGameInjuries(ctx, game.ID, rawInjuries)
+	err := s.store.Tx(ctx, func(tx *db.Store) error {
+		summaryChanged, err := tx.SetGameSummary(ctx, game.ID, rawInjuries, boxscoreJSON)
 		if err != nil {
 			return err
 		}
-		changed = injuriesChanged
+		changed = summaryChanged
 		return tx.RecordSync(ctx, SummarySource(game.ID), now, nil)
 	})
 	if err != nil {

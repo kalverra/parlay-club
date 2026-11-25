@@ -821,16 +821,18 @@ func TestSummaryStaleRules(t *testing.T) {
 	sunday := novemberTime(8, 12, 0)
 	saturday := novemberTime(7, 12, 0)
 	scheduledGame := db.Game{ID: "401", Status: db.GameScheduled, Kickoff: novemberTime(8, 13, 0)}
+	liveGame := db.Game{ID: "405", Status: db.GameLive, Kickoff: novemberTime(8, 13, 0)}
 	saturdayNearKickoff := db.Game{ID: "403", Status: db.GameScheduled, Kickoff: saturday.Add(3 * time.Hour)}
 	saturdayFarKickoff := db.Game{ID: "404", Status: db.GameScheduled, Kickoff: saturday.Add(6 * time.Hour)}
 	finalGame := db.Game{ID: "402", Status: db.GameFinal}
 
 	tests := []struct {
-		name string
-		last time.Time
-		now  time.Time
-		game db.Game
-		want bool
+		name        string
+		last        time.Time
+		now         time.Time
+		game        db.Game
+		hasSlipLegs bool
+		want        bool
 	}{
 		{
 			name: "never fetched scheduled game",
@@ -839,10 +841,59 @@ func TestSummaryStaleRules(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "final game is skipped",
-			now:  sunday,
-			game: finalGame,
-			want: false,
+			name:        "final game is skipped even with slip legs",
+			now:         sunday,
+			game:        finalGame,
+			hasSlipLegs: true,
+			want:        false,
+		},
+		{
+			name:        "live game with slip legs waits 2 minutes",
+			last:        sunday.Add(-2*time.Minute + time.Second),
+			now:         sunday,
+			game:        liveGame,
+			hasSlipLegs: true,
+			want:        false,
+		},
+		{
+			name:        "live game with slip legs at 2 minutes",
+			last:        sunday.Add(-2 * time.Minute),
+			now:         sunday,
+			game:        liveGame,
+			hasSlipLegs: true,
+			want:        true,
+		},
+		{
+			name:        "live game without slip legs on game day waits 15 minutes",
+			last:        sunday.Add(-14 * time.Minute),
+			now:         sunday,
+			game:        liveGame,
+			hasSlipLegs: false,
+			want:        false,
+		},
+		{
+			name:        "live game without slip legs on game day at 15 minutes",
+			last:        sunday.Add(-15 * time.Minute),
+			now:         sunday,
+			game:        liveGame,
+			hasSlipLegs: false,
+			want:        true,
+		},
+		{
+			name:        "live game without slip legs off game day waits 1 hour",
+			last:        saturday.Add(-59 * time.Minute),
+			now:         saturday,
+			game:        liveGame,
+			hasSlipLegs: false,
+			want:        false,
+		},
+		{
+			name:        "scheduled game with slip legs on game day still waits 15 minutes",
+			last:        sunday.Add(-14 * time.Minute),
+			now:         sunday,
+			game:        scheduledGame,
+			hasSlipLegs: true,
+			want:        false,
 		},
 		{
 			name: "game day waits 15 minutes",
@@ -897,7 +948,7 @@ func TestSummaryStaleRules(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			assert.Equal(t, test.want, summaryStale(test.last, test.now, test.game))
+			assert.Equal(t, test.want, summaryStale(test.last, test.now, test.game, test.hasSlipLegs))
 		})
 	}
 }
