@@ -229,3 +229,27 @@ func TestBoxScoreReportsHTTPFailure(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "boxscore 401873038")
 }
+
+func TestParseBoxScoreJSON(t *testing.T) {
+	t.Parallel()
+
+	raw, err := os.ReadFile(filepath.Join("testdata", "summary_week9_featured.json"))
+	require.NoError(t, err)
+
+	box, err := espn.ParseBoxScoreJSON(raw)
+	require.NoError(t, err)
+	assert.True(t, box.Completed)
+	assert.True(t, box.HasStats)
+	burrow, ok := findBoxPlayer(box.Players, "3915511")
+	require.True(t, ok)
+	assert.Equal(t, 271, burrow.Passing.PassingYards)
+
+	emptyRaw, err := os.ReadFile(filepath.Join("testdata", "summary_empty.json"))
+	require.NoError(t, err)
+	emptyBox, err := espn.ParseBoxScoreJSON(emptyRaw)
+	require.NoError(t, err)
+	assert.False(t, emptyBox.HasStats)
+
+	_, err = espn.ParseBoxScoreJSON([]byte("{invalid"))
+	require.Error(t, err)
+}

@@ -2,6 +2,7 @@ package espn
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"net/url"
@@ -101,6 +102,15 @@ func (c *Client) BoxScore(ctx context.Context, eventID string) (BoxScore, error)
 		return BoxScore{}, fmt.Errorf("boxscore %s: %w", eventID, err)
 	}
 	return parseBoxScore(raw), nil
+}
+
+// ParseBoxScoreJSON decodes raw ESPN /summary JSON into a BoxScore.
+func ParseBoxScoreJSON(raw []byte) (BoxScore, error) {
+	var parsed rawSummaryBoxScore
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		return BoxScore{}, fmt.Errorf("parse boxscore json: %w", err)
+	}
+	return parseBoxScore(parsed), nil
 }
 
 func parseBoxScore(raw rawSummaryBoxScore) BoxScore {
