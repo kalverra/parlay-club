@@ -23,7 +23,8 @@ team efficiency, player usage, and snap-count signals. `0013_canonical_players.s
 hook) refreshes `roster_players.norm_name`, deduplicates colliding `odds` rows onto canonical `player_name` and `team`
 values, and backfills missing `legs.player_id` and `legs.team` values. `0014_roster_injuries.sql` adds `injury_status` and `injury_date` to `roster_players`. `0015_research_context.sql` adds
 `games_json` to `player_gamelogs` and adds opponent, player name, position, passing/rushing/receiving/kicking stat
-columns, and `idx_nflverse_player_weeks_opp_pos` to `nflverse_player_weeks`.
+columns, and `idx_nflverse_player_weeks_opp_pos` to `nflverse_player_weeks`. `0018_live_game_state.sql` adds nullable
+`period`, `clock`, and `boxscore_json` columns to `games`.
 
 ## Connection settings
 
@@ -55,7 +56,7 @@ writer handle.
 - `db.Migrate` applies every file whose number is greater than `PRAGMA user_version`, in number order.
 - Each file runs in its own transaction. The migration's statements and its `user_version` bump commit together, so a
   failed migration leaves neither behind.
-- A fresh database ends at version 17 with every table below.
+- A fresh database ends at version 18 with every table below.
 - `0001_init.sql` creates `groups`, `group_members`, and `slips.group_id`. A database created before groups existed has
   the old `slips` shape, so delete it and let the migrations rebuild.
 - `0002_google_identity.sql` rebuilds `users` in its transaction with the SQLite 12-step method and
@@ -88,7 +89,8 @@ writer handle.
   `rec_tds`, and `kicker_pts` to `nflverse_player_weeks`, and creates `idx_nflverse_player_weeks_opp_pos`.
 - `0017_slip_games.sql` creates `slip_games` (`slip_id`, `game_id`) with `idx_slip_games_slip_id` to store explicit
   eligible games for slips with `slate_scope = 'custom'`.
-- Never edit an applied file. Add `0018_name.sql` and up.
+- `0018_live_game_state.sql` adds nullable `period`, `clock`, and `boxscore_json` columns to `games`.
+- Never edit an applied file. Add `0019_name.sql` and up.
 - `PRAGMA user_version` on the database file is the only record of what ran.
 
 ## Tables
@@ -99,7 +101,7 @@ writer handle.
 | `group_members`   | Which people belong to which group and when they joined.      |
 | `users`           | People, their Google identity, avatar color, home book, and active flag. |
 | `weeks`           | NFL weeks, keyed `season*1000 + season_type*100 + week_num`.  |
-| `games`           | One row per ESPN event: teams, kickoff, venue, weather, scores. |
+| `games`           | One row per ESPN event: teams, kickoff, venue, weather, scores, live clock, injuries, and box score. |
 | `odds`            | Odds API prices and sportsbook deep links per game, book, market, and selection. |
 | `nfelo_games`     | nfelo's pre-game model spread, win probability, and QB adjustments per game. |
 | `nflverse_player_ids`   | Crosswalk mapping ESPN athlete IDs to nflverse GSIS and PFR IDs. |
@@ -214,7 +216,10 @@ CREATE TABLE games (
   injuries_json  TEXT,                         -- raw ESPN injuries block
   updated_at     TEXT NOT NULL,
   home_logo      TEXT,                         -- ESPN team logo URL (https:// only)
-  away_logo      TEXT                          -- ESPN team logo URL (https:// only)
+  away_logo      TEXT,                         -- ESPN team logo URL (https:// only)
+  period         INTEGER,                      -- live quarter/OT period; NULL unless LIVE
+  clock          TEXT,                         -- live display clock or break label; NULL unless LIVE
+  boxscore_json  TEXT                          -- marshaled espn.BoxScore JSON while LIVE
 );
 CREATE INDEX games_week ON games(week_id, kickoff_utc);
 
@@ -473,5 +478,6 @@ how to read it.
 - `player_gamelogs.stats_json` stores parsed season market values as a JSON map of float arrays, ordered most recent first. `player_gamelogs.games_json` stores the aligned JSON array of `espn.GameLogEntry` objects (`eventId`, `week`, `opponent`, `atVs`, `result`, `score`) in the same most-recent-first order.
 - `player_matches` maps normalized sportsbook player names and teams to ESPN athlete IDs. A row with `manual = 1` was
   corrected by a user and is never overwritten by automated matching.
-- `games.injuries_json` stores the raw ESPN summary injuries JSON array.
+- `games.period` and `games.clock` are populated only while a game is `LIVE` (`NULL` for `SCHEDULED` and `FINAL`).
+- `games.injuries_json` stores the raw ESPN summary injuries JSON array; `games.boxscore_json` stores the marshaled `espn.BoxScore` JSON for `LIVE` games (preserved when `SetGameSummary` is called with `nil` `boxscoreJSON`).
 - An invite token is a bearer secret. Do not log it or echo it in an error.
