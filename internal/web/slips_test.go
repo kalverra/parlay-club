@@ -3,6 +3,7 @@ package web_test
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"html"
@@ -21,6 +22,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kalverra/parlay-club/internal/db"
+	"github.com/kalverra/parlay-club/internal/ingest/espn"
 	"github.com/kalverra/parlay-club/internal/live"
 	"github.com/kalverra/parlay-club/internal/parlay"
 	"github.com/kalverra/parlay-club/internal/slips"
@@ -1926,4 +1928,283 @@ func TestSlipHubHighlightsRenderImpliedChances(t *testing.T) {
 	assert.Contains(t, body, "(51%)")
 	// 2-leg combo of -105 and -105 is +281 -> (26%).
 	assert.Contains(t, body, "(26%)")
+}
+
+func TestSlipHubLiveProgressStates(t *testing.T) {
+	t.Parallel()
+
+	t.Run("scheduled", func(t *testing.T) {
+		t.Parallel()
+		fixture := newSlipFixture(t, 2)
+		game := addGame(t, fixture, gameKickoff())
+		resp := postForm(t, fixture.handler, fmt.Sprintf("/slips/%d/legs", fixture.slip.ID), url.Values{
+			"game_id":     {game.ID},
+			"market_type": {"ML"},
+			"team":        {"BUF"},
+			"side":        {"TEAM"},
+			"odds":        {"-110"},
+		})
+		require.Equal(t, http.StatusOK, resp.Code, resp.Body.String())
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequestWithContext(
+			t.Context(),
+			http.MethodGet,
+			fmt.Sprintf("/slips/%d", fixture.slip.ID),
+			nil,
+		)
+		fixture.handler.ServeHTTP(rec, req)
+		require.Equal(t, http.StatusOK, rec.Code)
+		body := rec.Body.String()
+		assert.NotContains(t, body, "data-slip-live-progress")
+		assert.NotContains(t, body, "data-leg-live-progress")
+	})
+
+	t.Run("live", func(t *testing.T) {
+		t.Parallel()
+		fixture := newSlipFixture(t, 3)
+		liveGame := addGame(t, fixture, gameKickoff())
+		schedGame, err := fixture.store.UpsertGame(t.Context(), db.Game{
+			ID:         "sched-game-1",
+			WeekID:     fixture.week.ID,
+			HomeTeam:   "DAL",
+			AwayTeam:   "PHI",
+			HomeName:   "Dallas Cowboys",
+			AwayName:   "Philadelphia Eagles",
+			HomeESPNID: "6",
+			AwayESPNID: "21",
+			Kickoff:    gameKickoff(),
+			Status:     db.GameScheduled,
+		})
+		require.NoError(t, err)
+
+		// Add legs before the game kicks off.
+		for _, form := range []url.Values{
+			{
+				"game_id":     {liveGame.ID},
+				"market_type": {"SPREAD"},
+				"team":        {"BUF"},
+				"side":        {"TEAM"},
+				"line":        {"-3.5"},
+				"odds":        {"-110"},
+			},
+			{
+				"game_id":     {liveGame.ID},
+				"market_type": {"PASS_YDS"},
+				"team":        {"BUF"},
+				"player_id":   {"3918298"},
+				"player_name": {"Josh Allen"},
+				"side":        {"OVER"},
+				"line":        {"245.5"},
+				"odds":        {"-110"},
+			},
+			{
+				"game_id":     {schedGame.ID},
+				"market_type": {"ML"},
+				"team":        {"DAL"},
+				"side":        {"TEAM"},
+				"odds":        {"+120"},
+			},
+		} {
+			resp := postForm(t, fixture.handler, fmt.Sprintf("/slips/%d/legs", fixture.slip.ID), form)
+			require.Equal(t, http.StatusOK, resp.Code, resp.Body.String())
+		}
+
+		// Transition game to LIVE with score, clock, and box score.
+		liveGame.Status = db.GameLive
+		liveGame.HomeScore = new(21)
+		liveGame.AwayScore = new(17)
+		liveGame.Period = new(3)
+		liveGame.Clock = new("8:42")
+		_, err = fixture.store.UpsertGame(t.Context(), liveGame)
+		require.NoError(t, err)
+
+		boxBytes, err := json.Marshal(espn.BoxScore{
+			HasStats: true,
+			Players: []espn.PlayerBoxStats{
+				{
+					PlayerID:    "3918298",
+					DisplayName: "Josh Allen",
+					TeamAbbrev:  "BUF",
+					Passing:     espn.PassingStats{PassingYards: 210},
+				},
+			},
+		})
+		require.NoError(t, err)
+		_, err = fixture.store.SetGameSummary(t.Context(), liveGame.ID, "", new(string(boxBytes)))
+		require.NoError(t, err)
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequestWithContext(
+			t.Context(),
+			http.MethodGet,
+			fmt.Sprintf("/slips/%d", fixture.slip.ID),
+			nil,
+		)
+		fixture.handler.ServeHTTP(rec, req)
+		require.Equal(t, http.StatusOK, rec.Code)
+		body := rec.Body.String()
+
+		assert.Contains(t, body, `data-slip-live-progress data-live-state="LIVE"`)
+		assert.Contains(t, body, `role="progressbar"`)
+		assert.Contains(t, body, "0/3 hit · 2 live")
+		assert.Contains(t, body, "Live chance ")
+		assert.Contains(t, body, "Pre-game ")
+		assert.Equal(t, 2, strings.Count(body, "data-leg-live-progress"))
+		assert.Contains(t, body, "BUF 21-17 (-3.5) · Q3 8:42")
+		assert.Contains(t, body, "210 / 245.5 yds · Q3 8:42")
+	})
+
+	t.Run("cashed", func(t *testing.T) {
+		t.Parallel()
+		fixture := newSlipFixture(t, 2)
+		game := addGame(t, fixture, gameKickoff())
+		for _, form := range []url.Values{
+			{"game_id": {game.ID}, "market_type": {"ML"}, "team": {"BUF"}, "side": {"TEAM"}, "odds": {"-110"}},
+			{"game_id": {game.ID}, "market_type": {"TOTAL"}, "side": {"OVER"}, "line": {"47.5"}, "odds": {"-110"}},
+		} {
+			resp := postForm(t, fixture.handler, fmt.Sprintf("/slips/%d/legs", fixture.slip.ID), form)
+			require.Equal(t, http.StatusOK, resp.Code, resp.Body.String())
+		}
+		legs, err := fixture.store.LegsForSlip(t.Context(), fixture.slip.ID)
+		require.NoError(t, err)
+		require.Len(t, legs, 2)
+
+		require.Equal(
+			t,
+			http.StatusOK,
+			putForm(t, fixture.handler, fmt.Sprintf("/legs/%d/result", legs[0].ID), url.Values{"result": {"WON"}}).Code,
+		)
+		require.Equal(
+			t,
+			http.StatusOK,
+			putForm(
+				t,
+				fixture.handler,
+				fmt.Sprintf("/legs/%d/result", legs[1].ID),
+				url.Values{"result": {"PUSH"}},
+			).Code,
+		)
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequestWithContext(
+			t.Context(),
+			http.MethodGet,
+			fmt.Sprintf("/slips/%d", fixture.slip.ID),
+			nil,
+		)
+		fixture.handler.ServeHTTP(rec, req)
+		require.Equal(t, http.StatusOK, rec.Code)
+		body := rec.Body.String()
+
+		assert.Contains(t, body, `data-slip-live-progress data-live-state="CASHED"`)
+		assert.Contains(t, body, "1/1 hit")
+		assert.Contains(t, body, "Live chance 100%")
+		assert.Contains(t, body, `aria-valuenow="100"`)
+	})
+
+	t.Run("busted", func(t *testing.T) {
+		t.Parallel()
+		fixture := newSlipFixture(t, 2)
+		game := addGame(t, fixture, gameKickoff())
+		for _, form := range []url.Values{
+			{"game_id": {game.ID}, "market_type": {"ML"}, "team": {"BUF"}, "side": {"TEAM"}, "odds": {"-110"}},
+			{"game_id": {game.ID}, "market_type": {"TOTAL"}, "side": {"OVER"}, "line": {"47.5"}, "odds": {"-110"}},
+		} {
+			resp := postForm(t, fixture.handler, fmt.Sprintf("/slips/%d/legs", fixture.slip.ID), form)
+			require.Equal(t, http.StatusOK, resp.Code, resp.Body.String())
+		}
+		legs, err := fixture.store.LegsForSlip(t.Context(), fixture.slip.ID)
+		require.NoError(t, err)
+		require.Len(t, legs, 2)
+
+		require.Equal(
+			t,
+			http.StatusOK,
+			putForm(t, fixture.handler, fmt.Sprintf("/legs/%d/result", legs[0].ID), url.Values{"result": {"WON"}}).Code,
+		)
+		require.Equal(
+			t,
+			http.StatusOK,
+			putForm(
+				t,
+				fixture.handler,
+				fmt.Sprintf("/legs/%d/result", legs[1].ID),
+				url.Values{"result": {"LOST"}},
+			).Code,
+		)
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequestWithContext(
+			t.Context(),
+			http.MethodGet,
+			fmt.Sprintf("/slips/%d", fixture.slip.ID),
+			nil,
+		)
+		fixture.handler.ServeHTTP(rec, req)
+		require.Equal(t, http.StatusOK, rec.Code)
+		body := rec.Body.String()
+
+		assert.Contains(t, body, `data-slip-live-progress data-live-state="BUSTED"`)
+		assert.Contains(t, body, "1/2 hit · 1 lost")
+		assert.Contains(t, body, "Live chance 0%")
+	})
+}
+
+func TestSlipPanelSSERefreshesLiveProgress(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 1)
+	game := addGame(t, fixture, gameKickoff())
+	resp := postForm(t, fixture.handler, fmt.Sprintf("/slips/%d/legs", fixture.slip.ID), url.Values{
+		"game_id":     {game.ID},
+		"market_type": {"TOTAL"},
+		"side":        {"OVER"},
+		"line":        {"47.5"},
+		"odds":        {"-110"},
+	})
+	require.Equal(t, http.StatusOK, resp.Code, resp.Body.String())
+
+	server := httptest.NewServer(fixture.handler)
+	t.Cleanup(server.Close)
+
+	req, err := http.NewRequestWithContext(
+		t.Context(),
+		http.MethodGet,
+		fmt.Sprintf("%s/slips/%d/events", server.URL, fixture.slip.ID),
+		nil,
+	)
+	require.NoError(t, err)
+	stream, err := server.Client().Do(req)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, stream.StatusCode)
+	t.Cleanup(func() { assert.NoError(t, stream.Body.Close()) })
+
+	// Simulate a live score update crossing the total line and publishing slip-updated.
+	game.Status = db.GameLive
+	game.HomeScore = new(28)
+	game.AwayScore = new(24)
+	game.Period = new(4)
+	game.Clock = new("2:10")
+	_, err = fixture.store.UpsertGame(t.Context(), game)
+	require.NoError(t, err)
+	fixture.hub.Publish(fmt.Sprintf("slip:%d", fixture.slip.ID))
+
+	assert.Equal(t, "slip-updated", waitForEvent(t, stream.Body))
+
+	// Fetch the refreshed panel partial that HTMX requests on slip-updated.
+	panelRec := httptest.NewRecorder()
+	panelReq := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodGet,
+		fmt.Sprintf("/slips/%d/panel", fixture.slip.ID),
+		nil,
+	)
+	fixture.handler.ServeHTTP(panelRec, panelReq)
+	require.Equal(t, http.StatusOK, panelRec.Code)
+	panelBody := panelRec.Body.String()
+
+	assert.Contains(t, panelBody, `data-slip-live-progress data-live-state="CASHED"`)
+	assert.Contains(t, panelBody, "52 / 47.5 pts · Q4 2:10")
+	assert.Contains(t, panelBody, "Live chance 100%")
 }
