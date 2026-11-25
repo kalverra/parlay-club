@@ -146,15 +146,14 @@ func gradePlayerProp(market string, leg LegInput, box *espn.BoxScore) parlay.Res
 	if strings.TrimSpace(team) == "" {
 		_, team = db.StripPlayerTag(leg.PlayerName)
 	}
-	player, found := findPlayer(box.Players, playerID, normName, team)
+	player, found := FindPlayer(box.Players, playerID, normName, team)
 	if !found {
 		return parlay.Void
 	}
 
 	if market == "ANYTIME_TD" {
 		// Passing TDs do not count toward anytime TD scorer props.
-		tds := player.Rushing.RushingTDs + player.Receiving.ReceivingTDs + player.OtherTDs
-		scored := tds >= 1
+		scored := AnytimeTDCount(player) >= 1
 		if side == "NO" {
 			if scored {
 				return parlay.Lost
@@ -167,15 +166,22 @@ func gradePlayerProp(market string, leg LegInput, box *espn.BoxScore) parlay.Res
 		return parlay.Lost
 	}
 
-	stat, ok := propStat(market, player)
+	stat, ok := PlayerMarketStat(market, player)
 	if !ok {
 		return parlay.NeedsGrading
 	}
 	return gradeOverUnder(stat, *leg.Line, side)
 }
 
-func propStat(market string, p espn.PlayerBoxStats) (float64, bool) {
-	switch market {
+// AnytimeTDCount returns the total non-passing touchdowns scored by p.
+// Passing TDs do not count toward anytime TD scorer props.
+func AnytimeTDCount(p espn.PlayerBoxStats) int {
+	return p.Rushing.RushingTDs + p.Receiving.ReceivingTDs + p.OtherTDs
+}
+
+// PlayerMarketStat extracts the box-score stat corresponding to market for p.
+func PlayerMarketStat(market string, p espn.PlayerBoxStats) (float64, bool) {
+	switch strings.ToUpper(strings.TrimSpace(market)) {
 	case "PASS_YDS":
 		return float64(p.Passing.PassingYards), true
 	case "PASS_TDS":
@@ -188,6 +194,8 @@ func propStat(market string, p espn.PlayerBoxStats) (float64, bool) {
 		return float64(p.Receiving.ReceivingYards), true
 	case "RECEPTIONS":
 		return float64(p.Receiving.Receptions), true
+	case "ANYTIME_TD":
+		return float64(AnytimeTDCount(p)), true
 	case "KICKER_PTS":
 		pts := p.Kicking.TotalKickingPoints
 		if pts == 0 {
@@ -238,7 +246,9 @@ func teamScores(team string, game GameScore) (teamScore, oppScore int, ok bool) 
 	}
 }
 
-func findPlayer(players []espn.PlayerBoxStats, playerID, normName, team string) (espn.PlayerBoxStats, bool) {
+// FindPlayer locates a player in an ESPN box score by ESPN ID first, then by
+// normalized display name (filtered by team when both are present).
+func FindPlayer(players []espn.PlayerBoxStats, playerID, normName, team string) (espn.PlayerBoxStats, bool) {
 	if playerID != "" {
 		for _, p := range players {
 			if strings.TrimSpace(p.PlayerID) == playerID {
