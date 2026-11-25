@@ -69,9 +69,17 @@ func TestRecordSeasonQueriesIsolateGroupAndStatus(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []int{2026, 2025, 2024}, seasons)
 
+	allSeasons, err := store.Seasons(t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, []int{2026, 2025, 2024}, allSeasons)
+
 	gradedSeasons, err := store.GradedSeasonsForGroup(t.Context(), groupA.ID)
 	require.NoError(t, err)
 	assert.Equal(t, []int{2025, 2024}, gradedSeasons)
+
+	allGradedSeasons, err := store.GradedSeasons(t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, []int{2026, 2025, 2024}, allGradedSeasons)
 
 	gradedSlips, err := store.GradedSlipsForGroupSeason(t.Context(), groupA.ID, 2025)
 	require.NoError(t, err)

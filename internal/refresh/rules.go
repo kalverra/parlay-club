@@ -21,8 +21,8 @@ func scoreboardStale(last, now time.Time, games []db.Game, live bool) bool {
 	return !now.Before(last.Add(scoreboardAge(now, games, live)))
 }
 
-// scoreboardAge is the slate's freshness window: 5 minutes while a game is
-// live, 15 minutes on a scheduled game day, and 2 hours otherwise.
+// scoreboardAge is the slate's freshness window: 2 minutes while a game is
+// live, 5 minutes on a scheduled game day, and 15 minutes otherwise.
 func scoreboardAge(now time.Time, games []db.Game, live bool) time.Duration {
 	switch {
 	case live:

@@ -86,11 +86,16 @@ func TestCacheGetOrComputeAndInvalidate(t *testing.T) {
 	require.Len(t, reportB1.Reports, 1)
 	assert.Equal(t, 1, reportB1.Coverage.TotalLegs)
 
+	global1, err := cache.GetOrCompute(ctx, store, 0, 2025)
+	require.NoError(t, err)
+	require.Len(t, global1.Reports, 1)
+	assert.Equal(t, 2, global1.Coverage.TotalLegs)
+
 	// Add another settled slip to both groups in DB without invalidating yet.
 	seedGradedSlipForGroup(t, store, groupA, userA, week1, "Slip A2", "g-cache-1", parlay.Won)
 	seedGradedSlipForGroup(t, store, groupB, userB, week1, "Slip B2", "g-cache-1", parlay.Won)
 
-	// Cache hits should still return 1 leg for both groups.
+	// Cache hits should still return 1 leg for both groups and 2 for global.
 	hitA, err := cache.GetOrCompute(ctx, store, groupA.ID, 2025)
 	require.NoError(t, err)
 	assert.Equal(t, 1, hitA.Coverage.TotalLegs)
@@ -99,12 +104,20 @@ func TestCacheGetOrComputeAndInvalidate(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 1, hitB.Coverage.TotalLegs)
 
-	// Invalidate only group A: group A recomputes (2 legs), group B stays cached (1 leg).
+	hitGlobal, err := cache.GetOrCompute(ctx, store, 0, 2025)
+	require.NoError(t, err)
+	assert.Equal(t, 2, hitGlobal.Coverage.TotalLegs)
+
+	// Invalidate only group A: group A recomputes (2 legs), global recomputes (4 legs), group B stays cached (1 leg).
 	cache.InvalidateGroup(groupA.ID)
 
 	reportA2, err := cache.GetOrCompute(ctx, store, groupA.ID, 2025)
 	require.NoError(t, err)
 	assert.Equal(t, 2, reportA2.Coverage.TotalLegs)
+
+	global2, err := cache.GetOrCompute(ctx, store, 0, 2025)
+	require.NoError(t, err)
+	assert.Equal(t, 4, global2.Coverage.TotalLegs)
 
 	stillCachedB, err := cache.GetOrCompute(ctx, store, groupB.ID, 2025)
 	require.NoError(t, err)

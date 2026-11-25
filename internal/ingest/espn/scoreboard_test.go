@@ -140,32 +140,32 @@ func TestScoreboardParsesLiveAndFinalGames(t *testing.T) {
 	assert.Nil(t, scheduled.Away.Score)
 }
 
-func TestInSlate(t *testing.T) {
+func TestScoreboardParsesAllDaysOfWeek(t *testing.T) {
 	t.Parallel()
 
-	location := eastern(t)
-	// 2026-11-05 is Thursday, 11-06 is Friday, 11-07 is Saturday, 11-08 is Sunday,
-	// 11-09 is Monday, 11-10 is Tuesday, 11-11 is Wednesday in New York.
-	tests := []struct {
-		name    string
-		kickoff time.Time
-		want    bool
-	}{
-		{name: "Thursday", kickoff: time.Date(2026, time.November, 5, 20, 15, 0, 0, location), want: true},
-		{name: "Friday", kickoff: time.Date(2026, time.November, 6, 20, 0, 0, 0, location), want: false},
-		{name: "Saturday", kickoff: time.Date(2026, time.November, 7, 13, 0, 0, 0, location), want: false},
-		{name: "Sunday", kickoff: time.Date(2026, time.November, 8, 13, 0, 0, 0, location), want: true},
-		{name: "Monday", kickoff: time.Date(2026, time.November, 9, 20, 15, 0, 0, location), want: true},
-		{name: "Tuesday", kickoff: time.Date(2026, time.November, 10, 20, 0, 0, 0, location), want: false},
-		{name: "Wednesday", kickoff: time.Date(2026, time.November, 11, 20, 0, 0, 0, location), want: false},
-	}
+	fixture := `{
+		"season": {"year": 2026, "type": 2},
+		"week": {"number": 13},
+		"events": [
+			{"id": "thu", "date": "2026-11-26T17:30Z", "status": {"type": {"state": "pre"}}, "competitions": [{"competitors": [{"homeAway": "home", "team": {"id": "1", "abbreviation": "DET", "displayName": "Detroit Lions"}}, {"homeAway": "away", "team": {"id": "2", "abbreviation": "CHI", "displayName": "Chicago Bears"}}]}]},
+			{"id": "fri", "date": "2026-11-27T20:00Z", "status": {"type": {"state": "pre"}}, "competitions": [{"competitors": [{"homeAway": "home", "team": {"id": "3", "abbreviation": "KC", "displayName": "Kansas City Chiefs"}}, {"homeAway": "away", "team": {"id": "4", "abbreviation": "LV", "displayName": "Las Vegas Raiders"}}]}]},
+			{"id": "sat", "date": "2026-11-28T18:00Z", "status": {"type": {"state": "pre"}}, "competitions": [{"competitors": [{"homeAway": "home", "team": {"id": "5", "abbreviation": "BUF", "displayName": "Buffalo Bills"}}, {"homeAway": "away", "team": {"id": "6", "abbreviation": "MIA", "displayName": "Miami Dolphins"}}]}]},
+			{"id": "sun", "date": "2026-11-29T18:00Z", "status": {"type": {"state": "pre"}}, "competitions": [{"competitors": [{"homeAway": "home", "team": {"id": "7", "abbreviation": "PHI", "displayName": "Philadelphia Eagles"}}, {"homeAway": "away", "team": {"id": "8", "abbreviation": "DAL", "displayName": "Dallas Cowboys"}}]}]},
+			{"id": "mon", "date": "2026-12-01T01:15Z", "status": {"type": {"state": "pre"}}, "competitions": [{"competitors": [{"homeAway": "home", "team": {"id": "9", "abbreviation": "MIN", "displayName": "Minnesota Vikings"}}, {"homeAway": "away", "team": {"id": "10", "abbreviation": "GB", "displayName": "Green Bay Packers"}}]}]},
+			{"id": "tue", "date": "2026-12-02T00:00Z", "status": {"type": {"state": "pre"}}, "competitions": [{"competitors": [{"homeAway": "home", "team": {"id": "11", "abbreviation": "BAL", "displayName": "Baltimore Ravens"}}, {"homeAway": "away", "team": {"id": "12", "abbreviation": "CIN", "displayName": "Cincinnati Bengals"}}]}]},
+			{"id": "wed", "date": "2026-12-02T18:00Z", "status": {"type": {"state": "pre"}}, "competitions": [{"competitors": [{"homeAway": "home", "team": {"id": "13", "abbreviation": "HOU", "displayName": "Houston Texans"}}, {"homeAway": "away", "team": {"id": "14", "abbreviation": "TEN", "displayName": "Tennessee Titans"}}]}]}
+		]
+	}`
 
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			assert.Equal(t, tc.want, espn.InSlate(tc.kickoff, location))
-		})
-	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(fixture))
+	}))
+	t.Cleanup(server.Close)
+
+	board, err := espn.NewClient(server.URL, server.Client()).Scoreboard(t.Context(), espn.ScoreboardParams{})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"thu", "fri", "sat", "sun", "mon", "tue", "wed"}, gameIDs(board.Games))
 }
 
 func TestScoreboardParsesAnInternationalGame(t *testing.T) {

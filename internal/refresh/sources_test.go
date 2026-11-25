@@ -379,8 +379,8 @@ func TestKickUsesTheScoreboardStalenessClock(t *testing.T) {
 	service.wait()
 	assert.Equal(t, int32(1), scoreboard.calls.Load())
 
-	// Two hours later the midweek slate is stale.
-	clock.Advance(2 * time.Hour)
+	// Fifteen minutes later the midweek slate is stale.
+	clock.Advance(15 * time.Minute)
 	service.KickContext(t.Context())
 	service.wait()
 	assert.Equal(t, int32(2), scoreboard.calls.Load())
