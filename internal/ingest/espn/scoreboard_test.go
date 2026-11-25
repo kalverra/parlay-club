@@ -98,6 +98,8 @@ func TestScoreboardParsesLiveAndFinalGames(t *testing.T) {
 
 	thursday := gameByID(t, board.Games, "401872964")
 	assert.Equal(t, espn.Final, thursday.Status)
+	assert.Nil(t, thursday.Period)
+	assert.Nil(t, thursday.Clock)
 	assert.Equal(t, "CLE", thursday.Home.Abbreviation)
 	assert.NotEmpty(t, thursday.Home.Logo)
 	require.NotNil(t, thursday.Home.Score)
@@ -109,6 +111,10 @@ func TestScoreboardParsesLiveAndFinalGames(t *testing.T) {
 
 	live := gameByID(t, board.Games, "401872971")
 	assert.Equal(t, espn.Live, live.Status)
+	require.NotNil(t, live.Period)
+	assert.Equal(t, 3, *live.Period)
+	require.NotNil(t, live.Clock)
+	assert.Equal(t, "2:29", *live.Clock)
 	assert.Equal(t, "BUF", live.Home.Abbreviation)
 	require.NotNil(t, live.Home.Score)
 	assert.Equal(t, 17, *live.Home.Score)
@@ -118,6 +124,8 @@ func TestScoreboardParsesLiveAndFinalGames(t *testing.T) {
 
 	final := gameByID(t, board.Games, "401872965")
 	assert.Equal(t, espn.Final, final.Status)
+	assert.Nil(t, final.Period)
+	assert.Nil(t, final.Clock)
 	assert.Equal(t, espn.Venue{ID: "5534", Name: "Tottenham Hotspur Stadium"}, final.Venue)
 	require.NotNil(t, final.Home.Score)
 	assert.Equal(t, 13, *final.Home.Score)
@@ -126,6 +134,8 @@ func TestScoreboardParsesLiveAndFinalGames(t *testing.T) {
 
 	scheduled := gameByID(t, board.Games, "401872978")
 	assert.Equal(t, espn.Scheduled, scheduled.Status)
+	assert.Nil(t, scheduled.Period)
+	assert.Nil(t, scheduled.Clock)
 	assert.Nil(t, scheduled.Home.Score, "a game that has not kicked off has no score")
 	assert.Nil(t, scheduled.Away.Score)
 }
@@ -275,6 +285,105 @@ func TestScoreboardReportsAnHTTPFailure(t *testing.T) {
 	_, err := espn.NewClient(server.URL, server.Client()).Scoreboard(t.Context(), espn.ScoreboardParams{})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "503 Service Unavailable")
+}
+
+func TestScoreboardParsesPeriodAndClock(t *testing.T) {
+	t.Parallel()
+
+	intPtr := func(v int) *int { return &v }
+	strPtr := func(v string) *string { return &v }
+
+	cases := []struct {
+		name       string
+		statusJSON string
+		wantStatus espn.Status
+		wantPeriod *int
+		wantClock  *string
+	}{
+		{
+			name:       "pre-game",
+			statusJSON: `{"displayClock":"0:00","period":0,"type":{"name":"STATUS_SCHEDULED","state":"pre","shortDetail":"10/4 - 4:05 PM EDT"}}`,
+			wantStatus: espn.Scheduled,
+		},
+		{
+			name:       "live regulation",
+			statusJSON: `{"displayClock":"8:42","period":3,"type":{"name":"STATUS_IN_PROGRESS","state":"in","shortDetail":"8:42 - 3rd"}}`,
+			wantStatus: espn.Live,
+			wantPeriod: intPtr(3),
+			wantClock:  strPtr("8:42"),
+		},
+		{
+			name:       "halftime",
+			statusJSON: `{"displayClock":"0:00","period":2,"type":{"name":"STATUS_HALFTIME","state":"in","shortDetail":"Halftime"}}`,
+			wantStatus: espn.Live,
+			wantPeriod: intPtr(2),
+			wantClock:  strPtr("Halftime"),
+		},
+		{
+			name:       "end of 1st break",
+			statusJSON: `{"displayClock":"0:00","period":1,"type":{"name":"STATUS_END_PERIOD","state":"in","shortDetail":"End of 1st"}}`,
+			wantStatus: espn.Live,
+			wantPeriod: intPtr(1),
+			wantClock:  strPtr("End of 1st"),
+		},
+		{
+			name:       "end of 3rd fallback",
+			statusJSON: `{"displayClock":"0:00","period":3,"type":{"name":"STATUS_END_PERIOD","state":"in","shortDetail":""}}`,
+			wantStatus: espn.Live,
+			wantPeriod: intPtr(3),
+			wantClock:  strPtr("End of 3rd"),
+		},
+		{
+			name:       "overtime",
+			statusJSON: `{"displayClock":"7:45","period":5,"type":{"name":"STATUS_IN_PROGRESS","state":"in","shortDetail":"7:45 - OT"}}`,
+			wantStatus: espn.Live,
+			wantPeriod: intPtr(5),
+			wantClock:  strPtr("7:45"),
+		},
+		{
+			name:       "final",
+			statusJSON: `{"displayClock":"0:00","period":4,"type":{"name":"STATUS_FINAL","state":"post","shortDetail":"Final"}}`,
+			wantStatus: espn.Final,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			payload := `{
+				"season": {"year": 2026, "type": 2},
+				"week": {"number": 5},
+				"events": [{
+					"id": "401873100",
+					"date": "2026-10-04T17:00Z",
+					"status": ` + tc.statusJSON + `,
+					"competitions": [{
+						"competitors": [
+							{"homeAway":"home","score":"14","team":{"id":"2","abbreviation":"BUF","displayName":"Buffalo Bills"}},
+							{"homeAway":"away","score":"10","team":{"id":"17","abbreviation":"NE","displayName":"New England Patriots"}}
+						],
+						"venue": {"id":"1","fullName":"Highmark Stadium","indoor":false}
+					}]
+				}]
+			}`
+
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(payload))
+			}))
+			t.Cleanup(server.Close)
+
+			board, err := espn.NewClient(server.URL, server.Client()).Scoreboard(t.Context(), espn.ScoreboardParams{})
+			require.NoError(t, err)
+			require.Len(t, board.Games, 1)
+
+			game := board.Games[0]
+			assert.Equal(t, tc.wantStatus, game.Status)
+			assert.Equal(t, tc.wantPeriod, game.Period)
+			assert.Equal(t, tc.wantClock, game.Clock)
+		})
+	}
 }
 
 // serveScoreboard points a client at fixture and returns the parsed board.

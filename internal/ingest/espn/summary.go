@@ -27,6 +27,32 @@ type Injury struct {
 	Detail      string `json:"detail"`
 }
 
+// GameSummary holds both the raw injuries JSON and parsed box score from a
+// single GET /summary?event={eventID} response.
+type GameSummary struct {
+	InjuriesJSON string
+	BoxScore     BoxScore
+}
+
+type rawSummaryResponse struct {
+	Injuries json.RawMessage `json:"injuries"`
+	rawSummaryBoxScore
+}
+
+// Summary fetches GET /summary?event={eventID} once and returns both the raw
+// injuries JSON array (or "[]" when absent) and the parsed box score.
+func (c *Client) Summary(ctx context.Context, eventID string) (GameSummary, error) {
+	var raw rawSummaryResponse
+	query := url.Values{"event": {eventID}}
+	if err := c.get(ctx, "/summary", query, &raw); err != nil {
+		return GameSummary{}, fmt.Errorf("summary %s: %w", eventID, err)
+	}
+	return GameSummary{
+		InjuriesJSON: normalizeInjuriesJSON(raw.Injuries),
+		BoxScore:     parseBoxScore(raw.rawSummaryBoxScore),
+	}, nil
+}
+
 // SummaryInjuries fetches GET /summary?event={eventID} and returns the raw
 // injuries JSON array (or "[]" when absent).
 func (c *Client) SummaryInjuries(ctx context.Context, eventID string) (string, error) {
@@ -37,10 +63,15 @@ func (c *Client) SummaryInjuries(ctx context.Context, eventID string) (string, e
 	if err := c.get(ctx, "/summary", query, &raw); err != nil {
 		return "", fmt.Errorf("summary injuries %s: %w", eventID, err)
 	}
-	if len(raw.Injuries) == 0 || string(raw.Injuries) == "null" {
-		return "[]", nil
+	return normalizeInjuriesJSON(raw.Injuries), nil
+}
+
+func normalizeInjuriesJSON(raw json.RawMessage) string {
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" || trimmed == "null" {
+		return "[]"
 	}
-	return string(raw.Injuries), nil
+	return string(raw)
 }
 
 // keyPositions defines the positions kept when parsing injury reports:
