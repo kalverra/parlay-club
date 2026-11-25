@@ -1,5 +1,5 @@
 [tools]
-go = "latest"
+go = "1.27.3"
 golangci-lint = "latest"
 # Standalone Tailwind CLI used by `go generate ./...`; pinned so app.css is stable.
 "aqua:tailwindlabs/tailwindcss" = "4.3.3"

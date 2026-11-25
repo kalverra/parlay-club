@@ -13,16 +13,100 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  check:
-    name: Generate, lint, test
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+      docker: ${{ steps.filter.outputs.docker }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Classify changed paths
+        id: filter
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          files=""
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            files=$(git diff --name-only "${PR_BASE}...${PR_HEAD}")
+          elif [ -n "$PUSH_BEFORE" ] && [ "$PUSH_BEFORE" != "0000000000000000000000000000000000000000" ] && git cat-file -e "${PUSH_BEFORE}^{commit}" 2>/dev/null; then
+            files=$(git diff --name-only "${PUSH_BEFORE}...${HEAD_SHA}")
+          else
+            # Initial push or unknown base: run everything.
+            echo "code=true" >> "$GITHUB_OUTPUT"
+            echo "docker=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          code=false
+          docker=false
+
+          if printf '%s\n' "$files" | grep -qE '^(cmd/|internal/|web/|seed/|go\.mod$|go\.sum$|\.golangci\.yaml$|mise\.toml$|\.github/workflows/ci\.yml$)'; then
+            code=true
+          fi
+
+          if printf '%s\n' "$files" | grep -qE '^(cmd/|internal/|web/|seed/|deploy/litestream\.yml$|deploy/entrypoint\.sh$|Dockerfile$|\.dockerignore$|go\.mod$|go\.sum$|\.github/workflows/(ci|deploy)\.yml$)'; then
+            docker=true
+          fi
+
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          echo "docker=$docker" >> "$GITHUB_OUTPUT"
+          echo "Changed files:"
+          printf '%s\n' "$files"
+
+  checks:
+    name: Workflow and script checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - uses: jdx/mise-action@v5.2.8
+
+      - name: Lint GitHub workflows
+        run: actionlint
+
+      - name: Lint shell scripts
+        run: shellcheck deploy/*.sh scripts/*.sh
+
+      # Guards a deploy gate, so it runs on every push rather than only on the
+      # machine that touches deploy/.
+      - name: Test the deploy blackout
+        run: deploy/blackout_test.sh
+
+  lint:
+    name: Generate, format, lint
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
-
     steps:
       - uses: actions/checkout@v7.0.1
 
       # Installs Go, golangci-lint, and the pinned Tailwind CLI from mise.toml.
       - uses: jdx/mise-action@v5.2.8
+
+      - name: Cache Go and golangci-lint
+        uses: actions/cache@v6.1.0
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+            ~/.cache/golangci-lint
+          key: lint-${{ runner.os }}-${{ hashFiles('go.sum', 'mise.toml', '.golangci.yaml') }}
+          restore-keys: |
+            lint-${{ runner.os }}-${{ hashFiles('go.sum', 'mise.toml') }}-
+            lint-${{ runner.os }}-
 
       # app.css is generated and committed; a diff means a template changed
       # without regenerating the stylesheet.
@@ -32,11 +116,16 @@ jobs:
       - name: Check generated files are committed
         run: git diff --exit-code
 
+      - name: Check go.mod and go.sum are tidy
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum
+
+      - name: Check formatting
+        run: golangci-lint fmt --diff
+
       - name: Lint
         run: golangci-lint run ./...
-
-      - name: Test
-        run: go test -short -race ./...
 
       - name: Grading eval benchmark summary
         run: |
@@ -45,7 +134,100 @@ jobs:
             --all \
             --format markdown >> "$GITHUB_STEP_SUMMARY"
 
-      # Guards a deploy gate, so it runs on every push rather than only on the
-      # machine that touches deploy/.
-      - name: Test the deploy blackout
-        run: deploy/blackout_test.sh
+  test:
+    name: Test (${{ matrix.shard }})
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [server, db-web, other]
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - uses: jdx/mise-action@v5.2.8
+
+      - name: Cache Go build and modules
+        uses: actions/cache@v6.1.0
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: test-${{ runner.os }}-${{ matrix.shard }}-${{ hashFiles('go.sum', 'mise.toml') }}
+          restore-keys: |
+            test-${{ runner.os }}-${{ matrix.shard }}-
+            test-${{ runner.os }}-
+
+      - name: Run race tests
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: |
+          set -euo pipefail
+          case "$SHARD" in
+            server)
+              go test -short -race ./cmd/server
+              ;;
+            db-web)
+              go test -short -race ./internal/db ./internal/web
+              ;;
+            other)
+              pkgs=$(go list ./... | grep -vE '/(cmd/server|internal/db|internal/web)$')
+              # shellcheck disable=SC2086
+              go test -short -race $pkgs
+              ;;
+            *)
+              echo "unknown shard: $SHARD" >&2
+              exit 1
+              ;;
+          esac
+
+  docker:
+    name: Verify Docker build
+    needs: changes
+    if: needs.changes.outputs.docker == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4.4.1
+
+      - name: Build image (no push)
+        uses: docker/build-push-action@v7.4.0
+        with:
+          context: .
+          push: false
+          cache-from: type=gha
+
+  ci:
+    name: CI
+    needs: [changes, checks, lint, test, docker]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check job results
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          CHECKS_RESULT: ${{ needs.checks.result }}
+          LINT_RESULT: ${{ needs.lint.result }}
+          TEST_RESULT: ${{ needs.test.result }}
+          DOCKER_RESULT: ${{ needs.docker.result }}
+        run: |
+          set -euo pipefail
+          for pair in \
+            "changes:$CHANGES_RESULT" \
+            "checks:$CHECKS_RESULT" \
+            "lint:$LINT_RESULT" \
+            "test:$TEST_RESULT" \
+            "docker:$DOCKER_RESULT"; do
+            name="${pair%%:*}"
+            result="${pair#*:}"
+            if [ "$result" != "success" ] && [ "$result" != "skipped" ]; then
+              echo "::error::job $name ended with result '$result'"
+              exit 1
+            fi
+          done

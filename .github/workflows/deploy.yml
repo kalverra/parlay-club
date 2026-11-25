@@ -2,6 +2,8 @@ name: Deploy
 
 # Deploy the commit CI tested. Runs after CI passes on main, or by hand from the
 # Actions tab. The game-window blackout gates both paths; force=true skips it.
+# Automatic runs skip the build and deploy when no runtime files changed since
+# the live Cloud Run revision; manual dispatches always deploy.
 # See docs/runbooks/deploy.md.
 
 on:
@@ -46,6 +48,7 @@ jobs:
         uses: actions/checkout@v7.0.1
         with:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 0
 
       # Two writers during a deploy can drop the old instance's last writes.
       # The blackout pauses that until the games end.
@@ -98,9 +101,52 @@ jobs:
         with:
           project_id: ${{ vars.GCP_PROJECT }}
 
+      # Compare against the commit currently live on Cloud Run so docs/ADR-only
+      # commits skip an unnecessary container rebuild and Litestream restore,
+      # while never missing a runtime change from an earlier skipped/failed run.
+      # Manual dispatches always deploy so operators can re-run boot.
+      - name: Check for runtime changes
+        id: runtime
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PROJECT: ${{ vars.GCP_PROJECT }}
+          REGION: ${{ vars.GCP_REGION }}
+          TARGET_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+        run: |
+          set -euo pipefail
+
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "should_deploy=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          live_image=$(gcloud run services describe "$SERVICE" \
+            --project "$PROJECT" --region "$REGION" \
+            --format='value(spec.template.spec.containers[0].image)' 2>/dev/null || true)
+
+          deployed_sha="${live_image##*:}"
+          if [[ "$deployed_sha" =~ ^[0-9a-f]{40}$ ]] && git cat-file -e "${deployed_sha}^{commit}" 2>/dev/null; then
+            if git diff --quiet "$deployed_sha" "$TARGET_SHA" -- \
+              cmd/ internal/ web/ seed/ \
+              deploy/litestream.yml deploy/entrypoint.sh \
+              Dockerfile .dockerignore go.mod go.sum; then
+              echo "should_deploy=false" >> "$GITHUB_OUTPUT"
+              echo "::notice::no runtime files changed between live revision ${deployed_sha:0:7} and ${TARGET_SHA:0:7}; skipping deploy"
+              {
+                echo "### Deploy skipped"
+                echo ""
+                echo "No runtime files changed between live revision \`${deployed_sha:0:7}\` and \`${TARGET_SHA:0:7}\`."
+              } >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+          fi
+
+          echo "should_deploy=true" >> "$GITHUB_OUTPUT"
+
       # Cloud Run rejects a revision that points at a missing resource or an
       # empty secret, so check everything before spending minutes on a build.
       - name: Pre-flight the GCP project
+        if: steps.runtime.outputs.should_deploy == 'true'
         env:
           PROJECT: ${{ vars.GCP_PROJECT }}
           REGION: ${{ vars.GCP_REGION }}
@@ -109,64 +155,90 @@ jobs:
         run: |
           set -euo pipefail
 
-          failed=0
+          tmpdir=$(mktemp -d)
+          trap 'rm -rf "$tmpdir"' EXIT
 
-          if ! gcloud artifacts repositories describe "$AR_REPO" \
-            --project "$PROJECT" --location "$REGION" >/dev/null; then
-            echo "::error::Artifact Registry repo $AR_REPO is missing in $REGION; run deploy/setup.sh"
-            failed=1
-          fi
+          (
+            if ! gcloud artifacts repositories describe "$AR_REPO" \
+              --project "$PROJECT" --location "$REGION" >/dev/null 2>&1; then
+              echo "::error::Artifact Registry repo $AR_REPO is missing in $REGION; run deploy/setup.sh" > "$tmpdir/err-ar"
+            fi
+          ) &
 
-          if ! gcloud storage buckets describe "gs://$BUCKET" --project "$PROJECT" >/dev/null; then
-            echo "::error::Litestream bucket gs://$BUCKET is missing; run deploy/setup.sh"
-            failed=1
-          fi
+          (
+            if ! gcloud storage buckets describe "gs://$BUCKET" --project "$PROJECT" >/dev/null 2>&1; then
+              echo "::error::Litestream bucket gs://$BUCKET is missing; run deploy/setup.sh" > "$tmpdir/err-bucket"
+            fi
+          ) &
 
           for secret in session-key google-client-id google-client-secret odds-api-key the-odds-api-key; do
-            if ! versions=$(gcloud secrets versions list "$secret" \
-              --project "$PROJECT" \
-              --filter='state=ENABLED' \
-              --limit=1 \
-              --format='value(name)' 2>&1); then
-              echo "::error::cannot read secret $secret; run deploy/setup.sh to create it and grant roles/secretmanager.viewer: $versions"
-              failed=1
-            elif [ -z "$versions" ]; then
-              echo "::error::secret $secret has no ENABLED version; add one (see docs/guides/gcp-setup.md)"
-              failed=1
-            fi
+            (
+              if ! versions=$(gcloud secrets versions list "$secret" \
+                --project "$PROJECT" \
+                --filter='state=ENABLED' \
+                --limit=1 \
+                --format='value(name)' 2>&1); then
+                echo "::error::cannot read secret $secret; run deploy/setup.sh to create it and grant roles/secretmanager.viewer: $versions" > "$tmpdir/err-$secret"
+              elif [ -z "$versions" ]; then
+                echo "::error::secret $secret has no ENABLED version; add one (see docs/guides/gcp-setup.md)" > "$tmpdir/err-$secret"
+              fi
+            ) &
           done
 
           # github-token is optional. Mount it only when someone added a
           # version; an empty secret would fail the revision at boot.
-          if versions=$(gcloud secrets versions list github-token \
-            --project "$PROJECT" \
-            --filter='state=ENABLED' \
-            --limit=1 \
-            --format='value(name)' 2>/dev/null) && [ -n "$versions" ]; then
+          (
+            if versions=$(gcloud secrets versions list github-token \
+              --project "$PROJECT" \
+              --filter='state=ENABLED' \
+              --limit=1 \
+              --format='value(name)' 2>/dev/null) && [ -n "$versions" ]; then
+              echo "true" > "$tmpdir/opt-github-token"
+            fi
+          ) &
+
+          # prefill-token is optional. Mount it only when someone added a
+          # version; an empty secret would fail the revision at boot.
+          (
+            if versions=$(gcloud secrets versions list prefill-token \
+              --project "$PROJECT" \
+              --filter='state=ENABLED' \
+              --limit=1 \
+              --format='value(name)' 2>/dev/null) && [ -n "$versions" ]; then
+              echo "true" > "$tmpdir/opt-prefill-token"
+            fi
+          ) &
+
+          wait
+
+          if [ -f "$tmpdir/opt-github-token" ]; then
             echo "MOUNT_GITHUB_TOKEN=true" >> "$GITHUB_ENV"
             echo "github-token has an ENABLED version; bug reports will open GitHub issues"
           else
             echo "::notice::github-token has no ENABLED version; bug reports stay in SQLite"
           fi
 
-          # prefill-token is optional. Mount it only when someone added a
-          # version; an empty secret would fail the revision at boot.
-          if versions=$(gcloud secrets versions list prefill-token \
-            --project "$PROJECT" \
-            --filter='state=ENABLED' \
-            --limit=1 \
-            --format='value(name)' 2>/dev/null) && [ -n "$versions" ]; then
+          if [ -f "$tmpdir/opt-prefill-token" ]; then
             echo "MOUNT_PREFILL_TOKEN=true" >> "$GITHUB_ENV"
             echo "prefill-token has an ENABLED version; POST /internal/prefill will be enabled"
           else
             echo "::notice::prefill-token has no ENABLED version; POST /internal/prefill stays disabled (404)"
           fi
 
+          failed=0
+          for errfile in "$tmpdir"/err-*; do
+            if [ -f "$errfile" ]; then
+              cat "$errfile"
+              failed=1
+            fi
+          done
+
           if [ "$failed" -ne 0 ]; then
             exit 1
           fi
 
       - name: Resolve the image tag
+        if: steps.runtime.outputs.should_deploy == 'true'
         id: image
         env:
           PROJECT: ${{ vars.GCP_PROJECT }}
@@ -179,9 +251,11 @@ jobs:
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
+        if: steps.runtime.outputs.should_deploy == 'true'
         uses: docker/setup-buildx-action@v4.4.1
 
       - name: Configure Docker for Artifact Registry
+        if: steps.runtime.outputs.should_deploy == 'true'
         env:
           REGION: ${{ vars.GCP_REGION }}
         run: gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
@@ -189,6 +263,7 @@ jobs:
       # Cache layers in the GitHub Actions cache, not Artifact Registry: the
       # registry's free tier is 0.5 GB and the cache does not count against it.
       - name: Build and push the image
+        if: steps.runtime.outputs.should_deploy == 'true'
         uses: docker/build-push-action@v7.4.0
         with:
           context: .
@@ -198,6 +273,7 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Deploy to Cloud Run
+        if: steps.runtime.outputs.should_deploy == 'true'
         env:
           PROJECT: ${{ vars.GCP_PROJECT }}
           REGION: ${{ vars.GCP_REGION }}
