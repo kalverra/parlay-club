@@ -674,6 +674,31 @@ func TestEngineV2SlipCopulaScriptTaxAndConflicts(t *testing.T) {
 		assert.Contains(t, factorRules(eval.Grade.Factors), "chalk_drag")
 		assert.Contains(t, strings.Join(p[analyzer.PillarPriceVig].Reasons, " "), "5 legs of book juice")
 	})
+
+	t.Run("leading ungraded OTHER leg does not shift Script Fit pair labels", func(t *testing.T) {
+		t.Parallel()
+		g := richV2Game()
+		legs := []analyzer.Leg{
+			leg(1, "Adam", "", "OTHER", "", "Coin Toss Heads", "OTHER", nil, -105),
+			withPlayerID(
+				leg(2, "Adam", "buf-mia", "PASS_YDS", "BUF", "Josh Allen", "OVER", new(255.5), -110),
+				"allen",
+			),
+			withPlayerID(
+				leg(3, "Adam", "buf-mia", "REC_YDS", "BUF", "Khalil Shakir", "OVER", new(62.5), -110),
+				"shakir",
+			),
+		}
+
+		eval := v2.EvaluateSlip(legs, map[string]analyzer.Game{"buf-mia": g}, statsMap)
+		p := assertValidFourPillars(t, eval.Grade.Pillars)
+
+		assert.Greater(t, eval.Grade.CorrMultiplier, 1.05)
+		reasonsText := strings.Join(p[analyzer.PillarScriptFit].Reasons, " ")
+		assert.Contains(t, reasonsText, "Josh Allen")
+		assert.Contains(t, reasonsText, "Khalil Shakir")
+		assert.NotContains(t, reasonsText, "Coin Toss Heads")
+	})
 }
 
 func TestEngineV2FullSlateLatencyBudget(t *testing.T) {

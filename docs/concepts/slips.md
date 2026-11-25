@@ -5,8 +5,8 @@ type: concept
 summary: How a group builds and tracks shared parlays from the slate, covering slate scopes, deadlines, the hub, live progress, A-grade highlights, the pick board, votes, wagers, grading, and editing rules.
 tags: [slips, weeks, legs, members, locking, grading, results, activity, groups, games, quick-add, nfelo, props, autocomplete, research, next-step, hub, pick-board, slate, drilldown, tabs, search, dock, tray, votes, voting, wagers, slate-scopes, deadlines, multi-slip, highlights, live-progress]
 budget:
-  max_lines: 550
-  max_spans_per_100_lines: 100
+  max_lines: 575
+  max_spans_per_100_lines: 105
   reason: Covers the full slip lifecycle, pick board, highlights, voting, research, grading, wagers, and multi-slip rules in one concept doc.
 ---
 
@@ -51,7 +51,8 @@ When the slip is `OPEN` and the viewer is in the `pick` step (has remaining leg 
 **"Top A-grade ideas"** strip below the step banner. It runs `analyzer.LoadBoardSignals` and `board.SelectHighlights`
 over cached SQLite odds and signals—making zero external API calls—to surface up to 3 A-grade legs and up to 2 A-grade
 2–3 leg parlay combos. Each card shows its `A` pill, a concise reason, odds with a muted implied percentage chance (and
-combined implied chance on combo headers), an inline `<details>` factor breakdown, and one-tap `+ Add` (or `"Add all N"` via `POST /slips/{id}/legs/batch`, which disables as `"Needs N open slots"` when fewer
+combined implied chance on combo headers), an inline `<details>` [four-pillar grade breakdown](analyzer.md), and
+one-tap `+ Add` (or `"Add all N"` via `POST /slips/{id}/legs/batch`, which disables as `"Needs N open slots"` when fewer
 than `N` slots remain). When no A-grade plays exist or the viewer finishes picking, the strip hides cleanly.
 
 `slips.NextStep` is one pure function over the slip, its members, its legs, the week's games, the viewer, and `now`. It

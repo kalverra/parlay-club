@@ -366,7 +366,7 @@ func (c CopulaArtifact) estimateGameJoint(
 	for i := range m {
 		sub[i*m+i] = 1.0
 		pClamped := clampCopulaProb(resolved[i].leg.Prob)
-		z[i] = normInv(pClamped)
+		z[i] = NormInv(pClamped)
 		for j := i + 1; j < m; j++ {
 			signedCorr, within := c.pairCorrelation(resolved[i], resolved[j], mat)
 			sub[i*m+j] = signedCorr
@@ -761,7 +761,7 @@ func evalQMCMVN(chol, z []float64, m int) float64 {
 		u := normals[r*maxQMCDims:]
 		for d := maxQMCDims; d < m; d++ {
 			prime := haltonExtraPrimes[(d-maxQMCDims)%len(haltonExtraPrimes)]
-			extra[d-maxQMCDims] = normInv(haltonPoint(r+1, prime))
+			extra[d-maxQMCDims] = NormInv(haltonPoint(r+1, prime))
 		}
 		ok := true
 		for i := range m {
@@ -823,7 +823,7 @@ func buildSobolNormals(nSamples, dims int) []float64 {
 		base := r * dims
 		for d := range dims {
 			u := float64(x[d])*inv2Pow32 + midpointShift
-			out[base+d] = normInv(u)
+			out[base+d] = NormInv(u)
 		}
 		if r+1 < nSamples {
 			c := bits.TrailingZeros32(^uint32(r))
@@ -892,9 +892,17 @@ func clampCorr(rho float64) float64 {
 	return rho
 }
 
-// normInv returns the inverse standard normal CDF Φ⁻¹(p) using Acklam's
+// NormCDF returns the standard normal cumulative distribution function Φ(x).
+func NormCDF(x float64) float64 {
+	if math.IsNaN(x) {
+		return 0.5
+	}
+	return 0.5 * math.Erfc(-x/math.Sqrt2)
+}
+
+// NormInv returns the inverse standard normal CDF Φ⁻¹(p) using Acklam's
 // rational approximation (relative error < 1.15e-9 across (0, 1)).
-func normInv(p float64) float64 {
+func NormInv(p float64) float64 {
 	if p <= 0 {
 		return math.Inf(-1)
 	}

@@ -856,10 +856,20 @@ def evaluate_sgp_log_loss(
             rb1 = holders.get((team, "RB1"))
 
             if qb is not None and wr1 is not None and pd.notna(qb["ewma_pass_yds"]) and pd.notna(wr1["ewma_rec_yds"]):
-                qb_line = max(150.5, round(float(qb["ewma_pass_yds"])) - 0.5)
-                wr_line = max(25.5, round(float(wr1["ewma_rec_yds"])) - 0.5)
-                p_qb = float(pred_lookup.get((gid, qb["player_id"], "PASS_YDS"), {}).get("prob", 0.50))
-                p_wr = float(pred_lookup.get((gid, wr1["player_id"], "REC_YDS"), {}).get("prob", 0.50))
+                qb_pred = pred_lookup.get((gid, qb["player_id"], "PASS_YDS"), {})
+                wr_pred = pred_lookup.get((gid, wr1["player_id"], "REC_YDS"), {})
+                qb_line = (
+                    float(qb_pred["line"])
+                    if "line" in qb_pred and pd.notna(qb_pred["line"])
+                    else max(150.5, round(float(qb["ewma_pass_yds"])) - 0.5)
+                )
+                wr_line = (
+                    float(wr_pred["line"])
+                    if "line" in wr_pred and pd.notna(wr_pred["line"])
+                    else max(25.5, round(float(wr1["ewma_rec_yds"])) - 0.5)
+                )
+                p_qb = float(qb_pred.get("prob", 0.50))
+                p_wr = float(wr_pred.get("prob", 0.50))
                 ctx = CopulaGameContext(
                     home_team=team if bool(qb["is_home"]) else str(qb["opponent"]),
                     away_team=str(qb["opponent"]) if bool(qb["is_home"]) else team,
@@ -881,7 +891,13 @@ def evaluate_sgp_log_loss(
                 outcomes.append(hit)
 
                 # Same-player QB PASS_YDS + PASS_TDS stack
-                p_td = float(pred_lookup.get((gid, qb["player_id"], "PASS_TDS"), {}).get("prob", 0.52))
+                td_pred = pred_lookup.get((gid, qb["player_id"], "PASS_TDS"), {})
+                td_line = (
+                    float(td_pred["line"])
+                    if "line" in td_pred and pd.notna(td_pred["line"])
+                    else 1.5
+                )
+                p_td = float(td_pred.get("prob", 0.52))
                 est_qb = copula_model.estimate_joint(
                     [
                         CopulaLeg(1, gid, team, str(qb["player_id"]), str(qb["player_name"]), "QB", "PASS_YDS", "OVER", p_qb),
@@ -889,14 +905,19 @@ def evaluate_sgp_log_loss(
                     ],
                     {gid: ctx},
                 )
-                hit_qb = 1.0 if (float(qb["pass_yds"]) > qb_line and float(qb["pass_tds"]) > 1.5) else 0.0
+                hit_qb = 1.0 if (float(qb["pass_yds"]) > qb_line and float(qb["pass_tds"]) > td_line) else 0.0
                 joint_probs.append(est_qb["joint_prob"])
                 indep_probs.append(est_qb["independent_prob"])
                 outcomes.append(hit_qb)
 
             if rb1 is not None and pd.notna(rb1["ewma_rush_yds"]) and pd.notna(rb1["actual_team_margin"]) and pd.notna(rb1["team_spread"]):
-                rb_line = max(25.5, round(float(rb1["ewma_rush_yds"])) - 0.5)
-                p_rb = float(pred_lookup.get((gid, rb1["player_id"], "RUSH_YDS"), {}).get("prob", 0.50))
+                rb_pred = pred_lookup.get((gid, rb1["player_id"], "RUSH_YDS"), {})
+                rb_line = (
+                    float(rb_pred["line"])
+                    if "line" in rb_pred and pd.notna(rb_pred["line"])
+                    else max(25.5, round(float(rb1["ewma_rush_yds"])) - 0.5)
+                )
+                p_rb = float(rb_pred.get("prob", 0.50))
                 ctx = CopulaGameContext(
                     home_team=team if bool(rb1["is_home"]) else str(rb1["opponent"]),
                     away_team=str(rb1["opponent"]) if bool(rb1["is_home"]) else team,

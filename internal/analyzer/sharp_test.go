@@ -568,6 +568,50 @@ func TestHasSharpBenchmark(t *testing.T) {
 	assert.False(t, analyzer.HasSharpBenchmark(game, analyzer.Leg{Market: "ML", Team: "BUF"}))
 }
 
+func TestSharpMarketProb(t *testing.T) {
+	t.Parallel()
+
+	game := analyzer.Game{
+		ID: "g1",
+		Sharp: map[analyzer.SharpKey]analyzer.SharpQuote{
+			{MarketType: "ML", Team: "BUF", Side: "TEAM"}: {
+				FairProb:      0.61,
+				PowerFairProb: 0.625,
+			},
+			{MarketType: "TOTAL", Side: "OVER"}: {
+				Line:     new(47.5),
+				FairProb: 0.515,
+			},
+			{MarketType: "REC_YDS", Team: "BUF", PlayerName: "khalil shakir", Side: "OVER"}: {
+				Line:          new(62.5),
+				FairProb:      0.52,
+				PowerFairProb: 0.535,
+			},
+		},
+	}
+
+	p, ok := analyzer.SharpMarketProb(game, analyzer.Leg{Market: "MONEYLINE", Team: "buf"})
+	require.True(t, ok)
+	assert.InDelta(t, 0.625, p, 1e-12)
+
+	p, ok = analyzer.SharpMarketProb(game, analyzer.Leg{Market: "TOTAL", Team: "BUF", Side: "over", Line: new(47.5)})
+	require.True(t, ok)
+	assert.InDelta(t, 0.515, p, 1e-12)
+
+	_, ok = analyzer.SharpMarketProb(game, analyzer.Leg{Market: "TOTAL", Side: "OVER", Line: new(48.5)})
+	assert.False(t, ok)
+
+	p, ok = analyzer.SharpMarketProb(game, analyzer.Leg{
+		Market:     "REC_YDS",
+		Team:       "BUF",
+		PlayerName: "Khalil Shakir",
+		Side:       "OVER",
+		Line:       new(62.5),
+	})
+	require.True(t, ok)
+	assert.InDelta(t, 0.535, p, 1e-12)
+}
+
 func TestBuildSharpBenchmarksPowerVigAndBookCount(t *testing.T) {
 	t.Parallel()
 

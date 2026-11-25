@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import numpy as np
+import pandas as pd
 
 from copula import (
     CANONICAL_COPULA_NODES,
     CopulaGameContext,
     CopulaLeg,
     CopulaModel,
+    evaluate_sgp_log_loss,
     get_qmc_normals,
     higham_nearest_psd_correlation,
 )
@@ -84,3 +86,82 @@ def test_copula_stack_vs_conflict_and_cross_game() -> None:
         ctx,
     )
     assert abs(cross["corr_multiplier"] - 1.0) < 1e-12
+
+
+def test_evaluate_sgp_log_loss_uses_matched_prediction_lines() -> None:
+    n = len(CANONICAL_COPULA_NODES)
+    mat = np.eye(n, dtype=np.float64)
+    idx = {name: i for i, name in enumerate(CANONICAL_COPULA_NODES)}
+    mat[idx["QB_PASS_YDS"], idx["WR1_REC_YDS"]] = 0.65
+    mat[idx["WR1_REC_YDS"], idx["QB_PASS_YDS"]] = 0.65
+    mat = higham_nearest_psd_correlation(mat)
+
+    model = CopulaModel(
+        nodes=list(CANONICAL_COPULA_NODES),
+        default_matrix=mat.tolist(),
+        regime_matrices={"neutral": mat.tolist()},
+        within_player={"PASS_YDS:PASS_TDS": 0.65},
+    )
+
+    # Heuristic fallback lines would be qb=249.5, wr=69.5, td=1.5, under which
+    # actual (240, 65, 1) would MISS. With matched lines (220.5, 55.5, 0.5),
+    # all three legs HIT, yielding much lower log loss for high predicted probs.
+    test_df = pd.DataFrame(
+        [
+            {
+                "game_id": "G1",
+                "team": "KC",
+                "opponent": "BUF",
+                "is_home": True,
+                "home_spread": -3.0,
+                "game_total": 48.0,
+                "player_id": "qb1",
+                "player_name": "QB One",
+                "role": "QB",
+                "ewma_pass_yds": 250.0,
+                "ewma_rec_yds": np.nan,
+                "ewma_rush_yds": np.nan,
+                "pass_yds": 240.0,
+                "pass_tds": 1.0,
+                "rec_yds": 0.0,
+                "rush_yds": 0.0,
+                "actual_team_margin": np.nan,
+                "team_spread": np.nan,
+            },
+            {
+                "game_id": "G1",
+                "team": "KC",
+                "opponent": "BUF",
+                "is_home": True,
+                "home_spread": -3.0,
+                "game_total": 48.0,
+                "player_id": "wr1",
+                "player_name": "WR One",
+                "role": "WR1",
+                "ewma_pass_yds": np.nan,
+                "ewma_rec_yds": 70.0,
+                "ewma_rush_yds": np.nan,
+                "pass_yds": 0.0,
+                "pass_tds": 0.0,
+                "rec_yds": 65.0,
+                "rush_yds": 0.0,
+                "actual_team_margin": np.nan,
+                "team_spread": np.nan,
+            },
+        ]
+    )
+    leg_preds = pd.DataFrame(
+        [
+            {"game_id": "G1", "player_id": "qb1", "market": "PASS_YDS", "line": 220.5, "prob": 0.90},
+            {"game_id": "G1", "player_id": "qb1", "market": "PASS_TDS", "line": 0.5, "prob": 0.90},
+            {"game_id": "G1", "player_id": "wr1", "market": "REC_YDS", "line": 55.5, "prob": 0.90},
+        ]
+    )
+    res_matched = evaluate_sgp_log_loss(model, test_df, leg_preds)
+    assert res_matched["sgp_count"] == 2
+    assert res_matched["sgp_log_loss"] < 0.20
+
+    # Without "line", fallback thresholds miss and high probs suffer > 1.5 log loss.
+    res_fallback = evaluate_sgp_log_loss(model, test_df, leg_preds.drop(columns=["line"]))
+    assert res_fallback["sgp_count"] == 2
+    assert res_fallback["sgp_log_loss"] > 1.50
