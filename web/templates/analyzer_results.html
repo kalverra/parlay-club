@@ -22,6 +22,19 @@
       </a>
     </div>
 
+    {{if .Sources}}
+      <div class="flex flex-wrap items-center gap-2" role="group" aria-label="Evaluation source">
+        {{range .Sources}}
+          <a
+            href="{{.URL}}"
+            class="rounded-full border px-3 py-1 text-xs font-medium {{if .Current}}border-accent bg-accent text-accent-ink{{else}}border-line-strong bg-surface text-ink hover:bg-surface-2{{end}}"
+          >
+            {{.Label}}
+          </a>
+        {{end}}
+      </div>
+    {{end}}
+
     {{if .Seasons}}
       <div class="flex flex-wrap items-center gap-2">
         {{range .Seasons}}
@@ -52,7 +65,11 @@
 
   {{if not .HasData}}
     <p class="ui-card border-dashed p-4 text-sm text-ink-muted">
-      No settled slips yet for {{.SeasonLabel}}. Once a slip finishes grading, A&ndash;F calibration and factor results will show up here.
+      {{if .IsMarket}}
+        No graded market-wide legs yet for {{.SeasonLabel}}. Once final games have pre-kickoff archived odds, A&ndash;F calibration and factor results will show up here.
+      {{else}}
+        No settled slips yet for {{.SeasonLabel}}. Once a slip finishes grading, A&ndash;F calibration and factor results will show up here.
+      {{end}}
     </p>
   {{else}}
     <section class="ui-card space-y-3 p-4">
@@ -122,6 +139,12 @@
       </div>
     </section>
 
+    {{if .IsMarket}}
+      <p class="ui-card p-3 text-xs text-ink-muted">
+        Parlay-level slip calibration and slip factor rules live under
+        <a href="{{.SlipsURL}}" class="font-medium text-ink underline hover:no-underline">User slips</a>.
+      </p>
+    {{else}}
     <section class="ui-card space-y-3 p-4">
       <h2 class="text-base font-semibold text-ink">Slip Calibration (A&ndash;F)</h2>
 
@@ -183,6 +206,7 @@
         </table>
       </div>
     </section>
+    {{end}}
 
     <section class="ui-card space-y-3 p-4">
       <h2 class="text-base font-semibold text-ink">Rubric Comparison</h2>
@@ -370,7 +394,7 @@
       {{end}}
     </section>
 
-    {{if .SlipFactors}}
+    {{if and (not .IsMarket) .SlipFactors}}
       <section class="ui-card space-y-3 p-4">
         <div class="flex flex-wrap items-center justify-between gap-2">
           <h2 class="text-base font-semibold text-ink">Slip Factor Attribution</h2>
@@ -436,7 +460,7 @@
 
     <section class="ui-card space-y-3 p-4">
       <h2 class="text-base font-semibold text-ink">Pre-Kickoff Data Coverage</h2>
-      <div class="grid grid-cols-2 gap-2 text-xs sm:grid-cols-3">
+      <div class="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
         <div class="rounded-lg border border-line bg-surface-2 p-3">
           <p class="text-ink-muted">Replayed legs</p>
           <p class="mt-1 font-mono text-base font-semibold tabular-nums text-ink">{{.Coverage.TotalLegs}}</p>
@@ -444,6 +468,10 @@
         <div class="rounded-lg border border-line bg-surface-2 p-3">
           <p class="text-ink-muted">Game logs</p>
           <p class="mt-1 font-mono text-base font-semibold tabular-nums text-ink">{{.Coverage.WithGameLogs}}</p>
+        </div>
+        <div class="rounded-lg border border-line bg-surface-2 p-3">
+          <p class="text-ink-muted">nflverse L5 fallback</p>
+          <p class="mt-1 font-mono text-base font-semibold tabular-nums text-ink">{{.Coverage.WithL5Fallback}}</p>
         </div>
         <div class="rounded-lg border border-line bg-surface-2 p-3">
           <p class="text-ink-muted">Injuries</p>
@@ -460,6 +488,10 @@
         <div class="rounded-lg border border-line bg-surface-2 p-3">
           <p class="text-ink-muted">Archived odds</p>
           <p class="mt-1 font-mono text-base font-semibold tabular-nums text-ink">{{.Coverage.WithOdds}}</p>
+        </div>
+        <div class="rounded-lg border border-line bg-surface-2 p-3">
+          <p class="text-ink-muted">Sharp benchmarks</p>
+          <p class="mt-1 font-mono text-base font-semibold tabular-nums text-ink">{{.Coverage.WithSharp}}</p>
         </div>
       </div>
     </section>

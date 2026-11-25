@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -18,6 +19,10 @@ type EvalResultsPage struct {
 	BackURL         string
 	GuideURL        string
 	ScopeLabel      string
+	Source          string
+	IsMarket        bool
+	SlipsURL        string
+	Sources         []EvalSourceOption
 	HasData         bool
 	Season          int
 	SeasonLabel     string
@@ -34,6 +39,14 @@ type EvalResultsPage struct {
 	Factors         []EvalFactorView
 	SlipFactors     []EvalFactorView
 	Coverage        EvalCoverageView
+}
+
+// EvalSourceOption is one pill in the source switcher (User slips vs. Market-wide).
+type EvalSourceOption struct {
+	Label   string
+	Value   string
+	Current bool
+	URL     string
 }
 
 // EvalSeasonOption is one pill in the season filter.
@@ -136,32 +149,49 @@ type EvalFactorView struct {
 
 // EvalCoverageView formats the pre-kickoff signal coverage counts.
 type EvalCoverageView struct {
-	TotalLegs    int
-	WithGameLogs int
-	WithInjuries int
-	WithNFLVerse int
-	WithNfelo    int
-	WithOdds     int
+	TotalLegs      int
+	WithGameLogs   int
+	WithL5Fallback int
+	WithInjuries   int
+	WithNFLVerse   int
+	WithNfelo      int
+	WithOdds       int
+	WithSharp      int
 }
 
 // evalResults serves GET /analyzer/results, showing global calibration across
-// all groups, week-over-week progression, factor attribution, and data coverage.
+// all groups (or market-wide pre-kickoff lines when ?source=market), week-over-week
+// progression, factor attribution, and data coverage.
 func (h *slipHandlers) evalResults(w http.ResponseWriter, r *http.Request) {
 	if _, ok := h.user(r.Context()); !ok {
 		h.redirect(w, r, "/login")
 		return
 	}
 
+	source, ok := parseEvalSource(w, r)
+	if !ok {
+		return
+	}
+
 	backURL := safeReturnPath(r.URL.Query().Get("from"))
 	page := h.page(r, "Grading Results")
 	page.Tab = ""
+	isMarket := source == eval.ModeMarket
+	scopeLabel := "All groups"
+	if isMarket {
+		scopeLabel = "Market-wide"
+	}
 
 	if h.deps.Store == nil {
 		h.renderPage(w, "analyzer-results", EvalResultsPage{
 			Page:        page,
 			BackURL:     backURL,
 			GuideURL:    buildGuideURL(backURL),
-			ScopeLabel:  "All groups",
+			ScopeLabel:  scopeLabel,
+			Source:      string(source),
+			IsMarket:    isMarket,
+			SlipsURL:    buildResultsURL(string(eval.ModeSlips), "all", "", backURL),
+			Sources:     buildEvalSources(source, "all", "", backURL),
 			SeasonLabel: "All seasons",
 		})
 		return
@@ -173,18 +203,23 @@ func (h *slipHandlers) evalResults(w http.ResponseWriter, r *http.Request) {
 		h.serverError(w, err)
 		return
 	}
-	gradedSeasons, err := h.deps.Store.GradedSeasons(ctx)
+	preferredSeasons, err := h.preferredEvalSeasons(ctx, source)
 	if err != nil {
 		h.serverError(w, err)
 		return
 	}
 
-	selectedSeason, ok := parseEvalSeason(w, r, allSeasons, gradedSeasons)
+	seasonChoices := allSeasons
+	if isMarket {
+		seasonChoices = mergeEvalSeasons(preferredSeasons, allSeasons)
+	}
+
+	selectedSeason, ok := parseEvalSeason(w, r, seasonChoices, preferredSeasons)
 	if !ok {
 		return
 	}
 
-	suite, err := h.deps.EvalCache.GetOrCompute(ctx, h.deps.Store, 0, selectedSeason)
+	suite, err := h.deps.EvalCache.GetOrComputeMode(ctx, h.deps.Store, source, 0, selectedSeason)
 	if err != nil {
 		h.serverError(w, err)
 		return
@@ -194,12 +229,55 @@ func (h *slipHandlers) evalResults(w http.ResponseWriter, r *http.Request) {
 	data := buildEvalResultsPage(
 		page,
 		backURL,
+		source,
 		selectedSeason,
-		allSeasons,
+		seasonChoices,
 		suite,
 		selectedReport,
 	)
 	h.renderPage(w, "analyzer-results", data)
+}
+
+func (h *slipHandlers) preferredEvalSeasons(ctx context.Context, source eval.ReplayMode) ([]int, error) {
+	if source == eval.ModeMarket {
+		return h.deps.Store.FinalSeasons(ctx)
+	}
+	return h.deps.Store.GradedSeasons(ctx)
+}
+
+func mergeEvalSeasons(primary, secondary []int) []int {
+	if len(primary) == 0 {
+		return secondary
+	}
+	seen := make(map[int]struct{}, len(primary)+len(secondary))
+	out := make([]int, 0, len(primary)+len(secondary))
+	for _, s := range primary {
+		if _, ok := seen[s]; !ok {
+			seen[s] = struct{}{}
+			out = append(out, s)
+		}
+	}
+	for _, s := range secondary {
+		if _, ok := seen[s]; !ok {
+			seen[s] = struct{}{}
+			out = append(out, s)
+		}
+	}
+	slices.SortFunc(out, func(a, b int) int { return b - a })
+	return out
+}
+
+func parseEvalSource(w http.ResponseWriter, r *http.Request) (eval.ReplayMode, bool) {
+	raw := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("source")))
+	switch raw {
+	case "", string(eval.ModeSlips):
+		return eval.ModeSlips, true
+	case string(eval.ModeMarket):
+		return eval.ModeMarket, true
+	default:
+		http.Error(w, "invalid source", http.StatusBadRequest)
+		return "", false
+	}
 }
 
 func parseEvalSeason(
@@ -251,6 +329,7 @@ func selectEvalReport(suite eval.SuiteReport, requested string) eval.Report {
 func buildEvalResultsPage(
 	page Page,
 	backURL string,
+	source eval.ReplayMode,
 	selectedSeason int,
 	allSeasons []int,
 	suite eval.SuiteReport,
@@ -262,12 +341,19 @@ func buildEvalResultsPage(
 		slices.SortFunc(seasonYears, func(a, b int) int { return b - a })
 	}
 
+	sourceStr := string(source)
+	isMarket := source == eval.ModeMarket
+	scopeLabel := "All groups"
+	if isMarket {
+		scopeLabel = "Market-wide"
+	}
+
 	seasons := make([]EvalSeasonOption, 0, len(seasonYears)+1)
 	seasons = append(seasons, EvalSeasonOption{
 		Label:   "All seasons",
 		Value:   "all",
 		Current: selectedSeason == 0,
-		URL:     buildResultsURL("all", report.RubricName, backURL),
+		URL:     buildResultsURL(sourceStr, "all", report.RubricName, backURL),
 	})
 	for _, year := range seasonYears {
 		val := strconv.Itoa(year)
@@ -275,7 +361,7 @@ func buildEvalResultsPage(
 			Label:   val,
 			Value:   val,
 			Current: year == selectedSeason,
-			URL:     buildResultsURL(val, report.RubricName, backURL),
+			URL:     buildResultsURL(sourceStr, val, report.RubricName, backURL),
 		})
 	}
 
@@ -292,12 +378,17 @@ func buildEvalResultsPage(
 			Name:    rep.RubricName,
 			Active:  rep.RubricName == suite.ActiveRubric,
 			Current: rep.RubricName == report.RubricName,
-			URL:     buildResultsURL(seasonParam, rep.RubricName, backURL),
+			URL:     buildResultsURL(sourceStr, seasonParam, rep.RubricName, backURL),
 		})
 	}
 
 	legBands := buildEvalBands(report.LegBands)
-	slipBands := buildEvalBands(report.SlipBands)
+	var slipBands []EvalBandView
+	var slipFactors []EvalFactorView
+	if !isMarket {
+		slipBands = buildEvalBands(report.SlipBands)
+		slipFactors = buildEvalFactors(report.SlipFactors)
+	}
 	totalDecidedLegs := 0
 	for _, b := range report.LegBands {
 		if b.Band != "ungraded" {
@@ -318,7 +409,11 @@ func buildEvalResultsPage(
 		Page:            page,
 		BackURL:         backURL,
 		GuideURL:        buildGuideURL(backURL),
-		ScopeLabel:      "All groups",
+		ScopeLabel:      scopeLabel,
+		Source:          sourceStr,
+		IsMarket:        isMarket,
+		SlipsURL:        buildResultsURL(string(eval.ModeSlips), seasonParam, report.RubricName, backURL),
+		Sources:         buildEvalSources(source, seasonParam, report.RubricName, backURL),
 		HasData:         hasData,
 		Season:          selectedSeason,
 		SeasonLabel:     seasonLabel,
@@ -333,14 +428,33 @@ func buildEvalResultsPage(
 		Diffs:           buildEvalDiffs(suite.Diffs),
 		Weekly:          buildEvalWeekly(report.Weekly),
 		Factors:         buildEvalFactors(report.Factors),
-		SlipFactors:     buildEvalFactors(report.SlipFactors),
+		SlipFactors:     slipFactors,
 		Coverage: EvalCoverageView{
-			TotalLegs:    suite.Coverage.TotalLegs,
-			WithGameLogs: suite.Coverage.WithGameLogs,
-			WithInjuries: suite.Coverage.WithInjuries,
-			WithNFLVerse: suite.Coverage.WithNFLVerse,
-			WithNfelo:    suite.Coverage.WithNfelo,
-			WithOdds:     suite.Coverage.WithOdds,
+			TotalLegs:      suite.Coverage.TotalLegs,
+			WithGameLogs:   suite.Coverage.WithGameLogs,
+			WithL5Fallback: suite.Coverage.WithL5Fallback,
+			WithInjuries:   suite.Coverage.WithInjuries,
+			WithNFLVerse:   suite.Coverage.WithNFLVerse,
+			WithNfelo:      suite.Coverage.WithNfelo,
+			WithOdds:       suite.Coverage.WithOdds,
+			WithSharp:      suite.Coverage.WithSharp,
+		},
+	}
+}
+
+func buildEvalSources(current eval.ReplayMode, season, rubric, backURL string) []EvalSourceOption {
+	return []EvalSourceOption{
+		{
+			Label:   "User slips",
+			Value:   string(eval.ModeSlips),
+			Current: current != eval.ModeMarket,
+			URL:     buildResultsURL(string(eval.ModeSlips), season, rubric, backURL),
+		},
+		{
+			Label:   "Market-wide",
+			Value:   string(eval.ModeMarket),
+			Current: current == eval.ModeMarket,
+			URL:     buildResultsURL(string(eval.ModeMarket), season, rubric, backURL),
 		},
 	}
 }
@@ -352,8 +466,11 @@ func buildGuideURL(backURL string) string {
 	return "/analyzer/guide?from=" + url.QueryEscape(backURL)
 }
 
-func buildResultsURL(season, rubric, backURL string) string {
+func buildResultsURL(source, season, rubric, backURL string) string {
 	params := url.Values{}
+	if source != "" {
+		params.Set("source", source)
+	}
 	if season != "" {
 		params.Set("season", season)
 	}
