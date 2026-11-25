@@ -54,23 +54,26 @@ With no params it returns the current week. For a specific week: `?seasontype={2
 | `events[].competitions[0].competitors[].score`                   | `home_score` or `away_score`, only for a live or final game              |
 | `events[].competitions[0].venue`                                 | `venue_id`, `venue_name`, `is_indoor` from `id`, `fullName`, `indoor`    |
 | `events[].status.type.state`                                     | `pre` → `SCHEDULED`, `in` → `LIVE`, `post` → `FINAL`                     |
+| `events[].status.period`                                         | `period` (live quarter/overtime period, `NULL` unless `LIVE`)            |
+| `events[].status.displayClock`, `status.type.name`, `shortDetail`| `clock` (live clock or break label like `"Halftime"`, `NULL` unless `LIVE`) |
 
 - Keep only events whose kickoff in `America/New_York` falls on Sunday or Monday. A 9:30 a.m. ET London kickoff stays on
   the slate, and a Monday night game stored in UTC on Tuesday stays too.
-- A scheduled game has no score, even when ESPN sends a placeholder zero.
+- A scheduled game has no score, even when ESPN sends a placeholder zero. `Period` and `Clock` are populated only for `LIVE` games (`nil` for `SCHEDULED` and `FINAL`).
 - An unknown event state is an error, not a guess.
 - Upsert the week and each game; never delete them, so a flexed game keeps its ID. Rerunning a sync with the same
   response leaves every row, including `updated_at`, unchanged.
 
-### Summary (injuries)
+### Summary (injuries and live box score)
 
 `GET https://site.api.espn.com/apis/site/v2/sports/football/nfl/summary?event={id}`
 
-- `SummaryInjuries(ctx, eventID)` returns the raw `injuries` JSON array or `"[]"` when absent.
+- `Summary(ctx, eventID)` returns a `GameSummary` containing both `InjuriesJSON` (raw `injuries` JSON array or `"[]"` when absent) and `BoxScore` from a single `/summary` request. `SummaryInjuries(ctx, eventID)` and `BoxScore(ctx, eventID)` remain available for callers that only need one slice.
 - `ParseInjuries(rawJSON)` parses per-team injury lists filtered to key positions (`QB`, `RB`, `WR`, `TE`, `LT`, `C`,
   `CB`, `S`, plus `OT`). Non-key positions are omitted.
 - Each team group includes `LogoURL` (from `team.logo`). Injuries include `AthleteID`, `FullName`, `Position`, `Status`,
   `HeadshotURL` (from `athlete.headshot.href`), and a formatted `Detail` string.
+- For `LIVE` games, `refresh` persists the marshaled `BoxScore` into `games.boxscore_json` alongside `games.injuries_json`.
 
 ### Roster
 

@@ -164,7 +164,7 @@ Each source records its last successful sync in `sync_state.fetched_at`. A sourc
 | `odds:props:{gameID}` | Game prop odds                       | 30 min on the game's Eastern date or within 6 h of kickoff; 2 h otherwise (15 min idempotency in `RunPrefill`; 2 min cooldown in `ForcePickRefresh`) | Once game has kicked off               |
 | `odds:props:enrich:{gameID}` | Per-game The Odds API prop link enrichment | 30 min on the game's Eastern date or within 6 h of kickoff; 2 h otherwise (2 min cooldown in `ForcePickRefresh`), or whenever older than `odds:props:{gameID}` | Once game has kicked off, The Odds API is unconfigured, or `odds:props:{gameID}` has not synced yet |
 | `espn:roster:{teamID}`| NFL team roster                      | 2 h on game days; 6 h otherwise                                                                                         | Never (skipped for `FINAL` games in `Kick()`/`RunPrefill()`/`RunOnce()`) |
-| `espn:summary:{gameID}`| Game summary and key injuries        | 15 min on the game's Eastern date or within 4 h before kickoff; 1 h otherwise                                           | Game status is FINAL                                               |
+| `espn:summary:{gameID}`| Game summary, key injuries, and live box score | 2 min while `LIVE` with active slip legs; 15 min on the game's Eastern date or within 4 h before kickoff; 1 h otherwise | Game status is `FINAL` |
 | `espn:gamelog:{athleteID}`| Athlete season game log and stats | 1 h on game days; 4 h otherwise                                                                                         | Never                                                              |
 | `nfelo:projections`| The week's model spreads, win probabilities, and QB adjustments | 1 h on game days; 4 h otherwise                                                                | Not a regular-season week, no games, or every game has kicked off  |
 | `nflverse:season:{year}` | Season player crosswalk, team EPA, player usage, and snap counts | 6 h on Tuesday, Wednesday, and game days; 24 h otherwise                                        | Not a regular or postseason week, or all games are final and last sync ran > 12 h after latest kickoff |
@@ -272,9 +272,10 @@ game.
 - `espn:roster:{teamID}`: Stale after 2 hours on game days and 6 hours otherwise. Upserts
   team roster players into `roster_players` with normalized names. Promoted into `Kick()`, `RunPrefill()`, and
   `RunOnce()` (deduped per week team for non-`FINAL` games).
-- `espn:summary:{gameID}`: Stale after 15 minutes on the game's Eastern date or within 4 hours before kickoff, and 1 hour
-  otherwise; skipped when game status is `FINAL`. Stores raw `injuries_json` on `games`. Promoted into `Kick()`,
-  `RunPrefill()`, and `RunOnce()` for non-`FINAL` games.
+- `espn:summary:{gameID}`: Stale after 2 minutes while `LIVE` with active slip legs, 15 minutes on the game's Eastern date
+  or within 4 hours before kickoff, and 1 hour otherwise; skipped when game status is `FINAL`. Stores raw `injuries_json`
+  (and marshaled `boxscore_json` when `LIVE`) on `games` via `SetGameSummary`, publishing `week:{weekID}` and `slip:{id}`
+  when either payload changes. Promoted into `Kick()`, `RunPrefill()`, and `RunOnce()` for non-`FINAL` games.
 - `espn:gamelog:{athleteID}`: Stale after 1 hour on game days and 4 hours otherwise. Upserts `player_gamelogs` with
   market stats. In addition to on-demand research lookups, `Kick()`, `RunPrefill()`, and `RunOnce()` scan slip legs in
   the current week and sync stale game logs.
@@ -315,7 +316,7 @@ After a transaction commits and only when it changed rows, refresh publishes liv
 - `week:{weekID}` for the game board;
 - `slip:{id}` for every slip in that week.
 
-The scoreboard, weather, odds, nfelo, and nflverse syncs all use the same helper. Publishing after commit means a
+The scoreboard, summary, weather, odds, nfelo, and nflverse syncs all use the same helper. Publishing after commit means a
 listener never refetches a write that might roll back. A no-op rerun publishes nothing. See
 [Live updates](live-updates.md) for the hub and the client.
 
