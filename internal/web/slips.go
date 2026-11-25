@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -15,7 +16,9 @@ import (
 	"github.com/kalverra/parlay-club/internal/analyzer"
 	"github.com/kalverra/parlay-club/internal/board"
 	"github.com/kalverra/parlay-club/internal/db"
+	"github.com/kalverra/parlay-club/internal/ingest/espn"
 	"github.com/kalverra/parlay-club/internal/parlay"
+	"github.com/kalverra/parlay-club/internal/progress"
 	"github.com/kalverra/parlay-club/internal/slips"
 	"github.com/kalverra/parlay-club/internal/tz"
 )
@@ -226,11 +229,25 @@ type SlipView struct {
 	LockedIn      int
 	MemberCount   int
 	Members       []SlipMemberView
+	Live          SlipLiveView
 	Payout        PayoutView
 	Wager         WagerView
 	Activity      []ActivityView
 	Analyzer      AnalyzerView
 	Siblings      []SiblingSlipView
+}
+
+// SlipLiveView summarizes live or settled parlay progress for the slip panel.
+type SlipLiveView struct {
+	Show          bool
+	State         string
+	ProgressPct   int
+	BarClass      string
+	BadgeClass    string
+	StatusLabel   string
+	Summary       string
+	LiveChance    string
+	PreGameChance string
 }
 
 // SlipMemberView is one member's section of the panel.
@@ -263,6 +280,18 @@ type LegView struct {
 	MatchupAwayLogo string
 	MatchupHomeLogo string
 	Votes           VoteView
+	Live            *LegLiveView
+}
+
+// LegLiveView summarizes live or settled progress for one leg row.
+type LegLiveView struct {
+	State       string
+	ProgressPct int
+	BarClass    string
+	StatLabel   string
+	ClockLabel  string
+	LiveChance  string
+	Tone        string
 }
 
 // VoteView is one leg's tally and the viewer's own vote. UpValue and DownValue
@@ -1870,6 +1899,7 @@ func (h *slipHandlers) slipPageData(ctx context.Context, slip db.Slip) (SlipPage
 	}
 	viewerID := user.ID
 	votesByLeg := voteViews(votes, viewerID)
+	legProgs, slipProg := evaluateSlipProgress(legs, allWeekGames)
 	legsByUser := legViews(
 		legs,
 		names,
@@ -1881,6 +1911,7 @@ func (h *slipHandlers) slipPageData(ctx context.Context, slip db.Slip) (SlipPage
 		viewerIsMember,
 		viewerID,
 		votesByLeg,
+		legProgs,
 	)
 
 	locked := 0
@@ -1928,6 +1959,7 @@ func (h *slipHandlers) slipPageData(ctx context.Context, slip db.Slip) (SlipPage
 		LockedIn:      locked,
 		MemberCount:   len(members),
 		Members:       memberViews,
+		Live:          slipLiveView(slipProg),
 		Activity:      activity,
 		Analyzer:      analysis,
 		Siblings:      siblings,
@@ -2159,6 +2191,7 @@ func legViews(
 	open, hasUser, viewerIsMember bool,
 	viewerID int64,
 	votes map[int64]VoteView,
+	legProgs map[int64]progress.LegProgress,
 ) map[int64][]LegView {
 	byUser := make(map[int64][]LegView, len(names))
 	for _, leg := range legs {
@@ -2177,6 +2210,7 @@ func legViews(
 			CanGrade:      viewerIsMember,
 			ResearchURL:   legResearchURL(leg),
 			Votes:         legVoteView(votes, leg, canVote),
+			Live:          legLiveView(legProgs[leg.ID]),
 		}
 		applyLegMedia(&view, leg, media)
 		byUser[leg.UserID] = append(byUser[leg.UserID], view)
@@ -3083,5 +3117,153 @@ func resultClass(result string) string {
 		return "badge-void"
 	default:
 		return "badge-pending"
+	}
+}
+
+func evaluateSlipProgress(
+	legs []db.Leg,
+	allWeekGames []db.Game,
+) (map[int64]progress.LegProgress, progress.SlipProgress) {
+	gameByID := make(map[string]*db.Game, len(allWeekGames))
+	boxByGame := make(map[string]*espn.BoxScore)
+	for i := range allWeekGames {
+		g := &allWeekGames[i]
+		gameByID[g.ID] = g
+		if (g.Status == db.GameLive || g.Status == db.GameFinal) && g.BoxScoreJSON != nil && *g.BoxScoreJSON != "" {
+			var box espn.BoxScore
+			if err := json.Unmarshal([]byte(*g.BoxScoreJSON), &box); err == nil {
+				boxByGame[g.ID] = &box
+			}
+		}
+	}
+
+	legProgs := make(map[int64]progress.LegProgress, len(legs))
+	allProgs := make([]progress.LegProgress, 0, len(legs))
+	for _, leg := range legs {
+		var game *db.Game
+		var box *espn.BoxScore
+		if leg.GameID != nil && *leg.GameID != "" {
+			game = gameByID[*leg.GameID]
+			box = boxByGame[*leg.GameID]
+		}
+		lp := progress.EvaluateLeg(leg, game, box)
+		legProgs[leg.ID] = lp
+		allProgs = append(allProgs, lp)
+	}
+	return legProgs, progress.EvaluateSlip(allProgs)
+}
+
+func slipLiveView(sp progress.SlipProgress) SlipLiveView {
+	if !sp.Show {
+		return SlipLiveView{}
+	}
+	return SlipLiveView{
+		Show:          true,
+		State:         string(sp.State),
+		ProgressPct:   roundPct(sp.ProgressPct),
+		BarClass:      progressBarClass(sp.Tone),
+		BadgeClass:    slipLiveBadgeClass(sp.State, sp.Tone),
+		StatusLabel:   slipLiveStatusLabel(sp.State),
+		Summary:       sp.Summary,
+		LiveChance:    formatLiveChance(sp.State, sp.LiveProb),
+		PreGameChance: formatImpliedChance(sp.PreGameProb),
+	}
+}
+
+func legLiveView(lp progress.LegProgress) *LegLiveView {
+	if !lp.HasLive {
+		return nil
+	}
+	statLabel := lp.StatLabel
+	if statLabel == "" {
+		statLabel = legLiveStateLabel(lp.State)
+	}
+	return &LegLiveView{
+		State:       string(lp.State),
+		ProgressPct: roundPct(lp.ProgressPct),
+		BarClass:    progressBarClass(lp.Tone),
+		StatLabel:   statLabel,
+		ClockLabel:  lp.ClockLabel,
+		LiveChance:  formatLiveChance(lp.State, lp.LiveProb),
+		Tone:        lp.Tone,
+	}
+}
+
+func roundPct(pct float64) int {
+	if math.IsNaN(pct) || math.IsInf(pct, 0) {
+		return 0
+	}
+	return min(max(int(math.Round(pct)), 0), 100)
+}
+
+func formatLiveChance(state progress.State, prob float64) string {
+	switch state {
+	case progress.StateCashed:
+		return "100%"
+	case progress.StateBusted:
+		return "0%"
+	case progress.StatePush, progress.StateVoid:
+		return ""
+	default:
+		return formatImpliedChance(prob)
+	}
+}
+
+func progressBarClass(tone string) string {
+	switch tone {
+	case "won", "on_track":
+		return "bg-positive"
+	case "trailing":
+		return "bg-warning"
+	case "lost":
+		return "bg-danger"
+	default:
+		return "bg-line-strong"
+	}
+}
+
+func slipLiveBadgeClass(state progress.State, tone string) string {
+	switch state {
+	case progress.StateCashed:
+		return "border-positive bg-positive-soft text-positive-ink"
+	case progress.StateBusted:
+		return "border-danger bg-danger-soft text-danger-ink"
+	case progress.StateLive:
+		if tone == "trailing" {
+			return "border-warning bg-warning-soft text-warning-ink"
+		}
+		return "border-positive bg-positive-soft text-positive-ink"
+	default:
+		return "border-line-strong bg-surface-2 text-ink-muted"
+	}
+}
+
+func slipLiveStatusLabel(state progress.State) string {
+	switch state {
+	case progress.StateCashed:
+		return "Cashed"
+	case progress.StateBusted:
+		return "Busted"
+	case progress.StateLive:
+		return "Live"
+	case progress.StatePush:
+		return "Push"
+	default:
+		return "Scheduled"
+	}
+}
+
+func legLiveStateLabel(state progress.State) string {
+	switch state {
+	case progress.StateCashed:
+		return "Cashed"
+	case progress.StateBusted:
+		return "Busted"
+	case progress.StatePush:
+		return "Push"
+	case progress.StateVoid:
+		return "Void"
+	default:
+		return ""
 	}
 }

@@ -138,6 +138,40 @@
     {{end}}
   </header>
 
+  {{if .Slip.Live.Show}}
+    <section class="ui-slip-card p-4" data-slip-live-progress data-live-state="{{.Slip.Live.State}}">
+      <div class="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+        <div class="flex min-w-0 items-center gap-2">
+          <span class="shrink-0 rounded-full border px-2 py-0.5 text-xs font-semibold {{.Slip.Live.BadgeClass}}">
+            {{.Slip.Live.StatusLabel}}
+          </span>
+          <span class="truncate text-sm font-medium text-ink">{{.Slip.Live.Summary}}</span>
+        </div>
+        {{if .Slip.Live.LiveChance}}
+          <div class="shrink-0 text-xs">
+            <span class="font-semibold text-ink">Live chance {{.Slip.Live.LiveChance}}</span>
+            {{if .Slip.Live.PreGameChance}}
+              <span class="text-ink-muted">· Pre-game {{.Slip.Live.PreGameChance}}</span>
+            {{end}}
+          </div>
+        {{end}}
+      </div>
+      <div
+        class="mt-2.5 h-2 w-full overflow-hidden rounded-full bg-surface-2"
+        role="progressbar"
+        aria-label="Live parlay progress"
+        aria-valuemin="0"
+        aria-valuemax="100"
+        aria-valuenow="{{.Slip.Live.ProgressPct}}"
+      >
+        <div
+          class="h-full rounded-full transition-all {{.Slip.Live.BarClass}}"
+          style="width: {{.Slip.Live.ProgressPct}}%"
+        ></div>
+      </div>
+    </section>
+  {{end}}
+
   {{range .Slip.Members}}
     <section class="ui-slip-card p-4">
       <div class="flex items-center justify-between gap-2">
@@ -163,7 +197,7 @@
         {{range .Legs}}
           {{$leg := .}}
           <li class="flex items-start justify-between gap-3 rounded-lg border border-line px-3 py-2">
-            <div class="flex min-w-0 items-start gap-2.5">
+            <div class="flex min-w-0 flex-1 items-start gap-2.5">
               {{- if .PlayerHeadshot -}}
                 {{template "player-portrait" (dict "URL" .PlayerHeadshot "Initials" .PlayerInitials "Size" "h-7 w-7" "TextSize" "text-[10px]")}}
               {{- else if .TeamLogo -}}
@@ -173,7 +207,7 @@
               {{- else if or .MatchupAwayLogo .MatchupHomeLogo -}}
                 {{template "matchup-logos" (dict "AwayURL" .MatchupAwayLogo "HomeURL" .MatchupHomeLogo "Size" "h-5 w-5")}}
               {{- end -}}
-              <div class="min-w-0">
+              <div class="min-w-0 flex-1">
                 <p class="truncate text-sm font-medium">{{.Selection}}</p>
                 <div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-ink-muted">
                 <span class="ui-odds">{{.Odds}}{{if .ImpliedChance}} <span class="font-normal text-ink-muted" title="Implied chance from odds">({{.ImpliedChance}})</span>{{end}}</span>
@@ -299,6 +333,33 @@
                   </span>
                 {{end}}
               </div>
+              {{with .Live}}
+                <div class="mt-2 space-y-1" data-leg-live-progress data-live-state="{{.State}}">
+                  <div
+                    class="h-1.5 w-full overflow-hidden rounded-full bg-surface-2"
+                    role="progressbar"
+                    aria-label="Leg live progress"
+                    aria-valuemin="0"
+                    aria-valuemax="100"
+                    aria-valuenow="{{.ProgressPct}}"
+                  >
+                    <div
+                      class="h-full rounded-full transition-all {{.BarClass}}"
+                      style="width: {{.ProgressPct}}%"
+                    ></div>
+                  </div>
+                  <div class="flex items-center justify-between gap-2 text-[11px] text-ink-muted">
+                    <span class="min-w-0 truncate">
+                      {{- .StatLabel -}}
+                      {{- if and .StatLabel .ClockLabel }} · {{end -}}
+                      {{- .ClockLabel -}}
+                    </span>
+                    {{if .LiveChance}}
+                      <span class="shrink-0 font-semibold text-ink">{{.LiveChance}}</span>
+                    {{end}}
+                  </div>
+                </div>
+              {{end}}
             </div>
             </div>
             {{if .CanEdit}}
