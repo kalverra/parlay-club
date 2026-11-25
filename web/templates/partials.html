@@ -1059,8 +1059,9 @@
 <div class="space-y-4">
   <div class="ui-card p-4">
     <div class="flex min-w-0 items-center gap-2">
-      {{template "matchup-logos" (dict "AwayURL" .AwayLogo "HomeURL" .HomeLogo "Size" "h-6 w-6")}}
+      {{template "team-logo" (dict "URL" .AwayLogo "Size" "h-7 w-7")}}
       <h2 class="min-w-0 truncate text-lg font-semibold text-ink">{{.GameTitle}}</h2>
+      {{template "team-logo" (dict "URL" .HomeLogo "Size" "h-7 w-7")}}
     </div>
 
     <!-- Injuries -->
@@ -1670,8 +1671,9 @@
           <div class="flex items-start justify-between gap-3">
             <div class="min-w-0">
               <div class="flex min-w-0 items-center gap-2">
-                {{template "matchup-logos" (dict "AwayURL" .AwayLogo "HomeURL" .HomeLogo "Size" "h-5 w-5")}}
+                {{template "team-logo" (dict "URL" .AwayLogo "Size" "h-6 w-6")}}
                 <p class="truncate font-semibold">{{.Matchup}}</p>
+                {{template "team-logo" (dict "URL" .HomeLogo "Size" "h-6 w-6")}}
               </div>
               <p class="mt-0.5 text-xs text-ink-muted">
                 {{if .KickoffISO}}<time datetime="{{.KickoffISO}}">{{.KickoffFallback}}</time>{{end}}{{if .Venue}} &middot; {{.Venue}}{{end}}
@@ -1789,8 +1791,9 @@
       </div>
     </div>
     <div class="mt-2 flex min-w-0 items-center gap-2">
-      {{template "matchup-logos" (dict "AwayURL" .AwayLogo "HomeURL" .HomeLogo "Size" "h-6 w-6")}}
+      {{template "team-logo" (dict "URL" .AwayLogo "Size" "h-7 w-7")}}
       <h2 class="min-w-0 truncate font-display text-lg font-semibold">{{.Matchup}}</h2>
+      {{template "team-logo" (dict "URL" .HomeLogo "Size" "h-7 w-7")}}
     </div>
     <p class="mt-0.5 text-xs text-page-muted">
       {{if .KickoffISO}}<time datetime="{{.KickoffISO}}">{{.KickoffFallback}}</time>{{end}}{{if .Venue}} &middot; {{.Venue}}{{end}}

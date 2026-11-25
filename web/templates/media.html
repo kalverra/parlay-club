@@ -44,7 +44,7 @@
 
 {{- define "matchup-logos" -}}
 {{- if or .AwayURL .HomeURL .AwayFallback .HomeFallback -}}
-<span class="inline-flex shrink-0 items-center -space-x-1">
+<span class="inline-flex shrink-0 items-center gap-1">
   {{- if or .AwayURL .AwayFallback -}}
     {{- template "team-logo" (dict "URL" .AwayURL "Fallback" .AwayFallback "Size" .Size) -}}
   {{- end -}}
