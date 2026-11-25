@@ -93,7 +93,7 @@ func (c *Cache) GetOrComputeMode(
 	if err != nil {
 		return SuiteReport{}, err
 	}
-	report := EvaluateAll(dataset, analyzer.BuiltInRubrics())
+	report := EvaluateAllEngines(dataset, analyzer.BuiltInEngines())
 
 	c.mu.Lock()
 	if c.entries == nil {

@@ -16,29 +16,31 @@ import (
 // EvalResultsPage is the in-app Grading Results screen at GET /analyzer/results.
 type EvalResultsPage struct {
 	Page
-	BackURL         string
-	GuideURL        string
-	ScopeLabel      string
-	Source          string
-	IsMarket        bool
-	SlipsURL        string
-	Sources         []EvalSourceOption
-	HasData         bool
-	Season          int
-	SeasonLabel     string
-	Seasons         []EvalSeasonOption
-	SelectedRubric  string
-	Rubrics         []EvalRubricOption
-	ShowRubricDiffs bool
-	Monotonic       bool
-	MonotonicStatus string
-	LegBands        []EvalBandView
-	SlipBands       []EvalBandView
-	Diffs           []EvalDiffView
-	Weekly          []EvalWeekView
-	Factors         []EvalFactorView
-	SlipFactors     []EvalFactorView
-	Coverage        EvalCoverageView
+	BackURL           string
+	GuideURL          string
+	ScopeLabel        string
+	Source            string
+	IsMarket          bool
+	SlipsURL          string
+	Sources           []EvalSourceOption
+	HasData           bool
+	Season            int
+	SeasonLabel       string
+	Seasons           []EvalSeasonOption
+	SelectedEngine    string
+	Engines           []EvalEngineOption
+	ShowEngineDiffs   bool
+	EngineComparisons []EvalEngineComparisonView
+	Calibration       EvalCalibrationView
+	Monotonic         bool
+	MonotonicStatus   string
+	LegBands          []EvalBandView
+	SlipBands         []EvalBandView
+	Diffs             []EvalDiffView
+	Weekly            []EvalWeekView
+	Factors           []EvalFactorView
+	SlipFactors       []EvalFactorView
+	Coverage          EvalCoverageView
 }
 
 // EvalSourceOption is one pill in the source switcher (User slips vs. Market-wide).
@@ -57,12 +59,74 @@ type EvalSeasonOption struct {
 	URL     string
 }
 
-// EvalRubricOption is one pill in the rubric switcher.
-type EvalRubricOption struct {
+// EvalEngineOption is one pill in the grading engine switcher.
+type EvalEngineOption struct {
 	Name    string
 	Active  bool
 	Current bool
 	URL     string
+}
+
+// EvalEngineComparisonView summarizes one grading engine's calibration and
+// SGP performance for side-by-side comparison.
+type EvalEngineComparisonView struct {
+	Name          string
+	Active        bool
+	Current       bool
+	URL           string
+	HasModelProbs bool
+	LogLoss       string
+	BrierScore    string
+	ClasswiseECE  string
+	BinSpread     string
+	BinSpreadOK   bool
+	HasSGP        bool
+	SGPCount      int
+	SGPLogLoss    string
+	NaiveSGPLL    string
+	SGPLift       string
+	SGPLiftPos    bool
+	SGPLiftNeg    bool
+	Monotonic     bool
+}
+
+// EvalCalibrationView formats proper scoring rules, market baselines,
+// reliability bins, and SGP correlation lift for the selected grading engine.
+type EvalCalibrationView struct {
+	HasData           bool
+	HasModelProbs     bool
+	LogLoss           string
+	BrierScore        string
+	ClasswiseECE      string
+	BinSpread         string
+	BinSpreadOK       bool
+	HasMarket         bool
+	MarketLogLoss     string
+	MarketBrier       string
+	BeatsMarketLL     bool
+	TrailsMarketLL    bool
+	BeatsMarketBrier  bool
+	TrailsMarketBrier bool
+	HasSGP            bool
+	SGPCount          int
+	SGPLabel          string
+	SGPLogLoss        string
+	NaiveIndepLogLoss string
+	SGPLift           string
+	SGPLiftPositive   bool
+	SGPLiftNegative   bool
+	Reliability       []EvalReliabilityBinView
+}
+
+// EvalReliabilityBinView formats one 10% probability bucket in the reliability table.
+type EvalReliabilityBinView struct {
+	Label      string
+	Count      int
+	CountLabel string
+	Empty      bool
+	MeanPred   string
+	Empirical  string
+	Gap        string
 }
 
 // EvalBandView formats one A-F (or ungraded) calibration row.
@@ -225,7 +289,11 @@ func (h *slipHandlers) evalResults(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	selectedReport := selectEvalReport(suite, strings.TrimSpace(r.URL.Query().Get("rubric")))
+	requestedEngine := strings.TrimSpace(r.URL.Query().Get("engine"))
+	if requestedEngine == "" {
+		requestedEngine = strings.TrimSpace(r.URL.Query().Get("rubric"))
+	}
+	selectedReport := selectEvalReport(suite, requestedEngine)
 	data := buildEvalResultsPage(
 		page,
 		backURL,
@@ -309,7 +377,11 @@ func parseEvalSeason(
 
 func selectEvalReport(suite eval.SuiteReport, requested string) eval.Report {
 	if len(suite.Reports) == 0 {
-		return eval.Report{RubricName: analyzer.ActiveRubric.Name, Coverage: suite.Coverage}
+		name := analyzer.RubricV1.Name
+		if analyzer.ActiveEngine != nil {
+			name = analyzer.ActiveEngine.Name()
+		}
+		return eval.Report{RubricName: name, Coverage: suite.Coverage}
 	}
 	if requested != "" {
 		for _, rep := range suite.Reports {
@@ -372,9 +444,9 @@ func buildEvalResultsPage(
 		seasonParam = strconv.Itoa(selectedSeason)
 	}
 
-	rubrics := make([]EvalRubricOption, 0, len(suite.Reports))
+	engines := make([]EvalEngineOption, 0, len(suite.Reports))
 	for _, rep := range suite.Reports {
-		rubrics = append(rubrics, EvalRubricOption{
+		engines = append(engines, EvalEngineOption{
 			Name:    rep.RubricName,
 			Active:  rep.RubricName == suite.ActiveRubric,
 			Current: rep.RubricName == report.RubricName,
@@ -406,29 +478,31 @@ func buildEvalResultsPage(
 	hasData := suite.Coverage.TotalLegs > 0 || len(report.Weekly) > 0
 
 	return EvalResultsPage{
-		Page:            page,
-		BackURL:         backURL,
-		GuideURL:        buildGuideURL(backURL),
-		ScopeLabel:      scopeLabel,
-		Source:          sourceStr,
-		IsMarket:        isMarket,
-		SlipsURL:        buildResultsURL(string(eval.ModeSlips), seasonParam, report.RubricName, backURL),
-		Sources:         buildEvalSources(source, seasonParam, report.RubricName, backURL),
-		HasData:         hasData,
-		Season:          selectedSeason,
-		SeasonLabel:     seasonLabel,
-		Seasons:         seasons,
-		SelectedRubric:  report.RubricName,
-		Rubrics:         rubrics,
-		ShowRubricDiffs: len(suite.Diffs) > 0,
-		Monotonic:       report.LegMonotonic,
-		MonotonicStatus: monotonicStatus,
-		LegBands:        legBands,
-		SlipBands:       slipBands,
-		Diffs:           buildEvalDiffs(suite.Diffs),
-		Weekly:          buildEvalWeekly(report.Weekly),
-		Factors:         buildEvalFactors(report.Factors),
-		SlipFactors:     slipFactors,
+		Page:              page,
+		BackURL:           backURL,
+		GuideURL:          buildGuideURL(backURL),
+		ScopeLabel:        scopeLabel,
+		Source:            sourceStr,
+		IsMarket:          isMarket,
+		SlipsURL:          buildResultsURL(string(eval.ModeSlips), seasonParam, report.RubricName, backURL),
+		Sources:           buildEvalSources(source, seasonParam, report.RubricName, backURL),
+		HasData:           hasData,
+		Season:            selectedSeason,
+		SeasonLabel:       seasonLabel,
+		Seasons:           seasons,
+		SelectedEngine:    report.RubricName,
+		Engines:           engines,
+		ShowEngineDiffs:   len(suite.Diffs) > 0,
+		EngineComparisons: buildEvalEngineComparisons(suite, report.RubricName, sourceStr, seasonParam, backURL),
+		Calibration:       buildEvalCalibration(report.Calibration),
+		Monotonic:         report.LegMonotonic,
+		MonotonicStatus:   monotonicStatus,
+		LegBands:          legBands,
+		SlipBands:         slipBands,
+		Diffs:             buildEvalDiffs(suite.Diffs),
+		Weekly:            buildEvalWeekly(report.Weekly),
+		Factors:           buildEvalFactors(report.Factors),
+		SlipFactors:       slipFactors,
 		Coverage: EvalCoverageView{
 			TotalLegs:      suite.Coverage.TotalLegs,
 			WithGameLogs:   suite.Coverage.WithGameLogs,
@@ -442,19 +516,19 @@ func buildEvalResultsPage(
 	}
 }
 
-func buildEvalSources(current eval.ReplayMode, season, rubric, backURL string) []EvalSourceOption {
+func buildEvalSources(current eval.ReplayMode, season, engine, backURL string) []EvalSourceOption {
 	return []EvalSourceOption{
 		{
 			Label:   "User slips",
 			Value:   string(eval.ModeSlips),
 			Current: current != eval.ModeMarket,
-			URL:     buildResultsURL(string(eval.ModeSlips), season, rubric, backURL),
+			URL:     buildResultsURL(string(eval.ModeSlips), season, engine, backURL),
 		},
 		{
 			Label:   "Market-wide",
 			Value:   string(eval.ModeMarket),
 			Current: current == eval.ModeMarket,
-			URL:     buildResultsURL(string(eval.ModeMarket), season, rubric, backURL),
+			URL:     buildResultsURL(string(eval.ModeMarket), season, engine, backURL),
 		},
 	}
 }
@@ -466,7 +540,7 @@ func buildGuideURL(backURL string) string {
 	return "/analyzer/guide?from=" + url.QueryEscape(backURL)
 }
 
-func buildResultsURL(source, season, rubric, backURL string) string {
+func buildResultsURL(source, season, engine, backURL string) string {
 	params := url.Values{}
 	if source != "" {
 		params.Set("source", source)
@@ -474,8 +548,8 @@ func buildResultsURL(source, season, rubric, backURL string) string {
 	if season != "" {
 		params.Set("season", season)
 	}
-	if rubric != "" {
-		params.Set("rubric", rubric)
+	if engine != "" {
+		params.Set("engine", engine)
 	}
 	if backURL != "" {
 		params.Set("from", backURL)
@@ -485,6 +559,128 @@ func buildResultsURL(source, season, rubric, backURL string) string {
 		return "/analyzer/results"
 	}
 	return "/analyzer/results?" + encoded
+}
+
+func buildEvalEngineComparisons(
+	suite eval.SuiteReport,
+	selectedEngine, source, season, backURL string,
+) []EvalEngineComparisonView {
+	out := make([]EvalEngineComparisonView, 0, len(suite.Reports))
+	for _, rep := range suite.Reports {
+		cal := buildEvalCalibration(rep.Calibration)
+		out = append(out, EvalEngineComparisonView{
+			Name:          rep.RubricName,
+			Active:        rep.RubricName == suite.ActiveRubric,
+			Current:       rep.RubricName == selectedEngine,
+			URL:           buildResultsURL(source, season, rep.RubricName, backURL),
+			HasModelProbs: cal.HasModelProbs,
+			LogLoss:       cal.LogLoss,
+			BrierScore:    cal.BrierScore,
+			ClasswiseECE:  cal.ClasswiseECE,
+			BinSpread:     cal.BinSpread,
+			BinSpreadOK:   cal.BinSpreadOK,
+			HasSGP:        cal.HasSGP,
+			SGPCount:      cal.SGPCount,
+			SGPLogLoss:    cal.SGPLogLoss,
+			NaiveSGPLL:    cal.NaiveIndepLogLoss,
+			SGPLift:       cal.SGPLift,
+			SGPLiftPos:    cal.SGPLiftPositive,
+			SGPLiftNeg:    cal.SGPLiftNegative,
+			Monotonic:     rep.LegMonotonic,
+		})
+	}
+	return out
+}
+
+func buildEvalCalibration(c eval.CalibrationMetrics) EvalCalibrationView {
+	hasModel := len(c.Reliability) > 0
+	hasMarket := c.MarketLogLoss > 0 || c.MarketBrier > 0
+	hasSGP := c.SGPCount > 0
+
+	view := EvalCalibrationView{
+		HasData:           hasModel || hasMarket || hasSGP,
+		HasModelProbs:     hasModel,
+		LogLoss:           "–",
+		BrierScore:        "–",
+		ClasswiseECE:      "–",
+		BinSpread:         "–",
+		BinSpreadOK:       c.BinSpreadOK,
+		HasMarket:         hasMarket,
+		MarketLogLoss:     "–",
+		MarketBrier:       "–",
+		HasSGP:            hasSGP,
+		SGPCount:          c.SGPCount,
+		SGPLogLoss:        "–",
+		NaiveIndepLogLoss: "–",
+		SGPLift:           "–",
+	}
+
+	if hasModel {
+		view.LogLoss = fmt.Sprintf("%.4f", c.LogLoss)
+		view.BrierScore = fmt.Sprintf("%.4f", c.BrierScore)
+		view.ClasswiseECE = fmt.Sprintf("%.4f", c.ClasswiseECE)
+		totalBins := c.TotalBins
+		if totalBins <= 0 {
+			totalBins = len(c.Reliability)
+		}
+		view.BinSpread = fmt.Sprintf("%d/%d", c.PopulatedBins, totalBins)
+		view.Reliability = buildEvalReliabilityBins(c.Reliability)
+	}
+
+	if hasMarket {
+		view.MarketLogLoss = fmt.Sprintf("%.4f", c.MarketLogLoss)
+		view.MarketBrier = fmt.Sprintf("%.4f", c.MarketBrier)
+		if hasModel {
+			diffLL := c.MarketLogLoss - c.LogLoss
+			view.BeatsMarketLL = diffLL > 0.00005
+			view.TrailsMarketLL = diffLL < -0.00005
+			diffBrier := c.MarketBrier - c.BrierScore
+			view.BeatsMarketBrier = diffBrier > 0.00005
+			view.TrailsMarketBrier = diffBrier < -0.00005
+		}
+	}
+
+	if hasSGP {
+		if c.SGPCount == 1 {
+			view.SGPLabel = "1 settled SGP"
+		} else {
+			view.SGPLabel = fmt.Sprintf("%d settled SGPs", c.SGPCount)
+		}
+		view.SGPLogLoss = fmt.Sprintf("%.4f", c.SGPLogLoss)
+		view.NaiveIndepLogLoss = fmt.Sprintf("%.4f", c.NaiveIndepLogLoss)
+		lift := c.NaiveIndepLogLoss - c.SGPLogLoss
+		view.SGPLift = fmt.Sprintf("%+.4f", lift)
+		view.SGPLiftPositive = lift > 0.00005
+		view.SGPLiftNegative = lift < -0.00005
+	}
+
+	return view
+}
+
+func buildEvalReliabilityBins(bins []eval.ReliabilityBin) []EvalReliabilityBinView {
+	out := make([]EvalReliabilityBinView, 0, len(bins))
+	for _, b := range bins {
+		countLabel := fmt.Sprintf("%d legs", b.Count)
+		if b.Count == 1 {
+			countLabel = "1 leg"
+		}
+		item := EvalReliabilityBinView{
+			Label:      fmt.Sprintf("%.0f–%.0f%%", b.BinLow*100, b.BinHigh*100),
+			Count:      b.Count,
+			CountLabel: countLabel,
+			Empty:      b.Count == 0,
+			MeanPred:   "–",
+			Empirical:  "–",
+			Gap:        "–",
+		}
+		if b.Count > 0 {
+			item.MeanPred = fmt.Sprintf("%.1f%%", b.MeanPredProb*100)
+			item.Empirical = fmt.Sprintf("%.1f%%", b.EmpiricalHit*100)
+			item.Gap = fmt.Sprintf("%+.1f pp", (b.EmpiricalHit-b.MeanPredProb)*100)
+		}
+		out = append(out, item)
+	}
+	return out
 }
 
 func buildEvalBands(bands []eval.BandStats) []EvalBandView {

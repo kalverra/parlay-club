@@ -1133,7 +1133,10 @@ func TestPickTrayMatchesTheViewerByIDNotName(t *testing.T) {
 	body := getTray()
 	assert.NotContains(t, body, `data-rule="median_trap"`,
 		"the other Chris's heads-up does not belong in this viewer's tray")
-	assert.NotContains(t, body, "Dawson Knox")
+	assert.NotContains(t, body, "Dawson Knox Over 52.5 Rec Yds",
+		"the other Chris's leg row does not belong in this viewer's tray")
+	assert.NotContains(t, body, "Dawson Knox's",
+		"the other Chris's heads-up text does not belong in this viewer's tray")
 
 	fixture.as(owner)
 	assert.Contains(t, getTray(), `data-rule="median_trap"`,

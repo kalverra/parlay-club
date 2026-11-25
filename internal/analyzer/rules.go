@@ -648,41 +648,49 @@ func tdSpikeRisk(a *analysis) []Warning {
 			continue
 		}
 		ps, ok := a.stats[leg.PlayerID]
-		if !ok || ps.Usage == nil || len(ps.Usage.Weeks) < 3 {
+		if !ok {
 			continue
 		}
-		games := ps.Games[leg.Market]
-		if len(games) < 3 {
-			continue
-		}
-		last3TDs := games[0] + games[1] + games[2]
-
-		switch {
-		case leg.Market == marketAnytimeTD && leg.Side == sideYes:
-			avgCarries := last3CarriesAvg(ps.Usage.Weeks)
-			if last3TDs >= tdSpikeMinTDs &&
-				ps.Usage.Last3TargetShare < tdSpikeMaxTargetShare &&
-				avgCarries < tdSpikeMaxCarriesPerGame {
-				message := fmt.Sprintf(
-					"%s has %s TDs in the last 3 games on a %d%% target share and %s carries/game — TD luck can cool off.",
-					playerName(leg),
-					number(last3TDs),
-					int(math.Round(ps.Usage.Last3TargetShare*100)),
-					number(math.Round(avgCarries*10)/10),
-				)
-				warnings = append(warnings, a.warning(ruleTDSpikeRisk, Info, message, []Leg{leg}))
-			}
-		case leg.Market == marketPassTDs && leg.Side == sideOver:
-			avgEPA := last3TotalEPAAvg(ps.Usage.Weeks)
-			if last3TDs >= tdSpikePassMinTDs && avgEPA <= 0 {
-				message := fmt.Sprintf(
-					"%s has %s passing TDs in the last 3 games despite negative EPA — TD efficiency can cool off.",
-					playerName(leg), number(last3TDs))
-				warnings = append(warnings, a.warning(ruleTDSpikeRisk, Info, message, []Leg{leg}))
-			}
+		if message, hit := evalTDSpikeRisk(leg, ps); hit {
+			warnings = append(warnings, a.warning(ruleTDSpikeRisk, Info, message, []Leg{leg}))
 		}
 	}
 	return warnings
+}
+
+func evalTDSpikeRisk(leg Leg, ps PlayerStats) (string, bool) {
+	if leg.PlayerID == "" || ps.Usage == nil || len(ps.Usage.Weeks) < 3 {
+		return "", false
+	}
+	games := ps.Games[leg.Market]
+	if len(games) < 3 {
+		return "", false
+	}
+	last3TDs := games[0] + games[1] + games[2]
+
+	switch {
+	case leg.Market == marketAnytimeTD && leg.Side == sideYes:
+		avgCarries := last3CarriesAvg(ps.Usage.Weeks)
+		if last3TDs >= tdSpikeMinTDs &&
+			ps.Usage.Last3TargetShare < tdSpikeMaxTargetShare &&
+			avgCarries < tdSpikeMaxCarriesPerGame {
+			return fmt.Sprintf(
+				"%s has %s TDs in the last 3 games on a %d%% target share and %s carries/game — TD luck can cool off.",
+				playerName(leg),
+				number(last3TDs),
+				int(math.Round(ps.Usage.Last3TargetShare*100)),
+				number(math.Round(avgCarries*10)/10),
+			), true
+		}
+	case leg.Market == marketPassTDs && leg.Side == sideOver:
+		avgEPA := last3TotalEPAAvg(ps.Usage.Weeks)
+		if last3TDs >= tdSpikePassMinTDs && avgEPA <= 0 {
+			return fmt.Sprintf(
+				"%s has %s passing TDs in the last 3 games despite negative EPA — TD efficiency can cool off.",
+				playerName(leg), number(last3TDs)), true
+		}
+	}
+	return "", false
 }
 
 func inTopRank(rank, maxRank int) bool {

@@ -1083,3 +1083,316 @@ func TestEvaluateMarketLegsAndMigrations(t *testing.T) {
 	}
 	assert.Equal(t, 4, totalMigrated)
 }
+
+type stubProbEngine struct {
+	name      string
+	probsByID map[int64]float64
+	mktByID   map[int64]float64
+}
+
+func (s stubProbEngine) Name() string { return s.name }
+
+func (s stubProbEngine) ScoreLeg(
+	leg analyzer.Leg,
+	_ map[string]analyzer.Game,
+	_ map[string]analyzer.PlayerStats,
+) analyzer.LegGrade {
+	p := s.probsByID[leg.ID]
+	letter := "B"
+	score := 75
+	if p == 0 {
+		letter = ""
+		score = 0
+	}
+	return analyzer.LegGrade{
+		LegID:          leg.ID,
+		Letter:         letter,
+		Score:          score,
+		CalibratedProb: p,
+		MarketProb:     s.mktByID[leg.ID],
+	}
+}
+
+func (s stubProbEngine) EvaluateSlip(
+	legs []analyzer.Leg,
+	games map[string]analyzer.Game,
+	stats map[string]analyzer.PlayerStats,
+) analyzer.SlipEvaluation {
+	grades := make([]analyzer.LegGrade, len(legs))
+	for i, l := range legs {
+		grades[i] = s.ScoreLeg(l, games, stats)
+	}
+	return analyzer.SlipEvaluation{
+		Grade: analyzer.SlipGrade{
+			Letter:    "B",
+			Score:     75,
+			LegGrades: grades,
+		},
+	}
+}
+
+func TestCalibrationMetricsSyntheticBinsSpreadAndMarketBaseline(t *testing.T) {
+	t.Parallel()
+
+	// Create 10 legs spanning all 10 probability bins [0.05..0.95] plus a Push
+	// leg and an ungraded leg that must be excluded from calibration metrics.
+	probs := []float64{0.05, 0.15, 0.25, 0.35, 0.45, 0.55, 0.65, 0.75, 0.85, 0.95}
+	results := []parlay.Result{
+		parlay.Lost, parlay.Lost, parlay.Lost, parlay.Lost, parlay.Lost,
+		parlay.Won, parlay.Won, parlay.Won, parlay.Won, parlay.Won,
+	}
+	probsByID := make(map[int64]float64, len(probs)+2)
+	mktByID := make(map[int64]float64, len(probs)+2)
+	legs := make([]ReplayedLeg, 0, len(probs)+2)
+	for i, p := range probs {
+		id := int64(i + 1)
+		probsByID[id] = p
+		mktByID[id] = 0.50
+		legs = append(legs, ReplayedLeg{
+			Leg: analyzer.Leg{
+				ID: id, GameID: "g1", Market: "REC_YDS", Odds: -110,
+			},
+			Result:      results[i],
+			DecimalOdds: parlay.AmericanToDecimal(-110),
+		})
+	}
+	// Push leg (ignored) + ungraded leg (CalibratedProb=0 -> ignored).
+	probsByID[99] = 0.75
+	legs = append(legs,
+		ReplayedLeg{
+			Leg:         analyzer.Leg{ID: 99, GameID: "g1", Market: "REC_YDS", Odds: -110},
+			Result:      parlay.Push,
+			DecimalOdds: 1.91,
+		},
+		ReplayedLeg{
+			Leg:         analyzer.Leg{ID: 100, GameID: "g1", Market: "OTHER", Odds: -110},
+			Result:      parlay.Won,
+			DecimalOdds: 1.91,
+		},
+	)
+
+	dataset := ReplayDataset{
+		Coverage: DataCoverage{TotalLegs: len(legs)},
+		Weeks: []ReplayedWeek{{
+			Season:     2025,
+			WeekNum:    4,
+			Games:      testGame(),
+			MarketLegs: legs,
+		}},
+	}
+
+	eng := stubProbEngine{name: "stub-full", probsByID: probsByID, mktByID: mktByID}
+	report := EvaluateEngine(dataset, eng)
+	cal := report.Calibration
+
+	assert.Equal(t, 10, cal.TotalBins)
+	assert.Equal(t, 10, cal.PopulatedBins)
+	assert.True(t, cal.BinSpreadOK)
+	require.Len(t, cal.Reliability, 10)
+
+	// Analytical checks across symmetric probs:
+	// ECE: each bin i has 1 item with |p_i - y_i| = 0.05, 0.15, 0.25, 0.35, 0.45 (symmetrically) -> mean = 0.25.
+	var wantLL, wantBrier float64
+	for i, p := range probs {
+		y := 0.0
+		if results[i] == parlay.Won {
+			y = 1.0
+		}
+		wantLL += binaryLogLossSample(p, y) / float64(len(probs))
+		wantBrier += (p - y) * (p - y) / float64(len(probs))
+	}
+	assert.InDelta(t, wantLL, cal.LogLoss, 1e-12)
+	assert.InDelta(t, wantBrier, cal.BrierScore, 1e-12)
+	assert.InDelta(t, 0.25, cal.ClasswiseECE, 1e-12)
+	assert.InDelta(t, math.Log(2.0), cal.MarketLogLoss, 1e-12)
+	assert.InDelta(t, 0.25, cal.MarketBrier, 1e-12)
+
+	for i, b := range cal.Reliability {
+		assert.Equal(t, 1, b.Count)
+		assert.InDelta(t, float64(i)/10.0, b.BinLow, 1e-12)
+		assert.InDelta(t, float64(i+1)/10.0, b.BinHigh, 1e-12)
+		assert.InDelta(t, probs[i], b.MeanPredProb, 1e-12)
+		if i < 5 {
+			assert.InDelta(t, 0.0, b.EmpiricalHit, 1e-12)
+		} else {
+			assert.InDelta(t, 1.0, b.EmpiricalHit, 1e-12)
+		}
+	}
+
+	// Verify 7 populated bins fails the >= 80% bin spread gate (7/10 < 80%), while 8/10 passes.
+	sparse7 := EvaluateEngine(ReplayDataset{
+		Weeks: []ReplayedWeek{{Season: 2025, WeekNum: 4, Games: testGame(), MarketLegs: legs[:7]}},
+	}, eng)
+	assert.Equal(t, 7, sparse7.Calibration.PopulatedBins)
+	assert.False(t, sparse7.Calibration.BinSpreadOK)
+
+	sparse8 := EvaluateEngine(ReplayDataset{
+		Weeks: []ReplayedWeek{{Season: 2025, WeekNum: 4, Games: testGame(), MarketLegs: legs[:8]}},
+	}, eng)
+	assert.Equal(t, 8, sparse8.Calibration.PopulatedBins)
+	assert.True(t, sparse8.Calibration.BinSpreadOK)
+}
+
+func TestEvaluateAllEnginesSideBySideAndSGPReplay(t *testing.T) {
+	t.Parallel()
+
+	games := map[string]analyzer.Game{
+		"g1": {
+			ID:     "g1",
+			Home:   "BUF",
+			Away:   "MIA",
+			Indoor: true,
+			MarketScript: analyzer.MarketScript{
+				HomeSpread:       -2.5,
+				GameTotal:        52.5,
+				HomeImpliedTotal: 27.5,
+				AwayImpliedTotal: 25.0,
+				HasSpread:        true,
+				HasTotal:         true,
+			},
+			Sharp: map[analyzer.SharpKey]analyzer.SharpQuote{
+				{MarketType: "PASS_YDS", Team: "BUF", PlayerName: "josh allen", Side: "OVER"}: {
+					Line: new(265.5), FairProb: 0.54, PowerFairProb: 0.54, Source: "Pinnacle", Tier: 1,
+				},
+				{MarketType: "REC_YDS", Team: "BUF", PlayerName: "khalil shakir", Side: "OVER"}: {
+					Line: new(62.5), FairProb: 0.54, PowerFairProb: 0.54, Source: "Pinnacle", Tier: 1,
+				},
+				{MarketType: "TOTAL", Side: "OVER"}: {
+					Line: new(52.5), FairProb: 0.54, PowerFairProb: 0.54, Source: "Pinnacle", Tier: 1,
+				},
+			},
+		},
+		"g2": {
+			ID:     "g2",
+			Home:   "KC",
+			Away:   "BAL",
+			Indoor: true,
+			MarketScript: analyzer.MarketScript{
+				HomeSpread: -3.0, GameTotal: 46.5, HasSpread: true, HasTotal: true,
+			},
+		},
+	}
+
+	stats := map[string]analyzer.PlayerStats{
+		"qb1": {
+			Position: "QB",
+			Role:     analyzer.RoleQB,
+			Games:    map[string][]float64{"PASS_YDS": {295, 280, 310, 275, 290}},
+			EWMA:     &analyzer.PlayerEWMAUsage{GamesPlayed: 6, PassYds: 288, ExpPassYds: 278},
+		},
+		"wr1": {
+			Position: "WR",
+			Role:     analyzer.RoleWR1,
+			Games:    map[string][]float64{"REC_YDS": {88, 76, 94, 70, 82}},
+			EWMA:     &analyzer.PlayerEWMAUsage{GamesPlayed: 6, RecYds: 81, ExpRecYds: 74, TargetShare: 0.28},
+		},
+	}
+
+	qbLeg := func(id int64, res parlay.Result) ReplayedLeg {
+		return ReplayedLeg{
+			Leg: analyzer.Leg{
+				ID: id, GameID: "g1", Market: "PASS_YDS", Team: "BUF",
+				PlayerID: "qb1", PlayerName: "Josh Allen", Side: "OVER", Line: new(265.5), Odds: -110,
+			},
+			Result:      res,
+			DecimalOdds: parlay.AmericanToDecimal(-110),
+		}
+	}
+	wrLeg := func(id int64, res parlay.Result) ReplayedLeg {
+		return ReplayedLeg{
+			Leg: analyzer.Leg{
+				ID: id, GameID: "g1", Market: "REC_YDS", Team: "BUF",
+				PlayerID: "wr1", PlayerName: "Khalil Shakir", Side: "OVER", Line: new(62.5), Odds: -110,
+			},
+			Result:      res,
+			DecimalOdds: parlay.AmericanToDecimal(-110),
+		}
+	}
+	totalLeg := func(id int64, gameID string, line float64, res parlay.Result) ReplayedLeg {
+		return ReplayedLeg{
+			Leg: analyzer.Leg{
+				ID: id, GameID: gameID, Market: "TOTAL", Side: "OVER", Line: new(line), Odds: -110,
+			},
+			Result:      res,
+			DecimalOdds: parlay.AmericanToDecimal(-110),
+		}
+	}
+
+	dataset := ReplayDataset{
+		Coverage: DataCoverage{TotalLegs: 10, WithGameLogs: 6, WithNFLVerse: 10, WithOdds: 10, WithSharp: 6},
+		Weeks: []ReplayedWeek{{
+			Season:  2025,
+			WeekNum: 7,
+			Games:   games,
+			Stats:   stats,
+			Slips: []ReplayedSlip{
+				{
+					// Winning 3-leg shootout SGP in g1 (copula M_corr > 1 lifts joint prob above naive prod).
+					SlipID:       1,
+					Result:       parlay.Won,
+					CombinedOdds: 6.0,
+					Legs: []ReplayedLeg{
+						qbLeg(1, parlay.Won),
+						wrLeg(2, parlay.Won),
+						totalLeg(3, "g1", 52.5, parlay.Won),
+					},
+				},
+				{
+					// Winning 2-leg QB+WR SGP in g1.
+					SlipID:       2,
+					Result:       parlay.Won,
+					CombinedOdds: 3.6,
+					Legs:         []ReplayedLeg{qbLeg(4, parlay.Won), wrLeg(5, parlay.Won)},
+				},
+				{
+					// Cross-game 2-leg parlay (g1 + g2): must NOT be counted as an SGP.
+					SlipID:       3,
+					Result:       parlay.Lost,
+					CombinedOdds: 3.6,
+					Legs:         []ReplayedLeg{qbLeg(6, parlay.Won), totalLeg(7, "g2", 46.5, parlay.Lost)},
+				},
+				{
+					// Pushed SGP: must NOT be counted in SGPCount.
+					SlipID:       4,
+					Result:       parlay.Push,
+					CombinedOdds: 3.6,
+					Legs:         []ReplayedLeg{qbLeg(8, parlay.Push), wrLeg(9, parlay.Push)},
+				},
+			},
+		}},
+	}
+
+	suite := EvaluateAllEngines(dataset, analyzer.BuiltInEngines())
+	assert.Equal(t, analyzer.ActiveEngine.Name(), suite.ActiveRubric)
+	require.Len(t, suite.Reports, 2)
+	require.Len(t, suite.Diffs, 1)
+
+	v1 := suite.Reports[0]
+	v2 := suite.Reports[1]
+	assert.Equal(t, "v1", v1.RubricName)
+	assert.Equal(t, "v2", v2.RubricName)
+	assert.Equal(t, "v1", suite.Diffs[0].BaselineName)
+	assert.Equal(t, "v2", suite.Diffs[0].CandidateName)
+
+	// v1 emits no calibrated probabilities, while still preserving the sharp market baseline.
+	assert.Empty(t, v1.Calibration.Reliability)
+	assert.Zero(t, v1.Calibration.PopulatedBins)
+	assert.Equal(t, defaultReliabilityBins, v1.Calibration.TotalBins)
+	assert.False(t, v1.Calibration.BinSpreadOK)
+	assert.Zero(t, v1.Calibration.SGPCount)
+	assert.Greater(t, v1.Calibration.MarketLogLoss, 0.0)
+
+	// v2 emits calibrated leg probabilities, market baseline, reliability bins, and SGP copula lift.
+	assert.Len(t, v2.Calibration.Reliability, defaultReliabilityBins)
+	assert.Positive(t, v2.Calibration.PopulatedBins)
+	assert.Greater(t, v2.Calibration.LogLoss, 0.0)
+	assert.Greater(t, v2.Calibration.BrierScore, 0.0)
+	assert.InDelta(t, v1.Calibration.MarketLogLoss, v2.Calibration.MarketLogLoss, 1e-12)
+	assert.InDelta(t, v1.Calibration.MarketBrier, v2.Calibration.MarketBrier, 1e-12)
+
+	// Only the 2 decided same-game parlays count toward SGPCount.
+	assert.Equal(t, 2, v2.Calibration.SGPCount)
+	assert.Greater(t, v2.Calibration.SGPLogLoss, 0.0)
+	assert.Greater(t, v2.Calibration.NaiveIndepLogLoss, 0.0)
+	assert.Less(t, v2.Calibration.SGPLogLoss, v2.Calibration.NaiveIndepLogLoss)
+}

@@ -1713,7 +1713,7 @@ func TestScoreLegTeammateOut(t *testing.T) {
 
 	t.Run("no injuries gives full L5 median trap", func(t *testing.T) {
 		t.Parallel()
-		got := analyzer.ScoreLeg(knoxLeg, games(), knoxStats)
+		got := analyzer.EngineV1.ScoreLeg(knoxLeg, games(), knoxStats)
 		assert.Equal(t, 60, got.Score)
 		assert.Equal(t, "C", got.Letter)
 		require.Len(t, got.Factors, 1)
@@ -1726,7 +1726,7 @@ func TestScoreLegTeammateOut(t *testing.T) {
 		gs := gamesWithInjuries([]analyzer.Injury{
 			{AthleteID: "kincaid", FullName: "Dalton Kincaid", Position: "TE", Status: "Out"},
 		})
-		got := analyzer.ScoreLeg(knoxLeg, gs, knoxStats)
+		got := analyzer.EngineV1.ScoreLeg(knoxLeg, gs, knoxStats)
 		assert.Equal(t, 75, got.Score)
 		assert.Equal(t, "B", got.Letter)
 		require.Len(t, got.Factors, 2)
@@ -1744,7 +1744,7 @@ func TestScoreLegTeammateOut(t *testing.T) {
 			gs := gamesWithInjuries([]analyzer.Injury{
 				{AthleteID: "kincaid", FullName: "Dalton Kincaid", Position: "TE", Status: status},
 			})
-			got := analyzer.ScoreLeg(knoxLeg, gs, knoxStats)
+			got := analyzer.EngineV1.ScoreLeg(knoxLeg, gs, knoxStats)
 			assert.Equal(t, 60, got.Score, "status %s should not soften trap", status)
 			require.Len(t, got.Factors, 1)
 			assert.Equal(t, "median_trap", got.Factors[0].Rule)
@@ -1757,7 +1757,7 @@ func TestScoreLegTeammateOut(t *testing.T) {
 		gs := gamesWithInjuries([]analyzer.Injury{
 			{AthleteID: "coleman", FullName: "Keon Coleman", Position: "WR", Status: "Out"},
 		})
-		got := analyzer.ScoreLeg(knoxLeg, gs, knoxStats)
+		got := analyzer.EngineV1.ScoreLeg(knoxLeg, gs, knoxStats)
 		assert.Equal(t, 60, got.Score)
 		require.Len(t, got.Factors, 1)
 		assert.Equal(t, -15, got.Factors[0].Delta)
@@ -1768,7 +1768,7 @@ func TestScoreLegTeammateOut(t *testing.T) {
 		gs := gamesWithInjuries([]analyzer.Injury{
 			{AthleteID: "knox", FullName: "Dawson Knox", Position: "TE", Status: "Out"},
 		})
-		got := analyzer.ScoreLeg(knoxLeg, gs, knoxStats)
+		got := analyzer.EngineV1.ScoreLeg(knoxLeg, gs, knoxStats)
 		assert.Equal(t, 60, got.Score)
 		require.Len(t, got.Factors, 1)
 		assert.Equal(t, -15, got.Factors[0].Delta)
@@ -1789,7 +1789,7 @@ func TestScoreLegTeammateOut(t *testing.T) {
 		gs := gamesWithInjuries([]analyzer.Injury{
 			{AthleteID: "trubisky", FullName: "Mitch Trubisky", Position: "QB", Status: "Out"},
 		})
-		got := analyzer.ScoreLeg(allenLeg, gs, allenStats)
+		got := analyzer.EngineV1.ScoreLeg(allenLeg, gs, allenStats)
 		assert.Equal(t, 75, got.Score)
 		assert.Empty(t, got.Factors)
 	})
@@ -1803,7 +1803,7 @@ func TestScoreLegTeammateOut(t *testing.T) {
 		gs := gamesWithInjuries([]analyzer.Injury{
 			{AthleteID: "kincaid", FullName: "Dalton Kincaid", Position: "TE", Status: "Out"},
 		})
-		got := analyzer.ScoreLeg(underLeg, gs, knoxStats)
+		got := analyzer.EngineV1.ScoreLeg(underLeg, gs, knoxStats)
 		assert.Equal(t, 85, got.Score)
 		require.Len(t, got.Factors, 1)
 		assert.Equal(t, "hit_rate", got.Factors[0].Rule)
@@ -1818,7 +1818,7 @@ func TestScoreLegTeammateOut(t *testing.T) {
 		gs := gamesWithInjuries([]analyzer.Injury{
 			{AthleteID: "kincaid", FullName: "Dalton Kincaid", Position: "TE", Status: "Out"},
 		})
-		got := analyzer.ScoreLeg(tdLeg, gs, knoxStats)
+		got := analyzer.EngineV1.ScoreLeg(tdLeg, gs, knoxStats)
 		assert.Equal(t, 80, got.Score)
 		require.Len(t, got.Factors, 1)
 		assert.Equal(t, "teammate_out_bump", got.Factors[0].Rule)
@@ -1856,7 +1856,7 @@ func TestScoreLegSharpBenchmarks(t *testing.T) {
 	t.Run("nil or missing sharp quote fails soft", func(t *testing.T) {
 		t.Parallel()
 		l := leg(1, "Adam", "buf-mia", "SPREAD", "BUF", "", "TEAM", new(-2.5), -110)
-		withoutSharp := analyzer.ScoreLeg(l, games(), nil)
+		withoutSharp := analyzer.EngineV1.ScoreLeg(l, games(), nil)
 		assert.Equal(t, 75, withoutSharp.Score)
 		assert.Empty(t, withoutSharp.Factors)
 
@@ -1865,7 +1865,7 @@ func TestScoreLegSharpBenchmarks(t *testing.T) {
 				Line: new(44.5), FairProb: 0.5, FairAmerican: -100, Source: "LowVig", Tier: 2,
 			},
 		}, nil)
-		withOtherKey := analyzer.ScoreLeg(l, otherKey, nil)
+		withOtherKey := analyzer.EngineV1.ScoreLeg(l, otherKey, nil)
 		assert.Equal(t, withoutSharp, withOtherKey)
 	})
 
@@ -1883,7 +1883,7 @@ func TestScoreLegSharpBenchmarks(t *testing.T) {
 			},
 		}, nil)
 
-		spreadEdge := analyzer.ScoreLeg(
+		spreadEdge := analyzer.EngineV1.ScoreLeg(
 			leg(1, "Adam", "buf-mia", "SPREAD", "BUF", "", "TEAM", new(-2.5), -110),
 			gs, nil,
 		)
@@ -1894,7 +1894,7 @@ func TestScoreLegSharpBenchmarks(t *testing.T) {
 		assert.Equal(t, "Getting BUF -2.5 while LowVig sits at -3.5.", spreadEdge.Factors[0].Detail)
 		assertFriendlyTone(t, spreadEdge.Factors[0].Detail)
 
-		totalOverEdge := analyzer.ScoreLeg(
+		totalOverEdge := analyzer.EngineV1.ScoreLeg(
 			leg(2, "Adam", "buf-mia", "TOTAL", "", "", "OVER", new(43.5), -110),
 			gs, nil,
 		)
@@ -1905,7 +1905,7 @@ func TestScoreLegSharpBenchmarks(t *testing.T) {
 		assert.Equal(t, 8, totalOverEdge.Factors[1].Delta)
 		assertFriendlyTone(t, totalOverEdge.Factors[1].Detail)
 
-		totalUnderConsensus := analyzer.ScoreLeg(
+		totalUnderConsensus := analyzer.EngineV1.ScoreLeg(
 			leg(3, "Adam", "buf-mia", "TOTAL", "", "", "UNDER", new(49.5), -110),
 			gs, nil,
 		)
@@ -1928,7 +1928,7 @@ func TestScoreLegSharpBenchmarks(t *testing.T) {
 			},
 		}, nil)
 
-		spreadFade := analyzer.ScoreLeg(
+		spreadFade := analyzer.EngineV1.ScoreLeg(
 			leg(1, "Adam", "buf-mia", "SPREAD", "BUF", "", "TEAM", new(-3.5), -110),
 			gs, nil,
 		)
@@ -1940,7 +1940,7 @@ func TestScoreLegSharpBenchmarks(t *testing.T) {
 		assert.Equal(t, "LowVig sits at -2.5, so -3.5 gives up a full point.", spreadFade.Factors[1].Detail)
 		assertFriendlyTone(t, spreadFade.Factors[1].Detail)
 
-		ttFade := analyzer.ScoreLeg(
+		ttFade := analyzer.EngineV1.ScoreLeg(
 			leg(2, "Adam", "buf-mia", "TEAM_TOTAL", "BUF", "", "OVER", new(24.0), -110),
 			gs, nil,
 		)
@@ -1966,7 +1966,7 @@ func TestScoreLegSharpBenchmarks(t *testing.T) {
 		}, nil)
 
 		// 1.5 yards difference on PASS_YDS is below the 2.0 yardage threshold.
-		smallDiff := analyzer.ScoreLeg(
+		smallDiff := analyzer.EngineV1.ScoreLeg(
 			leg(1, "Adam", "buf-mia", "PASS_YDS", "BUF", "Josh Allen", "OVER", new(264.0), -110),
 			gs, nil,
 		)
@@ -1974,7 +1974,7 @@ func TestScoreLegSharpBenchmarks(t *testing.T) {
 		assert.Empty(t, smallDiff.Factors)
 
 		// 2.0 yards edge on PASS_YDS triggers sharp_line_edge.
-		twoYardEdge := analyzer.ScoreLeg(
+		twoYardEdge := analyzer.EngineV1.ScoreLeg(
 			leg(2, "Adam", "buf-mia", "PASS_YDS", "BUF", "Josh Allen", "OVER", new(263.5), -110),
 			gs, nil,
 		)
@@ -1983,7 +1983,7 @@ func TestScoreLegSharpBenchmarks(t *testing.T) {
 		assert.Equal(t, "sharp_line_edge", twoYardEdge.Factors[0].Rule)
 
 		// 2.5 yards fade with Jr. suffix normalization on REC_YDS triggers sharp_line_fade.
-		suffixFade := analyzer.ScoreLeg(
+		suffixFade := analyzer.EngineV1.ScoreLeg(
 			leg(3, "Adam", "buf-mia", "REC_YDS", "MIA", "Marvin Harrison Jr.", "OVER", new(68.0), -110),
 			gs, nil,
 		)
@@ -1994,7 +1994,7 @@ func TestScoreLegSharpBenchmarks(t *testing.T) {
 		assertFriendlyTone(t, suffixFade.Factors[0].Detail)
 
 		// 0.5 receptions edge triggers sharp_line_edge (non-yardage threshold = 0.5).
-		recEdge := analyzer.ScoreLeg(
+		recEdge := analyzer.EngineV1.ScoreLeg(
 			leg(4, "Adam", "buf-mia", "RECEPTIONS", "BUF", "Khalil Shakir", "OVER", new(5.0), -110),
 			gs, nil,
 		)
@@ -2021,7 +2021,7 @@ func TestScoreLegSharpBenchmarks(t *testing.T) {
 		}, nil)
 
 		// +105 vs 52% fair (-108) -> +3.22 pp edge -> sharp_price_edge (+6).
-		priceEdge := analyzer.ScoreLeg(
+		priceEdge := analyzer.EngineV1.ScoreLeg(
 			leg(1, "Adam", "buf-mia", "ML", "BUF", "", "TEAM", nil, +105),
 			gs, nil,
 		)
@@ -2034,7 +2034,7 @@ func TestScoreLegSharpBenchmarks(t *testing.T) {
 
 		// -135 vs 52.8% fair (-112) -> -4.65 pp edge -> sharp_price_fade (-6).
 		// Note MIA +2.5 is also a hook (-10) -> 75 - 10 - 6 = 59.
-		priceFade := analyzer.ScoreLeg(
+		priceFade := analyzer.EngineV1.ScoreLeg(
 			leg(2, "Adam", "buf-mia", "SPREAD", "MIA", "", "TEAM", new(2.5), -135),
 			gs, nil,
 		)
@@ -2046,7 +2046,7 @@ func TestScoreLegSharpBenchmarks(t *testing.T) {
 		assertFriendlyTone(t, priceFade.Factors[1].Detail)
 
 		// Standard -110 retail vs 50% fair (-0.0238 edge) is inside -0.045 and must NOT penalize.
-		normalVig := analyzer.ScoreLeg(
+		normalVig := analyzer.EngineV1.ScoreLeg(
 			leg(3, "Adam", "buf-mia", "TOTAL", "", "", "OVER", new(45.5), -110),
 			gs, nil,
 		)
@@ -2054,7 +2054,7 @@ func TestScoreLegSharpBenchmarks(t *testing.T) {
 		assert.Empty(t, normalVig.Factors)
 
 		// Tier 3 consensus price edge awards +4.
-		tier3Edge := analyzer.ScoreLeg(
+		tier3Edge := analyzer.EngineV1.ScoreLeg(
 			leg(4, "Adam", "buf-mia", "ML", "MIA", "", "TEAM", nil, +125),
 			gs, nil,
 		)
@@ -2077,7 +2077,7 @@ func TestScoreLegSharpBenchmarks(t *testing.T) {
 			&analyzer.Nfelo{HomeSpread: 5.5},
 		)
 
-		got := analyzer.ScoreLeg(
+		got := analyzer.EngineV1.ScoreLeg(
 			leg(1, "Adam", "buf-mia", "SPREAD", "BUF", "", "TEAM", new(-2.5), -110),
 			gs, nil,
 		)

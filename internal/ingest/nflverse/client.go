@@ -1,7 +1,7 @@
-// Package nflverse fetches pre-aggregated NFL team, player, snap count, and
-// player-ID crosswalk CSVs from nflverse-data GitHub releases. The client
-// takes a base URL and an HTTP client, returns plain structs, and never touches
-// the database.
+// Package nflverse fetches pre-aggregated NFL team, player, snap count,
+// expected-opportunity, and player-ID crosswalk CSVs from nflverse-data and
+// ffverse/ffopportunity GitHub releases. The client takes a base URL and an
+// HTTP client, returns plain structs, and never touches the database.
 package nflverse
 
 import (
@@ -19,6 +19,9 @@ import (
 const (
 	// DefaultBaseURL is the GitHub releases download prefix for nflverse-data.
 	DefaultBaseURL = "https://github.com/nflverse/nflverse-data/releases/download"
+	// DefaultFFOpportunityBaseURL is the GitHub releases download prefix for
+	// ffverse's weekly expected-opportunity CSVs.
+	DefaultFFOpportunityBaseURL = "https://github.com/ffverse/ffopportunity/releases/download/latest-data"
 	// defaultTimeout bounds a request when the caller does not supply a client.
 	defaultTimeout = 30 * time.Second
 	// userAgent identifies this app to GitHub.
@@ -57,19 +60,24 @@ func NewClient(baseURL string, httpClient *http.Client) *Client {
 // get fetches path under the base URL. The response body is left open so the
 // caller can stream it into a parser.
 func (c *Client) get(ctx context.Context, path string) (*http.Response, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
+	return c.getURL(ctx, c.baseURL+path, path)
+}
+
+// getURL fetches targetURL. label identifies the resource in error messages.
+func (c *Client) getURL(ctx context.Context, targetURL, label string) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("build %s request: %w", path, err)
+		return nil, fmt.Errorf("build %s request: %w", label, err)
 	}
 	req.Header.Set("User-Agent", userAgent)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("get %s: %w", path, err)
+		return nil, fmt.Errorf("get %s: %w", label, err)
 	}
 	if resp.StatusCode != http.StatusOK {
 		_ = resp.Body.Close()
-		return nil, fmt.Errorf("get %s: unexpected status %s", path, resp.Status)
+		return nil, fmt.Errorf("get %s: unexpected status %s", label, resp.Status)
 	}
 	return resp, nil
 }
@@ -81,13 +89,24 @@ func parseCSV[T any](
 	required []string,
 	parseRow func(record []string, cols map[string]int, line int) (T, bool, error),
 ) ([]T, error) {
+	return parseCSVWithOptional(body, required, nil, parseRow)
+}
+
+// parseCSVWithOptional reads a CSV stream by header name, resolving required
+// columns (failing if any are missing) plus any present optional columns.
+func parseCSVWithOptional[T any](
+	body io.Reader,
+	required []string,
+	optional []string,
+	parseRow func(record []string, cols map[string]int, line int) (T, bool, error),
+) ([]T, error) {
 	reader := csv.NewReader(body)
 	header, err := reader.Read()
 	if err != nil {
 		return nil, fmt.Errorf("read header: %w", err)
 	}
 
-	cols, err := resolveColumns(header, required)
+	cols, err := resolveColumnsWithOptional(header, required, optional)
 	if err != nil {
 		return nil, err
 	}
@@ -112,15 +131,16 @@ func parseCSV[T any](
 	return out, nil
 }
 
-// resolveColumns maps every required column name to its 0-based index in
-// header. Any missing required column fails the file immediately.
-func resolveColumns(header, required []string) (map[string]int, error) {
+// resolveColumnsWithOptional maps every required column name (and any present
+// optional column name) to its 0-based index in header. Any missing required
+// column fails the file immediately.
+func resolveColumnsWithOptional(header, required, optional []string) (map[string]int, error) {
 	index := make(map[string]int, len(header))
 	for pos, name := range header {
 		index[strings.TrimSpace(name)] = pos
 	}
 
-	cols := make(map[string]int, len(required))
+	cols := make(map[string]int, len(required)+len(optional))
 	var missing []string
 	for _, name := range required {
 		pos, ok := index[name]
@@ -133,12 +153,26 @@ func resolveColumns(header, required []string) (map[string]int, error) {
 	if len(missing) > 0 {
 		return nil, fmt.Errorf("missing required columns: %s", strings.Join(missing, ", "))
 	}
+	for _, name := range optional {
+		if pos, ok := index[name]; ok {
+			cols[name] = pos
+		}
+	}
 	return cols, nil
 }
 
 // cell returns the trimmed value of column name in record.
 func cell(record []string, cols map[string]int, name string) string {
 	return strings.TrimSpace(record[cols[name]])
+}
+
+// optionalCell returns the trimmed value of an optional column, or "" when absent.
+func optionalCell(record []string, cols map[string]int, name string) string {
+	pos, ok := cols[name]
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(record[pos])
 }
 
 // parseSeasonType converts nflverse season_type/game_type codes into ESPN's

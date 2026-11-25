@@ -176,6 +176,7 @@ func TestPlayerStatsParsesSavedFixture(t *testing.T) {
 	assert.Equal(t, 43, stafford.Attempts)
 	assert.Equal(t, 228, stafford.PassingYards)
 	assert.Equal(t, 1, stafford.PassingTDs)
+	assert.InDelta(t, -4.18803408378508, stafford.PassingCPOE, 1e-9)
 
 	folk, ok := byID["00-0025565"]
 	require.True(t, ok)
@@ -205,6 +206,78 @@ func TestSnapCountsParsesSavedFixture(t *testing.T) {
 		_, ok := espnTeamCodes[r.Team]
 		assert.True(t, ok, "team code %q is not an ESPN abbreviation", r.Team)
 	}
+}
+
+func TestFFOpportunityParsesSavedFixture(t *testing.T) {
+	t.Parallel()
+
+	raw := readFixture(t, "ep_weekly_2026.csv")
+	server := csvServer(t, "/ff_opportunity/ep_weekly_2026.csv", raw)
+
+	rows, err := nflverse.NewClient(server.URL, server.Client()).FFOpportunity(t.Context(), 2026)
+	require.NoError(t, err)
+	assert.Len(t, rows, 318)
+
+	byID := make(map[string]nflverse.PlayerOpportunity, len(rows))
+	for _, r := range rows {
+		assert.NotEmpty(t, r.PlayerID)
+		assert.NotEmpty(t, r.PlayerName)
+		assert.Equal(t, 2026, r.Season)
+		assert.Equal(t, nflverse.SeasonTypeRegular, r.SeasonType)
+		assert.Equal(t, 9, r.Week)
+		_, ok := espnTeamCodes[r.Team]
+		assert.True(t, ok, "team code %q is not an ESPN abbreviation", r.Team)
+		byID[r.PlayerID] = r
+	}
+
+	stafford, ok := byID["00-0026498"]
+	require.True(t, ok)
+	assert.Equal(t, "Matthew Stafford", stafford.PlayerName)
+	assert.Equal(t, "QB", stafford.Position)
+	assert.Equal(t, "LAR", stafford.Team)
+	assert.InDelta(t, 326.6, stafford.ExpPassYds, 1e-9)
+	assert.InDelta(t, 5.92, stafford.ExpRushYds, 1e-9)
+	assert.InDelta(t, 2.03, stafford.ExpPassTDs, 1e-9)
+	assert.InDelta(t, 0.02, stafford.ExpRushTDs, 1e-9)
+}
+
+func TestFFOpportunityPostseasonAndOptionalCells(t *testing.T) {
+	t.Parallel()
+
+	header := []string{
+		"season", "posteam", "week", "player_id", "full_name", "position",
+		"receptions_exp", "pass_yards_gained_exp", "rec_yards_gained_exp",
+		"rush_yards_gained_exp", "pass_touchdown_exp", "rec_touchdown_exp",
+		"rush_touchdown_exp",
+	}
+	body := buildCSV(t, header,
+		[]string{"2025", "WAS", "19", "00-1", "Jayden Daniels", "QB", "", "245.5", "NA", "38.2", "1.8", "", "0.35"},
+		[]string{"2025", "LA", "20", "00-2", "Kyren Williams", "HB", "3.4", "", "22.1", "81.6", "", "0.18", "0.72"},
+		[]string{"2025", "KC", "1", "", "Missing ID", "WR", "1.0", "", "10.0", "", "", "0.1", ""},
+	)
+	server := csvServer(t, "/ff_opportunity/ep_weekly_2025.csv", body)
+
+	rows, err := nflverse.NewClient(server.URL, server.Client()).FFOpportunity(t.Context(), 2025)
+	require.NoError(t, err)
+	require.Len(t, rows, 2)
+
+	assert.Equal(t, "WSH", rows[0].Team)
+	assert.Equal(t, nflverse.SeasonTypePostseason, rows[0].SeasonType)
+	assert.Equal(t, 19, rows[0].Week)
+	assert.InDelta(t, 245.5, rows[0].ExpPassYds, 1e-9)
+	assert.InDelta(t, 38.2, rows[0].ExpRushYds, 1e-9)
+	assert.InDelta(t, 1.8, rows[0].ExpPassTDs, 1e-9)
+	assert.InDelta(t, 0.35, rows[0].ExpRushTDs, 1e-9)
+	assert.Zero(t, rows[0].ExpRecYds)
+
+	assert.Equal(t, "LAR", rows[1].Team)
+	assert.Equal(t, "RB", rows[1].Position)
+	assert.Equal(t, nflverse.SeasonTypePostseason, rows[1].SeasonType)
+	assert.InDelta(t, 3.4, rows[1].ExpReceptions, 1e-9)
+	assert.InDelta(t, 22.1, rows[1].ExpRecYds, 1e-9)
+	assert.InDelta(t, 81.6, rows[1].ExpRushYds, 1e-9)
+	assert.InDelta(t, 0.18, rows[1].ExpRecTDs, 1e-9)
+	assert.InDelta(t, 0.72, rows[1].ExpRushTDs, 1e-9)
 }
 
 func TestReorderedColumnsAndTeamMapping(t *testing.T) {
@@ -402,5 +475,34 @@ func TestParserErrors(t *testing.T) {
 		require.Error(t, err)
 		_, err = c.SnapCounts(t.Context(), 0)
 		require.Error(t, err)
+		_, err = c.FFOpportunity(t.Context(), 0)
+		require.Error(t, err)
+		_, err = c.FFOpportunity(t.Context(), 2026)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "404")
+	})
+
+	t.Run("ff opportunity missing required column and bad float", func(t *testing.T) {
+		t.Parallel()
+		missingBody := buildCSV(t, []string{"season", "week"}, []string{"2026", "1"})
+		missingSrv := csvServer(t, "/ff_opportunity/ep_weekly_2026.csv", missingBody)
+		_, err := nflverse.NewClient(missingSrv.URL, missingSrv.Client()).FFOpportunity(t.Context(), 2026)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "missing required columns")
+
+		header := []string{
+			"season", "posteam", "week", "player_id", "full_name", "position",
+			"receptions_exp", "pass_yards_gained_exp", "rec_yards_gained_exp",
+			"rush_yards_gained_exp", "pass_touchdown_exp", "rec_touchdown_exp",
+			"rush_touchdown_exp",
+		}
+		badBody := buildCSV(t, header,
+			[]string{"2026", "BUF", "1", "00-1", "Josh Allen", "QB", "0", "bad", "0", "0", "0", "0", "0"},
+		)
+		badSrv := csvServer(t, "/ff_opportunity/ep_weekly_2026.csv", badBody)
+		_, err = nflverse.NewClient(badSrv.URL, badSrv.Client()).FFOpportunity(t.Context(), 2026)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "row 2")
+		assert.Contains(t, err.Error(), "pass_yards_gained_exp")
 	})
 }

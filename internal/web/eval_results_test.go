@@ -729,3 +729,357 @@ func TestEvalResultsMarketCacheInvalidation(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec2.Code)
 	assert.Contains(t, rec2.Body.String(), "4 decided")
 }
+
+func TestEvalResultsEngineSelectionAndCalibration(t *testing.T) {
+	t.Parallel()
+
+	f := newEvalResultsFixture(t)
+	ctx := t.Context()
+
+	kickoff := time.Date(2026, 9, 13, 17, 0, 0, 0, time.UTC)
+	homeScore, awayScore := 28, 21
+	_, err := f.store.UpsertGame(ctx, db.Game{
+		ID:          "g-sgp-1",
+		WeekID:      f.week2026.ID,
+		OddsEventID: new("evt-sgp-1"),
+		HomeTeam:    "BUF",
+		AwayTeam:    "MIA",
+		HomeName:    "Buffalo Bills",
+		AwayName:    "Miami Dolphins",
+		Kickoff:     kickoff,
+		Status:      db.GameFinal,
+		Indoor:      true,
+		HomeScore:   &homeScore,
+		AwayScore:   &awayScore,
+	})
+	require.NoError(t, err)
+
+	linesBody := `[
+		{
+			"id": "evt-sgp-1",
+			"commence_time": "2026-09-13T17:00:00Z",
+			"home_team": "Buffalo Bills",
+			"away_team": "Miami Dolphins",
+			"bookmakers": [
+				{
+					"key": "pinnacle",
+					"markets": [
+						{
+							"key": "spreads",
+							"outcomes": [
+								{"name": "Buffalo Bills", "price": -108, "point": -3.5},
+								{"name": "Miami Dolphins", "price": -108, "point": 3.5}
+							]
+						},
+						{
+							"key": "totals",
+							"outcomes": [
+								{"name": "Over", "price": -108, "point": 45.5},
+								{"name": "Under", "price": -108, "point": 45.5}
+							]
+						}
+					]
+				}
+			]
+		}
+	]`
+	require.NoError(t, f.store.SaveAPIResponse(ctx, archive.Record{
+		Source:    "odds",
+		Key:       db.ArchiveOddsLinesKey,
+		Method:    "GET",
+		URL:       "https://example.test/odds",
+		Status:    200,
+		FetchedAt: kickoff.Add(-30 * time.Minute),
+		Body:      []byte(linesBody),
+	}))
+
+	slip, err := f.store.CreateSlip(
+		ctx,
+		f.group.ID,
+		f.week2026.ID,
+		nil,
+		"BUF SGP",
+		db.SlateScopeFullWeek,
+		2,
+		[]int64{f.user.ID},
+	)
+	require.NoError(t, err)
+
+	leg1, err := f.store.CreateLeg(ctx, db.Leg{
+		SlipID:     slip.ID,
+		UserID:     f.user.ID,
+		GameID:     new("g-sgp-1"),
+		MarketType: "SPREAD",
+		Selection:  "BUF -3.5",
+		Team:       new("BUF"),
+		Side:       new("TEAM"),
+		Line:       new(-3.5),
+		Odds:       -110,
+	})
+	require.NoError(t, err)
+	require.NoError(t, f.store.SetLegResult(ctx, leg1.ID, parlay.Won, f.user.Name))
+
+	leg2, err := f.store.CreateLeg(ctx, db.Leg{
+		SlipID:     slip.ID,
+		UserID:     f.user.ID,
+		GameID:     new("g-sgp-1"),
+		MarketType: "TOTAL",
+		Selection:  "BUF vs MIA Over 45.5",
+		Side:       new("OVER"),
+		Line:       new(45.5),
+		Odds:       -110,
+	})
+	require.NoError(t, err)
+	require.NoError(t, f.store.SetLegResult(ctx, leg2.ID, parlay.Won, f.user.Name))
+	require.NoError(t, f.store.SetSlipGrade(ctx, slip.ID, parlay.Won, db.SlipGraded))
+
+	// Default view selects active engine (v2) and shows v1 vs. v2 switcher and comparison.
+	recDefault := httptest.NewRecorder()
+	f.handler.ServeHTTP(
+		recDefault,
+		httptest.NewRequestWithContext(ctx, http.MethodGet, "/analyzer/results?season=2026", nil),
+	)
+	require.Equal(t, http.StatusOK, recDefault.Code)
+	bodyDefault := html.UnescapeString(recDefault.Body.String())
+	assert.Contains(t, bodyDefault, "All groups · 2026 season · Engine v2")
+	assert.Contains(t, bodyDefault, `aria-label="Grading engine"`)
+	assert.Contains(t, bodyDefault, "v2 (active)")
+	assert.Contains(t, bodyDefault, "Probability Calibration (v2)")
+	assert.Contains(t, bodyDefault, "Market Log Loss")
+	assert.Contains(t, bodyDefault, "Engine Comparison")
+	assert.Contains(t, bodyDefault, "v1 → v2 (Leg Bands)")
+	assert.Contains(t, bodyDefault, "engine=v1&season=2026&source=slips")
+
+	// ?engine=v1 renders the v1 A–F points baseline view alongside the market baseline.
+	recV1 := httptest.NewRecorder()
+	f.handler.ServeHTTP(
+		recV1,
+		httptest.NewRequestWithContext(ctx, http.MethodGet, "/analyzer/results?season=2026&engine=v1", nil),
+	)
+	require.Equal(t, http.StatusOK, recV1.Code)
+	bodyV1 := html.UnescapeString(recV1.Body.String())
+	assert.Contains(t, bodyV1, "All groups · 2026 season · Engine v1")
+	assert.Contains(t, bodyV1, "Probability Calibration (v1)")
+	assert.Contains(t, bodyV1, "A–F points only")
+	assert.Contains(t, bodyV1, "engine=v2&season=2026&source=slips")
+
+	// ?engine=v2 renders v2 calibrated tiles, reliability bins, and SGP correlation lift.
+	recV2 := httptest.NewRecorder()
+	f.handler.ServeHTTP(
+		recV2,
+		httptest.NewRequestWithContext(ctx, http.MethodGet, "/analyzer/results?season=2026&engine=v2", nil),
+	)
+	require.Equal(t, http.StatusOK, recV2.Code)
+	bodyV2 := html.UnescapeString(recV2.Body.String())
+	assert.Contains(t, bodyV2, "All groups · 2026 season · Engine v2")
+	assert.Contains(t, bodyV2, "Probability Calibration (v2)")
+	assert.Contains(t, bodyV2, "Log Loss")
+	assert.Contains(t, bodyV2, "Brier Score")
+	assert.Contains(t, bodyV2, "Classwise ECE")
+	assert.Contains(t, bodyV2, "Bin Spread")
+	assert.Contains(t, bodyV2, "SGP Correlation Lift")
+	assert.Contains(t, bodyV2, "1 settled SGP")
+	assert.Contains(t, bodyV2, "Copula LL")
+	assert.Contains(t, bodyV2, "Naive LL")
+	assert.Contains(t, bodyV2, "Lift (LL Δ)")
+	assert.Contains(t, bodyV2, "Reliability Table (10% Bins)")
+	assert.Contains(t, bodyV2, "0–10%")
+	assert.Contains(t, bodyV2, "50–60%")
+	assert.Contains(t, bodyV2, "90–100%")
+	assert.Contains(t, bodyV2, "engine=v2&season=all&source=slips")
+	assert.Contains(t, bodyV2, "engine=v2&season=2026&source=market")
+
+	// Backwards-compatible ?rubric=v2 selects v2 as well.
+	recLegacy := httptest.NewRecorder()
+	f.handler.ServeHTTP(
+		recLegacy,
+		httptest.NewRequestWithContext(ctx, http.MethodGet, "/analyzer/results?season=2026&rubric=v2", nil),
+	)
+	require.Equal(t, http.StatusOK, recLegacy.Code)
+	assert.Contains(t, html.UnescapeString(recLegacy.Body.String()), "Probability Calibration (v2)")
+
+	// Market mode with ?engine=v2 renders reliability table and hides SGP Correlation Lift.
+	recMktV2 := httptest.NewRecorder()
+	f.handler.ServeHTTP(
+		recMktV2,
+		httptest.NewRequestWithContext(
+			ctx,
+			http.MethodGet,
+			"/analyzer/results?source=market&season=2026&engine=v2",
+			nil,
+		),
+	)
+	require.Equal(t, http.StatusOK, recMktV2.Code)
+	bodyMktV2 := html.UnescapeString(recMktV2.Body.String())
+	assert.Contains(t, bodyMktV2, "Market-wide · 2026 season · Engine v2")
+	assert.Contains(t, bodyMktV2, "Probability Calibration (v2)")
+	assert.Contains(t, bodyMktV2, "Reliability Table (10% Bins)")
+	assert.NotContains(t, bodyMktV2, "SGP Correlation Lift")
+}
+
+func TestAnalyzerResultsTemplateRendersCalibrationAndPhoneWidthLayout(t *testing.T) {
+	t.Parallel()
+
+	renderer, err := webui.NewRenderer(assets.Templates, false)
+	require.NoError(t, err)
+
+	page := webui.EvalResultsPage{
+		Title:          "Grading Results",
+		GuideURL:       "/analyzer/guide",
+		ScopeLabel:     "All groups",
+		Source:         "slips",
+		SlipsURL:       "/analyzer/results?source=slips",
+		HasData:        true,
+		SeasonLabel:    "2026 season",
+		SelectedEngine: "v2",
+		Engines: []webui.EvalEngineOption{
+			{Name: "v1", Active: true, URL: "/analyzer/results?engine=v1"},
+			{Name: "v2", Current: true, URL: "/analyzer/results?engine=v2"},
+		},
+		ShowEngineDiffs: true,
+		EngineComparisons: []webui.EvalEngineComparisonView{
+			{
+				Name:         "v1",
+				Active:       true,
+				URL:          "/analyzer/results?engine=v1",
+				LogLoss:      "–",
+				BrierScore:   "–",
+				ClasswiseECE: "–",
+				BinSpread:    "–",
+				SGPLogLoss:   "–",
+				SGPLift:      "–",
+				Monotonic:    true,
+			},
+			{
+				Name:          "v2",
+				Current:       true,
+				URL:           "/analyzer/results?engine=v2",
+				HasModelProbs: true,
+				LogLoss:       "0.6120",
+				BrierScore:    "0.2104",
+				ClasswiseECE:  "0.0241",
+				BinSpread:     "8/10",
+				BinSpreadOK:   true,
+				HasSGP:        true,
+				SGPCount:      3,
+				SGPLogLoss:    "0.5110",
+				NaiveSGPLL:    "0.5522",
+				SGPLift:       "+0.0412",
+				SGPLiftPos:    true,
+				Monotonic:     true,
+			},
+		},
+		Calibration: webui.EvalCalibrationView{
+			HasData:           true,
+			HasModelProbs:     true,
+			LogLoss:           "0.6120",
+			BrierScore:        "0.2104",
+			ClasswiseECE:      "0.0241",
+			BinSpread:         "8/10",
+			BinSpreadOK:       true,
+			HasMarket:         true,
+			MarketLogLoss:     "0.6380",
+			MarketBrier:       "0.2230",
+			BeatsMarketLL:     true,
+			BeatsMarketBrier:  true,
+			HasSGP:            true,
+			SGPCount:          3,
+			SGPLabel:          "3 settled SGPs",
+			SGPLogLoss:        "0.5110",
+			NaiveIndepLogLoss: "0.5522",
+			SGPLift:           "+0.0412",
+			SGPLiftPositive:   true,
+			Reliability: []webui.EvalReliabilityBinView{
+				{
+					Label:      "0–10%",
+					Count:      0,
+					CountLabel: "0 legs",
+					Empty:      true,
+					MeanPred:   "–",
+					Empirical:  "–",
+					Gap:        "–",
+				},
+				{
+					Label:      "50–60%",
+					Count:      14,
+					CountLabel: "14 legs",
+					MeanPred:   "54.2%",
+					Empirical:  "57.1%",
+					Gap:        "+2.9 pp",
+				},
+			},
+		},
+		Monotonic:       true,
+		MonotonicStatus: "A-grade legs are outperforming lower bands.",
+		LegBands: []webui.EvalBandView{
+			{
+				Band:         "A",
+				Class:        "grade-a",
+				Record:       "8-2-0",
+				Decided:      10,
+				HitPct:       "80.0%",
+				ImpliedPct:   "60.0%",
+				Lift:         "+20.0%",
+				LiftPositive: true,
+				FlatROI:      "+28.0%",
+				ROIPositive:  true,
+			},
+		},
+		Diffs: []webui.EvalDiffView{
+			{
+				BaselineName:  "v1",
+				CandidateName: "v2",
+				LegBandDiffs: []webui.EvalBandDiffView{
+					{
+						Band:         "A",
+						Class:        "grade-a",
+						SampleChange: "6 → 10",
+						WinRateDelta: "+5.0 pp",
+						WinPositive:  true,
+						LiftDelta:    "+4.2 pp",
+						LiftPositive: true,
+						FlatROIDelta: "+8.0 pp",
+						ROIPositive:  true,
+					},
+				},
+				Migrations: []webui.EvalMigrationView{
+					{
+						FromBand:  "B",
+						FromClass: "grade-b",
+						ToBand:    "A",
+						ToClass:   "grade-a",
+						Total:     4,
+						Record:    "4-0",
+						HitPct:    "100.0%",
+					},
+				},
+			},
+		},
+	}
+
+	out, err := renderer.Render("analyzer-results", page)
+	require.NoError(t, err)
+	body := html.UnescapeString(string(out))
+
+	assert.Contains(t, body, "Bin spread 8/10 (≥80%)")
+	assert.Contains(t, body, "Meets ≥80% target")
+	assert.Contains(t, body, "0.6120")
+	assert.Contains(t, body, "vs. Market 0.6380")
+	assert.Contains(t, body, "0.2104")
+	assert.Contains(t, body, "0.0241")
+	assert.Contains(t, body, "3 settled SGPs")
+	assert.Contains(t, body, "0.5110")
+	assert.Contains(t, body, "0.5522")
+	assert.Contains(t, body, "+0.0412")
+	assert.Contains(t, body, "Copula joint probability beats naive leg multiplication on settled SGPs.")
+	assert.Contains(t, body, "50–60%")
+	assert.Contains(t, body, "14 legs")
+	assert.Contains(t, body, "54.2%")
+	assert.Contains(t, body, "57.1%")
+	assert.Contains(t, body, "+2.9 pp")
+	assert.Contains(t, body, "0–10%")
+	assert.Contains(t, body, "0 legs")
+	assert.Contains(t, body, "Notable band migrations")
+	assert.Contains(t, body, "sm:hidden")
+	assert.Contains(t, body, "hidden sm:block")
+}

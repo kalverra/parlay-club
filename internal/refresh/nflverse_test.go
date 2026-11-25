@@ -19,12 +19,14 @@ import (
 )
 
 type fakeNFLverseClient struct {
-	players     []nflverse.Player
-	teamStats   []nflverse.TeamWeek
-	playerStats []nflverse.PlayerWeek
-	snapCounts  []nflverse.SnapCount
-	err         error
-	calls       int
+	players       []nflverse.Player
+	teamStats     []nflverse.TeamWeek
+	playerStats   []nflverse.PlayerWeek
+	snapCounts    []nflverse.SnapCount
+	opportunities []nflverse.PlayerOpportunity
+	err           error
+	oppErr        error
+	calls         int
 }
 
 func (f *fakeNFLverseClient) Players(context.Context) ([]nflverse.Player, error) {
@@ -54,6 +56,16 @@ func (f *fakeNFLverseClient) SnapCounts(context.Context, int) ([]nflverse.SnapCo
 		return nil, f.err
 	}
 	return f.snapCounts, nil
+}
+
+func (f *fakeNFLverseClient) FFOpportunity(context.Context, int) ([]nflverse.PlayerOpportunity, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	if f.oppErr != nil {
+		return nil, f.oppErr
+	}
+	return f.opportunities, nil
 }
 
 func TestSyncNFLverseWritesTablesAndPublishesOnce(t *testing.T) {
@@ -189,6 +201,41 @@ func TestSyncNFLverseWritesTablesAndPublishesOnce(t *testing.T) {
 				OffensePct:   0.15,
 			},
 		},
+		opportunities: []nflverse.PlayerOpportunity{
+			{
+				PlayerID:      "00-0036900",
+				PlayerName:    "Ja'Marr Chase",
+				Position:      "WR",
+				Team:          "CIN",
+				Season:        2026,
+				SeasonType:    nflverse.SeasonTypeRegular,
+				Week:          8,
+				ExpRushYds:    4.2,
+				ExpRecYds:     112.5,
+				ExpReceptions: 8.4,
+				ExpRecTDs:     1.15,
+			},
+			{
+				PlayerID:   "00-0036442",
+				PlayerName: "Joe Burrow",
+				Position:   "QB",
+				Team:       "CIN",
+				Season:     2026,
+				SeasonType: nflverse.SeasonTypeRegular,
+				Week:       8,
+				ExpPassYds: 285.0,
+				ExpPassTDs: 2.1,
+			},
+			// Unmatched GSIS ID fails soft.
+			{
+				PlayerID:   "00-9999999",
+				Team:       "CIN",
+				Season:     2026,
+				SeasonType: nflverse.SeasonTypeRegular,
+				Week:       8,
+				ExpRecYds:  12.0,
+			},
+		},
 	}
 
 	service := New(Deps{
@@ -235,8 +282,12 @@ func TestSyncNFLverseWritesTablesAndPublishesOnce(t *testing.T) {
 		SeasonType:   nflverse.SeasonTypeRegular,
 		WeekNum:      8,
 		Team:         "CIN",
+		PlayerName:   "Joe Burrow",
+		Position:     "QB",
 		OffenseSnaps: 61,
 		OffensePct:   1.0,
+		ExpPassYds:   285.0,
+		ExpPassTDs:   2.1,
 		UpdatedAt:    now,
 	}, playerRows[0])
 	assert.Equal(t, db.NFLversePlayerWeek{
@@ -272,6 +323,11 @@ func TestSyncNFLverseWritesTablesAndPublishesOnce(t *testing.T) {
 		RecYds:        142,
 		RecTDs:        2,
 		TotalEPA:      8.0,
+		ExpRushYds:    4.2,
+		ExpRecYds:     112.5,
+		ExpReceptions: 8.4,
+		ExpRecTDs:     1.15,
+		CarryShare:    1.0 / 24.0,
 		UpdatedAt:     now,
 	}, playerRows[2])
 
@@ -482,6 +538,81 @@ func TestNFLverseEndToEndWithSandboxFixtures(t *testing.T) {
 	playerRows, err := store.NFLversePlayerWeeksForSeason(t.Context(), 2026, nflverse.SeasonTypeRegular)
 	require.NoError(t, err)
 	assert.NotEmpty(t, playerRows)
+
+	state, err := store.SyncState(t.Context(), NFLverseSource(2026))
+	require.NoError(t, err)
+	assert.Equal(t, now, state.FetchedAt)
+}
+
+func TestSyncNFLverseFFOpportunityFailsSoftAndKeepsCarryShareCPOE(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.November, 8, 13, 0, 0, 0, time.UTC)
+	store, week, _ := nfeloTestStore(t, now)
+	client := &fakeNFLverseClient{
+		players: []nflverse.Player{
+			{GSISID: "00-0036442", PFRID: "BurrJo01", ESPNID: "3915511", DisplayName: "Joe Burrow", Position: "QB"},
+			{GSISID: "00-0038389", PFRID: "AbanIs00", ESPNID: "4429202", DisplayName: "Chase Brown", Position: "RB"},
+		},
+		teamStats: []nflverse.TeamWeek{
+			{Season: 2026, SeasonType: nflverse.SeasonTypeRegular, Week: 8, Team: "CIN", Attempts: 35, Carries: 25},
+		},
+		playerStats: []nflverse.PlayerWeek{
+			{
+				PlayerID:     "00-0036442",
+				PlayerName:   "Joe Burrow",
+				Position:     "QB",
+				Team:         "CIN",
+				Opponent:     "BAL",
+				Season:       2026,
+				SeasonType:   nflverse.SeasonTypeRegular,
+				Week:         8,
+				Attempts:     35,
+				PassingYards: 310,
+				PassingTDs:   3,
+				PassingCPOE:  6.4,
+				Carries:      3,
+			},
+			{
+				PlayerID:     "00-0038389",
+				PlayerName:   "Chase Brown",
+				Position:     "RB",
+				Team:         "CIN",
+				Opponent:     "BAL",
+				Season:       2026,
+				SeasonType:   nflverse.SeasonTypeRegular,
+				Week:         8,
+				Carries:      15,
+				RushingYards: 78,
+			},
+		},
+		oppErr: errors.New("ffopportunity 404"),
+	}
+
+	service := New(Deps{
+		Store:    store,
+		NFLverse: client,
+		Logger:   zerolog.Nop(),
+	})
+
+	changed, err := service.syncNFLverse(t.Context(), week, now)
+	require.NoError(t, err)
+	assert.True(t, changed)
+
+	playerRows, err := store.NFLversePlayerWeeksForSeason(t.Context(), 2026, nflverse.SeasonTypeRegular)
+	require.NoError(t, err)
+	require.Len(t, playerRows, 2)
+
+	byID := map[string]db.NFLversePlayerWeek{}
+	for _, r := range playerRows {
+		byID[r.ESPNID] = r
+	}
+	assert.InDelta(t, 6.4, byID["3915511"].CPOE, 1e-9)
+	assert.InDelta(t, 3.0/25.0, byID["3915511"].CarryShare, 1e-9)
+	assert.Zero(t, byID["3915511"].ExpPassYds)
+
+	assert.InDelta(t, 15.0/25.0, byID["4429202"].CarryShare, 1e-9)
+	assert.Zero(t, byID["4429202"].ExpRushYds)
 
 	state, err := store.SyncState(t.Context(), NFLverseSource(2026))
 	require.NoError(t, err)
