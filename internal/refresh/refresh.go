@@ -91,9 +91,9 @@ func NFLverseSource(season int) string {
 // Staleness windows and the failure backoff. The odds windows match the credit
 // budget in docs/reference/data-sources.md.
 const (
-	scoreboardLiveAge       = 5 * time.Minute
-	scoreboardGameDayAge    = 15 * time.Minute
-	scoreboardIdleAge       = 2 * time.Hour
+	scoreboardLiveAge       = 2 * time.Minute
+	scoreboardGameDayAge    = 5 * time.Minute
+	scoreboardIdleAge       = 15 * time.Minute
 	weatherNearAge          = 15 * time.Minute
 	weatherNearLookahead    = 6 * time.Hour
 	weatherAge              = 30 * time.Minute

@@ -19,8 +19,9 @@ type cacheGen struct {
 	group  uint64
 }
 
-// Cache memoizes group-scoped SuiteReports keyed by (groupID, season) until
-// invalidated by leg/slip settlement or a sandbox reset.
+// Cache memoizes SuiteReports keyed by (groupID, season) until invalidated by
+// leg/slip settlement or a sandbox reset. groupID 0 caches global (all-group)
+// reports and is invalidated whenever any group is invalidated.
 type Cache struct {
 	mu       sync.RWMutex
 	entries  map[cacheKey]SuiteReport
@@ -82,7 +83,8 @@ func (c *Cache) GetOrCompute(
 	return report, nil
 }
 
-// InvalidateGroup drops all cached seasons for groupID.
+// InvalidateGroup drops all cached seasons for groupID as well as any global
+// (groupID 0) cached entries that aggregate across groups.
 func (c *Cache) InvalidateGroup(groupID int64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -91,8 +93,11 @@ func (c *Cache) InvalidateGroup(groupID int64) {
 		c.groupGen = make(map[int64]uint64)
 	}
 	c.groupGen[groupID]++
+	if groupID != 0 {
+		c.groupGen[0]++
+	}
 	for key := range c.entries {
-		if key.groupID == groupID {
+		if key.groupID == groupID || key.groupID == 0 {
 			delete(c.entries, key)
 		}
 	}

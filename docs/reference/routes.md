@@ -232,14 +232,15 @@ bar in the header with links to each sibling slip and their status summaries (`(
 | `GET /games/{id}/props`         | Load one game's props on demand, or render its prop partial               | 200 with `Hx-Trigger: board-updated` when `?slip=`, otherwise a partial |
 
 `GET /slips/{id}/pick` is the hub's pick action. It filters the week's games for the slip via
-`slips.FilterGamesForSlip`, so games outside the slip's scope or `slip_games` are omitted from the slate, window chips, and detail drilldowns.
-It reads the filtered games, one `OddsForWeek` read, the week's rosters, and the viewer's legs, then hands them to
-`internal/board`. `board.Build` folds one row per selection, using the viewer's home-book price when it carries the pick
-and the median across books otherwise, and drops games that have kicked off. `board.Slates` turns the same rows into one
-card per upcoming game for the slate, `board.StartedCount` counts the games that already kicked off for the empty state,
-and `board.Detail` shapes the open game's header, tabs, and the active tab's lines or player cards. A card is marked
-unloaded when its game has lines but no prop rows. The handler sets `Page.Wide`, so the header and main use `max-w-6xl`,
-and sets `data-live-url` for `OPEN` and `LOCKED` slips so the page opens one stream, omitting it for `GRADED` slips.
+`slips.FilterGamesForSlip`, so games outside the slip's scope or `slip_games` are omitted from the slate, window chips,
+and detail drilldowns. It reads the filtered games, one `OddsForWeek` read, the week's rosters, and the viewer's legs,
+then hands them to `internal/board`. `board.Build` folds one row per selection, using the viewer's home-book price when
+it carries the pick and the median across books otherwise, and drops games that have kicked off. `board.Slates` turns
+the same rows into one card per upcoming game for the slate, `board.StartedCount` counts the games that already kicked
+off for the empty state, and `board.Detail` shapes the open game's header, tabs, and the active tab's lines or player
+cards. A card is marked unloaded when its game has lines but no prop rows. The handler sets `Page.Wide`, so the header
+and main use `max-w-6xl`, and sets `data-live-url` for `OPEN` and `LOCKED` slips so the page opens one stream, omitting
+it for `GRADED` slips.
 
 The board's query contract:
 
@@ -252,8 +253,8 @@ The board's query contract:
 | `sort`    | detail        | `player` (default), `odds` (shortest price first), `line` (highest line first), or `matchup` (strongest suggestion signal and softest opposing defense first). Kickoff, category, and unknown values resolve to `player`. |
 
 The slate shows one card per upcoming game, ordered by kickoff, with the matchup, venue, kickoff, spread, total,
-moneyline, an `"N A-grade"` pill when that game has unpicked A-grade legs, and either "Explore N props" or "No props yet".
-A game with no stored odds still gets a card, with no lines and no props. The open game is highlighted.
+moneyline, an `"N A-grade"` pill when that game has unpicked A-grade legs, and either "Explore N props" or "No props
+yet". A game with no stored odds still gets a card, with no lines and no props. The open game is highlighted.
 
 The search input debounces at 250 ms and swaps `GET /slips/{id}/pick/results`. Window chips are Thursday, Sun morning
 (before noon Eastern), Sun early (before 4), Sun late (before 7), Sun night, and Monday. A chip shows how many rows it
@@ -263,17 +264,18 @@ covers and appears only when it has rows. A card is a link with a plain `href` t
 `#pick-slate` re-fetches itself from `GET /slips/{id}/pick/slate` on `board-updated`, so the cards follow a prop sync
 without touching the open detail.
 
-Inside the open game, the detail has a pinned header with the back link, matchup, kickoff, venue, a Research link, and
-a horizontal tab bar. Below the pinned header and tab bar—when the slip is `OPEN` and the viewer has open slots—sits
-the `"Top plays in this game"` strip (up to 3 A-grade legs and 1 same-game A-grade combo), followed by the sort chips. The tabs are Lines, Passing, Rushing, Receiving, TDs, and Kicking. Team
-totals fold into Lines, a tab appears only when it has rows or is open, and each badge counts its rows, so the Lines
-badge includes both sides of each line. Tab and sort chips swap `#pick-detail` and push the full page URL, leaving the
-slate and its scroll alone. `#pick-detail` re-fetches itself from its resolved tab and sort on `board-updated`, and a
-tab or sort response out-of-band syncs the search form's hidden `cat` and `sort`, so a later search or live refresh
-keeps the open tab. An unknown category opens Lines when it has rows, otherwise the first tab that does; `sort` resolves
-to `player`, `odds`, `line`, or `matchup`, and anything else reads as `player`. The "All games" back link drops `game` and `cat`,
-keeps `q` and `win`, and swaps `#pick-body`. A search filters the open game's rows. An unknown game, a kicked-off game,
-or a game the window hides falls back to the slate instead of a 404.
+Inside the open game, the detail has a pinned header with the back link, matchup, kickoff, venue, a Research link, and a
+horizontal tab bar. Below the pinned header and tab bar—when the slip is `OPEN` and the viewer has open slots—sits the
+`"Top plays in this game"` strip (up to 3 A-grade legs and 1 same-game A-grade combo), followed by the sort chips. The
+tabs are Lines, Passing, Rushing, Receiving, TDs, and Kicking. Team totals fold into Lines, a tab appears only when it
+has rows or is open, and each badge counts its rows, so the Lines badge includes both sides of each line. Tab and sort
+chips swap `#pick-detail` and push the full page URL, leaving the slate and its scroll alone. `#pick-detail` re-fetches
+itself from its resolved tab and sort on `board-updated`, and a tab or sort response out-of-band syncs the search form's
+hidden `cat` and `sort`, so a later search or live refresh keeps the open tab. An unknown category opens Lines when it
+has rows, otherwise the first tab that does; `sort` resolves to `player`, `odds`, `line`, or `matchup`, and anything
+else reads as `player`. The "All games" back link drops `game` and `cat`, keeps `q` and `win`, and swaps `#pick-body`. A
+search filters the open game's rows. An unknown game, a kicked-off game, or a game the window hides falls back to the
+slate instead of a 404.
 
 `GET /slips/{id}/pick/detail` answers with `#pick-detail`: the open game's header, tabs, sort chips, and the active
 tab's rows. The Lines tab shows the game lines first, then team totals grouped by team; a prop tab shows one card per
@@ -382,30 +384,30 @@ and the member leaderboard (stacked cards below `sm:` and a table at `sm:+`). Se
 | ------------------------ | --------------------------------------------------------------- | -------- |
 | `GET /analyzer/guide`    | Grading & Analyzer Guide backed by `RuleDocs()` and `GradeRubric()` | Full page; optional `?from=` back-link path. |
 
-`GET /analyzer/guide` renders `web/templates/analyzer_guide.html` behind `RequireUser` and `Scope`. It displays the
-live `A`–`F` leg and slip grading rubric (`analyzer.GradeRubric()`), pick-board badge descriptions, and every active
-warning rule (`analyzer.RuleDocs()`) grouped by category with stable anchors (`#leg-grades`, `#slip-grade`,
-`#suggestions`, `#rules`, and `#rule-<id>`). It links to `/analyzer/results` ("Grading results"), and an optional
-`?from=` query parameter renders a `"← Back"` link when it passes `safeReturnPath` (starts with `/` and not `//`);
-external or protocol-relative targets are ignored. See [Analyzer](../concepts/analyzer.md) and
+`GET /analyzer/guide` renders `web/templates/analyzer_guide.html` behind `RequireUser` and `Scope`. It displays the live
+`A`–`F` leg and slip grading rubric (`analyzer.GradeRubric()`), pick-board badge descriptions, and every active warning
+rule (`analyzer.RuleDocs()`) grouped by category with stable anchors (`#leg-grades`, `#slip-grade`, `#suggestions`,
+`#rules`, and `#rule-<id>`). It links to `/analyzer/results` ("Grading results"), and an optional `?from=` query
+parameter renders a `"← Back"` link when it passes `safeReturnPath` (starts with `/` and not `//`); external or
+protocol-relative targets are ignored. See [Analyzer](../concepts/analyzer.md) and
 [Analyzer rules](analyzer-rules.md).
 
 ### Analyzer results
 
 | Method + path            | Purpose                                                               | Response |
 | ------------------------ | --------------------------------------------------------------------- | -------- |
-| `GET /analyzer/results`  | Group-scoped Grading Results backed by `eval.Cache` and `EvaluateAll` | Full page; invalid or non-positive `?season=` is 400. |
+| `GET /analyzer/results`  | Global Grading Results backed by `eval.Cache` and `EvaluateAll` | Full page; invalid or non-positive `?season=` is 400. |
 
-`GET /analyzer/results` renders `web/templates/analyzer_results.html` behind `RequireUser` and `Scope`, isolating all
-replayed calibration data to the viewer's active group. It reads from `eval.Cache` keyed by `(groupID, season)`, which
-invalidates for that group when `SetLegResult` or `AutoGradeLegs` commits a settlement change, and clears globally on
-sandbox stage transitions or resets.
+`GET /analyzer/results` renders `web/templates/analyzer_results.html` behind `RequireUser`, aggregating replayed
+calibration data across all groups. It reads from `eval.Cache` keyed by `(0, season)`, which invalidates whenever
+`SetLegResult` or `AutoGradeLegs` commits a settlement change for any group, and clears globally on sandbox stage
+transitions or resets.
 
 Query parameters:
 
-- `?season=`: `all` (or `0`) for all seasons, or a positive season year. Defaults to the latest season with graded
-  slips for the active group (`GradedSeasonsForGroup`), falling back to `SeasonsForGroup` or `all`. Unreadable or
-  non-positive values return `400 Bad Request`.
+- `?season=`: `all` (or `0`) for all seasons, or a positive season year. Defaults to the latest season with graded slips
+  across all groups (`GradedSeasons`), falling back to `Seasons` or `all`. Unreadable or non-positive values return
+  `400 Bad Request`.
 - `?rubric=`: selects which built-in rubric to display (defaults to `analyzer.ActiveRubric.Name`).
 - `?from=`: optional safe return path validated by `safeReturnPath`, preserved on season/rubric pills and the
   `"How grading works"` link back to `/analyzer/guide`. See [Analyzer](../concepts/analyzer.md).
@@ -445,23 +447,29 @@ Every full-page handler reads the `pc_theme` cookie via `web.ThemeFromRequest(r)
 | `redzone` | RedZone | `dark` | `#090a0c` | Obsidian broadcast dark with turf green and gold accents. |
 | `almanac` | 90s Almanac | `light` | `#fff8e7` | Warm cream sports almanac with crisp white cards and ink borders. |
 
-Missing or unrecognized cookie values fall back to `paper-turf`. `layout.html` renders `data-theme="{{.ActiveTheme.ID}}"`
-on `<html>` along with `<meta name="color-scheme">` and `<meta name="theme-color">`, so SSR pages paint with the chosen
-theme immediately and without flicker.
+Missing or unrecognized cookie values fall back to `paper-turf`. `layout.html` renders
+`data-theme="{{.ActiveTheme.ID}}"` on `<html>` along with `<meta name="color-scheme">` and `<meta name="theme-color">`,
+so SSR pages paint with the chosen theme immediately and without flicker.
 
-Clicking `[data-theme-cycle]` in the header cycles `paper-turf` -> `redzone` -> `almanac` in `web/static/app.js`, updates
-`document.documentElement.dataset.theme` and the meta tags in place, and writes `pc_theme=<id>; Path=/; Max-Age=31536000;
-SameSite=Lax` (adding `; Secure` over HTTPS) with no server round-trip.
+Clicking `[data-theme-cycle]` in the header cycles `paper-turf` -> `redzone` -> `almanac` in `web/static/app.js`,
+updates `document.documentElement.dataset.theme` and the meta tags in place, and writes
+`pc_theme=<id>; Path=/; Max-Age=31536000; SameSite=Lax` (adding `; Secure` over HTTPS) with no server round-trip.
 
 ### Semantic theme tokens
 
 `web/tailwind/input.css` defines Tailwind v4 `@theme` color and font tokens backed by `[data-theme="..."]` CSS custom
 properties, compiled into `web/static/app.css` via `go generate ./...`:
 
-- **Page and chrome (`bg-page`, `text-page-ink`, `text-page-muted`, `bg-chrome`, `text-chrome-ink`, `text-chrome-muted`, `border-chrome-border`):** used on `<body>`, the sticky header, the bottom nav, and text sitting directly on the page background.
-- **Card and surface (`bg-surface`, `bg-surface-2`, `text-ink`, `text-ink-muted`, `text-ink-subtle`, `border-line`, `border-line-strong`):** used inside cards, dialogs, tables, and form inputs. Separating page/chrome tokens from surface tokens lets `paper-turf` pair dark felt chrome with light ticket cards without template conditionals.
-- **Accent and status (`accent`, `positive`, `warning`, `danger`, each with `-soft` and `-ink` variants):** used for actions, focus rings, callouts, and status pills.
-- **Component and Go-emitted classes:** `.ui-card`, `.ui-slip-card`, `.ui-next-card`, `.ui-odds`, `.ui-stamp`, `.ui-heads-up`, `.badge-*`, `.grade-*`, `.sev-*`, `.bar-*`, and `.trend-*`.
+- **Page and chrome (`bg-page`, `text-page-ink`, `text-page-muted`, `bg-chrome`, `text-chrome-ink`, `text-chrome-muted`,
+  `border-chrome-border`):** used on `<body>`, the sticky header, the bottom nav, and text sitting directly on the page
+  background.
+- **Card and surface (`bg-surface`, `bg-surface-2`, `text-ink`, `text-ink-muted`, `text-ink-subtle`, `border-line`,
+  `border-line-strong`):** used inside cards, dialogs, tables, and form inputs. Separating page/chrome tokens from
+  surface tokens lets `paper-turf` pair dark felt chrome with light ticket cards without template conditionals.
+- **Accent and status (`accent`, `positive`, `warning`, `danger`, each with `-soft` and `-ink` variants):** used for
+  actions, focus rings, callouts, and status pills.
+- **Component and Go-emitted classes:** `.ui-card`, `.ui-slip-card`, `.ui-next-card`, `.ui-odds`, `.ui-stamp`,
+  `.ui-heads-up`, `.badge-*`, `.grade-*`, `.sev-*`, `.bar-*`, and `.trend-*`.
 
 Templates under `web/templates/` and view-model helpers in `internal/web/` use these semantic classes rather than raw
 `slate-*` or `sky-*` palette utilities (except per-user `db.AvatarColor` swatches).

@@ -33,8 +33,6 @@ func TestLiveScoreboard(t *testing.T) {
 		assert.NotEmpty(t, game.Home.Name)
 		assert.NotEmpty(t, game.Away.Name)
 		assert.Contains(t, []espn.Status{espn.Scheduled, espn.Live, espn.Final}, game.Status)
-		assert.Contains(t, []string{"Thursday", "Sunday", "Monday"}, game.Kickoff.In(eastern(t)).Weekday().String(),
-			"live scoreboard game %s is outside the slate", game.ID)
 	}
 }
 

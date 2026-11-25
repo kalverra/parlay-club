@@ -117,7 +117,7 @@ func TestEvalResultsAuthEmptyStateAndInvalidSeason(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 	body := html.UnescapeString(rec.Body.String())
 	assert.Contains(t, body, "Grading Results")
-	assert.Contains(t, body, "Sunday Parlay Club")
+	assert.Contains(t, body, "All groups")
 	assert.Contains(t, body, "No settled slips yet for All seasons.")
 	assert.Contains(t, body, `href="/slips/1"`)
 	assert.Contains(t, body, `href="/analyzer/guide?from=%2Fslips%2F1"`)
@@ -151,7 +151,7 @@ func TestEvalResultsAuthEmptyStateAndInvalidSeason(t *testing.T) {
 	assert.Contains(t, guide.Body.String(), `/analyzer/results?from=%2Fslips%2F1`)
 }
 
-func TestEvalResultsGroupIsolationAndFilters(t *testing.T) {
+func TestEvalResultsGlobalAggregationAndFilters(t *testing.T) {
 	t.Parallel()
 
 	f := newEvalResultsFixture(t)
@@ -226,7 +226,7 @@ func TestEvalResultsGroupIsolationAndFilters(t *testing.T) {
 	require.NoError(t, f.store.SetLegResult(ctx, l26.ID, parlay.Won, f.user.Name))
 	require.NoError(t, f.store.SetSlipGrade(ctx, s26.ID, parlay.Won, db.SlipGraded))
 
-	// otherGroup has 3 settled legs in 2026 that must never leak into f.group.
+	// otherGroup has 3 settled legs in 2026 that are included in global results.
 	otherSlip, err := f.store.CreateSlip(
 		ctx,
 		otherGroup.ID,
@@ -248,17 +248,15 @@ func TestEvalResultsGroupIsolationAndFilters(t *testing.T) {
 	}
 	require.NoError(t, f.store.SetSlipGrade(ctx, otherSlip.ID, parlay.Lost, db.SlipGraded))
 
-	// Default picks latest graded season (2026) and isolates f.group (1 leg: 1-0-0, not 4 legs).
+	// Default picks latest graded season (2026) and aggregates across all groups (1 WON + 3 LOST = 1-3-0).
 	recDefault := httptest.NewRecorder()
 	f.handler.ServeHTTP(recDefault, httptest.NewRequestWithContext(ctx, http.MethodGet, "/analyzer/results", nil))
 	require.Equal(t, http.StatusOK, recDefault.Code)
 	bodyDefault := html.UnescapeString(recDefault.Body.String())
-	assert.Contains(t, bodyDefault, "Sunday Parlay Club · 2026 season")
-	assert.Contains(t, bodyDefault, "1-0-0")
-	assert.NotContains(t, bodyDefault, "1-3-0")
+	assert.Contains(t, bodyDefault, "All groups · 2026 season")
+	assert.Contains(t, bodyDefault, "1-3-0")
 	assert.Contains(t, bodyDefault, "2026 REG Wk 1")
 	assert.NotContains(t, bodyDefault, "2025 REG Wk 1")
-	assert.NotContains(t, bodyDefault, "Slip Factor Attribution")
 
 	// ?season=2025 filters to 2025.
 	rec2025 := httptest.NewRecorder()
@@ -268,12 +266,12 @@ func TestEvalResultsGroupIsolationAndFilters(t *testing.T) {
 	)
 	require.Equal(t, http.StatusOK, rec2025.Code)
 	body2025 := html.UnescapeString(rec2025.Body.String())
-	assert.Contains(t, body2025, "Sunday Parlay Club · 2025 season")
+	assert.Contains(t, body2025, "All groups · 2025 season")
 	assert.Contains(t, body2025, "1-1-0")
 	assert.Contains(t, body2025, "2025 REG Wk 1")
 	assert.Contains(t, body2025, "2025 REG Wk 2")
 
-	// ?season=all combines 2025 and 2026 for f.group (2-1-0).
+	// ?season=all combines 2025 and 2026 across all groups (2-4-0).
 	recAll := httptest.NewRecorder()
 	f.handler.ServeHTTP(
 		recAll,
@@ -281,8 +279,8 @@ func TestEvalResultsGroupIsolationAndFilters(t *testing.T) {
 	)
 	require.Equal(t, http.StatusOK, recAll.Code)
 	bodyAll := html.UnescapeString(recAll.Body.String())
-	assert.Contains(t, bodyAll, "Sunday Parlay Club · All seasons")
-	assert.Contains(t, bodyAll, "2-1-0")
+	assert.Contains(t, bodyAll, "All groups · All seasons")
+	assert.Contains(t, bodyAll, "2-4-0")
 }
 
 func TestEvalResultsCacheInvalidatesAfterSettlement(t *testing.T) {

@@ -16,33 +16,49 @@ type GradedSlip struct {
 	Week Week
 }
 
+// Seasons returns every NFL season that has at least one slip across all
+// groups, newest first.
+func (s *Store) Seasons(ctx context.Context) ([]int, error) {
+	return s.seasons(ctx, 0, false)
+}
+
+// GradedSeasons returns every NFL season that has at least one GRADED slip
+// across all groups, newest first.
+func (s *Store) GradedSeasons(ctx context.Context) ([]int, error) {
+	return s.seasons(ctx, 0, true)
+}
+
 // SeasonsForGroup returns every NFL season that has at least one slip in
 // groupID, newest first.
 func (s *Store) SeasonsForGroup(ctx context.Context, groupID int64) ([]int, error) {
-	return s.seasonsForGroup(ctx, groupID, false)
+	return s.seasons(ctx, groupID, false)
 }
 
 // GradedSeasonsForGroup returns every NFL season that has at least one GRADED
 // slip in groupID, newest first.
 func (s *Store) GradedSeasonsForGroup(ctx context.Context, groupID int64) ([]int, error) {
-	return s.seasonsForGroup(ctx, groupID, true)
+	return s.seasons(ctx, groupID, true)
 }
 
-func (s *Store) seasonsForGroup(ctx context.Context, groupID int64, gradedOnly bool) ([]int, error) {
+func (s *Store) seasons(ctx context.Context, groupID int64, gradedOnly bool) ([]int, error) {
 	query := `
 		SELECT DISTINCT wk.season
 		FROM slips s
-		JOIN weeks wk ON wk.id = s.week_id
-		WHERE s.group_id = ?`
-	if gradedOnly {
-		query += " AND s.status = ?"
+		JOIN weeks wk ON wk.id = s.week_id`
+	var clauses []string
+	var args []any
+	if groupID > 0 {
+		clauses = append(clauses, "s.group_id = ?")
+		args = append(args, groupID)
 	}
-	query += " ORDER BY wk.season DESC"
-
-	args := []any{groupID}
 	if gradedOnly {
+		clauses = append(clauses, "s.status = ?")
 		args = append(args, string(SlipGraded))
 	}
+	if len(clauses) > 0 {
+		query += "\n\t\tWHERE " + strings.Join(clauses, " AND ")
+	}
+	query += " ORDER BY wk.season DESC"
 
 	rows, err := s.readConn().QueryContext(ctx, query, args...)
 	if err != nil {

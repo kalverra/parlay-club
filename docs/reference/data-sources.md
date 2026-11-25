@@ -57,9 +57,10 @@ With no params it returns the current week. For a specific week: `?seasontype={2
 | `events[].status.period`                                         | `period` (live quarter/overtime period, `NULL` unless `LIVE`)            |
 | `events[].status.displayClock`, `status.type.name`, `shortDetail`| `clock` (live clock or break label like `"Halftime"`, `NULL` unless `LIVE`) |
 
-- Keep only events whose kickoff in `America/New_York` falls on Sunday or Monday. A 9:30 a.m. ET London kickoff stays on
-  the slate, and a Monday night game stored in UTC on Tuesday stays too.
-- A scheduled game has no score, even when ESPN sends a placeholder zero. `Period` and `Clock` are populated only for `LIVE` games (`nil` for `SCHEDULED` and `FINAL`).
+- Keep all events returned on the scoreboard regardless of day of week (Thursday, Black Friday, Saturday, Sunday,
+  Monday, Christmas Wednesday, etc.).
+- A scheduled game has no score, even when ESPN sends a placeholder zero. `Period` and `Clock` are populated only for
+  `LIVE` games (`nil` for `SCHEDULED` and `FINAL`).
 - An unknown event state is an error, not a guess.
 - Upsert the week and each game; never delete them, so a flexed game keeps its ID. Rerunning a sync with the same
   response leaves every row, including `updated_at`, unchanged.
@@ -68,12 +69,15 @@ With no params it returns the current week. For a specific week: `?seasontype={2
 
 `GET https://site.api.espn.com/apis/site/v2/sports/football/nfl/summary?event={id}`
 
-- `Summary(ctx, eventID)` returns a `GameSummary` containing both `InjuriesJSON` (raw `injuries` JSON array or `"[]"` when absent) and `BoxScore` from a single `/summary` request. `SummaryInjuries(ctx, eventID)` and `BoxScore(ctx, eventID)` remain available for callers that only need one slice.
+- `Summary(ctx, eventID)` returns a `GameSummary` containing both `InjuriesJSON` (raw `injuries` JSON array or `"[]"`
+  when absent) and `BoxScore` from a single `/summary` request. `SummaryInjuries(ctx, eventID)` and
+  `BoxScore(ctx, eventID)` remain available for callers that only need one slice.
 - `ParseInjuries(rawJSON)` parses per-team injury lists filtered to key positions (`QB`, `RB`, `WR`, `TE`, `LT`, `C`,
   `CB`, `S`, plus `OT`). Non-key positions are omitted.
 - Each team group includes `LogoURL` (from `team.logo`). Injuries include `AthleteID`, `FullName`, `Position`, `Status`,
   `HeadshotURL` (from `athlete.headshot.href`), and a formatted `Detail` string.
-- For `LIVE` games, `refresh` persists the marshaled `BoxScore` into `games.boxscore_json` alongside `games.injuries_json`.
+- For `LIVE` games, `refresh` persists the marshaled `BoxScore` into `games.boxscore_json` alongside
+  `games.injuries_json`.
 
 ### Roster
 
@@ -98,8 +102,8 @@ With no params it returns the current week. For a specific week: `?seasontype={2
 - Walks regular-season and postseason event rows for the current season, most recent first.
 - Counts `GamesPlayed`, populates `Markets map[string][]float64` for `PASS_YDS`, `PASS_TDS`, `RUSH_YDS`, `RUSH_ATT`,
   `REC_YDS`, `RECEPTIONS`, `ANYTIME_TD` (rushing + receiving + return TDs), and `KICKER_PTS` (`FG made * 3 + XP made`),
-  and decodes the top-level `events` map into `Entries []GameLogEntry` (`EventID`, `Week`, `Opponent`, `AtVs`,
-  `Result`, `Score`) aligned 1:1 with `Markets` and persisted in `player_gamelogs.games_json`.
+  and decodes the top-level `events` map into `Entries []GameLogEntry` (`EventID`, `Week`, `Opponent`, `AtVs`, `Result`,
+  `Score`) aligned 1:1 with `Markets` and persisted in `player_gamelogs.games_json`.
 
 ## Open-Meteo (free, no auth)
 
@@ -229,8 +233,8 @@ price, or no subject or book is skipped, so unpriced DFS rows never reach `refre
   is accepted; tagged alternates (`"goblin"`, `"demon"`, `"alt"`, etc.) are dropped so they cannot overwrite standard
   lines.
 - **Primary-line selection:** For markets with a line (everything except `ANYTIME_TD`), `parseProps` groups each book's
-  remaining quotes by `(book, market_type, normalizePropSubject(subject))`, merging separate over/under items at the same
-  line, and keeps the single most balanced primary line:
+  remaining quotes by `(book, market_type, normalizePropSubject(subject))`, merging separate over/under items at the
+  same line, and keeps the single most balanced primary line:
   1. Two-sided quotes beat one-sided quotes.
   2. Among two-sided quotes, minimize `|impliedProb(over) - impliedProb(under)|`, breaking ties toward `-110`
      (`|over + 110| + |under + 110|`), then smallest `|over - under|`.
@@ -257,9 +261,10 @@ fallback on a non-game day—with 15-minute idempotency) and runs on demand when
 `RunPrefill`, subsequent `SyncGameProps`, `SyncPickGame`, `ForcePickRefresh`, or `KickSlipExportEnrich` calls run
 enrichment-only via `odds:props:enrich:{game}` without re-calling Parlay API. `odds:props:{game}` is stale after 30
 minutes on the game's Eastern date or within 6 hours of kickoff, and 2 hours otherwise (subject to a 2-minute cooldown
-on manual refresh), and is skipped once kickoff has passed. Before matching players, it syncs rosters for both teams (`espn:roster:{team}`). It checks the Parlay API 150-credit floor
-(`OddsPropsFloor`), calls `Client.Props`, maps `TEAM_TOTAL` to the game's team abbreviation, and canonicalizes player
-names and teams via batch resolution against `player_matches` and `roster_players`.
+on manual refresh), and is skipped once kickoff has passed. Before matching players, it syncs rosters for both teams
+(`espn:roster:{team}`). It checks the Parlay API 150-credit floor (`OddsPropsFloor`), calls `Client.Props`, maps
+`TEAM_TOTAL` to the game's team abbreviation, and canonicalizes player names and teams via batch resolution against
+`player_matches` and `roster_players`.
 
 ## The Odds API (free tier: 500 credits/month)
 
@@ -380,8 +385,8 @@ missing required column or non-numeric cell is an error.
 | `SnapCounts(ctx, season)` | `GET /snap_counts/snap_counts_{season}.csv` | Reads `pfr_player_id`, `player`, `team`, `season`, `game_type` (`REG`, `POST`, `WC`, `DIV`, `CON`, `SB`, `PRE`), `week`, `offense_snaps`, and `offense_pct`. |
 
 - Season types normalize to ESPN integers: `PRE` → `1`, `REG` → `2`, and `POST`/`WC`/`DIV`/`CON`/`SB` → `3`.
-- Team abbreviations that differ from ESPN normalize via `mapTeam`: `JAC` → `JAX`, `LA` → `LAR`, `OAK` → `LV`, `SD` → `LAC`,
-  `STL` → `LAR`, and `WAS` → `WSH`.
+- Team abbreviations that differ from ESPN normalize via `mapTeam`: `JAC` → `JAX`, `LA` → `LAR`, `OAK` → `LV`, `SD` →
+  `LAC`, `STL` → `LAR`, and `WAS` → `WSH`.
 - Refresh writes regular and postseason rows for the active season into `nflverse_player_ids`, `nflverse_team_weeks`,
   and `nflverse_player_weeks` under `nflverse:season:{year}`; see [Data refresh](../concepts/data-refresh.md). Responses
   up to 8 MiB are archived under `nflverse:season:{year}` (larger responses pass through unrecorded). Real 2026 fixtures
@@ -399,10 +404,10 @@ team:
 - **Normalization (`NormalizePlayerName`):** strips any trailing parenthetical tag via `StripPlayerTag`, folds common
   Latin accents (`á`→`a`, `é`→`e`, `ñ`→`n`, etc.), lowercases, strips `.`, `'`, `-`, and `,`, collapses spaces, and
   drops a trailing generational suffix (`jr`, `sr`, `ii`, `iii`, `iv`, `v`) when preceded by a space.
-- **Unified batch resolution (`db.BatchPlayerResolver`):** `internal/db/canonical_players.go` is the single player-matching
-  engine shared by prop ingest (`mapPropsToOdds`), game research (`loadGameResearch`), and single-row leg resolution
-  (`Store.ResolvePlayerMatch`). Each caller preloads `roster_players` (`RosterForTeams`) and `player_matches`
-  (`PlayerMatchesForTeams`) once per game:
+- **Unified batch resolution (`db.BatchPlayerResolver`):** `internal/db/canonical_players.go` is the single
+  player-matching engine shared by prop ingest (`mapPropsToOdds`), game research (`loadGameResearch`), and single-row
+  leg resolution (`Store.ResolvePlayerMatch`). Each caller preloads `roster_players` (`RosterForTeams`) and
+  `player_matches` (`PlayerMatchesForTeams`) once per game:
   1. Strips any `(TEAM)` tag via `StripPlayerTag` and validates `teamHint` against the game's home and away teams.
   2. Checks cached `player_matches` for the normalized name (`manual = 1` wins first, using `teamHint` to disambiguate
      when valid, and refusing ambiguous non-manual hits).
@@ -440,10 +445,10 @@ The free tier is 1,000 credits a month. Target at most 800, leaving room for tes
   non-`FINAL` games today in ET, 3 h with 1 upcoming game today, 12 h when tomorrow ET has games, 24 h otherwise).
   Page-load `Kick()` omits `odds:lines` outside that one-shot per-game-day pre-fill, and all runs skip the fetch once
   every game of the week has kicked off.
-- `odds:props:{game}` warms Parlay-only during `RunPrefill` for today's upcoming non-`FINAL` games in ET (or all upcoming
-  week games on a non-game-day manual fallback; 15 min idempotency) and runs on demand on `OPEN`-slip pick-time views,
-  "Load them", "Refresh odds" (2 min cooldown), or research views (stale after 30 min on the game's Eastern date or
-  within 6 h of kickoff, 2 h otherwise), and only while at least 150 credits remain (`refresh.OddsPropsFloor`). Each
+- `odds:props:{game}` warms Parlay-only during `RunPrefill` for today's upcoming non-`FINAL` games in ET (or all
+  upcoming week games on a non-game-day manual fallback; 15 min idempotency) and runs on demand on `OPEN`-slip pick-time
+  views, "Load them", "Refresh odds" (2 min cooldown), or research views (stale after 30 min on the game's Eastern date
+  or within 6 h of kickoff, 2 h otherwise), and only while at least 150 credits remain (`refresh.OddsPropsFloor`). Each
   game is one flat 3-credit `/props` call for all nine markets, not one credit per market.
 - `odds:lines` runs only while at least 50 credits remain (`refresh.OddsLinesFloor`).
 - Below a floor, serve cached rows and show "lines paused until the monthly reset".
@@ -462,5 +467,5 @@ The free tier is 500 credits a month. Its `/odds` call costs 3 credits, the same
 - Routine enrichment is about 20 line calls a week × 3 = 60 credits, or about 240 a month. Enrichment pauses at 100, so
   it never spends the reserve kept for fallback.
 - Per-event props cost 1 credit per market returned, so a nine-market call costs 9. In `odds:props:{game}` and
-  `odds:props:enrich:{game}`, enrichment runs at or above 100 credits (`refresh.TheOddsAPIEnrichFloor`) and fallback runs
-  at or above 25 credits (`refresh.TheOddsAPIFallbackFloor`).
+  `odds:props:enrich:{game}`, enrichment runs at or above 100 credits (`refresh.TheOddsAPIEnrichFloor`) and fallback
+  runs at or above 25 credits (`refresh.TheOddsAPIFallbackFloor`).

@@ -17,8 +17,7 @@ type EvalResultsPage struct {
 	Page
 	BackURL         string
 	GuideURL        string
-	GroupName       string
-	HasGroup        bool
+	ScopeLabel      string
 	HasData         bool
 	Season          int
 	SeasonLabel     string
@@ -145,8 +144,8 @@ type EvalCoverageView struct {
 	WithOdds     int
 }
 
-// evalResults serves GET /analyzer/results, showing group-scoped calibration,
-// week-over-week progression, factor attribution, and data coverage.
+// evalResults serves GET /analyzer/results, showing global calibration across
+// all groups, week-over-week progression, factor attribution, and data coverage.
 func (h *slipHandlers) evalResults(w http.ResponseWriter, r *http.Request) {
 	if _, ok := h.user(r.Context()); !ok {
 		h.redirect(w, r, "/login")
@@ -159,30 +158,22 @@ func (h *slipHandlers) evalResults(w http.ResponseWriter, r *http.Request) {
 
 	if h.deps.Store == nil {
 		h.renderPage(w, "analyzer-results", EvalResultsPage{
-			Page:     page,
-			BackURL:  backURL,
-			GuideURL: buildGuideURL(backURL),
-		})
-		return
-	}
-
-	group, ok := h.group(r.Context())
-	if !ok {
-		h.renderPage(w, "analyzer-results", EvalResultsPage{
-			Page:     page,
-			BackURL:  backURL,
-			GuideURL: buildGuideURL(backURL),
+			Page:        page,
+			BackURL:     backURL,
+			GuideURL:    buildGuideURL(backURL),
+			ScopeLabel:  "All groups",
+			SeasonLabel: "All seasons",
 		})
 		return
 	}
 
 	ctx := r.Context()
-	allSeasons, err := h.deps.Store.SeasonsForGroup(ctx, group.ID)
+	allSeasons, err := h.deps.Store.Seasons(ctx)
 	if err != nil {
 		h.serverError(w, err)
 		return
 	}
-	gradedSeasons, err := h.deps.Store.GradedSeasonsForGroup(ctx, group.ID)
+	gradedSeasons, err := h.deps.Store.GradedSeasons(ctx)
 	if err != nil {
 		h.serverError(w, err)
 		return
@@ -193,7 +184,7 @@ func (h *slipHandlers) evalResults(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	suite, err := h.deps.EvalCache.GetOrCompute(ctx, h.deps.Store, group.ID, selectedSeason)
+	suite, err := h.deps.EvalCache.GetOrCompute(ctx, h.deps.Store, 0, selectedSeason)
 	if err != nil {
 		h.serverError(w, err)
 		return
@@ -203,7 +194,6 @@ func (h *slipHandlers) evalResults(w http.ResponseWriter, r *http.Request) {
 	data := buildEvalResultsPage(
 		page,
 		backURL,
-		group.Name,
 		selectedSeason,
 		allSeasons,
 		suite,
@@ -261,7 +251,6 @@ func selectEvalReport(suite eval.SuiteReport, requested string) eval.Report {
 func buildEvalResultsPage(
 	page Page,
 	backURL string,
-	groupName string,
 	selectedSeason int,
 	allSeasons []int,
 	suite eval.SuiteReport,
@@ -329,8 +318,7 @@ func buildEvalResultsPage(
 		Page:            page,
 		BackURL:         backURL,
 		GuideURL:        buildGuideURL(backURL),
-		GroupName:       groupName,
-		HasGroup:        true,
+		ScopeLabel:      "All groups",
 		HasData:         hasData,
 		Season:          selectedSeason,
 		SeasonLabel:     seasonLabel,
