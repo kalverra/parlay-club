@@ -818,3 +818,187 @@ func TestHomeGroupSummaryPrioritizesActionableSlips(t *testing.T) {
 		assert.NotContains(t, body, "Picks are closed")
 	})
 }
+
+func TestGroupWeekSpotlightLiveProgress(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 11, 8, 19, 30, 0, 0, time.UTC)
+
+	setupGroupWeekSlip := func(t *testing.T, gameStatus db.GameStatus, legResult parlay.Result) (string, *landingFixture) {
+		t.Helper()
+		fixture := newLandingFixture(t)
+		fixture.clock = func() time.Time { return now }
+		fixture.handler = fixture.build()
+
+		liveGame := db.Game{
+			ID:         "401873401",
+			WeekID:     fixture.week.ID,
+			HomeTeam:   "BUF",
+			AwayTeam:   "KC",
+			HomeName:   "Buffalo Bills",
+			AwayName:   "Kansas City Chiefs",
+			HomeESPNID: "2",
+			AwayESPNID: "12",
+			Kickoff:    now.Add(-90 * time.Minute),
+			Status:     gameStatus,
+			UpdatedAt:  now,
+		}
+		if gameStatus == db.GameLive {
+			liveGame.HomeScore = new(24)
+			liveGame.AwayScore = new(17)
+			liveGame.Period = new(3)
+			liveGame.Clock = new("6:15")
+		}
+		_, err := fixture.store.UpsertGame(t.Context(), liveGame)
+		require.NoError(t, err)
+
+		_, err = fixture.store.UpsertGame(t.Context(), db.Game{
+			ID:         "401873402",
+			WeekID:     fixture.week.ID,
+			HomeTeam:   "DAL",
+			AwayTeam:   "PHI",
+			HomeName:   "Dallas Cowboys",
+			AwayName:   "Philadelphia Eagles",
+			HomeESPNID: "6",
+			AwayESPNID: "21",
+			Kickoff:    now.Add(2 * time.Hour),
+			Status:     db.GameScheduled,
+			UpdatedAt:  now,
+		})
+		require.NoError(t, err)
+
+		slip, err := fixture.store.CreateSlip(
+			t.Context(),
+			fixture.second.ID,
+			fixture.week.ID,
+			nil,
+			"Sunday Spotlight",
+			db.SlateScopeSundayMain,
+			2,
+			[]int64{fixture.user.ID},
+		)
+		require.NoError(t, err)
+
+		leg1, err := fixture.store.CreateLeg(t.Context(), db.Leg{
+			SlipID:     slip.ID,
+			UserID:     fixture.user.ID,
+			GameID:     new(liveGame.ID),
+			MarketType: "SPREAD",
+			Selection:  "BUF -3.5",
+			Team:       new("BUF"),
+			Side:       new("TEAM"),
+			Line:       new(-3.5),
+			Odds:       -110,
+		})
+		require.NoError(t, err)
+		if legResult != parlay.Pending {
+			require.NoError(t, fixture.store.SetLegResult(t.Context(), leg1.ID, legResult, "manual"))
+		}
+
+		_, err = fixture.store.CreateLeg(t.Context(), db.Leg{
+			SlipID:     slip.ID,
+			UserID:     fixture.user.ID,
+			GameID:     new("401873402"),
+			MarketType: "ML",
+			Selection:  "DAL ML",
+			Team:       new("DAL"),
+			Side:       new("TEAM"),
+			Odds:       +120,
+		})
+		require.NoError(t, err)
+
+		require.NoError(t, fixture.store.SetSlipMemberLock(t.Context(), slip.ID, fixture.user.ID, &now))
+		require.NoError(t, fixture.store.SetSlipStatus(t.Context(), slip.ID, db.SlipLocked))
+
+		rec := fixture.get(t, fmt.Sprintf("/groups/%d/week", fixture.second.ID))
+		require.Equal(t, http.StatusOK, rec.Code)
+		return html.UnescapeString(rec.Body.String()), fixture
+	}
+
+	t.Run("scheduled slip hides live progress bar", func(t *testing.T) {
+		t.Parallel()
+		body, _ := setupGroupWeekSlip(t, db.GameScheduled, parlay.Pending)
+		assert.Contains(t, body, "Sunday Spotlight")
+		assert.NotContains(t, body, "data-spotlight-live-progress")
+	})
+
+	t.Run("live slip renders compact single-row progress bar and phone-width classes", func(t *testing.T) {
+		t.Parallel()
+		body, _ := setupGroupWeekSlip(t, db.GameLive, parlay.Pending)
+		assert.Contains(t, body, "data-spotlight-live-progress")
+		assert.Contains(t, body, `data-live-state="LIVE"`)
+		assert.Contains(t, body, `role="progressbar"`)
+		assert.Contains(t, body, `aria-label="Live parlay progress"`)
+		assert.Contains(t, body, "0/2 hit · 1 live")
+		assert.Contains(t, body, "Live ")
+		assert.Contains(t, body, "min-w-0")
+		assert.Contains(t, body, "truncate text-ink-muted")
+		assert.Contains(t, body, "shrink-0 font-semibold tabular-nums")
+		assert.Contains(t, body, "h-1.5 w-full overflow-hidden rounded-full")
+	})
+
+	t.Run("busted slip renders danger bar and 0% live chance", func(t *testing.T) {
+		t.Parallel()
+		body, _ := setupGroupWeekSlip(t, db.GameLive, parlay.Lost)
+		assert.Contains(t, body, `data-live-state="BUSTED"`)
+		assert.Contains(t, body, "Live 0%")
+		assert.Contains(t, body, "bg-danger")
+	})
+
+	t.Run("cashed slip renders positive bar and 100% live chance", func(t *testing.T) {
+		t.Parallel()
+		fixture := newLandingFixture(t)
+		fixture.clock = func() time.Time { return now }
+		fixture.handler = fixture.build()
+
+		_, err := fixture.store.UpsertGame(t.Context(), db.Game{
+			ID:         "401873499",
+			WeekID:     fixture.week.ID,
+			HomeTeam:   "DAL",
+			AwayTeam:   "PHI",
+			HomeName:   "Dallas Cowboys",
+			AwayName:   "Philadelphia Eagles",
+			HomeESPNID: "6",
+			AwayESPNID: "21",
+			Kickoff:    now.Add(2 * time.Hour),
+			Status:     db.GameScheduled,
+			UpdatedAt:  now,
+		})
+		require.NoError(t, err)
+
+		slip, err := fixture.store.CreateSlip(
+			t.Context(),
+			fixture.second.ID,
+			fixture.week.ID,
+			nil,
+			"Cashed Spotlight",
+			db.SlateScopeSundayMain,
+			1,
+			[]int64{fixture.user.ID},
+		)
+		require.NoError(t, err)
+
+		leg, err := fixture.store.CreateLeg(t.Context(), db.Leg{
+			SlipID:     slip.ID,
+			UserID:     fixture.user.ID,
+			GameID:     new("401873499"),
+			MarketType: "ML",
+			Selection:  "DAL ML",
+			Team:       new("DAL"),
+			Side:       new("TEAM"),
+			Odds:       -110,
+		})
+		require.NoError(t, err)
+		require.NoError(t, fixture.store.SetLegResult(t.Context(), leg.ID, parlay.Won, "manual"))
+		require.NoError(t, fixture.store.SetSlipMemberLock(t.Context(), slip.ID, fixture.user.ID, &now))
+		require.NoError(t, fixture.store.SetSlipStatus(t.Context(), slip.ID, db.SlipLocked))
+
+		rec := fixture.get(t, fmt.Sprintf("/groups/%d/week", fixture.second.ID))
+		require.Equal(t, http.StatusOK, rec.Code)
+		body := html.UnescapeString(rec.Body.String())
+
+		assert.Contains(t, body, `data-live-state="CASHED"`)
+		assert.Contains(t, body, "Live 100%")
+		assert.Contains(t, body, "bg-positive")
+	})
+}

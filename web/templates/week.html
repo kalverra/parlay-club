@@ -34,6 +34,35 @@
             </span>
           </div>
 
+          {{if .Live.Show}}
+            <div class="space-y-1.5" data-spotlight-live-progress data-live-state="{{.Live.State}}">
+              <div class="flex items-center justify-between gap-2 text-xs">
+                <div class="flex min-w-0 items-center gap-1.5">
+                  <span class="shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-semibold {{.Live.BadgeClass}}">
+                    {{.Live.StatusLabel}}
+                  </span>
+                  <span class="truncate text-ink-muted">{{.Live.Summary}}</span>
+                </div>
+                {{if .Live.LiveChance}}
+                  <span class="shrink-0 font-semibold tabular-nums text-ink">Live {{.Live.LiveChance}}</span>
+                {{end}}
+              </div>
+              <div
+                class="h-1.5 w-full overflow-hidden rounded-full bg-surface-2"
+                role="progressbar"
+                aria-label="Live parlay progress"
+                aria-valuemin="0"
+                aria-valuemax="100"
+                aria-valuenow="{{.Live.ProgressPct}}"
+              >
+                <div
+                  class="h-full rounded-full transition-all {{.Live.BarClass}}"
+                  style="width: {{.Live.ProgressPct}}%"
+                ></div>
+              </div>
+            </div>
+          {{end}}
+
           <div class="flex flex-wrap items-center justify-between gap-3 pt-1">
             <div class="text-xs text-ink-muted">
               {{if .Deadline}}
