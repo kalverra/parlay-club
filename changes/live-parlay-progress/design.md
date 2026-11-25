@@ -231,5 +231,5 @@ Complexity: medium (wires cached live game state and `internal/progress` into bo
 Risk: low (read-only template additions inside existing SSE-refreshed partials, verified by web handler and HTML tests)
 
 - [x] Wire `SlipLiveView` and `LegLiveView` in `internal/web/slips.go` and render the parlay live progress card and per-leg progress bars with live hit chances in `web/templates/partials.html`, with handler and HTML tests covering live, cashed, busted, scheduled, and SSE-refreshed states.
-- [ ] Wire compact live parlay progress bars and live hit chances into `SpotlightSlipCard` in `internal/web/home.go` and `web/templates/week.html`, with overview handler tests and phone-width layout checks.
+- [x] Wire compact live parlay progress bars and live hit chances into `SpotlightSlipCard` in `internal/web/home.go` and `web/templates/week.html`, with overview handler tests and phone-width layout checks.
 - [ ] Docs: update `docs/concepts/slips.md` to document live parlay and leg progress bars and live hit chance display.

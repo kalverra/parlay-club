@@ -197,6 +197,7 @@ func TestBuildGroupOverviewPageStates(t *testing.T) {
 		assert.Equal(t, "Pick 2 more", page.Spotlight[0].ActionLabel)
 		assert.Equal(t, "/slips/102/pick", page.Spotlight[0].ActionHref)
 		assert.Equal(t, "2 members · 0/4 picks", page.Spotlight[0].Progress)
+		assert.False(t, page.Spotlight[0].Live.Show)
 
 		assert.Equal(t, exportSlip.ID, page.Spotlight[1].ID)
 		assert.Equal(t, "Open slip", page.Spotlight[1].ActionLabel)
@@ -226,14 +227,37 @@ func TestBuildGroupOverviewPageStates(t *testing.T) {
 			Group:      group,
 			ActiveWeek: &week9,
 			WeekGames: []db.Game{
-				{ID: "g-live", Kickoff: now.Add(-time.Hour), Status: db.GameLive},
+				{
+					ID:        "g-live",
+					HomeTeam:  "BUF",
+					AwayTeam:  "KC",
+					Kickoff:   now.Add(-time.Hour),
+					Status:    db.GameLive,
+					HomeScore: new(21),
+					AwayScore: new(17),
+					Period:    new(3),
+					Clock:     new("8:42"),
+				},
 			},
 			WeekSlips: []groupOverviewSlip{
 				{
 					Slip:    liveSlip,
 					Week:    week9,
 					Members: []db.SlipMember{{User: ada, LockedAt: &lockedAt}},
-					Legs:    []db.Leg{{ID: 1, SlipID: 201, UserID: ada.ID}},
+					Legs: []db.Leg{
+						{
+							ID:         1,
+							SlipID:     201,
+							UserID:     ada.ID,
+							GameID:     new("g-live"),
+							MarketType: "SPREAD",
+							Team:       new("BUF"),
+							Side:       new("TEAM"),
+							Line:       new(-3.5),
+							Odds:       -110,
+							Result:     parlay.Pending,
+						},
+					},
 				},
 			},
 			RecentSlips: []db.RecentSlipRow{{Slip: liveSlip, Week: week9}},
@@ -244,6 +268,10 @@ func TestBuildGroupOverviewPageStates(t *testing.T) {
 		require.Len(t, page.Spotlight, 1)
 		assert.Equal(t, liveSlip.ID, page.Spotlight[0].ID)
 		assert.Equal(t, "Open slip", page.Spotlight[0].ActionLabel)
+		assert.True(t, page.Spotlight[0].Live.Show)
+		assert.Equal(t, "LIVE", page.Spotlight[0].Live.State)
+		assert.Equal(t, "0/1 hit · 1 live", page.Spotlight[0].Live.Summary)
+		assert.NotEmpty(t, page.Spotlight[0].Live.LiveChance)
 		assert.Empty(t, page.RecentSlips)
 	})
 

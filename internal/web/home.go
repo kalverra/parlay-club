@@ -68,6 +68,7 @@ type SpotlightSlipCard struct {
 	TotalPicks  int
 	LockedCount int
 	Progress    string
+	Live        SlipLiveView
 	ActionLabel string
 	ActionHref  string
 }
@@ -158,6 +159,7 @@ func buildGroupOverviewPage(in groupOverviewInput) GroupOverviewPage {
 			deadline = newDeadlineView(in.WeekGames, *next.Deadline)
 		}
 		lockedCount, progress := slipProgressSummary(ws.Members, ws.Legs, ws.Slip.LegsPerMember)
+		_, slipProg := evaluateSlipProgress(ws.Legs, in.WeekGames)
 		actionLabel := "Open slip"
 		actionHref := fmt.Sprintf("/slips/%d", ws.Slip.ID)
 		if next.Step == slips.StepPick {
@@ -180,6 +182,7 @@ func buildGroupOverviewPage(in groupOverviewInput) GroupOverviewPage {
 				TotalPicks:  len(ws.Members) * ws.Slip.LegsPerMember,
 				LockedCount: lockedCount,
 				Progress:    progress,
+				Live:        slipLiveView(slipProg),
 				ActionLabel: actionLabel,
 				ActionHref:  actionHref,
 			},
