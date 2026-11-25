@@ -135,53 +135,36 @@ jobs:
             --format markdown >> "$GITHUB_STEP_SUMMARY"
 
   test:
-    name: Test (${{ matrix.shard }})
+    name: Test
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [server, db-web, other]
     steps:
       - uses: actions/checkout@v7.0.1
 
-      - uses: jdx/mise-action@v5.2.8
-
-      - name: Cache Go build and modules
-        uses: actions/cache@v6.1.0
+      - uses: actions/setup-go@v7.1.0
         with:
-          path: |
-            ~/go/pkg/mod
-            ~/.cache/go-build
-          key: test-${{ runner.os }}-${{ matrix.shard }}-${{ hashFiles('go.sum', 'mise.toml') }}
-          restore-keys: |
-            test-${{ runner.os }}-${{ matrix.shard }}-
-            test-${{ runner.os }}-
+          go-version-file: go.mod
+
+      - name: Run tests
+        run: go test -short ./...
+
+  race:
+    name: Race tests
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - uses: actions/setup-go@v7.1.0
+        with:
+          go-version-file: go.mod
 
       - name: Run race tests
-        env:
-          SHARD: ${{ matrix.shard }}
-        run: |
-          set -euo pipefail
-          case "$SHARD" in
-            server)
-              go test -short -race ./cmd/server
-              ;;
-            db-web)
-              go test -short -race ./internal/db ./internal/web
-              ;;
-            other)
-              pkgs=$(go list ./... | grep -vE '/(cmd/server|internal/db|internal/web)$')
-              # shellcheck disable=SC2086
-              go test -short -race $pkgs
-              ;;
-            *)
-              echo "unknown shard: $SHARD" >&2
-              exit 1
-              ;;
-          esac
+        run: go test -short -race ./...
 
   docker:
     name: Verify Docker build
@@ -204,7 +187,7 @@ jobs:
 
   ci:
     name: CI
-    needs: [changes, checks, lint, test, docker]
+    needs: [changes, checks, lint, test, race, docker]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -215,6 +198,7 @@ jobs:
           CHECKS_RESULT: ${{ needs.checks.result }}
           LINT_RESULT: ${{ needs.lint.result }}
           TEST_RESULT: ${{ needs.test.result }}
+          RACE_RESULT: ${{ needs.race.result }}
           DOCKER_RESULT: ${{ needs.docker.result }}
         run: |
           set -euo pipefail
@@ -223,6 +207,7 @@ jobs:
             "checks:$CHECKS_RESULT" \
             "lint:$LINT_RESULT" \
             "test:$TEST_RESULT" \
+            "race:$RACE_RESULT" \
             "docker:$DOCKER_RESULT"; do
             name="${pair%%:*}"
             result="${pair#*:}"
