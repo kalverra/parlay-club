@@ -15,7 +15,7 @@ import (
 )
 
 // latestSchemaVersion is the version the last migration records.
-const latestSchemaVersion = 17
+const latestSchemaVersion = 18
 
 func TestMigrateFreshDatabase(t *testing.T) {
 	t.Parallel()
@@ -546,6 +546,52 @@ func TestMigration0015ResearchContext(t *testing.T) {
 		 WHERE type = 'index' AND name = 'idx_nflverse_player_weeks_opp_pos'`).
 		Scan(&idxName))
 	assert.Equal(t, "idx_nflverse_player_weeks_opp_pos", idxName)
+}
+
+func TestMigration0018LiveGameState(t *testing.T) {
+	t.Parallel()
+
+	database := openTestDB(t)
+	require.NoError(t, db.Migrate(t.Context(), database))
+
+	_, err := database.ExecContext(t.Context(),
+		"INSERT INTO weeks (id, season, season_type, week_num) VALUES (2026209, 2026, 2, 9)")
+	require.NoError(t, err)
+	_, err = database.ExecContext(t.Context(), `
+		INSERT INTO games (
+			id, week_id, home_team, away_team, home_name, away_name,
+			home_espn_id, away_espn_id, kickoff_utc, status, is_indoor, updated_at
+		) VALUES (
+			'401772001', 2026209, 'BUF', 'MIA', 'Buffalo Bills', 'Miami Dolphins',
+			'2', '15', '2026-11-08T18:00:00Z', 'SCHEDULED', 0, '2026-11-07T12:00:00Z'
+		)`)
+	require.NoError(t, err)
+
+	var (
+		period   sql.NullInt64
+		clock    sql.NullString
+		boxscore sql.NullString
+	)
+	require.NoError(t, database.QueryRowContext(t.Context(),
+		"SELECT period, clock, boxscore_json FROM games WHERE id = '401772001'").
+		Scan(&period, &clock, &boxscore))
+	assert.False(t, period.Valid)
+	assert.False(t, clock.Valid)
+	assert.False(t, boxscore.Valid)
+
+	_, err = database.ExecContext(t.Context(), `
+		UPDATE games
+		SET period = 3, clock = '8:42', boxscore_json = '{"hasStats":true}'
+		WHERE id = '401772001'`)
+	require.NoError(t, err)
+
+	require.NoError(t, database.QueryRowContext(t.Context(),
+		"SELECT period, clock, boxscore_json FROM games WHERE id = '401772001'").
+		Scan(&period, &clock, &boxscore))
+	assert.True(t, period.Valid)
+	assert.Equal(t, int64(3), period.Int64)
+	assert.Equal(t, "8:42", clock.String)
+	assert.Equal(t, `{"hasStats":true}`, boxscore.String)
 }
 
 // schemaVersion reads PRAGMA user_version, the migration runner's record of the

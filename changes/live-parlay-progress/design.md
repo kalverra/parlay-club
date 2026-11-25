@@ -212,7 +212,7 @@ Complexity: medium (coordinates ESPN ingest parsing, SQLite migration/store meth
 Risk: low (additive nullable columns and free ESPN read path; existing pre-game and final grading behavior remains unchanged and covered by unit tests)
 
 - [x] Extend `internal/ingest/espn` (`scoreboard.go`, `summary.go`, `boxscore.go`) to parse live `period`, `displayClock` / break detail, and combined `Summary` (`injuries` + `boxscore`) from one `/summary` request, with unit tests for pre-game, live regulation, halftime, overtime, and final payloads.
-- [ ] Add `internal/db/migrations/0018_live_game_state.sql` (`period`, `clock`, `boxscore_json` on `games`) and update `internal/db/games.go` (`Game`, `UpsertGame`, `SetGameSummary`, `LiveGameIDsWithSlipLegs`) with migration and store tests verifying idempotent change detection.
+- [x] Add `internal/db/migrations/0018_live_game_state.sql` (`period`, `clock`, `boxscore_json` on `games`) and update `internal/db/games.go` (`Game`, `UpsertGame`, `SetGameSummary`, `LiveGameIDsWithSlipLegs`) with migration and store tests verifying idempotent change detection.
 - [ ] Update `internal/refresh` (`rules.go`, `research.go`, `refresh.go`, `sources.go`) so `espn:summary:{gameID}` refreshes every 2 minutes for `LIVE` games with active slip legs, persists live `boxscore_json` alongside `injuries_json`, and publishes `week:{weekID}` / `slip:{id}` on changes, with staleness and publish tests.
 - [ ] Docs: update `docs/reference/data-sources.md`, `docs/reference/schema.md`, and `docs/concepts/data-refresh.md` for live clock/period fields, `boxscore_json`, and live summary cadence.
 

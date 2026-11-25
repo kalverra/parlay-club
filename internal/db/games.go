@@ -63,7 +63,10 @@ type Game struct {
 	PrecipIN     *float64
 	HomeScore    *int
 	AwayScore    *int
+	Period       *int
+	Clock        *string
 	InjuriesJSON *string
+	BoxScoreJSON *string
 	UpdatedAt    time.Time
 }
 
@@ -72,11 +75,11 @@ const gameColumns = `
 	id, week_id, odds_event_id, home_team, away_team, home_name, away_name,
 	home_espn_id, away_espn_id, home_logo, away_logo, kickoff_utc, status,
 	venue_id, venue_name, is_indoor, temp_f, wind_mph, wind_gust_mph, precip_in,
-	home_score, away_score, injuries_json, updated_at`
+	home_score, away_score, period, clock, injuries_json, boxscore_json, updated_at`
 
 // UpsertGame inserts a game, or updates the fields the slate sync owns when
 // they changed. A rerun with the same data leaves the row and its updated_at
-// untouched. Weather, injuries, and the odds event match stay put.
+// untouched. Weather, injuries, box score, and the odds event match stay put.
 func (s *Store) UpsertGame(ctx context.Context, game Game) (Game, error) {
 	if !game.Status.Valid() {
 		return Game{}, fmt.Errorf("game %s: %w", game.ID, ErrGameStatusInvalid)
@@ -87,8 +90,8 @@ func (s *Store) UpsertGame(ctx context.Context, game Game) (Game, error) {
 			id, week_id, home_team, away_team, home_name, away_name,
 			home_espn_id, away_espn_id, home_logo, away_logo, kickoff_utc,
 			status, venue_id, venue_name, is_indoor, home_score, away_score,
-			updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			period, clock, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (id) DO UPDATE SET
 			week_id = excluded.week_id,
 			home_team = excluded.home_team,
@@ -106,6 +109,8 @@ func (s *Store) UpsertGame(ctx context.Context, game Game) (Game, error) {
 			is_indoor = excluded.is_indoor,
 			home_score = excluded.home_score,
 			away_score = excluded.away_score,
+			period = excluded.period,
+			clock = excluded.clock,
 			updated_at = excluded.updated_at
 		WHERE games.week_id IS NOT excluded.week_id
 			OR games.home_team IS NOT excluded.home_team
@@ -122,7 +127,9 @@ func (s *Store) UpsertGame(ctx context.Context, game Game) (Game, error) {
 			OR games.venue_name IS NOT excluded.venue_name
 			OR games.is_indoor IS NOT excluded.is_indoor
 			OR games.home_score IS NOT excluded.home_score
-			OR games.away_score IS NOT excluded.away_score`,
+			OR games.away_score IS NOT excluded.away_score
+			OR games.period IS NOT excluded.period
+			OR games.clock IS NOT excluded.clock`,
 		game.ID,
 		game.WeekID,
 		game.HomeTeam,
@@ -140,6 +147,8 @@ func (s *Store) UpsertGame(ctx context.Context, game Game) (Game, error) {
 		game.Indoor,
 		nullableInt(game.HomeScore),
 		nullableInt(game.AwayScore),
+		nullableInt(game.Period),
+		nullableString(game.Clock),
 		formatTimestamp(game.UpdatedAt),
 	)
 	if err != nil {
@@ -331,6 +340,75 @@ func (s *Store) SetGameInjuries(ctx context.Context, gameID, injuriesJSON string
 	return false, nil
 }
 
+// SetGameSummary stores a game's raw ESPN injuries JSON and optional live box
+// score JSON, reporting whether either column changed. When boxscoreJSON is
+// nil, any existing boxscore_json is preserved. A missing game wraps
+// ErrGameNotFound.
+func (s *Store) SetGameSummary(
+	ctx context.Context,
+	gameID, injuriesJSON string,
+	boxscoreJSON *string,
+) (bool, error) {
+	result, err := s.conn().ExecContext(ctx, `
+		UPDATE games SET
+			injuries_json = ?,
+			boxscore_json = COALESCE(?, boxscore_json)
+		WHERE id = ?
+			AND (
+				injuries_json IS NOT ?
+				OR (? IS NOT NULL AND boxscore_json IS NOT ?)
+			)`,
+		injuriesJSON,
+		nullableString(boxscoreJSON),
+		gameID,
+		injuriesJSON,
+		nullableString(boxscoreJSON),
+		nullableString(boxscoreJSON),
+	)
+	if err != nil {
+		return false, fmt.Errorf("set game %s summary: %w", gameID, err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("set game %s summary: %w", gameID, err)
+	}
+	if affected > 0 {
+		return true, nil
+	}
+	if _, err := s.GameKickoff(ctx, gameID); err != nil {
+		return false, err
+	}
+	return false, nil
+}
+
+// LiveGameIDsWithSlipLegs returns the IDs of LIVE games in weekID that are
+// referenced by at least one slip leg.
+func (s *Store) LiveGameIDsWithSlipLegs(ctx context.Context, weekID int64) (map[string]bool, error) {
+	rows, err := s.readConn().QueryContext(ctx, `
+		SELECT DISTINCT g.id
+		FROM games g
+		JOIN legs l ON l.game_id = g.id
+		WHERE g.week_id = ? AND g.status = ?`,
+		weekID, GameLive)
+	if err != nil {
+		return nil, fmt.Errorf("live games with slip legs for week %d: %w", weekID, err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	ids := make(map[string]bool)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("live games with slip legs for week %d: %w", weekID, err)
+		}
+		ids[id] = true
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("live games with slip legs for week %d: %w", weekID, err)
+	}
+	return ids, nil
+}
+
 // TeamLogos returns the most recent non-empty logo URL for each team
 // abbreviation stored in games.
 func (s *Store) TeamLogos(ctx context.Context) (map[string]string, error) {
@@ -383,7 +461,10 @@ func scanGame(row rowScanner) (Game, error) {
 		precipIN    sql.NullFloat64
 		homeScore   sql.NullInt64
 		awayScore   sql.NullInt64
+		period      sql.NullInt64
+		clock       sql.NullString
 		injuries    sql.NullString
+		boxscore    sql.NullString
 		updatedAt   string
 	)
 	if err := row.Scan(
@@ -409,7 +490,10 @@ func scanGame(row rowScanner) (Game, error) {
 		&precipIN,
 		&homeScore,
 		&awayScore,
+		&period,
+		&clock,
 		&injuries,
+		&boxscore,
 		&updatedAt,
 	); err != nil {
 		return Game{}, err
@@ -437,7 +521,10 @@ func scanGame(row rowScanner) (Game, error) {
 	game.PrecipIN = nullableFloatPtr(precipIN)
 	game.HomeScore = nullableIntPtr(homeScore)
 	game.AwayScore = nullableIntPtr(awayScore)
+	game.Period = nullableIntPtr(period)
+	game.Clock = nullableStringPtr(clock)
 	game.InjuriesJSON = nullableStringPtr(injuries)
+	game.BoxScoreJSON = nullableStringPtr(boxscore)
 	game.UpdatedAt = updateTime
 	return game, nil
 }
