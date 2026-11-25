@@ -10,6 +10,7 @@ import (
 )
 
 type cacheKey struct {
+	mode    ReplayMode
 	groupID int64
 	season  int
 }
@@ -17,16 +18,19 @@ type cacheKey struct {
 type cacheGen struct {
 	global uint64
 	group  uint64
+	market uint64
 }
 
-// Cache memoizes SuiteReports keyed by (groupID, season) until invalidated by
-// leg/slip settlement or a sandbox reset. groupID 0 caches global (all-group)
-// reports and is invalidated whenever any group is invalidated.
+// Cache memoizes SuiteReports keyed by (mode, groupID, season) until invalidated
+// by leg/slip settlement, market data updates, or a sandbox reset. groupID 0
+// caches global (all-group) slip reports and is invalidated whenever any group
+// is invalidated.
 type Cache struct {
-	mu       sync.RWMutex
-	entries  map[cacheKey]SuiteReport
-	gen      uint64
-	groupGen map[int64]uint64
+	mu        sync.RWMutex
+	entries   map[cacheKey]SuiteReport
+	gen       uint64
+	groupGen  map[int64]uint64
+	marketGen uint64
 }
 
 // NewCache constructs an empty in-memory eval Cache.
@@ -37,15 +41,33 @@ func NewCache() *Cache {
 	}
 }
 
-// GetOrCompute returns the cached SuiteReport for (groupID, season), or replays
-// and evaluates the group's dataset from store on a cache miss.
+// GetOrCompute returns the cached ModeSlips SuiteReport for (groupID, season),
+// or replays and evaluates the group's dataset from store on a cache miss.
 func (c *Cache) GetOrCompute(
 	ctx context.Context,
 	store *db.Store,
 	groupID int64,
 	season int,
 ) (SuiteReport, error) {
-	key := cacheKey{groupID: groupID, season: season}
+	return c.GetOrComputeMode(ctx, store, ModeSlips, groupID, season)
+}
+
+// GetOrComputeMode returns the cached SuiteReport for (mode, groupID, season),
+// or replays and evaluates the dataset from store on a cache miss.
+func (c *Cache) GetOrComputeMode(
+	ctx context.Context,
+	store *db.Store,
+	mode ReplayMode,
+	groupID int64,
+	season int,
+) (SuiteReport, error) {
+	if mode == "" {
+		mode = ModeSlips
+	}
+	if mode == ModeMarket {
+		groupID = 0
+	}
+	key := cacheKey{mode: mode, groupID: groupID, season: season}
 
 	c.mu.RLock()
 	if report, ok := c.entries[key]; ok {
@@ -55,6 +77,7 @@ func (c *Cache) GetOrCompute(
 	startGen := cacheGen{
 		global: c.gen,
 		group:  c.groupGen[groupID],
+		market: c.marketGen,
 	}
 	c.mu.RUnlock()
 
@@ -65,6 +88,7 @@ func (c *Cache) GetOrCompute(
 	dataset, err := LoadDataset(ctx, store, ReplayFilter{
 		GroupID: groupID,
 		Season:  season,
+		Mode:    mode,
 	})
 	if err != nil {
 		return SuiteReport{}, err
@@ -75,7 +99,10 @@ func (c *Cache) GetOrCompute(
 	if c.entries == nil {
 		c.entries = make(map[cacheKey]SuiteReport)
 	}
-	if c.gen == startGen.global && c.groupGen[groupID] == startGen.group {
+	genMatch := c.gen == startGen.global &&
+		((mode == ModeSlips && c.groupGen[groupID] == startGen.group) ||
+			(mode == ModeMarket && c.marketGen == startGen.market))
+	if genMatch {
 		c.entries[key] = report
 	}
 	c.mu.Unlock()
@@ -83,8 +110,9 @@ func (c *Cache) GetOrCompute(
 	return report, nil
 }
 
-// InvalidateGroup drops all cached seasons for groupID as well as any global
-// (groupID 0) cached entries that aggregate across groups.
+// InvalidateGroup drops all cached ModeSlips seasons for groupID as well as any
+// global (groupID 0) ModeSlips cached entries that aggregate across groups.
+// ModeMarket entries are left intact.
 func (c *Cache) InvalidateGroup(groupID int64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -97,7 +125,21 @@ func (c *Cache) InvalidateGroup(groupID int64) {
 		c.groupGen[0]++
 	}
 	for key := range c.entries {
-		if key.groupID == groupID || key.groupID == 0 {
+		if key.mode == ModeSlips && (key.groupID == groupID || key.groupID == 0) {
+			delete(c.entries, key)
+		}
+	}
+}
+
+// InvalidateMarket drops all cached ModeMarket entries without evicting
+// ModeSlips entries.
+func (c *Cache) InvalidateMarket() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.marketGen++
+	for key := range c.entries {
+		if key.mode == ModeMarket {
 			delete(c.entries, key)
 		}
 	}

@@ -286,6 +286,45 @@ func TestSyncNFLverseWritesTablesAndPublishesOnce(t *testing.T) {
 	assert.Len(t, publisher.seen(), 1)
 }
 
+func TestSyncNFLverseNotifiesMarketDataChangeWhenChanged(t *testing.T) {
+	t.Parallel()
+
+	store := openTestStore(t)
+	now := time.Date(2026, time.November, 10, 12, 0, 0, 0, time.UTC)
+	week, err := store.UpsertWeek(t.Context(), 2026, nflverse.SeasonTypeRegular, 9)
+	require.NoError(t, err)
+
+	client := &fakeNFLverseClient{
+		players: []nflverse.Player{
+			{ESPNID: "4362628", GSISID: "00-0036900", PFRID: "ChasJa00", DisplayName: "Ja'Marr Chase", Position: "WR"},
+		},
+		teamStats: []nflverse.TeamWeek{
+			{Season: 2026, SeasonType: nflverse.SeasonTypeRegular, Week: 8, Team: "CIN", Attempts: 30, Carries: 20},
+		},
+	}
+	service := New(Deps{
+		Store:    store,
+		NFLverse: client,
+		Logger:   zerolog.Nop(),
+	})
+
+	var calls int
+	service.SetOnMarketDataChange(func() {
+		calls++
+	})
+
+	changed, err := service.syncNFLverse(t.Context(), week, now)
+	require.NoError(t, err)
+	assert.True(t, changed)
+	assert.Equal(t, 1, calls)
+
+	// Rerun with identical data -> changed=false -> callback does not fire.
+	changed, err = service.syncNFLverse(t.Context(), week, now.Add(6*time.Hour))
+	require.NoError(t, err)
+	assert.False(t, changed)
+	assert.Equal(t, 1, calls)
+}
+
 func TestNFLverseStale(t *testing.T) {
 	t.Parallel()
 

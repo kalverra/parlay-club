@@ -291,7 +291,7 @@ Risk: low (read-only evaluation over finished games and archived snapshots; unit
 Complexity: low (wires `ModeMarket` into `eval.Cache`, `refresh.Service`, `cmd/eval`, and `/analyzer/results` following existing patterns)
 Risk: low (isolated to in-memory cache invalidation, offline CLI flags, and the read-only results screen, all covered by automated tests)
 
-- [ ] Extend `eval.Cache` with `GetOrComputeMode` and `InvalidateMarket`, wire `refresh.Service.SetOnMarketDataChange`
+- [x] Extend `eval.Cache` with `GetOrComputeMode` and `InvalidateMarket`, wire `refresh.Service.SetOnMarketDataChange`
   (on newly `FINAL` games in `syncScoreboard` and `syncNFLverse` changes) in `cmd/server/main.go`, and add
   `--mode slips|market` plus sharp/L5-fallback coverage output to `cmd/eval/main.go` with cache, refresh, and CLI tests.
 - [ ] Add `?source=slips|market` to `GET /analyzer/results` (`internal/web/eval_results.go`) and phone-first source

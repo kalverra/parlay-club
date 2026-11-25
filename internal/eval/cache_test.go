@@ -10,6 +10,7 @@ import (
 
 	"github.com/kalverra/parlay-club/internal/db"
 	"github.com/kalverra/parlay-club/internal/eval"
+	"github.com/kalverra/parlay-club/internal/ingest/archive"
 	"github.com/kalverra/parlay-club/internal/ingest/nflverse"
 	"github.com/kalverra/parlay-club/internal/parlay"
 )
@@ -171,4 +172,122 @@ func TestCacheConcurrency(t *testing.T) {
 		}(i)
 	}
 	wg.Wait()
+}
+
+func TestCacheModeIsolationAndInvalidation(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	store := newTestStore(t)
+
+	group, user := seedGroupAndMember(t, store, "mode-iso")
+	week1, err := store.UpsertWeek(ctx, 2025, nflverse.SeasonTypeRegular, 1)
+	require.NoError(t, err)
+
+	kickoff := time.Date(2025, 9, 7, 17, 0, 0, 0, time.UTC)
+	homeScore1, awayScore1 := 24, 17
+	_, err = store.UpsertGame(ctx, db.Game{
+		ID: "g-iso-1", WeekID: week1.ID, HomeTeam: "BUF", AwayTeam: "MIA",
+		HomeName: "Buffalo Bills", AwayName: "Miami Dolphins",
+		Kickoff: kickoff, Status: db.GameFinal, HomeScore: &homeScore1, AwayScore: &awayScore1,
+	})
+	require.NoError(t, err)
+
+	seedGradedSlipForGroup(t, store, group, user, week1, "Slip 1", "g-iso-1", parlay.Won)
+
+	linesBody := `[
+		{
+			"id": "evt-iso-1",
+			"commence_time": "2025-09-07T17:00:00Z",
+			"home_team": "Buffalo Bills",
+			"away_team": "Miami Dolphins",
+			"bookmakers": [{
+				"key": "pinnacle",
+				"markets": [{
+					"key": "spreads",
+					"outcomes": [
+						{"name": "Buffalo Bills", "price": -110, "point": -3.5},
+						{"name": "Miami Dolphins", "price": -110, "point": 3.5}
+					]
+				}]
+			}]
+		},
+		{
+			"id": "evt-iso-2",
+			"commence_time": "2025-09-07T17:00:00Z",
+			"home_team": "Kansas City Chiefs",
+			"away_team": "Baltimore Ravens",
+			"bookmakers": [{
+				"key": "pinnacle",
+				"markets": [{
+					"key": "spreads",
+					"outcomes": [
+						{"name": "Kansas City Chiefs", "price": -110, "point": -2.5},
+						{"name": "Baltimore Ravens", "price": -110, "point": 2.5}
+					]
+				}]
+			}]
+		}
+	]`
+	require.NoError(t, store.SaveAPIResponse(ctx, archive.Record{
+		Source:    "odds",
+		Key:       db.ArchiveOddsLinesKey,
+		Method:    "GET",
+		URL:       "https://example.test/odds",
+		Status:    200,
+		FetchedAt: kickoff.Add(-30 * time.Minute),
+		Body:      []byte(linesBody),
+	}))
+
+	cache := eval.NewCache()
+
+	slips1, err := cache.GetOrComputeMode(ctx, store, eval.ModeSlips, group.ID, 2025)
+	require.NoError(t, err)
+	assert.Equal(t, 1, slips1.Coverage.TotalLegs)
+
+	market1, err := cache.GetOrComputeMode(ctx, store, eval.ModeMarket, 0, 2025)
+	require.NoError(t, err)
+	assert.Equal(t, 2, market1.Coverage.TotalLegs)
+
+	// Add a second graded slip and a second FINAL game.
+	seedGradedSlipForGroup(t, store, group, user, week1, "Slip 2", "g-iso-1", parlay.Lost)
+	homeScore2, awayScore2 := 27, 20
+	_, err = store.UpsertGame(ctx, db.Game{
+		ID: "g-iso-2", WeekID: week1.ID, HomeTeam: "KC", AwayTeam: "BAL",
+		HomeName: "Kansas City Chiefs", AwayName: "Baltimore Ravens",
+		Kickoff: kickoff, Status: db.GameFinal, HomeScore: &homeScore2, AwayScore: &awayScore2,
+	})
+	require.NoError(t, err)
+
+	// InvalidateGroup evicts ModeSlips only; ModeMarket stays cached at 2 legs.
+	cache.InvalidateGroup(group.ID)
+
+	slips2, err := cache.GetOrComputeMode(ctx, store, eval.ModeSlips, group.ID, 2025)
+	require.NoError(t, err)
+	assert.Equal(t, 2, slips2.Coverage.TotalLegs)
+
+	marketStillCached, err := cache.GetOrComputeMode(ctx, store, eval.ModeMarket, 0, 2025)
+	require.NoError(t, err)
+	assert.Equal(t, 2, marketStillCached.Coverage.TotalLegs)
+
+	// Add a third graded slip, then InvalidateMarket: ModeMarket recomputes to 4 legs, ModeSlips stays cached at 2.
+	seedGradedSlipForGroup(t, store, group, user, week1, "Slip 3", "g-iso-1", parlay.Won)
+	cache.InvalidateMarket()
+
+	market2, err := cache.GetOrComputeMode(ctx, store, eval.ModeMarket, 0, 2025)
+	require.NoError(t, err)
+	assert.Equal(t, 4, market2.Coverage.TotalLegs)
+
+	slipsStillCached, err := cache.GetOrComputeMode(ctx, store, eval.ModeSlips, group.ID, 2025)
+	require.NoError(t, err)
+	assert.Equal(t, 2, slipsStillCached.Coverage.TotalLegs)
+
+	// InvalidateAll clears both modes.
+	cache.InvalidateAll()
+	slips3, err := cache.GetOrComputeMode(ctx, store, eval.ModeSlips, group.ID, 2025)
+	require.NoError(t, err)
+	assert.Equal(t, 3, slips3.Coverage.TotalLegs)
+
+	// Invalid mode returns error.
+	_, err = cache.GetOrComputeMode(ctx, store, eval.ReplayMode("bogus"), 0, 2025)
+	require.Error(t, err)
 }

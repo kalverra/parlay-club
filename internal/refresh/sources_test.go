@@ -161,6 +161,46 @@ func TestSyncScoreboardWritesTheSlateAndRecordsTheFetch(t *testing.T) {
 	assert.False(t, changed)
 }
 
+func TestSyncScoreboardNotifiesMarketDataChangeOnlyOnNewlyFinalGames(t *testing.T) {
+	t.Parallel()
+
+	board := espnWeek()
+	sb := &countingScoreboard{board: board}
+	store := openTestStore(t)
+	service := New(Deps{
+		Store:      store,
+		Scoreboard: sb,
+		Now:        func() time.Time { return time.Time{} },
+		Logger:     zerolog.Nop(),
+	})
+
+	var calls atomic.Int32
+	service.SetOnMarketDataChange(func() {
+		calls.Add(1)
+	})
+
+	now := novemberTime(8, 13, 5)
+
+	// First sync: game is Live -> changed=true, but NOT final -> no callback.
+	changed, err := service.syncScoreboard(t.Context(), now)
+	require.NoError(t, err)
+	assert.True(t, changed)
+	assert.Equal(t, int32(0), calls.Load())
+
+	// Transition game to Final -> callback fires once.
+	sb.board.Games[0].Status = espn.Final
+	changed, err = service.syncScoreboard(t.Context(), now.Add(time.Hour))
+	require.NoError(t, err)
+	assert.True(t, changed)
+	assert.Equal(t, int32(1), calls.Load())
+
+	// Rerun with game still Final -> no newly final games -> callback does not fire again.
+	changed, err = service.syncScoreboard(t.Context(), now.Add(2*time.Hour))
+	require.NoError(t, err)
+	assert.False(t, changed)
+	assert.Equal(t, int32(1), calls.Load())
+}
+
 func TestSyncScoreboardReturnsTheFetchError(t *testing.T) {
 	t.Parallel()
 
