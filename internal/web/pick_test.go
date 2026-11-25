@@ -3623,3 +3623,48 @@ func TestPickBoardTrayAndDockRenderImpliedChances(t *testing.T) {
 	assert.Contains(t, dockBody, "Implied chance from combined odds")
 	assert.Contains(t, dockBody, "31%")
 }
+
+func TestPickBoardGameCardsCondenseLinesWeatherGradesAndPlayers(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	outdoor := addGame(t, fixture, gameKickoff())
+	_, err := fixture.store.SetGameWeather(t.Context(), outdoor.ID, 42, 18, 28, 0, time.Now())
+	require.NoError(t, err)
+	addGameOdds(t, fixture.store, outdoor.ID)
+	seedAGradeBoardForHubTest(t, fixture, outdoor)
+
+	indoor, err := fixture.store.UpsertGame(t.Context(), db.Game{
+		ID:       "401772099",
+		WeekID:   fixture.week.ID,
+		HomeTeam: "NO",
+		AwayTeam: "CLE",
+		HomeName: "New Orleans Saints",
+		AwayName: "Cleveland Browns",
+		Kickoff:  gameKickoff().Add(time.Hour),
+		Status:   db.GameScheduled,
+		Indoor:   true,
+	})
+	require.NoError(t, err)
+	addGameOdds(t, fixture.store, indoor.ID)
+
+	body := html.UnescapeString(pickBoard(t, fixture, "").Body.String())
+
+	// Lines are condensed: favorite spread only, O/U without -110 juice, compact ML.
+	assert.Contains(t, body, "BUF -3")
+	assert.NotContains(t, body, "MIA +3")
+	assert.Contains(t, body, "O/U 47.5")
+	assert.NotContains(t, body, "O -110 · U -110")
+	assert.Contains(t, body, "+130 / -150")
+
+	// Weather/dome badges appear on the cards.
+	assert.Contains(t, body, "💨 42°F · 18 mph")
+	assert.Contains(t, body, "🏟️ Dome")
+
+	// Grade distribution and top players appear for the game with props.
+	assert.Contains(t, body, "data-game-grade-distribution")
+	assert.Contains(t, body, "data-game-a-grade-count")
+	assert.Contains(t, body, "data-game-top-players")
+	assert.Contains(t, body, "Top props:")
+	assert.Contains(t, body, "J. Allen")
+}
