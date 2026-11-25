@@ -33,7 +33,7 @@ flowchart LR
   UI -->|"tap Why? or rubric"| Guide["GET /analyzer/guide"]
   Guide <-->|"results / how grading works"| Results["GET /analyzer/results"]
   EngineDocs["RuleDocs() + GradeRubric()"] --> Guide
-  Cache["eval.Cache (Group-Scoped)"] --> Results
+  Cache["eval.Cache (Slips & Market)"] --> Results
 ```
 
 ## What the banner shows
@@ -111,17 +111,40 @@ ActiveRubric, while ScoreLegWithRubric and ScoreSlipWithRubric accept any rubric
 
 To test weight changes against settled outcomes before promoting a new rubric, the eval package replays historical weeks
 read-only from SQLite. To prevent post-kickoff data leakage, the replayer reads nflverse rows strictly prior to the
-target week and reconstructs overwritten inputs (game logs, injury statuses, and odds) only from archived API responses
-recorded before kickoff, failing soft and reporting coverage counts when an archive entry is missing. Every leg on a
-graded slip—including unsettled legs on an early-busted parlay—stays on the replayed slip so ScoreSlipWithRubric sees
-the full pre-kickoff slip (parlay drag, chalk drag, stacks, and script conflicts), while leg calibration bands, leg
-factor attribution, and band migrations count only settled legs. Evaluation computes leg and slip calibration by band,
-lift over implied odds, flat ROI, Brier score, week-over-week progression, and both leg-level and slip-level factor
-attribution (Factors and SlipFactors, labeled via GradeRubricFor). EvaluateAll evaluates all built-in rubrics and
-compares subsequent rubrics against the baseline, matching leg outcomes by (SlipID, LegID) to build the leg band
-migration matrix (with CompareRubrics as the dataset-driven comparison entry point). The eval CLI (cmd/eval) prints both
-leg and slip factor attribution in text, Markdown, and JSON outputs when present, omitting the slip factor section
-cleanly when empty.
+target week and reconstructs overwritten inputs (game logs, injury statuses, rosters, and odds) only from archived API
+responses recorded before kickoff, failing soft and reporting coverage counts when an archive entry is missing.
+
+Two shared signal reconstructions keep replay aligned with live scoring:
+
+- **Pre-kickoff sharp benchmarks**: Archived `odds:lines` and `odds:props:{gameID}` responses recorded before kickoff
+  are matched to each game (by `odds_event_id` or team names and kickoff) and resolved against pre-kickoff archived
+  rosters plus prior-week nflverse rows, then passed through BuildSharpBenchmarks to populate `Game.Sharp` (`WithSharp`
+  coverage).
+- **Prior-week nflverse L5 fallback**: When no pre-kickoff `espn:gamelog:{id}` archive exists for a player,
+  `PlayerStats.Games` falls back to strictly prior-week `nflverse_player_weeks` rows in the same season (and backfills
+  missing player positions), tracked separately as `WithL5Fallback` coverage alongside `WithGameLogs`.
+
+Eval supports two replay modes:
+
+- **User slips (`ModeSlips`, default)**: Every leg on a graded slip—including unsettled legs on an early-busted
+  parlay—stays on the replayed slip so ScoreSlipWithRubric sees the full pre-kickoff slip (parlay drag, chalk drag,
+  stacks, and script conflicts), while leg calibration bands, leg factor attribution, and band migrations count only
+  settled legs.
+- **Market-wide (`ModeMarket`)**: For each `FINAL` game with pre-kickoff archived odds, `board.Build` (with an empty
+  home book) deduplicates multi-book quotes into one median-line, median-price candidate leg per selection side. Game
+  lines and team totals grade deterministically from `FINAL` scores via `grader.GradeLeg`; player props prefer
+  completed archived ESPN box scores (preserving true DNPs as `Void`) and fall back to same-week `nflverse_player_weeks`
+  rows when no completed box score is archived, dropping unmatched players (`NeedsGrading`) rather than emitting false
+  voids. `Evaluate` scores market candidates with ScoreLegWithRubric and populates leg bands, weekly progression, leg
+  factors, and leg band migrations while leaving slip-level bands and factors empty.
+
+Evaluation computes leg and slip calibration by band, lift over implied odds, flat ROI, Brier score, week-over-week
+progression, and both leg-level and slip-level factor attribution (`Factors` and `SlipFactors`, labeled via
+GradeRubricFor). EvaluateAll evaluates all built-in rubrics and compares subsequent rubrics against the baseline,
+matching leg outcomes by `(SlipID, LegID)` (or synthetic market-leg coordinates) to build the leg band migration matrix
+(with CompareRubrics as the dataset-driven comparison entry point). The eval CLI (`cmd/eval`) prints both leg and slip
+factor attribution in text, Markdown, and JSON outputs when present, omitting empty slip calibration and slip factor
+sections cleanly.
 
 In CI, `.github/workflows/ci.yml` runs the eval CLI against the synthetic fixture
 `internal/eval/testdata/benchmark_dataset.json` and appends the Markdown benchmark summary to the workflow job summary
@@ -136,16 +159,22 @@ for CLI and `mise run eval-prod` usage.
 with a safe `?from=` back link to return to the slip or pick board, plus a "Grading results" link to
 `/analyzer/results`.
 
-`GET /analyzer/results` shows live calibration across all groups: A–F leg and slip bands (record, hit %, implied %,
-lift, flat ROI), side-by-side rubric comparison when multiple built-in rubrics exist, chronological week-over-week
-progression, ranked leg factor attribution, a secondary Slip Factor Attribution section (showing sample count N, record
-W-L, Hit %, Lift, and Avg Δ for parlay-level rules when non-empty), and pre-kickoff data coverage. Results aggregate
-every group's settled slips so calibration reflects all collected data.
+`GET /analyzer/results` shows live calibration in two views via `?source=slips|market`:
+
+- **User slips (`?source=slips`, default)**: Aggregates every group's settled slips to show A–F leg and slip bands
+  (record, hit %, implied %, lift, flat ROI), side-by-side rubric comparison when multiple built-in rubrics exist,
+  chronological week-over-week progression, ranked leg factor attribution, Slip Factor Attribution (sample count N, record
+  W-L, Hit %, Lift, and Avg Δ for parlay-level rules when non-empty), and pre-kickoff data coverage.
+- **Market-wide (`?source=market`)**: Replays pre-kickoff consensus lines across `FINAL` games, hides the slip-only
+  sections (`Slip Calibration` and `Slip Factor Attribution`, linking back to `User slips`), and adds `Sharp benchmarks`
+  and `nflverse L5 fallback` coverage tiles.
 
 To avoid replaying SQLite on every page load without persisting derived tables, `eval.Cache` (`internal/eval/cache.go`)
-memoizes each suite report in memory by group (`0` for global) and season. Normal settlement and re-grading in
-`internal/slips` invalidate the affected group (and global `0` entries) after commit via SetOnGradeChange, and sandbox
-stage transitions or resets clear the whole cache.
+memoizes each suite report in memory by `(mode, groupID, season)`. Normal settlement and re-grading in `internal/slips`
+invalidate the affected group's slip entries (and global `0` slip entries) after commit via `SetOnGradeChange` without
+evicting market entries; `refresh.Service.SetOnMarketDataChange` calls `InvalidateMarket` when `syncScoreboard` sees a
+game newly reach `FINAL` or `syncNFLverse` commits changes without evicting slip entries; and sandbox stage transitions
+or resets clear the whole cache.
 
 ## Tone
 
