@@ -10,7 +10,8 @@ description: Implement one phase of a good-vibes change, following changes/<slug
 1. Read `changes/<slug>/proposal.md` and `design.md`. Read the newest handoff in `changes/<slug>/handoffs/` when one
    exists. Also read `ARCHITECTURE.md` and `GLOSSARY.md`: the code must match the code map, and the code and docs use
    the glossary's words.
-2. Work through the current phase in order, one task at a time.
+2. Work through the current phase in order, one task at a time. Before editing unfamiliar code, run
+   `good-vibes docs for <path>` to read the living docs and ADRs that apply.
 3. After each task, build and run the project's tests. Tick the task in `design.md` (`- [ ]` to `- [x]`) only after it
    works.
 4. Do any `Docs:` task in the phase. If the doc the change needs does not exist, write it. When the work coins a domain
@@ -39,8 +40,11 @@ description: Implement one phase of a good-vibes change, following changes/<slug
 - In an orchestrated run (`good-vibes implement --style orchestrated`), the binary ticks boxes, commits, and runs
   verify. Follow the prompt you are given; do not tick, commit, or run `good-vibes done`.
 - Do not reword an open task. If the design is wrong, update `design.md` first, then implement.
-- Never reword or remove an existing glossary term, and do not edit `ARCHITECTURE.md` beyond what the change's accepted
-  proposal amends. Both guards fail the change otherwise.
+- Never reword or remove an existing glossary term, and do not edit `ARCHITECTURE.md` or `README.md` unless the change's
+  accepted proposal lists `architecture` or `readme` in `amends`. The guards fail the change otherwise.
+- When an accepted change amends `readme`, keep `README.md` a Diátaxis front door and signpost (orient readers and link
+  into `docs/` rather than duplicating concepts, guides, runbooks, or reference manuals) structured as an inverted
+  pyramid (lead above the fold with what the project is, why it matters, and a bare-bones quickstart).
 - After a change moves a module boundary, an invariant, or a cross-cutting concern, update the matching
   `ARCHITECTURE.md` section in the same task, keeping it a diagram with a short caption.
 - Do not commit or push unless the user asks.

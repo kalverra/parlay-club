@@ -9,7 +9,7 @@ description: Write or update good-vibes living docs in docs/. Use when a change 
 
 ## Principles
 
-Five principles decide what belongs in a doc. Each names the findings that catch its common failure, and the judgment
+Six principles decide what belongs in a doc. Each names the findings that catch its common failure, and the judgment
 only you can make.
 
 1. **Explain what code cannot.** A doc says why, not what the code already says. `budget-lines` and `budget-spans` flag
@@ -25,6 +25,9 @@ only you can make.
    alone. After lint passes, judge whether the prose still matches the code.
 5. **Easy to find.** `summary` keeps the one sentence the map shows, and the ADR map keeps history out of the living
    docs. Judge whether the title and summary use the words a reader would search for.
+6. **One home per fact.** Every rule or contract lives in one living doc; other docs link to it instead of restating it.
+   `covers-overlap` flags same-type docs or unlinked cross-type docs that cover the same paths. Keep `reference/` to
+   external contracts (flags, schemas, outputs), not internal control flow.
 
 ## Doc types
 
@@ -36,20 +39,36 @@ The folders are configured in `good-vibes.toml`. The default split follows Diát
 - `reference/` — exact behavior: flags, endpoints, schemas
 - `decisions/` — one ADR per significant decision, written by `good-vibes done`
 
-Two single files sit outside `docs/` and are read first: `ARCHITECTURE.md` shows the system as diagrams, and
-`GLOSSARY.md` fixes the words the code and docs use. Both are configured under `[docs.high_level.<name>]`.
+Three single files sit outside `docs/` and are read first: `README.md` is the project's front door, `ARCHITECTURE.md`
+shows the system as diagrams, and `GLOSSARY.md` fixes the words the code and docs use. All three are configured under
+`[docs.high_level.<name>]`.
+
+## Docs vs. code comments
+
+Keep each kind of explanation in the layer that owns it:
+
+| Layer | What belongs here | Examples |
+| --- | --- | --- |
+| **Code comment** | Local *why* scoped to one function or file | Invariants, edge-case guards, ordering constraints, performance bounds |
+| **Living doc** | Cross-cutting mental models and contracts | Package roles, workflows, runbooks, flags, schemas, external interfaces |
+| **ADR** | Historical *why* | Alternatives considered, trade-offs, consequences |
+
+When a surprising constraint comes from an ADR, add a one-line code comment pointing to the ADR instead of restating it.
 
 ## Steps
 
 1. Read `ARCHITECTURE.md` and `GLOSSARY.md` before writing. A doc that contradicts the code map or renames a glossary
    term is wrong even if its own page reads well.
+
 2. Find the docs the change invalidates. Run `good-vibes docs impact` (add `--base <ref>` to compare against an older
    commit) to list the docs whose `covers` entries the diff touched and that the diff did not edit. Open and judge each
    one. Docs without `covers` are the fallback: `docs/llms.txt` lists the living docs, and each type with its own map,
    such as `docs/decisions/llms.txt` for ADRs, lists its docs. Read the maps, compare them with the paths the change
    touches, and open each doc whose summary covers behavior the change alters.
+
 3. Update each in the same change as the code. Read it with `good-vibes docs get <id>#<heading>` when you only need one
    section.
+
 4. If no doc covers new behavior, add one in the right folder. Start from the type's template:
 
    ```sh
@@ -58,9 +77,13 @@ Two single files sit outside `docs/` and are read first: `ARCHITECTURE.md` shows
 
 5. Fill in the front matter. `summary` is one sentence, and it is what the docs map shows a reader searching for the
    doc.
-6. Update the high-level docs in the same change. Add a term to `GLOSSARY.md` as you coin it. Edit `ARCHITECTURE.md`
-   only when the change alters a module's responsibility, an invariant, or a cross-cutting concern, and only with an
-   accepted change that lists `architecture` in `amends`.
+
+6. Update the high-level docs in the same change. Add a domain term to `GLOSSARY.md` as you coin it (not internal helper
+   or struct names). Edit `ARCHITECTURE.md` only when the change alters a module's responsibility, an invariant, or a
+   cross-cutting concern, and only with an accepted change that lists `architecture` in `amends`. Edit `README.md` only
+   when the change alters the project's top-level overview, positioning, or quickstart, and only with an accepted change
+   that lists `readme` in `amends`.
+
 7. Run `good-vibes docs lint`, then `good-vibes docs index` so every docs map matches. If a doc has generated regions,
    run `good-vibes docs generate` so their bodies match too.
 
@@ -120,10 +143,15 @@ fence below it. Mark a sample only when it cannot be made true. A marker that hi
   Overview is a `section` finding, and an Overview with no Mermaid fence is a `diagram` finding. Add more in How it
   works when the flow needs them. Update the diagram in the same change as the behavior. Other doc types use diagrams
   only where they clarify.
+- `README.md` is a Diátaxis front door and signpost, not a manual: orient the reader and route into `docs/` instead of
+  duplicating concepts, guides, runbooks, or reference docs. Structure it as an inverted pyramid: lead above the fold
+  with what the project is, why it matters, and a bare-bones quickstart before linking out to deeper docs. It needs no
+  YAML front matter, and editing it requires an accepted change that lists `readme` in `amends`.
 - `ARCHITECTURE.md` is a map, not an essay: each section leads with a diagram and prose only adds what the diagram
   cannot carry. Keep one idea per diagram and split the code map by layer.
-- `GLOSSARY.md` holds one `##` heading per term: the definition, then an optional `_Avoid:_` line. Adding a term is
-  free. Never reword or remove an existing term without an accepted change that amends `glossary`.
+- `GLOSSARY.md` holds one `##` heading per term: the definition, then an optional `_Avoid:_` line. Scope it to domain
+  terms shared across code and docs, not internal helper or struct names. Adding a term is free. Never reword or remove
+  an existing term without an accepted change that amends `glossary`.
 - Update the doc in place. Do not append a changelog; history lives in git.
 - Short paragraphs, one idea each. Code samples must run.
 - If a doc describes behavior that no longer exists, delete or rewrite it. A stale doc is worse than no doc.
