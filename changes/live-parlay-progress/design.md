@@ -221,7 +221,7 @@ Risk: low (additive nullable columns and free ESPN read path; existing pre-game 
 Complexity: medium (designs a new pure-Go statistical model across all 12 supported game and player markets with kickoff anchoring, monotonic settlement, and parlay aggregation)
 Risk: low (pure functions with zero I/O or database side effects, fully verifiable through deterministic table-driven tests)
 
-- [ ] Export shared player lookup and market stat extraction from `internal/grader` and create `internal/progress` with game-clock parsing (`RemainingFraction`) and live evaluation for game/team markets (`SPREAD`, `ML`, `TOTAL`, `TEAM_TOTAL`), with unit tests covering kickoff anchoring, halftime, OT, missing clock, and monotonic early cash/bust.
+- [x] Export shared player lookup and market stat extraction from `internal/grader` and create `internal/progress` with game-clock parsing (`RemainingFraction`) and live evaluation for game/team markets (`SPREAD`, `ML`, `TOTAL`, `TEAM_TOTAL`), with unit tests covering kickoff anchoring, halftime, OT, missing clock, and monotonic early cash/bust.
 - [ ] Add live evaluation for all player prop markets (`PASS_YDS`, `RUSH_YDS`, `REC_YDS`, `RUSH_ATT`, `RECEPTIONS`, `KICKER_PTS`, `PASS_TDS`, `ANYTIME_TD`), `OTHER`/unlinked fallbacks, and full-parlay aggregation (`EvaluateSlip`) in `internal/progress`, with tests covering yardage non-monotonicity, absent players during live games, pushes/voids, and busted parlays.
 - [ ] Docs: document the live progress and hit probability formulas in `docs/reference/odds-math.md`.
 
