@@ -322,3 +322,144 @@ func TestMergeTeamInjuries(t *testing.T) {
 			{AthleteID: "6", FullName: "Dalton Kincaid", Position: "TE", Status: "Out"},
 		}))
 }
+
+func TestSummaryCombinedFromSingleRequest(t *testing.T) {
+	t.Parallel()
+
+	t.Run("pre-game fixture", func(t *testing.T) {
+		t.Parallel()
+
+		raw, err := os.ReadFile(filepath.Join("testdata", "summary.json"))
+		require.NoError(t, err)
+
+		requests := 0
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			requests++
+			assert.Equal(t, "/summary", r.URL.Path)
+			assert.Equal(t, "event=401873051", r.URL.RawQuery)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write(raw)
+		}))
+		t.Cleanup(server.Close)
+
+		summary, err := espn.NewClient(server.URL, server.Client()).Summary(t.Context(), "401873051")
+		require.NoError(t, err)
+		assert.Equal(t, 1, requests)
+		assert.NotEqual(t, "[]", summary.InjuriesJSON)
+		teams, err := espn.ParseInjuries(summary.InjuriesJSON)
+		require.NoError(t, err)
+		assert.NotEmpty(t, teams)
+		assert.False(t, summary.BoxScore.Completed)
+		assert.False(t, summary.BoxScore.HasStats)
+		assert.Empty(t, summary.BoxScore.Players)
+	})
+
+	t.Run("live game injuries and boxscore", func(t *testing.T) {
+		t.Parallel()
+
+		payload := `{
+			"header": {
+				"competitions": [{"status": {"type": {"completed": false}}}]
+			},
+			"injuries": [
+				{
+					"team": {"id": "2", "displayName": "Buffalo Bills", "abbreviation": "BUF"},
+					"injuries": [{
+						"status": "Out",
+						"athlete": {"id": "100", "fullName": "Keon Coleman", "position": {"abbreviation": "WR"}},
+						"details": {"type": "Wrist", "detail": "Out"}
+					}]
+				}
+			],
+			"boxscore": {
+				"players": [{
+					"team": {"abbreviation": "BUF"},
+					"statistics": [{
+						"name": "passing",
+						"keys": ["passingYards", "passingTouchdowns"],
+						"athletes": [{
+							"athlete": {"id": "3918298", "displayName": "Josh Allen"},
+							"stats": ["182", "2"]
+						}]
+					}]
+				}]
+			}
+		}`
+
+		requests := 0
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			requests++
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(payload))
+		}))
+		t.Cleanup(server.Close)
+
+		summary, err := espn.NewClient(server.URL, server.Client()).Summary(t.Context(), "401872971")
+		require.NoError(t, err)
+		assert.Equal(t, 1, requests)
+
+		teams, err := espn.ParseInjuries(summary.InjuriesJSON)
+		require.NoError(t, err)
+		require.Len(t, teams, 1)
+		require.Len(t, teams[0].Injuries, 1)
+		assert.Equal(t, "Keon Coleman", teams[0].Injuries[0].FullName)
+
+		assert.False(t, summary.BoxScore.Completed)
+		assert.True(t, summary.BoxScore.HasStats)
+		require.Len(t, summary.BoxScore.Players, 1)
+		assert.Equal(t, "Josh Allen", summary.BoxScore.Players[0].DisplayName)
+		assert.Equal(t, espn.PassingStats{PassingYards: 182, PassingTDs: 2}, summary.BoxScore.Players[0].Passing)
+	})
+
+	t.Run("final fixture", func(t *testing.T) {
+		t.Parallel()
+
+		raw, err := os.ReadFile(filepath.Join("testdata", "summary_week9_featured.json"))
+		require.NoError(t, err)
+
+		requests := 0
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			requests++
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write(raw)
+		}))
+		t.Cleanup(server.Close)
+
+		summary, err := espn.NewClient(server.URL, server.Client()).Summary(t.Context(), "401873038")
+		require.NoError(t, err)
+		assert.Equal(t, 1, requests)
+		assert.NotEmpty(t, summary.InjuriesJSON)
+		assert.True(t, summary.BoxScore.Completed)
+		assert.True(t, summary.BoxScore.HasStats)
+		assert.NotEmpty(t, summary.BoxScore.Players)
+	})
+
+	t.Run("absent injuries and boxscore", func(t *testing.T) {
+		t.Parallel()
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"header": {}, "injuries": null}`))
+		}))
+		t.Cleanup(server.Close)
+
+		summary, err := espn.NewClient(server.URL, server.Client()).Summary(t.Context(), "401873000")
+		require.NoError(t, err)
+		assert.Equal(t, "[]", summary.InjuriesJSON)
+		assert.False(t, summary.BoxScore.Completed)
+		assert.False(t, summary.BoxScore.HasStats)
+	})
+
+	t.Run("http failure", func(t *testing.T) {
+		t.Parallel()
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			http.Error(w, "bad gateway", http.StatusBadGateway)
+		}))
+		t.Cleanup(server.Close)
+
+		_, err := espn.NewClient(server.URL, server.Client()).Summary(t.Context(), "401873000")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "502 Bad Gateway")
+	})
+}

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/kalverra/parlay-club/internal/tz"
@@ -50,10 +51,13 @@ type Venue struct {
 }
 
 // Game is one game from the Thursday, Sunday, or Monday slate, in UTC.
+// Period and Clock are populated only when Status is Live.
 type Game struct {
 	ID      string
 	Kickoff time.Time
 	Status  Status
+	Period  *int
+	Clock   *string
 	Home    Team
 	Away    Team
 	Venue   Venue
@@ -134,8 +138,12 @@ type eventResponse struct {
 
 // statusResponse is the state ESPN puts on an event.
 type statusResponse struct {
-	Type struct {
-		State string `json:"state"`
+	DisplayClock string `json:"displayClock"`
+	Period       int    `json:"period"`
+	Type         struct {
+		Name        string `json:"name"`
+		State       string `json:"state"`
+		ShortDetail string `json:"shortDetail"`
 	} `json:"type"`
 }
 
@@ -240,6 +248,9 @@ func parseEvent(event eventResponse, kickoff time.Time) (Game, error) {
 			Indoor: competition.Venue.Indoor,
 		},
 	}
+	if status == Live {
+		game.Period, game.Clock = parseLiveClock(event.Status)
+	}
 
 	for _, competitor := range competition.Competitors {
 		team, err := parseTeam(competitor, status)
@@ -273,6 +284,60 @@ func parseState(state string) (Status, error) {
 		return Final, nil
 	default:
 		return "", fmt.Errorf("unknown event state %q", state)
+	}
+}
+
+// parseLiveClock extracts the current period and display clock (or normalized
+// break label such as "Halftime" or "End of 1st") for an in-progress game.
+func parseLiveClock(status statusResponse) (*int, *string) {
+	var periodPtr *int
+	if status.Period > 0 {
+		p := status.Period
+		periodPtr = &p
+	}
+
+	shortDetail := strings.TrimSpace(status.Type.ShortDetail)
+	typeName := strings.TrimSpace(status.Type.Name)
+	displayClock := strings.TrimSpace(status.DisplayClock)
+
+	var clockStr string
+	switch {
+	case strings.EqualFold(typeName, "STATUS_HALFTIME") ||
+		strings.EqualFold(shortDetail, "Halftime") ||
+		strings.EqualFold(shortDetail, "Half"):
+		clockStr = "Halftime"
+	case strings.HasPrefix(strings.ToLower(shortDetail), "end of "):
+		clockStr = shortDetail
+	case strings.EqualFold(typeName, "STATUS_END_PERIOD"):
+		if shortDetail != "" {
+			clockStr = shortDetail
+		} else if status.Period > 0 {
+			clockStr = "End of " + ordinalPeriod(status.Period)
+		}
+	case displayClock != "":
+		clockStr = displayClock
+	}
+
+	if clockStr == "" {
+		return periodPtr, nil
+	}
+	return periodPtr, &clockStr
+}
+
+func ordinalPeriod(period int) string {
+	switch period {
+	case 1:
+		return "1st"
+	case 2:
+		return "2nd"
+	case 3:
+		return "3rd"
+	case 4:
+		return "4th"
+	case 5:
+		return "OT"
+	default:
+		return fmt.Sprintf("%dOT", period-4)
 	}
 }
 
