@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kalverra/parlay-club/internal/db"
+	"github.com/kalverra/parlay-club/internal/ingest/espn"
 	"github.com/kalverra/parlay-club/internal/ingest/odds"
 	"github.com/kalverra/parlay-club/internal/ingest/weather"
 )
@@ -176,4 +177,104 @@ func TestChangedOddsPublishTheWeek(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, changed)
 	assert.Empty(t, publisher.seen(), "the same lines and fetch time publish nothing")
+}
+
+func TestChangedSummaryPublishesTheWeek(t *testing.T) {
+	t.Parallel()
+
+	store, week, slip := publishTestStore(t)
+	now := novemberTime(8, 14, 0)
+	game, err := store.UpsertGame(t.Context(), db.Game{
+		ID: "401", WeekID: week.ID, HomeTeam: "BUF", AwayTeam: "MIA",
+		HomeName: "Buffalo Bills", AwayName: "Miami Dolphins",
+		Kickoff: now.Add(-time.Hour), Status: db.GameLive, UpdatedAt: now,
+	})
+	require.NoError(t, err)
+
+	espnClient := &fakeESPNSummaryClient{
+		gameSummaries: map[string]espn.GameSummary{
+			"401": {
+				InjuriesJSON: `[{"team":"BUF"}]`,
+				BoxScore: espn.BoxScore{
+					HasStats: true,
+					Players: []espn.PlayerBoxStats{{
+						PlayerID: "3918298", DisplayName: "Josh Allen", TeamAbbrev: "BUF",
+						Passing: espn.PassingStats{PassingYards: 120},
+					}},
+				},
+			},
+		},
+	}
+	publisher := &recordingPublisher{}
+	service := New(Deps{
+		Store: store, ESPN: espnClient, Publisher: publisher, Logger: zerolog.Nop(),
+	})
+
+	changed, err := service.syncSummary(t.Context(), game, now)
+	require.NoError(t, err)
+	require.True(t, changed)
+	assert.ElementsMatch(t, weekTopics(week.ID, slip.ID), publisher.seen())
+
+	// Identical rerun publishes nothing.
+	publisher.reset()
+	changed, err = service.syncSummary(t.Context(), game, now.Add(2*time.Minute))
+	require.NoError(t, err)
+	require.False(t, changed)
+	assert.Empty(t, publisher.seen())
+
+	// Updated live box score (even with identical injuries) publishes again.
+	espnClient.gameSummaries["401"] = espn.GameSummary{
+		InjuriesJSON: `[{"team":"BUF"}]`,
+		BoxScore: espn.BoxScore{
+			HasStats: true,
+			Players: []espn.PlayerBoxStats{{
+				PlayerID: "3918298", DisplayName: "Josh Allen", TeamAbbrev: "BUF",
+				Passing: espn.PassingStats{PassingYards: 185},
+			}},
+		},
+	}
+	changed, err = service.syncSummary(t.Context(), game, now.Add(4*time.Minute))
+	require.NoError(t, err)
+	require.True(t, changed)
+	assert.ElementsMatch(t, weekTopics(week.ID, slip.ID), publisher.seen())
+}
+
+func TestChangedScoreboardPeriodAndClockPublishTheWeek(t *testing.T) {
+	t.Parallel()
+
+	store, week, slip := publishTestStore(t)
+	board := espnWeek()
+	period := 2
+	clock := "4:15"
+	board.Games[0].Status = espn.Live
+	board.Games[0].Period = &period
+	board.Games[0].Clock = &clock
+
+	sb := &fakeScoreboard{board: board}
+	publisher := &recordingPublisher{}
+	service := New(Deps{
+		Store: store, Scoreboard: sb, Publisher: publisher, Logger: zerolog.Nop(),
+	})
+	now := novemberTime(8, 14, 0)
+
+	changed, err := service.syncScoreboard(t.Context(), now)
+	require.NoError(t, err)
+	require.True(t, changed)
+	assert.ElementsMatch(t, weekTopics(week.ID, slip.ID), publisher.seen())
+
+	got, err := store.GameByID(t.Context(), board.Games[0].ID)
+	require.NoError(t, err)
+	require.NotNil(t, got.Period)
+	assert.Equal(t, 2, *got.Period)
+	require.NotNil(t, got.Clock)
+	assert.Equal(t, "4:15", *got.Clock)
+
+	// Changing only the clock publishes again.
+	publisher.reset()
+	nextClock := "2:00"
+	sb.board.Games[0].Clock = &nextClock
+	changed, err = service.syncScoreboard(t.Context(), now.Add(5*time.Minute))
+	require.NoError(t, err)
+	require.True(t, changed)
+	assert.ElementsMatch(t, weekTopics(week.ID, slip.ID), publisher.seen())
 }

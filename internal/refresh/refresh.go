@@ -113,6 +113,7 @@ const (
 	rosterIdleAge           = 6 * time.Hour
 	gameLogGameDayAge       = time.Hour
 	gameLogIdleAge          = 4 * time.Hour
+	summaryLiveAge          = 2 * time.Minute
 	summaryGameDayAge       = 15 * time.Minute
 	summaryIdleAge          = time.Hour
 	summaryNearKickoff      = 4 * time.Hour
@@ -159,6 +160,12 @@ type ESPNResearchClient interface {
 	Roster(ctx context.Context, espnTeamID string) ([]espn.RosterPlayer, error)
 	SummaryInjuries(ctx context.Context, eventID string) (string, error)
 	GameLog(ctx context.Context, athleteID string) (espn.GameLog, error)
+}
+
+// summaryClient is optionally implemented by ESPNResearchClient (such as
+// *espn.Client) to fetch both injuries and box score from one /summary call.
+type summaryClient interface {
+	Summary(ctx context.Context, eventID string) (espn.GameSummary, error)
 }
 
 // BoxScoreClient is the slice of *espn.Client refresh needs to auto-grade
@@ -712,13 +719,22 @@ func (s *Service) freeSourcesFor(
 	for _, game := range games {
 		sources = append(sources, s.weatherSource(game, now))
 	}
+	var errs []error
 	if s.espn != nil {
+		var liveWithLegs map[string]bool
+		if week.ID != 0 {
+			var err error
+			liveWithLegs, err = s.store.LiveGameIDsWithSlipLegs(ctx, week.ID)
+			if err != nil {
+				errs = append(errs, fmt.Errorf("live games with slip legs: %w", err))
+			}
+		}
 		seenTeams := make(map[string]struct{}, len(games)*2)
 		for _, game := range games {
 			if game.Status == db.GameFinal {
 				continue
 			}
-			sources = append(sources, s.summarySource(game, now))
+			sources = append(sources, s.summarySource(game, now, liveWithLegs[game.ID]))
 			if game.HomeESPNID != "" && game.HomeTeam != "" {
 				if _, seen := seenTeams[game.HomeESPNID]; !seen {
 					seenTeams[game.HomeESPNID] = struct{}{}
@@ -743,10 +759,9 @@ func (s *Service) freeSourcesFor(
 		sources = append(sources, s.gradeSource(now))
 	}
 	if s.espn == nil || week.ID == 0 {
-		return sources, nil
+		return sources, errors.Join(errs...)
 	}
 
-	var errs []error
 	slipIDs, err := s.store.SlipIDsForWeek(ctx, week.ID)
 	if err != nil {
 		errs = append(errs, fmt.Errorf("list slips for gamelogs: %w", err))
@@ -917,8 +932,14 @@ func (s *Service) SyncGameResearch(ctx context.Context, gameID string) error {
 	}
 
 	now := s.now()
+	hasSlipLegs := false
+	if game.Status == db.GameLive && game.WeekID != 0 {
+		if liveWithLegs, err := s.store.LiveGameIDsWithSlipLegs(ctx, game.WeekID); err == nil {
+			hasSlipLegs = liveWithLegs[game.ID]
+		}
+	}
 	var errs []error
-	if err := s.refreshSync(ctx, s.summarySource(game, now), now); err != nil {
+	if err := s.refreshSync(ctx, s.summarySource(game, now, hasSlipLegs), now); err != nil {
 		errs = append(errs, err)
 	}
 	if err := s.refreshSync(ctx, s.oddsPropsSource(game, now), now); err != nil && !errors.Is(err, odds.ErrNoAPIKey) {

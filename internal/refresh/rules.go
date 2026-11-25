@@ -317,20 +317,24 @@ func rosterStale(last, now time.Time, games []db.Game) bool {
 }
 
 // summaryStale reports whether a game's summary is due. It skips games that
-// are final. Inside the window summaries are good for 15 minutes on the game's
-// day or within 4 hours of kickoff, and 1 hour otherwise.
-func summaryStale(last, now time.Time, game db.Game) bool {
+// are final. Inside the window summaries are good for 2 minutes while the game
+// is live with active slip legs, 15 minutes on the game's day or within 4
+// hours of kickoff, and 1 hour otherwise.
+func summaryStale(last, now time.Time, game db.Game, hasSlipLegs bool) bool {
 	if game.Status == db.GameFinal {
 		return false
 	}
 	if last.IsZero() {
 		return true
 	}
-	return !now.Before(last.Add(summaryAgeFor(now, game)))
+	return !now.Before(last.Add(summaryAgeFor(now, game, hasSlipLegs)))
 }
 
 // summaryAgeFor returns the summary freshness window for game at now.
-func summaryAgeFor(now time.Time, game db.Game) time.Duration {
+func summaryAgeFor(now time.Time, game db.Game, hasSlipLegs bool) time.Duration {
+	if game.Status == db.GameLive && hasSlipLegs {
+		return summaryLiveAge
+	}
 	if !game.Kickoff.IsZero() && sameEasternDate(game.Kickoff, now) {
 		return summaryGameDayAge
 	}

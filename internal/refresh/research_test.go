@@ -2,6 +2,7 @@ package refresh
 
 import (
 	"context"
+	"encoding/json"
 	"sync"
 	"testing"
 	"time"
@@ -823,4 +824,190 @@ func TestSyncRosterPersistsAndClearsInjuries(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, kincaid.InjuryStatus)
 	assert.Empty(t, kincaid.InjuryDate)
+}
+
+type fakeESPNSummaryClient struct {
+	fakeESPNResearch
+	gameSummaries map[string]espn.GameSummary
+	combinedCalls map[string]int
+}
+
+func (f *fakeESPNSummaryClient) Summary(_ context.Context, eventID string) (espn.GameSummary, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.combinedCalls == nil {
+		f.combinedCalls = make(map[string]int)
+	}
+	f.combinedCalls[eventID]++
+	f.summaryCalls++
+	return f.gameSummaries[eventID], nil
+}
+
+func (f *fakeESPNSummaryClient) callsFor(eventID string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.combinedCalls[eventID]
+}
+
+func TestSyncSummaryPersistsLiveBoxScoreAndSchedulesOnlyInjuries(t *testing.T) {
+	t.Parallel()
+
+	store := openTestStore(t)
+	now := novemberTime(8, 14, 0)
+	week, err := store.UpsertWeek(t.Context(), 2026, 2, 9)
+	require.NoError(t, err)
+
+	liveGame, err := store.UpsertGame(t.Context(), db.Game{
+		ID:         "401",
+		WeekID:     week.ID,
+		HomeTeam:   "BUF",
+		AwayTeam:   "MIA",
+		HomeName:   "Buffalo Bills",
+		AwayName:   "Miami Dolphins",
+		HomeESPNID: "2",
+		AwayESPNID: "15",
+		Kickoff:    now.Add(-time.Hour),
+		Status:     db.GameLive,
+		UpdatedAt:  now,
+	})
+	require.NoError(t, err)
+
+	schedGame, err := store.UpsertGame(t.Context(), db.Game{
+		ID:         "402",
+		WeekID:     week.ID,
+		HomeTeam:   "KC",
+		AwayTeam:   "LV",
+		HomeName:   "Kansas City Chiefs",
+		AwayName:   "Las Vegas Raiders",
+		HomeESPNID: "12",
+		AwayESPNID: "13",
+		Kickoff:    now.Add(2 * time.Hour),
+		Status:     db.GameScheduled,
+		UpdatedAt:  now,
+	})
+	require.NoError(t, err)
+
+	espnClient := &fakeESPNSummaryClient{
+		gameSummaries: map[string]espn.GameSummary{
+			"401": {
+				InjuriesJSON: `[{"team":"BUF"}]`,
+				BoxScore: espn.BoxScore{
+					HasStats: true,
+					Players: []espn.PlayerBoxStats{{
+						PlayerID:    "3918298",
+						DisplayName: "Josh Allen",
+						TeamAbbrev:  "BUF",
+						Passing:     espn.PassingStats{PassingYards: 185, PassingTDs: 2},
+					}},
+				},
+			},
+			"402": {
+				InjuriesJSON: `[{"team":"KC"}]`,
+				BoxScore:     espn.BoxScore{HasStats: false},
+			},
+		},
+	}
+
+	service := New(Deps{
+		Store:  store,
+		ESPN:   espnClient,
+		Now:    func() time.Time { return now },
+		Logger: zerolog.Nop(),
+	})
+
+	changed, err := service.syncSummary(t.Context(), liveGame, now)
+	require.NoError(t, err)
+	assert.True(t, changed)
+
+	gotLive, err := store.GameByID(t.Context(), "401")
+	require.NoError(t, err)
+	require.NotNil(t, gotLive.InjuriesJSON)
+	assert.JSONEq(t, `[{"team":"BUF"}]`, *gotLive.InjuriesJSON)
+	require.NotNil(t, gotLive.BoxScoreJSON)
+
+	var decoded espn.BoxScore
+	require.NoError(t, json.Unmarshal([]byte(*gotLive.BoxScoreJSON), &decoded))
+	assert.True(t, decoded.HasStats)
+	require.Len(t, decoded.Players, 1)
+	assert.Equal(t, 185, decoded.Players[0].Passing.PassingYards)
+
+	changed, err = service.syncSummary(t.Context(), schedGame, now)
+	require.NoError(t, err)
+	assert.True(t, changed)
+
+	gotSched, err := store.GameByID(t.Context(), "402")
+	require.NoError(t, err)
+	require.NotNil(t, gotSched.InjuriesJSON)
+	assert.JSONEq(t, `[{"team":"KC"}]`, *gotSched.InjuriesJSON)
+	assert.Nil(t, gotSched.BoxScoreJSON)
+}
+
+func TestLiveSummaryTwoMinuteCadenceScopedToGamesWithSlipLegs(t *testing.T) {
+	t.Parallel()
+
+	store := openTestStore(t)
+	t0 := novemberTime(8, 14, 0)
+	clock := &fakeClock{now: t0}
+
+	user, err := store.CreateUserWithIdentity(t.Context(), "Ada", "ada@example.com", "google-ada", "")
+	require.NoError(t, err)
+	group, err := store.Create(t.Context(), user.ID, "Sunday Parlay Club")
+	require.NoError(t, err)
+	week, err := store.UpsertWeek(t.Context(), 2026, 2, 9)
+	require.NoError(t, err)
+
+	// 401 is LIVE and has an active slip leg -> 2m cadence.
+	_, err = store.UpsertGame(t.Context(), db.Game{
+		ID: "401", WeekID: week.ID, HomeTeam: "BUF", AwayTeam: "MIA",
+		HomeName: "Buffalo Bills", AwayName: "Miami Dolphins",
+		Kickoff: t0.Add(-time.Hour), Status: db.GameLive, UpdatedAt: t0,
+	})
+	require.NoError(t, err)
+
+	// 402 is LIVE without any slip legs -> 15m game-day cadence.
+	_, err = store.UpsertGame(t.Context(), db.Game{
+		ID: "402", WeekID: week.ID, HomeTeam: "KC", AwayTeam: "LV",
+		HomeName: "Kansas City Chiefs", AwayName: "Las Vegas Raiders",
+		Kickoff: t0.Add(-time.Hour), Status: db.GameLive, UpdatedAt: t0,
+	})
+	require.NoError(t, err)
+
+	slip, err := store.CreateSlip(
+		t.Context(), group.ID, week.ID, nil, "Week 9", db.SlateScopeSundayMain, 1, []int64{user.ID},
+	)
+	require.NoError(t, err)
+	gameID := "401"
+	_, err = store.CreateLeg(t.Context(), db.Leg{
+		SlipID: slip.ID, UserID: user.ID, GameID: &gameID, MarketType: "ML", Selection: "BUF", Odds: -120,
+	})
+	require.NoError(t, err)
+
+	espnClient := &fakeESPNSummaryClient{
+		gameSummaries: map[string]espn.GameSummary{
+			"401": {InjuriesJSON: "[]", BoxScore: espn.BoxScore{HasStats: true}},
+			"402": {InjuriesJSON: "[]", BoxScore: espn.BoxScore{HasStats: true}},
+		},
+	}
+	service := New(Deps{
+		Store:  store,
+		ESPN:   espnClient,
+		Now:    clock.Now,
+		Logger: zerolog.Nop(),
+	})
+
+	require.NoError(t, service.RunOnce(t.Context()))
+	assert.Equal(t, 1, espnClient.callsFor("401"))
+	assert.Equal(t, 1, espnClient.callsFor("402"))
+
+	// At +2 minutes, only 401 (with slip legs) refreshes.
+	clock.Advance(2 * time.Minute)
+	require.NoError(t, service.RunOnce(t.Context()))
+	assert.Equal(t, 2, espnClient.callsFor("401"))
+	assert.Equal(t, 1, espnClient.callsFor("402"))
+
+	// At +15 minutes from t0, 402 refreshes too.
+	clock.Advance(13 * time.Minute)
+	require.NoError(t, service.RunOnce(t.Context()))
+	assert.Equal(t, 3, espnClient.callsFor("401"))
+	assert.Equal(t, 2, espnClient.callsFor("402"))
 }

@@ -121,6 +121,8 @@ func slateGame(game espn.Game, weekID int64, now time.Time) db.Game {
 		AwayLogo:   db.OptionalString(game.Away.Logo),
 		Kickoff:    game.Kickoff,
 		Status:     db.GameStatus(game.Status),
+		Period:     game.Period,
+		Clock:      game.Clock,
 		VenueID:    db.OptionalString(game.Venue.ID),
 		VenueName:  db.OptionalString(game.Venue.Name),
 		Indoor:     game.Venue.Indoor,
