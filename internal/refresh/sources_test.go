@@ -214,6 +214,127 @@ func TestSyncScoreboardReturnsTheFetchError(t *testing.T) {
 	require.Error(t, err)
 }
 
+type routedScoreboard struct {
+	boards map[espn.ScoreboardParams]espn.Scoreboard
+	calls  []espn.ScoreboardParams
+}
+
+func (r *routedScoreboard) Scoreboard(_ context.Context, params espn.ScoreboardParams) (espn.Scoreboard, error) {
+	r.calls = append(r.calls, params)
+	return r.boards[params], nil
+}
+
+func TestSyncScoreboardFetchesNextWeekWhenCurrentWeekIsAllFinal(t *testing.T) {
+	t.Parallel()
+
+	week11 := espnWeek()
+	week11.Week.Number = 11
+	week11.Games[0].ID = "401"
+	week11.Games[0].Status = espn.Final
+	week11.Games[0].Kickoff = novemberTime(24, 1, 15)
+
+	week12 := espnWeek()
+	week12.Week.Number = 12
+	week12.Games[0].ID = "402"
+	week12.Games[0].Status = espn.Scheduled
+	week12.Games[0].Kickoff = novemberTime(26, 17, 30)
+
+	sb := &routedScoreboard{
+		boards: map[espn.ScoreboardParams]espn.Scoreboard{
+			{}:                                      week11,
+			{Season: 2026, SeasonType: 2, Week: 12}: week12,
+		},
+	}
+
+	store := openTestStore(t)
+	service := New(Deps{
+		Store:      store,
+		Scoreboard: sb,
+		Logger:     zerolog.Nop(),
+	})
+
+	now := novemberTime(25, 3, 0)
+	changed, err := service.syncScoreboard(t.Context(), now)
+	require.NoError(t, err)
+	assert.True(t, changed)
+	assert.Equal(t, []espn.ScoreboardParams{
+		{},
+		{Season: 2026, SeasonType: 2, Week: 12},
+	}, sb.calls)
+
+	upcoming, err := store.UpcomingWeeks(t.Context(), now)
+	require.NoError(t, err)
+	require.Len(t, upcoming, 1)
+	assert.Equal(t, db.WeekID(2026, 2, 12), upcoming[0].ID)
+
+	_, err = store.GameByID(t.Context(), "402")
+	require.NoError(t, err)
+}
+
+func TestSyncScoreboardFallsBackToPostseasonAfterRegularSeason(t *testing.T) {
+	t.Parallel()
+
+	week18 := espnWeek()
+	week18.Week.Number = 18
+	week18.Games[0].ID = "418"
+	week18.Games[0].Status = espn.Final
+	week18.Games[0].Kickoff = time.Date(2027, 1, 11, 1, 20, 0, 0, time.UTC)
+
+	wildCard := espnWeek()
+	wildCard.Season.Type = 3
+	wildCard.Week.Number = 1
+	wildCard.Games[0].ID = "501"
+	wildCard.Games[0].Status = espn.Scheduled
+	wildCard.Games[0].Kickoff = time.Date(2027, 1, 16, 21, 30, 0, 0, time.UTC)
+
+	sb := &routedScoreboard{
+		boards: map[espn.ScoreboardParams]espn.Scoreboard{
+			{}: week18,
+			{Season: 2026, SeasonType: 2, Week: 19}: {
+				Season: espn.Season{Year: 2026, Type: 2},
+				Week:   espn.Week{Number: 19},
+			},
+			{Season: 2026, SeasonType: 3, Week: 1}: wildCard,
+		},
+	}
+
+	store := openTestStore(t)
+	service := New(Deps{
+		Store:      store,
+		Scoreboard: sb,
+		Logger:     zerolog.Nop(),
+	})
+
+	now := time.Date(2027, 1, 12, 15, 0, 0, 0, time.UTC)
+	changed, err := service.syncScoreboard(t.Context(), now)
+	require.NoError(t, err)
+	assert.True(t, changed)
+
+	upcoming, err := store.UpcomingWeeks(t.Context(), now)
+	require.NoError(t, err)
+	require.Len(t, upcoming, 1)
+	assert.Equal(t, db.WeekID(2026, 3, 1), upcoming[0].ID)
+}
+
+func TestSyncScoreboardSkipsNextWeekWhenCurrentWeekHasNonFinalGame(t *testing.T) {
+	t.Parallel()
+
+	week11 := espnWeek()
+	week11.Week.Number = 11
+	week11.Games[0].Status = espn.Live
+
+	sb := &countingScoreboard{board: week11}
+	service := New(Deps{
+		Store:      openTestStore(t),
+		Scoreboard: sb,
+		Logger:     zerolog.Nop(),
+	})
+
+	_, err := service.syncScoreboard(t.Context(), novemberTime(24, 2, 0))
+	require.NoError(t, err)
+	assert.Equal(t, int32(1), sb.calls.Load())
+}
+
 func TestSyncWeatherWritesTheForecastAndRecordsTheFetch(t *testing.T) {
 	t.Parallel()
 
