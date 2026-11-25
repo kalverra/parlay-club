@@ -40,6 +40,35 @@ func (s *Store) GradedSeasonsForGroup(ctx context.Context, groupID int64) ([]int
 	return s.seasons(ctx, groupID, true)
 }
 
+// FinalSeasons returns every NFL season that has at least one FINAL game,
+// newest first.
+func (s *Store) FinalSeasons(ctx context.Context) ([]int, error) {
+	rows, err := s.readConn().QueryContext(ctx, `
+		SELECT DISTINCT wk.season
+		FROM games g
+		JOIN weeks wk ON wk.id = g.week_id
+		WHERE g.status = ?
+		ORDER BY wk.season DESC`,
+		string(GameFinal))
+	if err != nil {
+		return nil, fmt.Errorf("list final seasons: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	seasons := make([]int, 0)
+	for rows.Next() {
+		var season int
+		if err := rows.Scan(&season); err != nil {
+			return nil, fmt.Errorf("list final seasons: %w", err)
+		}
+		seasons = append(seasons, season)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list final seasons: %w", err)
+	}
+	return seasons, nil
+}
+
 func (s *Store) seasons(ctx context.Context, groupID int64, gradedOnly bool) ([]int, error) {
 	query := `
 		SELECT DISTINCT wk.season

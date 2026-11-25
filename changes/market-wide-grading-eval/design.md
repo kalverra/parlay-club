@@ -294,7 +294,7 @@ Risk: low (isolated to in-memory cache invalidation, offline CLI flags, and the 
 - [x] Extend `eval.Cache` with `GetOrComputeMode` and `InvalidateMarket`, wire `refresh.Service.SetOnMarketDataChange`
   (on newly `FINAL` games in `syncScoreboard` and `syncNFLverse` changes) in `cmd/server/main.go`, and add
   `--mode slips|market` plus sharp/L5-fallback coverage output to `cmd/eval/main.go` with cache, refresh, and CLI tests.
-- [ ] Add `?source=slips|market` to `GET /analyzer/results` (`internal/web/eval_results.go`) and phone-first source
+- [x] Add `?source=slips|market` to `GET /analyzer/results` (`internal/web/eval_results.go`) and phone-first source
   switcher pills plus sharp/L5-fallback coverage tiles to `web/templates/analyzer_results.html` (hiding slip-only
   sections in market mode and preserving `?source=` on filter URLs), run `go generate ./...`, and add HTTP tests.
 - [ ] Docs: update `docs/concepts/analyzer.md`, `docs/reference/routes.md`, and `docs/guides/local-dev.md` for

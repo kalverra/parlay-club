@@ -18,6 +18,7 @@ import (
 
 	"github.com/kalverra/parlay-club/internal/db"
 	"github.com/kalverra/parlay-club/internal/eval"
+	"github.com/kalverra/parlay-club/internal/ingest/archive"
 	"github.com/kalverra/parlay-club/internal/live"
 	"github.com/kalverra/parlay-club/internal/parlay"
 	"github.com/kalverra/parlay-club/internal/slips"
@@ -444,4 +445,287 @@ func TestEvalResultsSlipFactors(t *testing.T) {
 	assert.Contains(t, body, "Parlay length drag")
 	assert.Contains(t, body, "Extra chalk drag")
 	assert.Contains(t, body, "1-0")
+}
+
+func TestEvalResultsSourceValidationAndEmptyMarket(t *testing.T) {
+	t.Parallel()
+
+	f := newEvalResultsFixture(t)
+	ctx := t.Context()
+
+	// Invalid ?source= returns 400.
+	for _, raw := range []string{"bogus", "all", "123"} {
+		bad := httptest.NewRecorder()
+		f.handler.ServeHTTP(
+			bad,
+			httptest.NewRequestWithContext(ctx, http.MethodGet, "/analyzer/results?source="+raw, nil),
+		)
+		assert.Equal(t, http.StatusBadRequest, bad.Code)
+	}
+
+	// Empty market state renders source switcher and market empty-state copy.
+	rec := httptest.NewRecorder()
+	f.handler.ServeHTTP(
+		rec,
+		httptest.NewRequestWithContext(ctx, http.MethodGet, "/analyzer/results?source=market", nil),
+	)
+	require.Equal(t, http.StatusOK, rec.Code)
+	body := html.UnescapeString(rec.Body.String())
+	assert.Contains(t, body, "Market-wide · All seasons")
+	assert.Contains(t, body, "User slips")
+	assert.Contains(t, body, "Market-wide")
+	assert.Contains(t, body, "No graded market-wide legs yet for All seasons.")
+}
+
+func TestEvalResultsMarketModeAndFilterPreservation(t *testing.T) {
+	t.Parallel()
+
+	f := newEvalResultsFixture(t)
+	ctx := t.Context()
+
+	// Seed a graded slip in 2025 so Seasons() != FinalSeasons().
+	wk2025, err := f.store.UpsertWeek(ctx, 2025, 2, 1)
+	require.NoError(t, err)
+	slip2025, err := f.store.CreateSlip(
+		ctx,
+		f.group.ID,
+		wk2025.ID,
+		nil,
+		"2025 Slip",
+		db.SlateScopeFullWeek,
+		1,
+		[]int64{f.user.ID},
+	)
+	require.NoError(t, err)
+	leg2025, err := f.store.CreateLeg(
+		ctx,
+		db.Leg{SlipID: slip2025.ID, UserID: f.user.ID, MarketType: "ML", Selection: "BUF ML", Odds: -110},
+	)
+	require.NoError(t, err)
+	require.NoError(t, f.store.SetLegResult(ctx, leg2025.ID, parlay.Won, f.user.Name))
+	require.NoError(t, f.store.SetSlipGrade(ctx, slip2025.ID, parlay.Won, db.SlipGraded))
+
+	// Seed a FINAL game in 2026 with pre-kickoff archived odds (including pinnacle for sharp benchmarks).
+	kickoff := time.Date(2026, 9, 13, 17, 0, 0, 0, time.UTC)
+	homeScore, awayScore := 27, 20
+	_, err = f.store.UpsertGame(ctx, db.Game{
+		ID:          "g-mkt-2026",
+		WeekID:      f.week2026.ID,
+		OddsEventID: new("evt-mkt-2026"),
+		HomeTeam:    "BUF",
+		AwayTeam:    "MIA",
+		HomeName:    "Buffalo Bills",
+		AwayName:    "Miami Dolphins",
+		Kickoff:     kickoff,
+		Status:      db.GameFinal,
+		HomeScore:   &homeScore,
+		AwayScore:   &awayScore,
+	})
+	require.NoError(t, err)
+
+	linesBody := `[
+		{
+			"id": "evt-mkt-2026",
+			"commence_time": "2026-09-13T17:00:00Z",
+			"home_team": "Buffalo Bills",
+			"away_team": "Miami Dolphins",
+			"bookmakers": [
+				{
+					"key": "pinnacle",
+					"markets": [{
+						"key": "spreads",
+						"outcomes": [
+							{"name": "Buffalo Bills", "price": -110, "point": -3.5},
+							{"name": "Miami Dolphins", "price": -110, "point": 3.5}
+						]
+					}]
+				},
+				{
+					"key": "fanduel",
+					"markets": [{
+						"key": "spreads",
+						"outcomes": [
+							{"name": "Buffalo Bills", "price": -110, "point": -3.5},
+							{"name": "Miami Dolphins", "price": -110, "point": 3.5}
+						]
+					}]
+				}
+			]
+		}
+	]`
+	require.NoError(t, f.store.SaveAPIResponse(ctx, archive.Record{
+		Source:    "odds",
+		Key:       db.ArchiveOddsLinesKey,
+		Method:    "GET",
+		URL:       "https://example.test/odds",
+		Status:    200,
+		FetchedAt: kickoff.Add(-30 * time.Minute),
+		Body:      []byte(linesBody),
+	}))
+
+	// ?source=market resolves default season from FINAL games (2026), not graded slips (2025).
+	recMkt := httptest.NewRecorder()
+	f.handler.ServeHTTP(
+		recMkt,
+		httptest.NewRequestWithContext(ctx, http.MethodGet, "/analyzer/results?source=market", nil),
+	)
+	require.Equal(t, http.StatusOK, recMkt.Code)
+	bodyMkt := html.UnescapeString(recMkt.Body.String())
+
+	assert.Contains(t, bodyMkt, "Market-wide · 2026 season")
+	assert.Contains(t, bodyMkt, "Leg Calibration (A–F)")
+	assert.Contains(t, bodyMkt, "2 decided")
+	assert.Contains(t, bodyMkt, "Sharp benchmarks")
+	assert.Contains(t, bodyMkt, "nflverse L5 fallback")
+
+	// Slip-only sections are hidden and replaced by a note linking to User slips.
+	assert.NotContains(t, bodyMkt, "Slip Calibration (A–F)")
+	assert.NotContains(t, bodyMkt, "Slip Factor Attribution")
+	assert.Contains(t, bodyMkt, "Parlay-level slip calibration and slip factor rules live under")
+
+	// Filter URLs preserve ?source=market.
+	assert.Contains(t, bodyMkt, "season=all&source=market")
+	assert.Contains(t, bodyMkt, "season=2026&source=market")
+	assert.Contains(t, bodyMkt, "season=2025&source=market")
+
+	// Default ?source=slips still shows Slip Calibration and resolves 2025.
+	recSlips := httptest.NewRecorder()
+	f.handler.ServeHTTP(
+		recSlips,
+		httptest.NewRequestWithContext(ctx, http.MethodGet, "/analyzer/results?source=slips", nil),
+	)
+	require.Equal(t, http.StatusOK, recSlips.Code)
+	bodySlips := html.UnescapeString(recSlips.Body.String())
+	assert.Contains(t, bodySlips, "All groups · 2025 season")
+	assert.Contains(t, bodySlips, "Slip Calibration (A–F)")
+	assert.Contains(t, bodySlips, "season=2025&source=slips")
+}
+
+func TestEvalResultsMarketCacheInvalidation(t *testing.T) {
+	t.Parallel()
+
+	f := newEvalResultsFixture(t)
+	ctx := t.Context()
+
+	kickoff := time.Date(2026, 9, 13, 17, 0, 0, 0, time.UTC)
+	homeScore, awayScore := 27, 20
+	_, err := f.store.UpsertGame(ctx, db.Game{
+		ID:          "g-cache-1",
+		WeekID:      f.week2026.ID,
+		OddsEventID: new("evt-cache-1"),
+		HomeTeam:    "BUF",
+		AwayTeam:    "MIA",
+		HomeName:    "Buffalo Bills",
+		AwayName:    "Miami Dolphins",
+		Kickoff:     kickoff,
+		Status:      db.GameFinal,
+		HomeScore:   &homeScore,
+		AwayScore:   &awayScore,
+	})
+	require.NoError(t, err)
+
+	linesBody := `[
+		{
+			"id": "evt-cache-1",
+			"commence_time": "2026-09-13T17:00:00Z",
+			"home_team": "Buffalo Bills",
+			"away_team": "Miami Dolphins",
+			"bookmakers": [{
+				"key": "pinnacle",
+				"markets": [{
+					"key": "spreads",
+					"outcomes": [
+						{"name": "Buffalo Bills", "price": -110, "point": -3.5},
+						{"name": "Miami Dolphins", "price": -110, "point": 3.5}
+					]
+				}]
+			}]
+		}
+	]`
+	require.NoError(t, f.store.SaveAPIResponse(ctx, archive.Record{
+		Source:    "odds",
+		Key:       db.ArchiveOddsLinesKey,
+		Method:    "GET",
+		URL:       "https://example.test/odds",
+		Status:    200,
+		FetchedAt: kickoff.Add(-30 * time.Minute),
+		Body:      []byte(linesBody),
+	}))
+
+	// First request caches 2 market legs (2 decided).
+	rec1 := httptest.NewRecorder()
+	f.handler.ServeHTTP(
+		rec1,
+		httptest.NewRequestWithContext(ctx, http.MethodGet, "/analyzer/results?source=market&season=2026", nil),
+	)
+	require.Equal(t, http.StatusOK, rec1.Code)
+	assert.Contains(t, rec1.Body.String(), "2 decided")
+
+	// Add a second FINAL game and invalidate market cache.
+	_, err = f.store.UpsertGame(ctx, db.Game{
+		ID:          "g-cache-2",
+		WeekID:      f.week2026.ID,
+		OddsEventID: new("evt-cache-2"),
+		HomeTeam:    "KC",
+		AwayTeam:    "BAL",
+		HomeName:    "Kansas City Chiefs",
+		AwayName:    "Baltimore Ravens",
+		Kickoff:     kickoff,
+		Status:      db.GameFinal,
+		HomeScore:   &homeScore,
+		AwayScore:   &awayScore,
+	})
+	require.NoError(t, err)
+	linesBody2 := `[
+		{
+			"id": "evt-cache-1",
+			"commence_time": "2026-09-13T17:00:00Z",
+			"home_team": "Buffalo Bills",
+			"away_team": "Miami Dolphins",
+			"bookmakers": [{
+				"key": "pinnacle",
+				"markets": [{
+					"key": "spreads",
+					"outcomes": [
+						{"name": "Buffalo Bills", "price": -110, "point": -3.5},
+						{"name": "Miami Dolphins", "price": -110, "point": 3.5}
+					]
+				}]
+			}]
+		},
+		{
+			"id": "evt-cache-2",
+			"commence_time": "2026-09-13T17:00:00Z",
+			"home_team": "Kansas City Chiefs",
+			"away_team": "Baltimore Ravens",
+			"bookmakers": [{
+				"key": "pinnacle",
+				"markets": [{
+					"key": "spreads",
+					"outcomes": [
+						{"name": "Kansas City Chiefs", "price": -110, "point": -2.5},
+						{"name": "Baltimore Ravens", "price": -110, "point": 2.5}
+					]
+				}]
+			}]
+		}
+	]`
+	require.NoError(t, f.store.SaveAPIResponse(ctx, archive.Record{
+		Source:    "odds",
+		Key:       db.ArchiveOddsLinesKey,
+		Method:    "GET",
+		URL:       "https://example.test/odds",
+		Status:    200,
+		FetchedAt: kickoff.Add(-20 * time.Minute),
+		Body:      []byte(linesBody2),
+	}))
+	f.evalCache.InvalidateMarket()
+
+	rec2 := httptest.NewRecorder()
+	f.handler.ServeHTTP(
+		rec2,
+		httptest.NewRequestWithContext(ctx, http.MethodGet, "/analyzer/results?source=market&season=2026", nil),
+	)
+	require.Equal(t, http.StatusOK, rec2.Code)
+	assert.Contains(t, rec2.Body.String(), "4 decided")
 }
