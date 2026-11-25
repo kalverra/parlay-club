@@ -1,7 +1,7 @@
 ---
 slug: market-wide-grading-eval
-status: proposed
-created: 2026-11-24
+status: implementing
+created: "2026-11-24"
 complexity: medium
 risk: low
 ---

@@ -538,3 +538,26 @@ func TestBuildSharpBenchmarksCapturedUSFixture(t *testing.T) {
 	_, hasTotal := rc[analyzer.SharpKey{MarketType: "TOTAL", Side: "OVER"}]
 	assert.False(t, hasTotal, "total with 3 distinct lines across 3 books must not form Tier 3 consensus")
 }
+
+func TestHasSharpBenchmark(t *testing.T) {
+	t.Parallel()
+
+	game := analyzer.Game{
+		ID: "g1",
+		Sharp: map[analyzer.SharpKey]analyzer.SharpQuote{
+			{MarketType: "SPREAD", Team: "BUF", Side: "TEAM"}:                  {FairProb: 0.5},
+			{MarketType: "TOTAL", Side: "OVER"}:                                {FairProb: 0.5},
+			{MarketType: "REC_YDS", PlayerName: "khalil shakir", Side: "OVER"}: {FairProb: 0.5},
+		},
+	}
+
+	assert.False(t, analyzer.HasSharpBenchmark(analyzer.Game{ID: "empty"}, analyzer.Leg{Market: "SPREAD", Team: "BUF"}))
+	assert.True(t, analyzer.HasSharpBenchmark(game, analyzer.Leg{Market: "SPREAD", Team: "buf"}))
+	assert.True(t, analyzer.HasSharpBenchmark(game, analyzer.Leg{Market: "TOTAL", Team: "BUF", Side: "OVER"}))
+	assert.True(t, analyzer.HasSharpBenchmark(game, analyzer.Leg{
+		Market:     "REC_YDS",
+		PlayerName: "Khalil Shakir",
+		Side:       "OVER",
+	}))
+	assert.False(t, analyzer.HasSharpBenchmark(game, analyzer.Leg{Market: "ML", Team: "BUF"}))
+}

@@ -25,6 +25,14 @@ func (c *Client) Events(ctx context.Context) ([]Event, Credits, error) {
 		return nil, Credits{}, fmt.Errorf("events: %w", err)
 	}
 
+	events, err := parseEvents(raw)
+	if err != nil {
+		return nil, Credits{}, err
+	}
+	return events, credits, nil
+}
+
+func parseEvents(raw []eventResponse) ([]Event, error) {
 	events := make([]Event, 0, len(raw))
 	for _, item := range raw {
 		// A fixture whose kickoff is not yet reported cannot match an ESPN
@@ -34,7 +42,7 @@ func (c *Client) Events(ctx context.Context) ([]Event, Credits, error) {
 		}
 		commence, err := time.Parse(time.RFC3339, item.CommenceTime)
 		if err != nil {
-			return nil, Credits{}, fmt.Errorf("event %s commence time %q: %w", item.ID, item.CommenceTime, err)
+			return nil, fmt.Errorf("event %s commence time %q: %w", item.ID, item.CommenceTime, err)
 		}
 		events = append(events, Event{
 			ID:           item.ID,
@@ -43,7 +51,7 @@ func (c *Client) Events(ctx context.Context) ([]Event, Credits, error) {
 			AwayTeam:     item.AwayTeam,
 		})
 	}
-	return events, credits, nil
+	return events, nil
 }
 
 // eventResponse is the shared slice of Parlay API's event JSON used by both

@@ -15,6 +15,7 @@ import (
 	"github.com/kalverra/parlay-club/internal/db"
 	"github.com/kalverra/parlay-club/internal/ingest/espn"
 	"github.com/kalverra/parlay-club/internal/ingest/nflverse"
+	"github.com/kalverra/parlay-club/internal/ingest/odds"
 	"github.com/kalverra/parlay-club/internal/parlay"
 )
 
@@ -81,7 +82,7 @@ func LoadDataset(ctx context.Context, store *db.Store, filter ReplayFilter) (Rep
 		}
 
 		athleteIDs := analyzer.DistinctLegPlayerIDs(rawLegs)
-		teamEPA, usageByPlayer := loadPriorNFLverse(ctx, store, week, athleteIDs)
+		teamEPA, usageByPlayer, playersByTeam := loadPriorNFLverse(ctx, store, week, athleteIDs)
 
 		nfeloByGame, err := store.NfeloForGames(ctx, gameIDs)
 		if err != nil {
@@ -93,7 +94,8 @@ func LoadDataset(ctx context.Context, store *db.Store, filter ReplayFilter) (Rep
 		gameHasInjuries := make(map[string]bool, len(weekGames))
 		gameHasArchivedOdds := make(map[string]bool, len(weekGames))
 		referencedGames, gameNeedsOddsCheck := referencedGamesFromSlips(slips)
-		linesByKickoff := make(map[int64]bool)
+		matchGames := buildMatchGames(weekGames)
+		linesCache := make(map[string]decodedLinesSnapshot)
 
 		for _, g := range weekGames {
 			var proj *db.NfeloGame
@@ -106,7 +108,7 @@ func LoadDataset(ctx context.Context, store *db.Store, filter ReplayFilter) (Rep
 			converted := analyzer.GameFromDB(preKickoffGame, proj, teamEPA)
 
 			if referencedGames[g.ID] {
-				injuries, rosterPositions, hasInj := loadArchivedGameInjuries(ctx, store, g)
+				injuries, rosterPositions, rosterPlayers, hasInj := loadArchivedGameInjuries(ctx, store, g)
 				if len(injuries) > 0 {
 					converted.Injuries = injuries
 				}
@@ -117,8 +119,22 @@ func LoadDataset(ctx context.Context, store *db.Store, filter ReplayFilter) (Rep
 					}
 				}
 
+				preKickoffOdds, hasArchivedOdds := loadPreKickoffGameOdds(
+					ctx,
+					store,
+					g,
+					matchGames,
+					rosterPlayers,
+					playersByTeam,
+					linesCache,
+				)
+				if len(preKickoffOdds) > 0 {
+					if sharpByGame := analyzer.BuildSharpBenchmarks(preKickoffOdds); len(sharpByGame) > 0 {
+						converted.Sharp = sharpByGame[g.ID]
+					}
+				}
 				if gameNeedsOddsCheck[g.ID] {
-					gameHasArchivedOdds[g.ID] = hasArchivedOddsBefore(ctx, store, g.ID, g.Kickoff, linesByKickoff)
+					gameHasArchivedOdds[g.ID] = hasArchivedOdds
 				}
 			}
 			gamesMap[g.ID] = converted
@@ -200,6 +216,9 @@ func accumulateWeekCoverage(
 			if g, ok := gamesMap[rl.Leg.GameID]; ok {
 				if g.Nfelo != nil {
 					cov.WithNfelo++
+				}
+				if analyzer.HasSharpBenchmark(g, rl.Leg) {
+					cov.WithSharp++
 				}
 				hasNFLV := g.HomeEPA != nil || g.AwayEPA != nil
 				if !hasNFLV && rl.Leg.PlayerID != "" {
@@ -321,7 +340,7 @@ func loadPriorNFLverse(
 	store *db.Store,
 	week db.Week,
 	athleteIDs []string,
-) (map[string]*analyzer.TeamDefenseProfile, map[string]*analyzer.PlayerUsage) {
+) (map[string]*analyzer.TeamDefenseProfile, map[string]*analyzer.PlayerUsage, map[string][]db.RosterPlayer) {
 	seasonTypes := analyzer.NFLverseSeasonTypes(week.SeasonType)
 
 	var teamEPA map[string]*analyzer.TeamDefenseProfile
@@ -358,7 +377,33 @@ func loadPriorNFLverse(
 		}
 	}
 
-	return teamEPA, usageByPlayer
+	playersByTeam := make(map[string][]db.RosterPlayer)
+	seenPlayers := make(map[string]bool)
+	// Iterate most recent season type first so postseason rows precede regular season.
+	for _, seasonType := range slices.Backward(seasonTypes) {
+		rows, err := store.NFLversePlayerWeeksForSeason(ctx, week.Season, seasonType)
+		if err != nil {
+			continue
+		}
+		for _, r := range rows {
+			if !isPriorNFLverseWeek(r.SeasonType, r.WeekNum, week) {
+				continue
+			}
+			if r.ESPNID == "" || r.Team == "" || r.PlayerName == "" || seenPlayers[r.ESPNID] {
+				continue
+			}
+			seenPlayers[r.ESPNID] = true
+			playersByTeam[r.Team] = append(playersByTeam[r.Team], db.RosterPlayer{
+				AthleteID: r.ESPNID,
+				Team:      r.Team,
+				FullName:  r.PlayerName,
+				NormName:  db.NormalizePlayerName(r.PlayerName),
+				Position:  r.Position,
+			})
+		}
+	}
+
+	return teamEPA, usageByPlayer, playersByTeam
 }
 
 func isPriorNFLverseWeek(rowSeasonType, rowWeekNum int, target db.Week) bool {
@@ -428,10 +473,10 @@ func loadArchivedGameInjuries(
 	ctx context.Context,
 	store *db.Store,
 	game db.Game,
-) (map[string][]analyzer.Injury, map[string]string, bool) {
+) (map[string][]analyzer.Injury, map[string]string, []db.RosterPlayer, bool) {
 	positions := make(map[string]string)
 	if game.Kickoff.IsZero() {
-		return nil, positions, false
+		return nil, positions, nil, false
 	}
 
 	hasArchive := false
@@ -451,6 +496,7 @@ func loadArchivedGameInjuries(
 	}
 
 	rosterByTeam := make(map[string][]espn.Injury, 2)
+	var rosterPlayers []db.RosterPlayer
 	teamCandidates := []struct {
 		abbr   string
 		espnID string
@@ -484,6 +530,15 @@ func loadArchivedGameInjuries(
 			if p.Position != "" {
 				positions[p.ID] = p.Position
 			}
+			rosterPlayers = append(rosterPlayers, db.RosterPlayer{
+				AthleteID:   p.ID,
+				Team:        tc.abbr,
+				ESPNTeamID:  tc.espnID,
+				FullName:    p.FullName,
+				NormName:    db.NormalizePlayerName(p.FullName),
+				Position:    p.Position,
+				HeadshotURL: p.HeadshotURL,
+			})
 			if strings.TrimSpace(p.InjuryStatus) == "" || !espn.IsKeyInjuryPosition(p.Position) {
 				continue
 			}
@@ -498,7 +553,7 @@ func loadArchivedGameInjuries(
 	}
 
 	merged := analyzer.MergeInjuryFeeds(summaryByTeam, rosterByTeam)
-	return merged, positions, hasArchive
+	return merged, positions, rosterPlayers, hasArchive
 }
 
 func extractSummaryInjuriesJSON(raw []byte) (string, bool) {
@@ -521,34 +576,248 @@ func extractSummaryInjuriesJSON(raw []byte) (string, bool) {
 	return string(obj.Injuries), true
 }
 
-func hasArchivedOddsBefore(
-	ctx context.Context,
-	store *db.Store,
-	gameID string,
-	kickoff time.Time,
-	linesByKickoff map[int64]bool,
-) bool {
-	if kickoff.IsZero() {
-		return false
-	}
-	if hasArchivedResponseBefore(ctx, store, db.ArchiveOddsPropsKey(gameID), kickoff) {
-		return true
-	}
-	if linesByKickoff != nil {
-		key := kickoff.UTC().UnixNano()
-		if cached, ok := linesByKickoff[key]; ok {
-			return cached
-		}
-		found := hasArchivedResponseBefore(ctx, store, db.ArchiveOddsLinesKey, kickoff)
-		linesByKickoff[key] = found
-		return found
-	}
-	return hasArchivedResponseBefore(ctx, store, db.ArchiveOddsLinesKey, kickoff)
+type decodedLinesSnapshot struct {
+	events       []odds.Event
+	linesByEvent map[string][]odds.Line
 }
 
-func hasArchivedResponseBefore(ctx context.Context, store *db.Store, key string, kickoff time.Time) bool {
-	resp, ok, err := store.LatestAPIResponseBefore(ctx, key, beforeKickoff(kickoff))
-	return err == nil && ok && resp.FetchedAt.Before(kickoff)
+func buildMatchGames(games []db.Game) []odds.MatchGame {
+	out := make([]odds.MatchGame, 0, len(games))
+	for _, g := range games {
+		out = append(out, odds.MatchGame{
+			ID:       g.ID,
+			HomeName: g.HomeName,
+			AwayName: g.AwayName,
+			Kickoff:  g.Kickoff,
+		})
+	}
+	return out
+}
+
+func loadPreKickoffGameOdds(
+	ctx context.Context,
+	store *db.Store,
+	game db.Game,
+	matchGames []odds.MatchGame,
+	rosterPlayers []db.RosterPlayer,
+	priorNFLverseByTeam map[string][]db.RosterPlayer,
+	linesCache map[string]decodedLinesSnapshot,
+) ([]db.Odds, bool) {
+	if game.Kickoff.IsZero() {
+		return nil, false
+	}
+
+	var rows []db.Odds
+	hasArchived := false
+
+	if snap, ok := loadPreKickoffLinesSnapshot(ctx, store, game.Kickoff, linesCache); ok {
+		hasArchived = true
+		eventID := resolveOddsEventID(game, snap, matchGames)
+		if eventID != "" {
+			for _, line := range snap.linesByEvent[eventID] {
+				if row, ok := mapLineToDBOdds(game, line); ok {
+					rows = append(rows, row)
+				}
+			}
+		}
+	}
+
+	if rawProps, ok := latestArchivedBodyBefore(ctx, store, db.ArchiveOddsPropsKey(game.ID), game.Kickoff); ok {
+		hasArchived = true
+		if props, err := odds.ParsePropsJSON(rawProps); err == nil && len(props) > 0 {
+			rows = append(rows, mapPropsToDBOdds(game, props, rosterPlayers, priorNFLverseByTeam)...)
+		}
+	}
+
+	return rows, hasArchived
+}
+
+func loadPreKickoffLinesSnapshot(
+	ctx context.Context,
+	store *db.Store,
+	kickoff time.Time,
+	cache map[string]decodedLinesSnapshot,
+) (decodedLinesSnapshot, bool) {
+	resp, ok, err := store.LatestAPIResponseBefore(ctx, db.ArchiveOddsLinesKey, beforeKickoff(kickoff))
+	if err != nil || !ok || !resp.FetchedAt.Before(kickoff) {
+		return decodedLinesSnapshot{}, false
+	}
+	if cached, hit := cache[resp.BodySHA256]; hit {
+		return cached, true
+	}
+
+	var snap decodedLinesSnapshot
+	body, err := store.APIResponseBody(ctx, resp.BodySHA256)
+	if err == nil {
+		if events, lines, parseErr := odds.ParseLinesSnapshotJSON(body); parseErr == nil {
+			byEvent := make(map[string][]odds.Line)
+			for _, line := range lines {
+				byEvent[line.EventID] = append(byEvent[line.EventID], line)
+			}
+			snap = decodedLinesSnapshot{
+				events:       events,
+				linesByEvent: byEvent,
+			}
+		}
+	}
+	cache[resp.BodySHA256] = snap
+	return snap, true
+}
+
+func resolveOddsEventID(game db.Game, snap decodedLinesSnapshot, matchGames []odds.MatchGame) string {
+	if game.OddsEventID != nil && *game.OddsEventID != "" && len(snap.linesByEvent[*game.OddsEventID]) > 0 {
+		return *game.OddsEventID
+	}
+	if len(snap.events) == 0 {
+		return ""
+	}
+	matches, _ := odds.MatchEvents(snap.events, matchGames)
+	return matches[game.ID]
+}
+
+func mapLineToDBOdds(game db.Game, line odds.Line) (db.Odds, bool) {
+	team := ""
+	switch line.MarketType {
+	case odds.MarketML, odds.MarketSpread:
+		switch line.Team {
+		case game.HomeName, game.HomeTeam:
+			team = game.HomeTeam
+		case game.AwayName, game.AwayTeam:
+			team = game.AwayTeam
+		default:
+			return db.Odds{}, false
+		}
+	case odds.MarketTotal:
+		if line.Team != "" {
+			return db.Odds{}, false
+		}
+	default:
+		return db.Odds{}, false
+	}
+
+	return db.Odds{
+		GameID:     game.ID,
+		Book:       line.Book,
+		MarketType: line.MarketType,
+		Team:       team,
+		Side:       line.Side,
+		Line:       line.Line,
+		Price:      line.Price,
+	}, true
+}
+
+func mapPropsToDBOdds(
+	game db.Game,
+	props []odds.Prop,
+	rosterPlayers []db.RosterPlayer,
+	priorNFLverseByTeam map[string][]db.RosterPlayer,
+) []db.Odds {
+	combined := combinePreKickoffRoster(game, rosterPlayers, priorNFLverseByTeam)
+	resolver := db.NewBatchPlayerResolver(combined, nil)
+
+	type oddsKey struct {
+		book       string
+		marketType string
+		team       string
+		playerName string
+		side       string
+	}
+	type mappedOdds struct {
+		row  db.Odds
+		pref db.OddsCandidate
+	}
+
+	mapped := make([]mappedOdds, 0, len(props))
+	indexByKey := make(map[oddsKey]int, len(props))
+
+	for _, prop := range props {
+		row := db.Odds{
+			GameID:     game.ID,
+			Book:       prop.Book,
+			MarketType: prop.MarketType,
+			Side:       prop.Side,
+			Line:       prop.Line,
+			Price:      prop.Price,
+			Link:       db.OptionalString(prop.Link),
+			Sid:        db.OptionalString(prop.Sid),
+			EventSid:   db.OptionalString(prop.EventSid),
+		}
+		linked := false
+		if prop.MarketType == odds.MarketTeamTotal {
+			switch prop.Team {
+			case game.HomeName, game.HomeTeam:
+				row.Team = game.HomeTeam
+			case game.AwayName, game.AwayTeam:
+				row.Team = game.AwayTeam
+			default:
+				continue
+			}
+		} else {
+			resolved := resolver.ResolveGamePlayer(game.ID, prop.PlayerName, "", game.HomeTeam, game.AwayTeam)
+			row.PlayerName = resolved.Name
+			row.Team = resolved.Team
+			linked = resolved.Linked
+		}
+
+		cand := mappedOdds{
+			row: row,
+			pref: db.OddsCandidate{
+				Linked:   linked,
+				Richness: db.OddsRichness(row),
+			},
+		}
+		key := oddsKey{
+			book:       row.Book,
+			marketType: row.MarketType,
+			team:       row.Team,
+			playerName: row.PlayerName,
+			side:       row.Side,
+		}
+		if idx, exists := indexByKey[key]; exists {
+			if db.PreferOddsCandidate(cand.pref, mapped[idx].pref) {
+				mapped[idx] = cand
+			}
+			continue
+		}
+		indexByKey[key] = len(mapped)
+		mapped = append(mapped, cand)
+	}
+
+	out := make([]db.Odds, len(mapped))
+	for i, m := range mapped {
+		out[i] = m.row
+	}
+	return out
+}
+
+func combinePreKickoffRoster(
+	game db.Game,
+	rosterPlayers []db.RosterPlayer,
+	priorNFLverseByTeam map[string][]db.RosterPlayer,
+) []db.RosterPlayer {
+	combined := make([]db.RosterPlayer, 0, len(rosterPlayers))
+	seen := make(map[string]bool, len(rosterPlayers))
+	for _, rp := range rosterPlayers {
+		combined = append(combined, rp)
+		if rp.AthleteID != "" {
+			seen[rp.AthleteID] = true
+		}
+	}
+	for _, team := range []string{game.AwayTeam, game.HomeTeam} {
+		if team == "" {
+			continue
+		}
+		for _, rp := range priorNFLverseByTeam[team] {
+			if rp.AthleteID != "" && seen[rp.AthleteID] {
+				continue
+			}
+			if rp.AthleteID != "" {
+				seen[rp.AthleteID] = true
+			}
+			combined = append(combined, rp)
+		}
+	}
+	return combined
 }
 
 func beforeKickoff(kickoff time.Time) time.Time {

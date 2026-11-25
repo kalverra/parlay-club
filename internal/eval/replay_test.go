@@ -613,3 +613,256 @@ func TestLoadDatasetEarlyBustedSlip(t *testing.T) {
 	assert.Equal(t, 4, ds.Coverage.TotalLegs)
 	assert.Equal(t, 4, ds.Coverage.WithOdds)
 }
+
+func TestLoadDatasetReconstructsSharpAndIsolatesPreKickoff(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	store := newTestStore(t)
+
+	group, user := seedGroupAndMember(t, store, "sharp")
+	week2, err := store.UpsertWeek(ctx, 2025, nflverse.SeasonTypeRegular, 2)
+	require.NoError(t, err)
+
+	kickoff := time.Date(2025, 9, 14, 17, 0, 0, 0, time.UTC)
+	_, err = store.UpsertGame(ctx, db.Game{
+		ID:         "g1",
+		WeekID:     week2.ID,
+		HomeTeam:   "BUF",
+		AwayTeam:   "MIA",
+		HomeName:   "Buffalo Bills",
+		AwayName:   "Miami Dolphins",
+		HomeESPNID: "2",
+		AwayESPNID: "15",
+		Kickoff:    kickoff,
+		Status:     db.GameFinal,
+	})
+	require.NoError(t, err)
+
+	// Second game on the same slate matched via OddsEventID, sharing the same odds:lines BodySHA256.
+	_, err = store.UpsertGame(ctx, db.Game{
+		ID:          "g2",
+		WeekID:      week2.ID,
+		OddsEventID: new("evt-kc-bal"),
+		HomeTeam:    "KC",
+		AwayTeam:    "BAL",
+		HomeName:    "Kansas City Chiefs",
+		AwayName:    "Baltimore Ravens",
+		Kickoff:     kickoff,
+		Status:      db.GameFinal,
+	})
+	require.NoError(t, err)
+
+	// Week 1 nflverse row provides pre-kickoff fallback identity for James Cook;
+	// Week 2 nflverse row (same week) must NOT leak into player resolution.
+	_, err = store.UpsertNFLversePlayerWeeks(ctx, []db.NFLversePlayerWeek{
+		{
+			Season: 2025, SeasonType: nflverse.SeasonTypeRegular, WeekNum: 1,
+			ESPNID: "espn-rb1", Team: "BUF", PlayerName: "James Cook", Position: "RB",
+		},
+		{
+			Season: 2025, SeasonType: nflverse.SeasonTypeRegular, WeekNum: 2,
+			ESPNID: "espn-wr-leak", Team: "BUF", PlayerName: "SameWeek Leak", Position: "WR",
+		},
+	})
+	require.NoError(t, err)
+
+	// Pre-kickoff roster has Khalil Shakir; post-kickoff roster has a poisoned name.
+	preRoster := `{"athletes":[{"items":[{"id":"espn-wr1","fullName":"Khalil Shakir","position":{"abbreviation":"WR"}}]}]}`
+	postRoster := `{"athletes":[{"items":[{"id":"espn-wr1","fullName":"Post Kickoff Name","position":{"abbreviation":"WR"}}]}]}`
+	mustArchiveResponse(t, store, "espn", "espn:roster:2", kickoff.Add(-1*time.Hour), []byte(preRoster))
+	mustArchiveResponse(t, store, "espn", "espn:roster:2", kickoff.Add(5*time.Minute), []byte(postRoster))
+
+	// Poison live odds and roster_players tables to verify replay ignores them.
+	require.NoError(t, store.UpsertRosterPlayers(ctx, []db.RosterPlayer{
+		{AthleteID: "espn-live", Team: "BUF", FullName: "Live Poison", Position: "WR"},
+	}))
+	_, err = store.UpsertOdds(ctx, []db.Odds{{
+		GameID: "g1", Book: "pinnacle", MarketType: "SPREAD", Team: "BUF", Side: "TEAM", Line: new(-14.5), Price: -110,
+	}})
+	require.NoError(t, err)
+
+	// Shared pre-kickoff odds:lines snapshot for both g1 (matched by team/kickoff) and g2 (matched by OddsEventID).
+	// Pinnacle has BUF -3.5 (-110) / MIA +3.5 (-110) and KC ML -150 / BAL ML +130.
+	preLines := `[
+		{
+			"id": "evt-buf-mia",
+			"commence_time": "2025-09-14T17:00:00Z",
+			"home_team": "Buffalo Bills",
+			"away_team": "Miami Dolphins",
+			"bookmakers": [{
+				"key": "pinnacle",
+				"markets": [{
+					"key": "spreads",
+					"outcomes": [
+						{"name": "Buffalo Bills", "price": -110, "point": -3.5},
+						{"name": "Miami Dolphins", "price": -110, "point": 3.5}
+					]
+				}]
+			}]
+		},
+		{
+			"id": "evt-kc-bal",
+			"commence_time": "2025-09-14T17:00:00Z",
+			"home_team": "Kansas City Chiefs",
+			"away_team": "Baltimore Ravens",
+			"bookmakers": [{
+				"key": "pinnacle",
+				"markets": [{
+					"key": "h2h",
+					"outcomes": [
+						{"name": "Kansas City Chiefs", "price": -150},
+						{"name": "Baltimore Ravens", "price": 130}
+					]
+				}]
+			}]
+		}
+	]`
+	// Post-kickoff and exact-kickoff odds:lines snapshots must be ignored.
+	poisonLines := `[
+		{
+			"id": "evt-buf-mia",
+			"commence_time": "2025-09-14T17:00:00Z",
+			"home_team": "Buffalo Bills",
+			"away_team": "Miami Dolphins",
+			"bookmakers": [{
+				"key": "pinnacle",
+				"markets": [{
+					"key": "spreads",
+					"outcomes": [
+						{"name": "Buffalo Bills", "price": -110, "point": -10.5},
+						{"name": "Miami Dolphins", "price": -110, "point": 10.5}
+					]
+				}]
+			}]
+		}
+	]`
+	mustArchiveResponse(t, store, "odds", db.ArchiveOddsLinesKey, kickoff.Add(-30*time.Minute), []byte(preLines))
+	mustArchiveResponse(t, store, "odds", db.ArchiveOddsLinesKey, kickoff, []byte(poisonLines))
+	mustArchiveResponse(t, store, "odds", db.ArchiveOddsLinesKey, kickoff.Add(10*time.Minute), []byte(poisonLines))
+
+	// Pre-kickoff odds:props:g1 with Pinnacle REC_YDS (Khalil Shakir from pre-kickoff roster)
+	// and RUSH_YDS (James Cook from Week 1 nflverse fallback).
+	preProps := `{
+		"id": "evt-buf-mia",
+		"bookmakers": [{
+			"key": "pinnacle",
+			"markets": [
+				{
+					"key": "player_reception_yds",
+					"outcomes": [
+						{"name": "Over", "description": "Khalil Shakir", "price": -115, "point": 55.5},
+						{"name": "Under", "description": "Khalil Shakir", "price": -105, "point": 55.5}
+					]
+				},
+				{
+					"key": "player_rush_yds",
+					"outcomes": [
+						{"name": "Over", "description": "James Cook", "price": -110, "point": 68.5},
+						{"name": "Under", "description": "James Cook", "price": -110, "point": 68.5}
+					]
+				}
+			]
+		}]
+	}`
+	postProps := `{
+		"id": "evt-buf-mia",
+		"bookmakers": [{
+			"key": "pinnacle",
+			"markets": [{
+				"key": "player_reception_yds",
+				"outcomes": [
+					{"name": "Over", "description": "Khalil Shakir", "price": -110, "point": 99.5},
+					{"name": "Under", "description": "Khalil Shakir", "price": -110, "point": 99.5}
+				]
+			}]
+		}]
+	}`
+	mustArchiveResponse(t, store, "odds", db.ArchiveOddsPropsKey("g1"), kickoff.Add(-20*time.Minute), []byte(preProps))
+	mustArchiveResponse(t, store, "odds", db.ArchiveOddsPropsKey("g1"), kickoff.Add(15*time.Minute), []byte(postProps))
+
+	slip, err := store.CreateSlip(
+		ctx, group.ID, week2.ID, nil, "Sharp Test Slip", db.SlateScopeFullWeek, 4, []int64{user.ID},
+	)
+	require.NoError(t, err)
+
+	// Leg 1: BUF -2.5 vs Pinnacle -3.5 -> sharp_line_edge (+1.0 >= 0.5).
+	leg1, err := store.CreateLeg(ctx, db.Leg{
+		SlipID: slip.ID, UserID: user.ID, GameID: new("g1"),
+		MarketType: "SPREAD", Selection: "BUF -2.5",
+		Team: new("BUF"), Side: new("TEAM"), Line: new(-2.5), Odds: -110,
+	})
+	require.NoError(t, err)
+	require.NoError(t, store.SetLegResult(ctx, leg1.ID, parlay.Won, "test"))
+
+	// Leg 2: Khalil Shakir Over 51.5 Rec Yds vs Pinnacle 55.5 -> sharp_line_edge (+4.0 >= 2.0).
+	leg2, err := store.CreateLeg(ctx, db.Leg{
+		SlipID: slip.ID, UserID: user.ID, GameID: new("g1"),
+		MarketType: "REC_YDS", Selection: "Khalil Shakir Over 51.5 Rec Yds",
+		Team: new("BUF"), PlayerName: new("Khalil Shakir"), PlayerID: new("espn-wr1"),
+		Side: new("OVER"), Line: new(51.5), Odds: -110,
+	})
+	require.NoError(t, err)
+	require.NoError(t, store.SetLegResult(ctx, leg2.ID, parlay.Won, "test"))
+
+	// Leg 3: James Cook Over 68.5 Rush Yds @ +115 vs Pinnacle 68.5 (-110/-110) -> sharp_price_edge.
+	leg3, err := store.CreateLeg(ctx, db.Leg{
+		SlipID: slip.ID, UserID: user.ID, GameID: new("g1"),
+		MarketType: "RUSH_YDS", Selection: "James Cook Over 68.5 Rush Yds",
+		Team: new("BUF"), PlayerName: new("James Cook"), PlayerID: new("espn-rb1"),
+		Side: new("OVER"), Line: new(68.5), Odds: 115,
+	})
+	require.NoError(t, err)
+	require.NoError(t, store.SetLegResult(ctx, leg3.ID, parlay.Won, "test"))
+
+	// Leg 4: KC ML @ -120 vs Pinnacle -150/+130 (on g2, matched via OddsEventID) -> sharp_price_edge.
+	leg4, err := store.CreateLeg(ctx, db.Leg{
+		SlipID: slip.ID, UserID: user.ID, GameID: new("g2"),
+		MarketType: "ML", Selection: "KC ML",
+		Team: new("KC"), Side: new("TEAM"), Odds: -120,
+	})
+	require.NoError(t, err)
+	require.NoError(t, store.SetLegResult(ctx, leg4.ID, parlay.Won, "test"))
+
+	// Leg 5: BUF Team Total Over 24.5 (no sharp benchmark archived for TEAM_TOTAL).
+	leg5, err := store.CreateLeg(ctx, db.Leg{
+		SlipID: slip.ID, UserID: user.ID, GameID: new("g1"),
+		MarketType: "TEAM_TOTAL", Selection: "BUF Over 24.5",
+		Team: new("BUF"), Side: new("OVER"), Line: new(24.5), Odds: -110,
+	})
+	require.NoError(t, err)
+	require.NoError(t, store.SetLegResult(ctx, leg5.ID, parlay.Lost, "test"))
+
+	require.NoError(t, store.SetSlipGrade(ctx, slip.ID, parlay.Lost, db.SlipGraded))
+
+	ds, err := eval.LoadDataset(ctx, store, eval.ReplayFilter{})
+	require.NoError(t, err)
+	require.Len(t, ds.Weeks, 1)
+
+	w := ds.Weeks[0]
+	assert.Equal(t, 5, ds.Coverage.TotalLegs)
+	assert.Equal(t, 4, ds.Coverage.WithSharp)
+
+	// Verify sharp quotes came from pre-kickoff archive (Pinnacle -3.5, not poisoned -10.5/-14.5).
+	g1 := w.Games["g1"]
+	spreadQuote, ok := g1.Sharp[analyzer.SharpKey{MarketType: "SPREAD", Team: "BUF", Side: "TEAM"}]
+	require.True(t, ok)
+	require.NotNil(t, spreadQuote.Line)
+	assert.InDelta(t, -3.5, *spreadQuote.Line, 1e-6)
+
+	// Verify sharp rules fire during ScoreLeg on replayed inputs.
+	grade1 := analyzer.ScoreLeg(w.Slips[0].Legs[0].Leg, w.Games, w.Stats)
+	assert.NotEmpty(t, grade1.Factors)
+	assert.Equal(t, "sharp_line_edge", grade1.Factors[0].Rule)
+
+	grade2 := analyzer.ScoreLeg(w.Slips[0].Legs[1].Leg, w.Games, w.Stats)
+	require.NotEmpty(t, grade2.Factors)
+	assert.Equal(t, "sharp_line_edge", grade2.Factors[0].Rule)
+
+	grade3 := analyzer.ScoreLeg(w.Slips[0].Legs[2].Leg, w.Games, w.Stats)
+	require.NotEmpty(t, grade3.Factors)
+	assert.Equal(t, "sharp_price_edge", grade3.Factors[0].Rule)
+
+	grade4 := analyzer.ScoreLeg(w.Slips[0].Legs[3].Leg, w.Games, w.Stats)
+	require.NotEmpty(t, grade4.Factors)
+	assert.Equal(t, "sharp_price_edge", grade4.Factors[0].Rule)
+}

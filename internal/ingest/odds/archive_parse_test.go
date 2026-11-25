@@ -31,6 +31,31 @@ func TestParseLinesJSON(t *testing.T) {
 	})
 }
 
+func TestParseLinesSnapshotJSON(t *testing.T) {
+	t.Parallel()
+
+	t.Run("parses events and lines from fixture", func(t *testing.T) {
+		t.Parallel()
+		raw, err := os.ReadFile(filepath.Join("testdata", "odds_nfl.json"))
+		require.NoError(t, err)
+
+		events, lines, err := odds.ParseLinesSnapshotJSON(raw)
+		require.NoError(t, err)
+		assert.NotEmpty(t, events)
+		assert.NotEmpty(t, lines)
+		assert.NotEmpty(t, events[0].ID)
+		assert.NotEmpty(t, events[0].HomeTeam)
+		assert.NotEmpty(t, events[0].AwayTeam)
+		assert.False(t, events[0].CommenceTime.IsZero())
+	})
+
+	t.Run("rejects invalid JSON", func(t *testing.T) {
+		t.Parallel()
+		_, _, err := odds.ParseLinesSnapshotJSON([]byte("{invalid"))
+		require.Error(t, err)
+	})
+}
+
 func TestParsePropsJSON(t *testing.T) {
 	t.Parallel()
 
