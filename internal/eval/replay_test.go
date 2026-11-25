@@ -866,3 +866,151 @@ func TestLoadDatasetReconstructsSharpAndIsolatesPreKickoff(t *testing.T) {
 	require.NotEmpty(t, grade4.Factors)
 	assert.Equal(t, "sharp_price_edge", grade4.Factors[0].Rule)
 }
+
+func TestLoadDatasetNFLverseL5Fallback(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	store := newTestStore(t)
+
+	group, user := seedGroupAndMember(t, store, "eve")
+	week6, err := store.UpsertWeek(ctx, 2025, nflverse.SeasonTypeRegular, 6)
+	require.NoError(t, err)
+
+	kickoff := time.Date(2025, 10, 12, 17, 0, 0, 0, time.UTC)
+	_, err = store.UpsertGame(ctx, db.Game{
+		ID:         "g6",
+		WeekID:     week6.ID,
+		HomeTeam:   "BUF",
+		AwayTeam:   "NYJ",
+		HomeName:   "Buffalo Bills",
+		AwayName:   "New York Jets",
+		HomeESPNID: "2",
+		AwayESPNID: "20",
+		Kickoff:    kickoff,
+		Status:     db.GameFinal,
+	})
+	require.NoError(t, err)
+
+	// Seed Weeks 1..5 (valid prior) and Weeks 6..7 (same-week & future leakage)
+	// for espn-wr-l5 (no pre-kickoff espn:gamelog, no pre-kickoff espn:roster)
+	// and espn-rb-espn (has pre-kickoff espn:gamelog which must take precedence).
+	var playerRows []db.NFLversePlayerWeek
+	for w := 1; w <= 7; w++ {
+		recYds := 40 + w*10 // Weeks 1..5 -> 50, 60, 70, 80, 90 (most-recent-first: 90, 80, 70, 60, 50; median 70)
+		pos := "WR"
+		rushYds := 15
+		if w >= 6 {
+			recYds = 999 // poisoned same-week / future leakage
+			pos = "QB"   // poisoned position leakage
+			rushYds = 999
+		}
+		playerRows = append(playerRows,
+			db.NFLversePlayerWeek{
+				Season: 2025, SeasonType: nflverse.SeasonTypeRegular, WeekNum: w,
+				ESPNID: "espn-wr-l5", Team: "BUF", PlayerName: "L5 Fallback WR", Position: pos,
+				PassYds: 10 + w, PassTDs: w % 2, RushYds: w, Carries: 1,
+				RecYds: recYds, Receptions: 4 + w, RushTDs: 0, RecTDs: w % 2, KickerPts: 0,
+			},
+			db.NFLversePlayerWeek{
+				Season: 2025, SeasonType: nflverse.SeasonTypeRegular, WeekNum: w,
+				ESPNID: "espn-rb-espn", Team: "BUF", PlayerName: "ESPN Gamelog RB", Position: "RB",
+				RushYds: rushYds, Carries: 5,
+			},
+		)
+	}
+	_, err = store.UpsertNFLversePlayerWeeks(ctx, playerRows)
+	require.NoError(t, err)
+
+	// Post-kickoff gamelog for espn-wr-l5 must be ignored; nflverse fallback must be used instead.
+	postGamelog := `{"names":["receivingYards"],"labels":["YDS"],"categories":[{"name":"receiving","count":1}],"seasonTypes":[{"displayName":"Regular Season","categories":[{"displayName":"Regular Season","splitType":"0","events":[{"eventId":"6","stats":["5"]}]}]}]}`
+	mustArchiveResponse(t, store, "espn", "espn:gamelog:espn-wr-l5", kickoff.Add(1*time.Minute), []byte(postGamelog))
+
+	// Pre-kickoff gamelog for espn-rb-espn must take precedence over nflverse fallback.
+	preRBGamelog := `{"names":["rushingYards"],"labels":["YDS"],"categories":[{"name":"rushing","count":1}],"seasonTypes":[{"displayName":"Regular Season","categories":[{"displayName":"Regular Season","splitType":"0","events":[{"eventId":"1","stats":["92"]},{"eventId":"2","stats":["88"]},{"eventId":"3","stats":["95"]},{"eventId":"4","stats":["90"]},{"eventId":"5","stats":["85"]}]}]}]}`
+	mustArchiveResponse(t, store, "espn", "espn:gamelog:espn-rb-espn", kickoff.Add(-1*time.Hour), []byte(preRBGamelog))
+
+	slip, err := store.CreateSlip(
+		ctx, group.ID, week6.ID, nil, "L5 Fallback Slip", db.SlateScopeFullWeek, 4, []int64{user.ID},
+	)
+	require.NoError(t, err)
+
+	// Leg 1: Over 45.5 Rec Yds -> clears in all 5 prior weeks (50..90) -> hit_rate fires.
+	leg1, err := store.CreateLeg(ctx, db.Leg{
+		SlipID: slip.ID, UserID: user.ID, GameID: new("g6"),
+		MarketType: "REC_YDS", Selection: "L5 Fallback WR Over 45.5 Rec Yds",
+		Team: new("BUF"), PlayerName: new("L5 Fallback WR"), PlayerID: new("espn-wr-l5"),
+		Side: new("OVER"), Line: new(45.5), Odds: -110,
+	})
+	require.NoError(t, err)
+	require.NoError(t, store.SetLegResult(ctx, leg1.ID, parlay.Won, "test"))
+
+	// Leg 2: Over 75.5 Rec Yds -> above L5 median 70 -> median_trap fires.
+	leg2, err := store.CreateLeg(ctx, db.Leg{
+		SlipID: slip.ID, UserID: user.ID, GameID: new("g6"),
+		MarketType: "REC_YDS", Selection: "L5 Fallback WR Over 75.5 Rec Yds",
+		Team: new("BUF"), PlayerName: new("L5 Fallback WR"), PlayerID: new("espn-wr-l5"),
+		Side: new("OVER"), Line: new(75.5), Odds: -110,
+	})
+	require.NoError(t, err)
+	require.NoError(t, store.SetLegResult(ctx, leg2.ID, parlay.Lost, "test"))
+
+	// Leg 3: RB with pre-kickoff ESPN gamelog -> uses ESPN gamelog, not nflverse fallback.
+	leg3, err := store.CreateLeg(ctx, db.Leg{
+		SlipID: slip.ID, UserID: user.ID, GameID: new("g6"),
+		MarketType: "RUSH_YDS", Selection: "ESPN Gamelog RB Over 80.5 Rush Yds",
+		Team: new("BUF"), PlayerName: new("ESPN Gamelog RB"), PlayerID: new("espn-rb-espn"),
+		Side: new("OVER"), Line: new(80.5), Odds: -110,
+	})
+	require.NoError(t, err)
+	require.NoError(t, store.SetLegResult(ctx, leg3.ID, parlay.Won, "test"))
+
+	require.NoError(t, store.SetSlipGrade(ctx, slip.ID, parlay.Lost, db.SlipGraded))
+
+	ds, err := eval.LoadDataset(ctx, store, eval.ReplayFilter{})
+	require.NoError(t, err)
+	require.Len(t, ds.Weeks, 1)
+
+	assert.Equal(t, 3, ds.Coverage.TotalLegs)
+	assert.Equal(t, 1, ds.Coverage.WithGameLogs)
+	assert.Equal(t, 2, ds.Coverage.WithL5Fallback)
+
+	w := ds.Weeks[0]
+	psFallback, ok := w.Stats["espn-wr-l5"]
+	require.True(t, ok)
+	assert.Equal(t, "WR", psFallback.Position)
+	assert.Equal(t, []float64{90, 80, 70, 60, 50}, psFallback.Games["REC_YDS"])
+	assert.Equal(t, []float64{9, 8, 7, 6, 5}, psFallback.Games["RECEPTIONS"])
+	assert.Equal(t, []float64{15, 14, 13, 12, 11}, psFallback.Games["PASS_YDS"])
+	assert.Equal(t, []float64{1, 0, 1, 0, 1}, psFallback.Games["PASS_TDS"])
+	assert.Equal(t, []float64{5, 4, 3, 2, 1}, psFallback.Games["RUSH_YDS"])
+	assert.Equal(t, []float64{1, 1, 1, 1, 1}, psFallback.Games["RUSH_ATT"])
+	assert.Equal(t, []float64{1, 0, 1, 0, 1}, psFallback.Games["ANYTIME_TD"])
+	assert.Equal(t, []float64{0, 0, 0, 0, 0}, psFallback.Games["KICKER_PTS"])
+
+	psESPN, ok := w.Stats["espn-rb-espn"]
+	require.True(t, ok)
+	assert.Equal(t, []float64{92, 88, 95, 90, 85}, psESPN.Games["RUSH_YDS"])
+
+	grade1 := analyzer.ScoreLeg(w.Slips[0].Legs[0].Leg, w.Games, w.Stats)
+	var rules1 []string
+	for _, f := range grade1.Factors {
+		rules1 = append(rules1, f.Rule)
+	}
+	assert.Contains(t, rules1, "hit_rate")
+	assert.NotContains(t, rules1, "median_trap")
+
+	grade2 := analyzer.ScoreLeg(w.Slips[0].Legs[1].Leg, w.Games, w.Stats)
+	var rules2 []string
+	for _, f := range grade2.Factors {
+		rules2 = append(rules2, f.Rule)
+	}
+	assert.Contains(t, rules2, "median_trap")
+	assert.NotContains(t, rules2, "hit_rate")
+
+	grade3 := analyzer.ScoreLeg(w.Slips[0].Legs[2].Leg, w.Games, w.Stats)
+	var rules3 []string
+	for _, f := range grade3.Factors {
+		rules3 = append(rules3, f.Rule)
+	}
+	assert.Contains(t, rules3, "hit_rate")
+}

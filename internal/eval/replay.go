@@ -82,7 +82,7 @@ func LoadDataset(ctx context.Context, store *db.Store, filter ReplayFilter) (Rep
 		}
 
 		athleteIDs := analyzer.DistinctLegPlayerIDs(rawLegs)
-		teamEPA, usageByPlayer, playersByTeam := loadPriorNFLverse(ctx, store, week, athleteIDs)
+		nflverseData := loadPriorNFLverse(ctx, store, week, athleteIDs)
 
 		nfeloByGame, err := store.NfeloForGames(ctx, gameIDs)
 		if err != nil {
@@ -105,7 +105,7 @@ func LoadDataset(ctx context.Context, store *db.Store, filter ReplayFilter) (Rep
 			// Reconstruct pre-kickoff game state as scheduled so GameFromDB attaches nfelo.
 			preKickoffGame := g
 			preKickoffGame.Status = db.GameScheduled
-			converted := analyzer.GameFromDB(preKickoffGame, proj, teamEPA)
+			converted := analyzer.GameFromDB(preKickoffGame, proj, nflverseData.teamEPA)
 
 			if referencedGames[g.ID] {
 				injuries, rosterPositions, rosterPlayers, hasInj := loadArchivedGameInjuries(ctx, store, g)
@@ -125,7 +125,7 @@ func LoadDataset(ctx context.Context, store *db.Store, filter ReplayFilter) (Rep
 					g,
 					matchGames,
 					rosterPlayers,
-					playersByTeam,
+					nflverseData.playersByTeam,
 					linesCache,
 				)
 				if len(preKickoffOdds) > 0 {
@@ -140,12 +140,12 @@ func LoadDataset(ctx context.Context, store *db.Store, filter ReplayFilter) (Rep
 			gamesMap[g.ID] = converted
 		}
 
-		statsMap, playerHasGameLog := loadArchivedPlayerStats(
+		statsMap, playerHasGameLog, playerHasL5Fallback := loadArchivedPlayerStats(
 			ctx,
 			store,
 			rawLegs,
 			gameByDBID,
-			usageByPlayer,
+			nflverseData,
 			positionByID,
 		)
 
@@ -155,6 +155,7 @@ func LoadDataset(ctx context.Context, store *db.Store, filter ReplayFilter) (Rep
 			gamesMap,
 			statsMap,
 			playerHasGameLog,
+			playerHasL5Fallback,
 			gameHasInjuries,
 			gameHasArchivedOdds,
 		)
@@ -195,14 +196,19 @@ func accumulateWeekCoverage(
 	gamesMap map[string]analyzer.Game,
 	statsMap map[string]analyzer.PlayerStats,
 	playerHasGameLog map[string]bool,
+	playerHasL5Fallback map[string]bool,
 	gameHasInjuries map[string]bool,
 	gameHasArchivedOdds map[string]bool,
 ) {
 	for _, s := range slips {
 		for _, rl := range s.Legs {
 			cov.TotalLegs++
-			if rl.Leg.PlayerID != "" && playerHasGameLog[rl.Leg.PlayerID] {
-				cov.WithGameLogs++
+			if rl.Leg.PlayerID != "" {
+				if playerHasGameLog[rl.Leg.PlayerID] {
+					cov.WithGameLogs++
+				} else if playerHasL5Fallback[rl.Leg.PlayerID] {
+					cov.WithL5Fallback++
+				}
 			}
 			if rl.Leg.GameID == "" {
 				if rl.DecimalOdds > 1 {
@@ -335,15 +341,25 @@ func isSettledResult(r parlay.Result) bool {
 	return r == parlay.Won || r == parlay.Lost || r == parlay.Push || r == parlay.Void
 }
 
+type priorNFLverseData struct {
+	teamEPA       map[string]*analyzer.TeamDefenseProfile
+	usageByPlayer map[string]*analyzer.PlayerUsage
+	gamesByPlayer map[string]map[string][]float64
+	positionByID  map[string]string
+	playersByTeam map[string][]db.RosterPlayer
+}
+
 func loadPriorNFLverse(
 	ctx context.Context,
 	store *db.Store,
 	week db.Week,
 	athleteIDs []string,
-) (map[string]*analyzer.TeamDefenseProfile, map[string]*analyzer.PlayerUsage, map[string][]db.RosterPlayer) {
+) priorNFLverseData {
 	seasonTypes := analyzer.NFLverseSeasonTypes(week.SeasonType)
+	out := priorNFLverseData{
+		playersByTeam: make(map[string][]db.RosterPlayer),
+	}
 
-	var teamEPA map[string]*analyzer.TeamDefenseProfile
 	if rows, err := store.NFLverseTeamWeeksForSeasonTypes(ctx, week.Season, seasonTypes...); err == nil {
 		filtered := make([]db.NFLverseTeamWeek, 0, len(rows))
 		for _, r := range rows {
@@ -351,17 +367,18 @@ func loadPriorNFLverse(
 				filtered = append(filtered, r)
 			}
 		}
-		teamEPA = analyzer.BuildTeamDefenseProfiles(filtered)
+		out.teamEPA = analyzer.BuildTeamDefenseProfiles(filtered)
 	}
 
-	var usageByPlayer map[string]*analyzer.PlayerUsage
 	if len(athleteIDs) > 0 {
 		if byPlayer, err := store.NFLversePlayerWeeksForPlayersTypes(
 			ctx,
 			athleteIDs,
 			week.Season,
 			seasonTypes...); err == nil {
-			usageByPlayer = make(map[string]*analyzer.PlayerUsage, len(athleteIDs))
+			out.usageByPlayer = make(map[string]*analyzer.PlayerUsage, len(athleteIDs))
+			out.gamesByPlayer = make(map[string]map[string][]float64, len(athleteIDs))
+			out.positionByID = make(map[string]string, len(athleteIDs))
 			for _, id := range athleteIDs {
 				rows := byPlayer[id]
 				filtered := make([]db.NFLversePlayerWeek, 0, len(rows))
@@ -370,14 +387,23 @@ func loadPriorNFLverse(
 						filtered = append(filtered, r)
 					}
 				}
+				if len(filtered) == 0 {
+					continue
+				}
 				if u := analyzer.BuildPlayerUsage(filtered); u != nil {
-					usageByPlayer[id] = u
+					out.usageByPlayer[id] = u
+				}
+				out.gamesByPlayer[id] = buildNFLversePlayerGames(filtered)
+				for _, r := range filtered {
+					if r.Position != "" {
+						out.positionByID[id] = r.Position
+						break
+					}
 				}
 			}
 		}
 	}
 
-	playersByTeam := make(map[string][]db.RosterPlayer)
 	seenPlayers := make(map[string]bool)
 	// Iterate most recent season type first so postseason rows precede regular season.
 	for _, seasonType := range slices.Backward(seasonTypes) {
@@ -393,7 +419,7 @@ func loadPriorNFLverse(
 				continue
 			}
 			seenPlayers[r.ESPNID] = true
-			playersByTeam[r.Team] = append(playersByTeam[r.Team], db.RosterPlayer{
+			out.playersByTeam[r.Team] = append(out.playersByTeam[r.Team], db.RosterPlayer{
 				AthleteID: r.ESPNID,
 				Team:      r.Team,
 				FullName:  r.PlayerName,
@@ -403,7 +429,38 @@ func loadPriorNFLverse(
 		}
 	}
 
-	return teamEPA, usageByPlayer, playersByTeam
+	return out
+}
+
+// buildNFLversePlayerGames constructs per-market stat slices (most recent game
+// first) from strictly prior-week nflverse rows ordered season_type DESC,
+// week_num DESC.
+func buildNFLversePlayerGames(rows []db.NFLversePlayerWeek) map[string][]float64 {
+	if len(rows) == 0 {
+		return nil
+	}
+	n := len(rows)
+	games := map[string][]float64{
+		"PASS_YDS":   make([]float64, 0, n),
+		"PASS_TDS":   make([]float64, 0, n),
+		"RUSH_YDS":   make([]float64, 0, n),
+		"RUSH_ATT":   make([]float64, 0, n),
+		"REC_YDS":    make([]float64, 0, n),
+		"RECEPTIONS": make([]float64, 0, n),
+		"ANYTIME_TD": make([]float64, 0, n),
+		"KICKER_PTS": make([]float64, 0, n),
+	}
+	for _, r := range rows {
+		games["PASS_YDS"] = append(games["PASS_YDS"], float64(r.PassYds))
+		games["PASS_TDS"] = append(games["PASS_TDS"], float64(r.PassTDs))
+		games["RUSH_YDS"] = append(games["RUSH_YDS"], float64(r.RushYds))
+		games["RUSH_ATT"] = append(games["RUSH_ATT"], float64(r.Carries))
+		games["REC_YDS"] = append(games["REC_YDS"], float64(r.RecYds))
+		games["RECEPTIONS"] = append(games["RECEPTIONS"], float64(r.Receptions))
+		games["ANYTIME_TD"] = append(games["ANYTIME_TD"], float64(r.RushTDs+r.RecTDs))
+		games["KICKER_PTS"] = append(games["KICKER_PTS"], float64(r.KickerPts))
+	}
+	return games
 }
 
 func isPriorNFLverseWeek(rowSeasonType, rowWeekNum int, target db.Week) bool {
@@ -421,9 +478,9 @@ func loadArchivedPlayerStats(
 	store *db.Store,
 	legs []db.Leg,
 	games map[string]db.Game,
-	usageByPlayer map[string]*analyzer.PlayerUsage,
+	nflverseData priorNFLverseData,
 	positionByID map[string]string,
-) (map[string]analyzer.PlayerStats, map[string]bool) {
+) (map[string]analyzer.PlayerStats, map[string]bool, map[string]bool) {
 	kickoffByAthlete := make(map[string]time.Time)
 	for _, l := range legs {
 		if l.PlayerID == nil || *l.PlayerID == "" || l.GameID == nil || *l.GameID == "" {
@@ -442,6 +499,7 @@ func loadArchivedPlayerStats(
 	athleteIDs := analyzer.DistinctLegPlayerIDs(legs)
 	stats := make(map[string]analyzer.PlayerStats, len(athleteIDs))
 	hasGameLog := make(map[string]bool, len(athleteIDs))
+	hasL5Fallback := make(map[string]bool, len(athleteIDs))
 
 	for _, id := range athleteIDs {
 		var markets map[string][]float64
@@ -454,8 +512,17 @@ func loadArchivedPlayerStats(
 				}
 			}
 		}
-		usage := usageByPlayer[id]
+		if len(markets) == 0 {
+			if fallback := nflverseData.gamesByPlayer[id]; len(fallback) > 0 {
+				markets = fallback
+				hasL5Fallback[id] = true
+			}
+		}
+		usage := nflverseData.usageByPlayer[id]
 		pos := positionByID[id]
+		if pos == "" {
+			pos = nflverseData.positionByID[id]
+		}
 		if len(markets) == 0 && usage == nil && pos == "" {
 			continue
 		}
@@ -466,7 +533,7 @@ func loadArchivedPlayerStats(
 		}
 	}
 
-	return stats, hasGameLog
+	return stats, hasGameLog, hasL5Fallback
 }
 
 func loadArchivedGameInjuries(

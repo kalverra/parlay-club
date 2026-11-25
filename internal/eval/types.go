@@ -10,13 +10,14 @@ import (
 // DataCoverage records how many replayed legs had each historical signal
 // available before kickoff.
 type DataCoverage struct {
-	TotalLegs    int `json:"total_legs"`
-	WithGameLogs int `json:"with_game_logs"`
-	WithInjuries int `json:"with_injuries"`
-	WithNFLVerse int `json:"with_nflverse"`
-	WithNfelo    int `json:"with_nfelo"`
-	WithOdds     int `json:"with_odds"`
-	WithSharp    int `json:"with_sharp,omitempty"`
+	TotalLegs      int `json:"total_legs"`
+	WithGameLogs   int `json:"with_game_logs"`
+	WithL5Fallback int `json:"with_l5_fallback,omitempty"`
+	WithInjuries   int `json:"with_injuries"`
+	WithNFLVerse   int `json:"with_nflverse"`
+	WithNfelo      int `json:"with_nfelo"`
+	WithOdds       int `json:"with_odds"`
+	WithSharp      int `json:"with_sharp,omitempty"`
 }
 
 // ReplayedLeg pairs a settled leg with its decimal odds and outcome.

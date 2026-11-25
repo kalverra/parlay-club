@@ -266,7 +266,7 @@ Risk: low (read-only replay enrichment with strict pre-kickoff timestamp boundar
   `odds:props:{gameID}` (with `BodySHA256` body memoization and pre-kickoff roster/prior-week nflverse player
   resolution) in `internal/eval/replay.go`, track `DataCoverage.WithSharp`, and add unit tests verifying sharp rule
   firing and strict pre-kickoff isolation.
-- [ ] Add strictly prior-week `nflverse_player_weeks` L5 fallback for `PlayerStats.Games` (and position backfill) in
+- [x] Add strictly prior-week `nflverse_player_weeks` L5 fallback for `PlayerStats.Games` (and position backfill) in
   `internal/eval/replay.go` when a player lacks a pre-kickoff archived ESPN game log, track
   `DataCoverage.WithL5Fallback`, and add unit tests verifying L5 hit-rate/median-trap firing and zero same-week/future
   leakage.
