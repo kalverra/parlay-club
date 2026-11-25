@@ -15,7 +15,7 @@
 - [Groups](concepts/groups.md): How groups split people into shared clubs, how invites and leaving work, how recurring slip schedules automate weekly slips, and how the active group scopes what a person sees.
 - [Live updates](concepts/live-updates.md): How a slip page hears about changes through one SSE stream, and how the hub, deadlines, and client reconnect keep that stream cheap.
 - [Persistence](concepts/persistence.md): How one SQLite file holds every slip and every cached response, how Litestream restores and replicates it on Cloud Run, why only one process may write to it, and how the local sandbox keeps its own file and stage row.
-- [Slips](concepts/slips.md): How a group builds shared parlays from the slate, covering slate scopes, deadlines, the hub, A-grade highlights, the pick board, votes, wagers, grading, and editing rules.
+- [Slips](concepts/slips.md): How a group builds and tracks shared parlays from the slate, covering slate scopes, deadlines, the hub, live progress, A-grade highlights, the pick board, votes, wagers, grading, and editing rules.
 
 ## Decision
 
@@ -31,7 +31,7 @@
 - [Analyzer rules](reference/analyzer-rules.md): The stable IDs, severities, triggers, and example messages for the correlation, weather, key-number, chalk, player stats, nfelo model, and nflverse rules, plus the A–F leg and slip grading rubric in internal/analyzer.
 - [Configuration](reference/config.md): Environment variables the server reads, their dev defaults, the odds provider keys, pre-fill bearer token, and GitHub issue reporting settings they configure, the offline sandbox switch, and the values it rejects in prod.
 - [Data sources](reference/data-sources.md): ESPN scoreboard, rosters, game logs, and injuries, Open-Meteo weather, Parlay API and The Odds API lines, props, and credits, nfelo, nflverse, player matching, and the API archive.
-- [Odds math](reference/odds-math.md): The formulas in internal/parlay for converting American and decimal odds, computing implied probability and two-way de-vigging, measuring price edge, combining legs, picking a reference price, and computing payout and units.
+- [Odds math](reference/odds-math.md): Formulas in internal/parlay for odds, implied probability, de-vigging, price edge, payouts, and units, plus internal/progress for live leg and parlay progress and hit probability.
 - [Routes](reference/routes.md): Every HTTP route the server serves, the middleware in front of them, and the status codes, HTMX headers, and SSE frames handlers return.
 - [Sandbox replay](reference/sandbox-replay.md): The fail-closed HTTP transport and named week 9 response registry behind the local Sunday sandbox, the requests they answer or leave as labeled empty fallbacks, which fixtures are real captures versus derived snapshots, and how startup, reset, stages, seeded people, and scripted grades replay them.
 - [Database schema](reference/schema.md): SQLite schema, migrations, connection pools, and table conventions for groups, users, games, odds, nfelo, nflverse, slips, legs, rosters, game logs, and the API archive.
