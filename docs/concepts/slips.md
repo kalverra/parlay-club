@@ -2,8 +2,8 @@
 id: slips
 title: Slips
 type: concept
-summary: How a group builds shared parlays from the slate, covering slate scopes, deadlines, the hub, A-grade highlights, the pick board, votes, wagers, grading, and editing rules.
-tags: [slips, weeks, legs, members, locking, grading, results, activity, groups, games, quick-add, nfelo, props, autocomplete, research, next-step, hub, pick-board, slate, drilldown, tabs, search, dock, tray, votes, voting, wagers, slate-scopes, deadlines, multi-slip, highlights]
+summary: How a group builds and tracks shared parlays from the slate, covering slate scopes, deadlines, the hub, live progress, A-grade highlights, the pick board, votes, wagers, grading, and editing rules.
+tags: [slips, weeks, legs, members, locking, grading, results, activity, groups, games, quick-add, nfelo, props, autocomplete, research, next-step, hub, pick-board, slate, drilldown, tabs, search, dock, tray, votes, voting, wagers, slate-scopes, deadlines, multi-slip, highlights, live-progress]
 budget:
   max_lines: 550
   max_spans_per_100_lines: 100
@@ -99,8 +99,9 @@ schedules). The route always renders the per-group overview page:
 
 - **Spotlight slips:** Active or upcoming slips from that week appear in the hero spotlight (`isSpotlightSlip`): any
   non-graded slip whose next step is `pick`, `lock_in`, `join`, `waiting`, or `export`, or a locked slip with an
-  eligible live or upcoming game (`now < kickoff`). Cards sort by urgency and earliest deadline, with a primary button
-  ("Pick N more" to `/slips/{id}/pick` when in `pick`, otherwise "Open slip" to `/slips/{id}`).
+  eligible live or upcoming game (`now < kickoff`). Cards sort by urgency and earliest deadline, show a compact live
+  progress bar and `Live X%` hit chance when any leg is live or settled, and offer a primary button ("Pick N more" to
+  `/slips/{id}/pick` when in `pick`, otherwise "Open slip" to `/slips/{id}`).
 - **Quiet state & overview sections:** With no spotlight slips, the hero shows "No active slip right now", notes the
   next upcoming week if loaded, and offers "+ Start a slip" (`/slips/new`). Below it sit the group record snapshot
   (`/record`), recent non-spotlight slips, recurring schedules (`+ Add recurring slip` to `/slips/new?mode=recurring`),
@@ -414,6 +415,25 @@ or game link. It is not a bottom-bar tab.
   or text fallback badge.
 - **Responsive layout:** Phone and desktop screens keep Research in a single column, reached from the page or leg that
   names the player or game.
+
+## Live progress
+
+Once any leg on a slip enters a `LIVE` game or is settled (`WON`, `LOST`, `PUSH`, `VOID`), the app surfaces live
+progress bars and deterministic hit chances without spending paid odds credits:
+
+- **Slip hub (`#slip-panel`):** Renders a live parlay progress card above the member list with a status badge (`Live`,
+  `Cashed`, `Busted`, `Push`, or `Scheduled`), hit/live/lost summary, `role="progressbar"` fill bar, and
+  `Live chance X%` beside the muted `Pre-game Y%` implied probability (omitting chances when every leg pushes or voids).
+  Each `LIVE` or settled leg row adds a slim progress strip showing the live stat or score, game clock/quarter (or
+  `Live · stats pending` before box-score stats arrive), and leg hit chance (`100%` when cashed, `0%` when busted).
+- **Group overview (`GET /groups/{id}/week`):** Spotlight cards show a compact single-row progress bar with the status
+  badge, summary, and `Live X%`.
+- **Probability and early settlement (`internal/progress`):** `EvaluateLeg` and `EvaluateSlip` anchor each leg to its
+  pre-game implied probability (`parlay.ImpliedProb`) and update it deterministically from ESPN scoreboard scores/clock
+  and `games.boxscore_json`. `PUSH` and `VOID` legs drop out of the parlay product and bar average, and any `LOST` or
+  busted leg drops the parlay live chance to `0%`. Monotonic markets (totals, TDs, attempts, receptions, kicking
+  points) cash or bust as soon as a live stat crosses the line; yardage props stay live until `FINAL` because negative
+  plays can reduce totals. `#slip-panel` refreshes automatically when `slip-updated` arrives over SSE.
 
 ## Grading
 
