@@ -7,12 +7,14 @@ FROM golang:1.27.3-alpine AS build
 WORKDIR /src
 
 COPY go.mod go.sum ./
-RUN --mount=type=cache,target=/go/pkg/mod \
-	go mod download
+# Keep /go/pkg/mod in this intermediate build-stage layer so BuildKit's GHA
+# layer cache reuses downloaded modules across ephemeral runners.
+RUN go mod download
 
-COPY . .
-RUN --mount=type=cache,target=/go/pkg/mod \
-	--mount=type=cache,target=/root/.cache/go-build \
+COPY cmd/ cmd/
+COPY internal/ internal/
+COPY web/ web/
+RUN --mount=type=cache,target=/root/.cache/go-build \
 	CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/server ./cmd/server
 
 # Pin the Litestream release and copy its binary into the runtime image.

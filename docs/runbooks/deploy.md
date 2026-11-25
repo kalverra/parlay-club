@@ -23,8 +23,8 @@ setup lives in [GCP setup](../guides/gcp-setup.md); this runbook covers every de
 - The five required secrets have an `ENABLED` version. `github-token` and `prefill-token` are optional: with a version,
   bug reports open GitHub issues and the optional `POST /internal/prefill` fallback accepts bearer-token requests;
   without one, bug reports stay in SQLite and `POST /internal/prefill` returns `404` (per-game-day pre-fill still runs
-  automatically on the first authenticated visit at or after 6:00 AM ET on any scheduled game day via `prefill:gameday` in
-  `sync_state`).
+  automatically on the first authenticated visit at or after 6:00 AM ET on any scheduled game day via `prefill:gameday`
+  in `sync_state`).
 - `parlay-deployer` can read Secret Manager metadata and the Litestream bucket. A project set up before the pre-flight
   checks existed needs `deploy/setup.sh` run once more; it grants `roles/secretmanager.viewer` and
   `roles/storage.bucketViewer`.
@@ -77,21 +77,24 @@ push, so a broken gate fails before it can block or allow a deploy.
    host. A missing or malformed value fails in seconds and names the variable.
 4. Authenticates to Google Cloud through Workload Identity Federation as `parlay-deployer`. No service account key is
    stored in GitHub.
-5. Pre-flights the GCP project: the Artifact Registry repo, the Litestream bucket, and an `ENABLED` version of each
-   required secret. It collects every failure, then exits before the build. `github-token` and `prefill-token` are
-   checked separately; when each has an `ENABLED` version the job sets `MOUNT_GITHUB_TOKEN=true` or
+5. Compares the tested commit against the commit currently live on Cloud Run (for CI-triggered runs). If no runtime,
+   template, seed, or container files changed, the job skips the build and deploy. Manual dispatches always deploy.
+6. Pre-flights the GCP project in parallel: the Artifact Registry repo, the Litestream bucket, and an `ENABLED` version
+   of each required secret. It collects every failure, then exits before the build. `github-token` and `prefill-token`
+   are checked separately; when each has an `ENABLED` version the job sets `MOUNT_GITHUB_TOKEN=true` or
    `MOUNT_PREFILL_TOKEN=true` so the deploy mounts it, and when one does not the job logs a notice and leaves bug
    reports in SQLite or `POST /internal/prefill` disabled (`404`).
-6. Builds the `Dockerfile` with Buildx and pushes the image to Artifact Registry tagged with the commit SHA, reusing
+7. Builds the `Dockerfile` with Buildx and pushes the image to Artifact Registry tagged with the commit SHA, reusing
    layers from the GitHub Actions cache.
-7. Runs `gcloud run deploy` with one instance at most, concurrency 80, 1 CPU, 512 MiB, a 3600 second timeout, CPU boost,
+8. Runs `gcloud run deploy` with one instance at most, concurrency 80, 1 CPU, 512 MiB, a 3600 second timeout, CPU boost,
    public access, the runtime account, `APP_ENV=prod`, `DB_PATH=/data/parlay.db`, `LITESTREAM_BUCKET`, `BASE_URL`, and
    `GITHUB_REPO` (from the optional `ISSUES_REPO` variable, or the repo that runs the workflow). It mounts the five
    required Secret Manager secrets, plus `GITHUB_TOKEN` when `github-token` has a version and `PREFILL_TOKEN` when
    `prefill-token` has a version.
-8. Reads the service URL and retries once with `BASE_URL` set to that URL if the first revision could not boot. That is
+9. Reads the service URL and retries once with `BASE_URL` set to that URL if the first revision could not boot. That is
    the first-deploy path; later deploys get `BASE_URL` from the repo variable.
-9. Waits for `GET /healthz` on the new revision, then writes the image and URL to the job summary.
+10. Probes `GET /readyz` on the new revision (Google Frontend reserves `/healthz` on `*.run.app`), then writes the image
+    and URL to the job summary.
 
 The image holds the server, the pinned Litestream binary, its config, the entrypoint, `seed/history.yaml`, and `web/`.
 The entrypoint restores the database, then runs the server under `litestream replicate`.
@@ -142,8 +145,8 @@ URL keeps working while you fix the image or a secret.
 
 ## Verify
 
-- The workflow's last step fetches `/healthz`; a green job means the revision booted.
-- `curl -s SERVICE_URL/healthz` prints `ok` from your machine.
+- The workflow's last step fetches `/readyz`; a green job means the revision booted.
+- `curl -s SERVICE_URL/readyz` prints `ok` from your machine.
 - `SERVICE_URL/login` loads, sign-in returns to `/`, and a slip opens.
 - Cloud Run logs show the startup lines and no config error. On an empty replica the first boot logs
   `no matching backups found`; that is normal, not a failure.

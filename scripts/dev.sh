@@ -7,6 +7,7 @@ url="http://localhost:${port}"
 air &
 air_pid=$!
 
+# shellcheck disable=SC2329
 shutdown() {
   kill -TERM "$air_pid" 2>/dev/null || true
 }
