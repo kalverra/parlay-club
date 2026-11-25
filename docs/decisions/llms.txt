@@ -15,6 +15,7 @@
 - [Reduce Cloud Run and storage costs](gcp-cost-optimization.md): Tighten live SSE stream lifetimes and client idle behavior alongside Litestream replication and GCS bucket retention settings: - Skip opening live streams on already-graded slips, shorten server idle/live stream caps (with seamless reconnect on activity or focus), and pause the browser's stream after a few minutes of no user interaction (reconnecting and refreshing immediately when the user returns).
 - [A-grade leg and parlay highlights](grade-highlights.md): A-grade leg and parlay highlights
 - [Grading evals and calibration](grading-evals.md): ### Before ### After Version the grading rubric in Go and build an offline, leak-free historical replayer and eval runner that scores past weeks across rubric versions and compares calibration against actual leg and parlay outcomes.
+- [Calibrated v2 grading and prediction model](grading-model-v2.md): Calibrated v2 grading and prediction model
 - [Auto-grading and Record Book](grading-record-book.md): Grade legs automatically from ESPN box scores once games end, with hand overrides.
 - [Automated grading evals and in-app results page](grading-results.md): Automated grading evals and in-app results page
 - [Redesign per-group landing page](group-landing-overview.md): Turn the per-group entry point into a state-aware group landing page that always renders a coherent overview, elevating active or soon-upcoming slips into a hero spotlight when present.
