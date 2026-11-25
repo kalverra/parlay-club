@@ -68,5 +68,9 @@ paths = ["deploy/blackout.sh", "deploy/blackout_test.sh"]
 
 # Final-gate checks: thorough or slower verification across the whole change.
 [[implement.final.verify.checks]]
+name = "test"
+run = "go test ./..."
+
+[[implement.final.verify.checks]]
 name = "test-race"
 run = "go test -short -race ./..."
