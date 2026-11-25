@@ -276,7 +276,7 @@ Risk: low (read-only replay enrichment with strict pre-kickoff timestamp boundar
 Complexity: medium (bridges `board.Build` multi-book deduplication, offline grading from scores/archived box scores/nflverse, and `eval.Evaluate`/`Compare` market-leg handling)
 Risk: low (read-only evaluation over finished games and archived snapshots; unit tests cover dedup, DNP/unsynced guards, and rubric diffs)
 
-- [ ] Export `espn.ParseBoxScoreJSON` in `internal/ingest/espn/boxscore.go` and `Store.LatestAPIResponse` in
+- [x] Export `espn.ParseBoxScoreJSON` in `internal/ingest/espn/boxscore.go` and `Store.LatestAPIResponse` in
   `internal/db/archive_read.go`, then implement the market-wide candidate builder (`internal/eval/market.go`) using
   `board.Build` median deduplication and deterministic offline grader (`internal/eval/market_grade.go`) over final
   scores, completed archived ESPN box scores, and same-week `nflverse_player_weeks` with unit tests covering all markets

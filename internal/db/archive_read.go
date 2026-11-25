@@ -91,6 +91,27 @@ func (s *Store) ListAPIResponses(ctx context.Context, filter APIResponseFilter) 
 	return list, nil
 }
 
+// LatestAPIResponse returns the newest 2xx archived response for key. It reads
+// only the metadata table, never a body.
+func (s *Store) LatestAPIResponse(ctx context.Context, key string) (APIResponse, bool, error) {
+	row := s.readConn().QueryRowContext(ctx, `
+		SELECT id, source, key, method, url, status, fetched_at, duration_ms,
+		       body_sha256, credits_remaining, credits_used
+		FROM api_responses
+		WHERE key = ? AND status >= 200 AND status < 300
+		ORDER BY fetched_at DESC, id DESC
+		LIMIT 1`, key)
+
+	response, err := scanAPIResponse(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return APIResponse{}, false, nil
+	}
+	if err != nil {
+		return APIResponse{}, false, fmt.Errorf("latest API response: %w", err)
+	}
+	return response, true, nil
+}
+
 // LatestAPIResponseBefore returns the newest 2xx archived response for key
 // fetched at or before before. It reads only the metadata table, never a body.
 func (s *Store) LatestAPIResponseBefore(ctx context.Context, key string, before time.Time) (APIResponse, bool, error) {

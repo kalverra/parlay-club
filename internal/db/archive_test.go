@@ -368,3 +368,39 @@ func TestLatestAPIResponseBefore(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, ok)
 }
+
+func TestLatestAPIResponse(t *testing.T) {
+	t.Parallel()
+
+	store, _ := openTestStore(t)
+	base := time.Date(2026, time.November, 8, 12, 0, 0, 0, time.UTC)
+
+	save := func(key string, status int, fetchedAt time.Time, body string) {
+		t.Helper()
+		require.NoError(t, store.SaveAPIResponse(t.Context(), archive.Record{
+			Source:    "espn",
+			Key:       key,
+			Method:    http.MethodGet,
+			URL:       "https://example.com/" + key,
+			Status:    status,
+			FetchedAt: fetchedAt,
+			Body:      []byte(body),
+		}))
+	}
+
+	key := db.ArchiveSummaryKey("401")
+	save(key, http.StatusOK, base.Add(-2*time.Hour), `{"v":1}`)
+	save(key, http.StatusCreated, base.Add(-1*time.Hour), `{"v":2}`)
+	save(key, http.StatusOK, base.Add(-1*time.Hour), `{"v":3}`) // same timestamp, higher id
+
+	got, ok, err := store.LatestAPIResponse(t.Context(), key)
+	require.NoError(t, err)
+	require.True(t, ok)
+	body, err := store.APIResponseBody(t.Context(), got.BodySHA256)
+	require.NoError(t, err)
+	assert.Equal(t, `{"v":3}`, string(body))
+
+	_, ok, err = store.LatestAPIResponse(t.Context(), db.ArchiveSummaryKey("missing"))
+	require.NoError(t, err)
+	assert.False(t, ok)
+}
