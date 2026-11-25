@@ -56,8 +56,10 @@ func (s *Service) oddsSource(games []db.Game, now time.Time) source {
 	}
 }
 
-// syncScoreboard writes the week and each game, and records the fetch. A rerun
-// of the same slate changes no rows.
+// syncScoreboard writes the week and each game, and records the fetch. When all
+// games on ESPN's default scoreboard are final (e.g., Tuesday before ESPN's
+// weekly rollover), it also fetches the next week's slate so upcoming weeks are
+// available for slip creation. A rerun of the same slate changes no rows.
 func (s *Service) syncScoreboard(ctx context.Context, now time.Time) (bool, error) {
 	if s.scoreboard == nil {
 		return false, nil
@@ -67,34 +69,31 @@ func (s *Service) syncScoreboard(ctx context.Context, now time.Time) (bool, erro
 		return false, fmt.Errorf("scoreboard: %w", err)
 	}
 
+	boards := []espn.Scoreboard{board}
+	if allBoardFinal(board.Games) {
+		next, err := s.nextScoreboard(ctx, board)
+		if err != nil {
+			return false, err
+		}
+		if len(next.Games) > 0 && !sameScoreboardWeek(next, board) {
+			boards = append(boards, next)
+		}
+	}
+
 	changed := false
 	newlyFinal := false
-	var weekID int64
+	var changedWeeks []int64
 	err = s.store.Tx(ctx, func(tx *db.Store) error {
-		week, err := tx.UpsertWeek(ctx, board.Season.Year, board.Season.Type, board.Week.Number)
-		if err != nil {
-			return err
-		}
-		weekID = week.ID
-		existing, err := tx.GamesForWeek(ctx, week.ID)
-		if err != nil {
-			return err
-		}
-		before := make(map[string]db.Game, len(existing))
-		for _, game := range existing {
-			before[game.ID] = game
-		}
-
-		for _, game := range board.Games {
-			stored, err := tx.UpsertGame(ctx, slateGame(game, week.ID, now))
+		for _, b := range boards {
+			weekChanged, weekFinal, weekID, err := upsertScoreboard(ctx, tx, b, now)
 			if err != nil {
 				return err
 			}
-			old, found := before[game.ID]
-			if !found || !reflect.DeepEqual(old, stored) {
+			if weekChanged {
 				changed = true
+				changedWeeks = append(changedWeeks, weekID)
 			}
-			if stored.Status == db.GameFinal && (!found || old.Status != db.GameFinal) {
+			if weekFinal {
 				newlyFinal = true
 			}
 		}
@@ -104,13 +103,91 @@ func (s *Service) syncScoreboard(ctx context.Context, now time.Time) (bool, erro
 	if err != nil {
 		return changed, err
 	}
-	if changed {
+	for _, weekID := range changedWeeks {
 		s.publishWeek(ctx, weekID)
 	}
 	if newlyFinal {
 		s.notifyMarketDataChange()
 	}
 	return changed, nil
+}
+
+// nextScoreboard fetches the week following board, falling back from the end of
+// the regular season (season type 2) to Wild Card weekend (season type 3, week 1).
+func (s *Service) nextScoreboard(ctx context.Context, board espn.Scoreboard) (espn.Scoreboard, error) {
+	next, err := s.scoreboard.Scoreboard(ctx, espn.ScoreboardParams{
+		Season:     board.Season.Year,
+		SeasonType: board.Season.Type,
+		Week:       board.Week.Number + 1,
+	})
+	if err != nil {
+		return espn.Scoreboard{}, fmt.Errorf("next scoreboard: %w", err)
+	}
+	if len(next.Games) == 0 && board.Season.Type == 2 {
+		post, err := s.scoreboard.Scoreboard(ctx, espn.ScoreboardParams{
+			Season:     board.Season.Year,
+			SeasonType: 3,
+			Week:       1,
+		})
+		if err != nil {
+			return espn.Scoreboard{}, fmt.Errorf("postseason scoreboard: %w", err)
+		}
+		return post, nil
+	}
+	return next, nil
+}
+
+func upsertScoreboard(
+	ctx context.Context,
+	tx *db.Store,
+	board espn.Scoreboard,
+	now time.Time,
+) (changed, newlyFinal bool, weekID int64, err error) {
+	week, err := tx.UpsertWeek(ctx, board.Season.Year, board.Season.Type, board.Week.Number)
+	if err != nil {
+		return false, false, 0, err
+	}
+	existing, err := tx.GamesForWeek(ctx, week.ID)
+	if err != nil {
+		return false, false, 0, err
+	}
+	before := make(map[string]db.Game, len(existing))
+	for _, game := range existing {
+		before[game.ID] = game
+	}
+
+	for _, game := range board.Games {
+		stored, err := tx.UpsertGame(ctx, slateGame(game, week.ID, now))
+		if err != nil {
+			return false, false, 0, err
+		}
+		old, found := before[game.ID]
+		if !found || !reflect.DeepEqual(old, stored) {
+			changed = true
+		}
+		if stored.Status == db.GameFinal && (!found || old.Status != db.GameFinal) {
+			newlyFinal = true
+		}
+	}
+	return changed, newlyFinal, week.ID, nil
+}
+
+func allBoardFinal(games []espn.Game) bool {
+	if len(games) == 0 {
+		return false
+	}
+	for _, game := range games {
+		if game.Status != espn.Final {
+			return false
+		}
+	}
+	return true
+}
+
+func sameScoreboardWeek(a, b espn.Scoreboard) bool {
+	return a.Season.Year == b.Season.Year &&
+		a.Season.Type == b.Season.Type &&
+		a.Week.Number == b.Week.Number
 }
 
 // slateGame maps one ESPN game to a games row.
