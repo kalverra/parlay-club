@@ -85,6 +85,24 @@ func ParseLinesJSON(raw []byte) ([]Line, error) {
 	return parseLines(parsed)
 }
 
+// ParseLinesSnapshotJSON decodes raw Parlay API or Odds API game-lines JSON
+// into both its event metadata and its priced selection rows.
+func ParseLinesSnapshotJSON(raw []byte) ([]Event, []Line, error) {
+	var parsed []eventResponse
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		return nil, nil, fmt.Errorf("parse lines snapshot json: %w", err)
+	}
+	events, err := parseEvents(parsed)
+	if err != nil {
+		return nil, nil, err
+	}
+	lines, err := parseLines(parsed)
+	if err != nil {
+		return nil, nil, err
+	}
+	return events, lines, nil
+}
+
 // parseLines maps the game-line markets of every event and book into rows.
 func parseLines(raw []eventResponse) ([]Line, error) {
 	var lines []Line

@@ -462,6 +462,16 @@ func scoreLineAndPrice(leg Leg, game Game, rubric Rubric) []GradeFactor {
 	return clampCategoryFactors(candidates, rubric.LinePriceMin, rubric.LinePriceMax)
 }
 
+// HasSharpBenchmark reports whether game carries a pre-kickoff sharp quote
+// matching leg.
+func HasSharpBenchmark(game Game, leg Leg) bool {
+	if len(game.Sharp) == 0 {
+		return false
+	}
+	_, ok := game.Sharp[sharpKeyForLeg(leg)]
+	return ok
+}
+
 func scoreSharpBenchmark(leg Leg, game Game, rubric Rubric) []GradeFactor {
 	if len(game.Sharp) == 0 {
 		return nil

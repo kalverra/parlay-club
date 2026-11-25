@@ -16,6 +16,7 @@ type DataCoverage struct {
 	WithNFLVerse int `json:"with_nflverse"`
 	WithNfelo    int `json:"with_nfelo"`
 	WithOdds     int `json:"with_odds"`
+	WithSharp    int `json:"with_sharp,omitempty"`
 }
 
 // ReplayedLeg pairs a settled leg with its decimal odds and outcome.
