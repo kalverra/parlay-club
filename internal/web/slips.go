@@ -1892,7 +1892,7 @@ func (h *slipHandlers) slipPageData(ctx context.Context, slip db.Slip) (SlipPage
 
 	open := slip.Status == db.SlipOpen
 	gamesByID, playerStats := analyzer.LoadSlipSignals(ctx, h.deps.Store, h.deps.now(), slip.WeekID, games, legs)
-	analysis, legGrades := analyzerView(legs, gamesByID, playerStats, names)
+	analysis, legGrades := analyzerView(legs, gamesByID, playerStats, names, h.deps.GradingEngine)
 	media, err := h.legMedia(ctx, legs, allWeekGames)
 	if err != nil {
 		return SlipPage{}, err
@@ -2043,7 +2043,7 @@ func highlightsView(set board.HighlightSet, remainingSlots int) HighlightsView {
 		}
 		parlays = append(parlays, ParlayHighlightView{
 			Legs:            pLegs,
-			Grade:           gradeView(p.Grade.Letter, p.Grade.Score, p.Grade.Summary, p.Grade.Factors),
+			Grade:           SlipGradeView(p.Grade),
 			CombinedOdds:    formatOdds(p.CombinedOdds),
 			CombinedImplied: formatImpliedChance(parlay.ImpliedProb(p.CombinedOdds)),
 			Label:           p.Label,
@@ -2077,7 +2077,7 @@ func legHighlightView(h board.LegHighlight) LegHighlightView {
 		Price:         formatOdds(h.Row.Odds),
 		ImpliedChance: formatImpliedChance(parlay.ImpliedProb(h.Row.Odds)),
 		Text:          h.Row.Text,
-		Grade:         gradeView(h.Grade.Letter, h.Grade.Score, "", h.Grade.Factors),
+		Grade:         LegGradeView(h.Grade),
 		Reason:        h.Reason,
 	}
 }

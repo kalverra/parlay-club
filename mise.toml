@@ -35,3 +35,8 @@ run = "go test -run='^$' -bench=. -benchmem ./internal/board ./internal/db ./int
 [tasks.eval-prod]
 description = "Restore a read-only Litestream snapshot and run grading evals"
 run = "./scripts/eval-prod.sh"
+
+[tasks.train-v2]
+description = "Run offline walk-forward v2 training and export artifacts and parity fixtures"
+dir = "ml"
+run = "uv run python export.py"

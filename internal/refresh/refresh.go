@@ -213,6 +213,7 @@ type NFLverseClient interface {
 	TeamStats(ctx context.Context, season int) ([]nflverse.TeamWeek, error)
 	PlayerStats(ctx context.Context, season int) ([]nflverse.PlayerWeek, error)
 	SnapCounts(ctx context.Context, season int) ([]nflverse.SnapCount, error)
+	FFOpportunity(ctx context.Context, season int) ([]nflverse.PlayerOpportunity, error)
 }
 
 // Publisher receives live change signals. *live.Hub satisfies it.

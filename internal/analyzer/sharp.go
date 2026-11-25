@@ -29,11 +29,14 @@ type SharpKey struct {
 
 // SharpQuote holds the de-vigged fair benchmark for one selection.
 type SharpQuote struct {
-	Line         *float64
-	FairProb     float64 // de-vigged probability (0..1)
-	FairAmerican int     // DecimalToAmerican(1 / FairProb)
-	Source       string  // "Pinnacle", "Circa", "Bookmaker", "LowVig", "BetOnline", or "market consensus"
-	Tier         int     // 1 = sharpest, 2 = sharp US-region, 3 = consensus
+	Line          *float64
+	FairProb      float64 // de-vigged probability (0..1)
+	PowerFairProb float64 // Power-method de-vigged probability (0..1)
+	VigPct        float64 // overround vig as a decimal fraction (overround - 1)
+	FairAmerican  int     // DecimalToAmerican(1 / FairProb)
+	Source        string  // "Pinnacle", "Circa", "Bookmaker", "LowVig", "BetOnline", or "market consensus"
+	Tier          int     // 1 = sharpest, 2 = sharp US-region, 3 = consensus
+	BookCount     int     // number of books contributing to the selected tier/bucket
 }
 
 type bookTierInfo struct {
@@ -81,12 +84,14 @@ var excludedTier3Books = map[string]bool{
 }
 
 type bookCandidate struct {
-	book     string
-	tier     int
-	priority int
-	label    string
-	line     *float64
-	fairProb float64
+	book          string
+	tier          int
+	priority      int
+	label         string
+	line          *float64
+	fairProb      float64
+	powerFairProb float64
+	vigPct        float64
 }
 
 type gameBookGroup struct {
@@ -150,12 +155,14 @@ func BuildSharpBenchmarks(rows []db.Odds) map[string]map[SharpKey]SharpQuote {
 		}
 		for key, quote := range paired {
 			gameMap[key] = append(gameMap[key], bookCandidate{
-				book:     gb.book,
-				tier:     info.tier,
-				priority: info.priority,
-				label:    info.label,
-				line:     quote.line,
-				fairProb: quote.fairProb,
+				book:          gb.book,
+				tier:          info.tier,
+				priority:      info.priority,
+				label:         info.label,
+				line:          quote.line,
+				fairProb:      quote.fairProb,
+				powerFairProb: quote.powerFairProb,
+				vigPct:        quote.vigPct,
 			})
 		}
 	}
@@ -179,8 +186,10 @@ func BuildSharpBenchmarks(rows []db.Odds) map[string]map[SharpKey]SharpQuote {
 }
 
 type pairedSide struct {
-	line     *float64
-	fairProb float64
+	line          *float64
+	fairProb      float64
+	powerFairProb float64
+	vigPct        float64
 }
 
 func pairBookRows(rows []db.Odds) map[SharpKey]pairedSide {
@@ -232,8 +241,20 @@ func pairML(rows []db.Odds, out map[SharpKey]pairedSide) {
 	if !ok {
 		return
 	}
-	out[SharpKey{MarketType: "ML", Team: teams[0], Side: "TEAM"}] = pairedSide{fairProb: probA}
-	out[SharpKey{MarketType: "ML", Team: teams[1], Side: "TEAM"}] = pairedSide{fairProb: probB}
+	powerA, powerB, vig, powerOK := parlay.DevigTwoWayPower(a.Price, b.Price)
+	if !powerOK {
+		return
+	}
+	out[SharpKey{MarketType: "ML", Team: teams[0], Side: "TEAM"}] = pairedSide{
+		fairProb:      probA,
+		powerFairProb: powerA,
+		vigPct:        vig,
+	}
+	out[SharpKey{MarketType: "ML", Team: teams[1], Side: "TEAM"}] = pairedSide{
+		fairProb:      probB,
+		powerFairProb: powerB,
+		vigPct:        vig,
+	}
 }
 
 func pairSpread(rows []db.Odds, out map[SharpKey]pairedSide) {
@@ -268,6 +289,7 @@ func pairSpread(rows []db.Odds, out map[SharpKey]pairedSide) {
 	var bestBalance float64
 	var bestA, bestB spreadEntry
 	var bestProbA, bestProbB float64
+	var bestPowerA, bestPowerB, bestVig float64
 
 	for i := range entries {
 		for j := i + 1; j < len(entries); j++ {
@@ -279,12 +301,18 @@ func pairSpread(rows []db.Odds, out map[SharpKey]pairedSide) {
 			if !ok {
 				continue
 			}
+			powerA, powerB, vig, powerOK := parlay.DevigTwoWayPower(a.price, b.price)
+			if !powerOK {
+				continue
+			}
 			balance := math.Abs(probA - 0.5)
 			if !bestFound || balance < bestBalance {
 				bestFound = true
 				bestBalance = balance
 				bestA, bestB = a, b
 				bestProbA, bestProbB = probA, probB
+				bestPowerA, bestPowerB = powerA, powerB
+				bestVig = vig
 			}
 		}
 	}
@@ -294,8 +322,18 @@ func pairSpread(rows []db.Odds, out map[SharpKey]pairedSide) {
 
 	lineA := bestA.line
 	lineB := bestB.line
-	out[SharpKey{MarketType: "SPREAD", Team: bestA.team, Side: "TEAM"}] = pairedSide{line: &lineA, fairProb: bestProbA}
-	out[SharpKey{MarketType: "SPREAD", Team: bestB.team, Side: "TEAM"}] = pairedSide{line: &lineB, fairProb: bestProbB}
+	out[SharpKey{MarketType: "SPREAD", Team: bestA.team, Side: "TEAM"}] = pairedSide{
+		line:          &lineA,
+		fairProb:      bestProbA,
+		powerFairProb: bestPowerA,
+		vigPct:        bestVig,
+	}
+	out[SharpKey{MarketType: "SPREAD", Team: bestB.team, Side: "TEAM"}] = pairedSide{
+		line:          &lineB,
+		fairProb:      bestProbB,
+		powerFairProb: bestPowerB,
+		vigPct:        bestVig,
+	}
 }
 
 func pairOverUnder(rows []db.Odds, out map[SharpKey]pairedSide) {
@@ -346,6 +384,7 @@ func pairOverUnder(rows []db.Odds, out map[SharpKey]pairedSide) {
 		var bestBalance float64
 		var bestLine float64
 		var bestProbOver, bestProbUnder float64
+		var bestPowerOver, bestPowerUnder, bestVig float64
 
 		for _, over := range g.overs {
 			for _, under := range g.unders {
@@ -356,6 +395,10 @@ func pairOverUnder(rows []db.Odds, out map[SharpKey]pairedSide) {
 				if !ok {
 					continue
 				}
+				powerOver, powerUnder, vig, powerOK := parlay.DevigTwoWayPower(over.Price, under.Price)
+				if !powerOK {
+					continue
+				}
 				balance := math.Abs(probOver - 0.5)
 				if !bestFound || balance < bestBalance {
 					bestFound = true
@@ -363,6 +406,9 @@ func pairOverUnder(rows []db.Odds, out map[SharpKey]pairedSide) {
 					bestLine = *over.Line
 					bestProbOver = probOver
 					bestProbUnder = probUnder
+					bestPowerOver = powerOver
+					bestPowerUnder = powerUnder
+					bestVig = vig
 				}
 			}
 		}
@@ -373,12 +419,16 @@ func pairOverUnder(rows []db.Odds, out map[SharpKey]pairedSide) {
 		lineOver := bestLine
 		lineUnder := bestLine
 		out[SharpKey{MarketType: k.marketType, Team: k.team, PlayerName: k.playerName, Side: "OVER"}] = pairedSide{
-			line:     &lineOver,
-			fairProb: bestProbOver,
+			line:          &lineOver,
+			fairProb:      bestProbOver,
+			powerFairProb: bestPowerOver,
+			vigPct:        bestVig,
 		}
 		out[SharpKey{MarketType: k.marketType, Team: k.team, PlayerName: k.playerName, Side: "UNDER"}] = pairedSide{
-			line:     &lineUnder,
-			fairProb: bestProbUnder,
+			line:          &lineUnder,
+			fairProb:      bestProbUnder,
+			powerFairProb: bestPowerUnder,
+			vigPct:        bestVig,
 		}
 	}
 }
@@ -407,10 +457,14 @@ func selectTieredQuote(candidates []bookCandidate) (SharpQuote, bool) {
 
 func aggregateSharpTier(group []bookCandidate, tier int) SharpQuote {
 	probs := make([]float64, 0, len(group))
+	powerProbs := make([]float64, 0, len(group))
+	vigs := make([]float64, 0, len(group))
 	lines := make([]float64, 0, len(group))
 	bestSource := group[0]
 	for _, c := range group {
 		probs = append(probs, c.fairProb)
+		powerProbs = append(powerProbs, c.powerFairProb)
+		vigs = append(vigs, c.vigPct)
 		if c.line != nil {
 			lines = append(lines, *c.line)
 		}
@@ -427,11 +481,14 @@ func aggregateSharpTier(group []bookCandidate, tier int) SharpQuote {
 	}
 
 	return SharpQuote{
-		Line:         linePtr,
-		FairProb:     fairProb,
-		FairAmerican: parlay.DecimalToAmerican(1 / fairProb),
-		Source:       bestSource.label,
-		Tier:         tier,
+		Line:          linePtr,
+		FairProb:      fairProb,
+		PowerFairProb: medianFloat64(powerProbs),
+		VigPct:        medianFloat64(vigs),
+		FairAmerican:  parlay.DecimalToAmerican(1 / fairProb),
+		Source:        bestSource.label,
+		Tier:          tier,
+		BookCount:     len(group),
 	}
 }
 
@@ -471,8 +528,12 @@ func aggregateTier3Consensus(group []bookCandidate) (SharpQuote, bool) {
 	}
 
 	probs := make([]float64, 0, len(bestList))
+	powerProbs := make([]float64, 0, len(bestList))
+	vigs := make([]float64, 0, len(bestList))
 	for _, c := range bestList {
 		probs = append(probs, c.fairProb)
+		powerProbs = append(powerProbs, c.powerFairProb)
+		vigs = append(vigs, c.vigPct)
 	}
 	fairProb := medianFloat64(probs)
 
@@ -483,11 +544,14 @@ func aggregateTier3Consensus(group []bookCandidate) (SharpQuote, bool) {
 	}
 
 	return SharpQuote{
-		Line:         linePtr,
-		FairProb:     fairProb,
-		FairAmerican: parlay.DecimalToAmerican(1 / fairProb),
-		Source:       consensusBookLabel,
-		Tier:         sharpTier3,
+		Line:          linePtr,
+		FairProb:      fairProb,
+		PowerFairProb: medianFloat64(powerProbs),
+		VigPct:        medianFloat64(vigs),
+		FairAmerican:  parlay.DecimalToAmerican(1 / fairProb),
+		Source:        consensusBookLabel,
+		Tier:          sharpTier3,
+		BookCount:     len(bestList),
 	}, true
 }
 

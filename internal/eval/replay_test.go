@@ -849,20 +849,20 @@ func TestLoadDatasetReconstructsSharpAndIsolatesPreKickoff(t *testing.T) {
 	require.NotNil(t, spreadQuote.Line)
 	assert.InDelta(t, -3.5, *spreadQuote.Line, 1e-6)
 
-	// Verify sharp rules fire during ScoreLeg on replayed inputs.
-	grade1 := analyzer.ScoreLeg(w.Slips[0].Legs[0].Leg, w.Games, w.Stats)
+	// Verify sharp rules fire during EngineV1.ScoreLeg on replayed inputs.
+	grade1 := analyzer.EngineV1.ScoreLeg(w.Slips[0].Legs[0].Leg, w.Games, w.Stats)
 	assert.NotEmpty(t, grade1.Factors)
 	assert.Equal(t, "sharp_line_edge", grade1.Factors[0].Rule)
 
-	grade2 := analyzer.ScoreLeg(w.Slips[0].Legs[1].Leg, w.Games, w.Stats)
+	grade2 := analyzer.EngineV1.ScoreLeg(w.Slips[0].Legs[1].Leg, w.Games, w.Stats)
 	require.NotEmpty(t, grade2.Factors)
 	assert.Equal(t, "sharp_line_edge", grade2.Factors[0].Rule)
 
-	grade3 := analyzer.ScoreLeg(w.Slips[0].Legs[2].Leg, w.Games, w.Stats)
+	grade3 := analyzer.EngineV1.ScoreLeg(w.Slips[0].Legs[2].Leg, w.Games, w.Stats)
 	require.NotEmpty(t, grade3.Factors)
 	assert.Equal(t, "sharp_price_edge", grade3.Factors[0].Rule)
 
-	grade4 := analyzer.ScoreLeg(w.Slips[0].Legs[3].Leg, w.Games, w.Stats)
+	grade4 := analyzer.EngineV1.ScoreLeg(w.Slips[0].Legs[3].Leg, w.Games, w.Stats)
 	require.NotEmpty(t, grade4.Factors)
 	assert.Equal(t, "sharp_price_edge", grade4.Factors[0].Rule)
 }
@@ -991,7 +991,7 @@ func TestLoadDatasetNFLverseL5Fallback(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, []float64{92, 88, 95, 90, 85}, psESPN.Games["RUSH_YDS"])
 
-	grade1 := analyzer.ScoreLeg(w.Slips[0].Legs[0].Leg, w.Games, w.Stats)
+	grade1 := analyzer.EngineV1.ScoreLeg(w.Slips[0].Legs[0].Leg, w.Games, w.Stats)
 	var rules1 []string
 	for _, f := range grade1.Factors {
 		rules1 = append(rules1, f.Rule)
@@ -999,7 +999,7 @@ func TestLoadDatasetNFLverseL5Fallback(t *testing.T) {
 	assert.Contains(t, rules1, "hit_rate")
 	assert.NotContains(t, rules1, "median_trap")
 
-	grade2 := analyzer.ScoreLeg(w.Slips[0].Legs[1].Leg, w.Games, w.Stats)
+	grade2 := analyzer.EngineV1.ScoreLeg(w.Slips[0].Legs[1].Leg, w.Games, w.Stats)
 	var rules2 []string
 	for _, f := range grade2.Factors {
 		rules2 = append(rules2, f.Rule)
@@ -1007,7 +1007,7 @@ func TestLoadDatasetNFLverseL5Fallback(t *testing.T) {
 	assert.Contains(t, rules2, "median_trap")
 	assert.NotContains(t, rules2, "hit_rate")
 
-	grade3 := analyzer.ScoreLeg(w.Slips[0].Legs[2].Leg, w.Games, w.Stats)
+	grade3 := analyzer.EngineV1.ScoreLeg(w.Slips[0].Legs[2].Leg, w.Games, w.Stats)
 	var rules3 []string
 	for _, f := range grade3.Factors {
 		rules3 = append(rules3, f.Rule)
@@ -1230,4 +1230,296 @@ func TestLoadDatasetMarketModeEndToEnd(t *testing.T) {
 	loaded, err := eval.LoadDatasetJSON(jsonPath)
 	require.NoError(t, err)
 	assert.Equal(t, 6, loaded.Coverage.TotalLegs)
+}
+
+func TestLoadDatasetRoleArchetypesEWMASparseAndLeakageGuard(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	store := newTestStore(t)
+
+	group, user := seedGroupAndMember(t, store, "v2replay")
+	week1, err := store.UpsertWeek(ctx, 2025, nflverse.SeasonTypeRegular, 1)
+	require.NoError(t, err)
+	week2, err := store.UpsertWeek(ctx, 2025, nflverse.SeasonTypeRegular, 2)
+	require.NoError(t, err)
+	week4, err := store.UpsertWeek(ctx, 2025, nflverse.SeasonTypeRegular, 4)
+	require.NoError(t, err)
+
+	kickoff1 := time.Date(2025, 9, 7, 17, 0, 0, 0, time.UTC)
+	kickoff2 := time.Date(2025, 9, 14, 17, 0, 0, 0, time.UTC)
+	kickoff4 := time.Date(2025, 9, 28, 17, 0, 0, 0, time.UTC)
+
+	for _, g := range []db.Game{
+		{
+			ID: "g-w1", WeekID: week1.ID, HomeTeam: "BUF", AwayTeam: "MIA",
+			HomeName: "Buffalo Bills", AwayName: "Miami Dolphins", Kickoff: kickoff1, Status: db.GameFinal,
+		},
+		{
+			ID: "g-w2", WeekID: week2.ID, HomeTeam: "BUF", AwayTeam: "MIA",
+			HomeName: "Buffalo Bills", AwayName: "Miami Dolphins", Kickoff: kickoff2, Status: db.GameFinal,
+		},
+		{
+			ID: "g-w4", WeekID: week4.ID, HomeTeam: "BUF", AwayTeam: "MIA",
+			HomeName: "Buffalo Bills", AwayName: "Miami Dolphins", Kickoff: kickoff4, Status: db.GameFinal,
+		},
+	} {
+		_, err = store.UpsertGame(ctx, g)
+		require.NoError(t, err)
+	}
+
+	// Seed Weeks 1..3 legitimate stats AND Weeks 4..5 poisoned stats (role flip + inflated allowed yards).
+	playerRows := []db.NFLversePlayerWeek{
+		// Week 1: BUF WR1 (wr1) > BUF WR2 (wr2), BUF RB1 (rb1), KC WR1 vs MIA
+		{
+			ESPNID: "buf-wr1", Season: 2025, SeasonType: nflverse.SeasonTypeRegular, WeekNum: 1,
+			Team: "BUF", Opponent: "NYJ", PlayerName: "Top WR", Position: "WR",
+			OffensePct: 0.90, TargetShare: 0.30, Targets: 10, Receptions: 7, RecYds: 95, TotalEPA: 3.5, ExpRecYds: 85,
+		},
+		{
+			ESPNID: "buf-wr2", Season: 2025, SeasonType: nflverse.SeasonTypeRegular, WeekNum: 1,
+			Team: "BUF", Opponent: "NYJ", PlayerName: "Second WR", Position: "WR",
+			OffensePct: 0.78, TargetShare: 0.16, Targets: 5, Receptions: 3, RecYds: 40, TotalEPA: 0.6, ExpRecYds: 38,
+		},
+		{
+			ESPNID: "buf-rb1", Season: 2025, SeasonType: nflverse.SeasonTypeRegular, WeekNum: 1,
+			Team: "BUF", Opponent: "NYJ", PlayerName: "Lead RB", Position: "RB",
+			OffensePct: 0.70, CarryShare: 0.68, Carries: 18, RushYds: 88, TotalEPA: 1.9, ExpRushYds: 72,
+		},
+		{
+			ESPNID: "kc-wr1", Season: 2025, SeasonType: nflverse.SeasonTypeRegular, WeekNum: 1,
+			Team: "KC", Opponent: "MIA", PlayerName: "KC WR1", Position: "WR",
+			OffensePct: 0.90, TargetShare: 0.28, Targets: 9, Receptions: 6, RecYds: 80, TotalEPA: 2.0, ExpRecYds: 74,
+		},
+		// Week 2 & 3 continue same hierarchy
+		{
+			ESPNID: "buf-wr1", Season: 2025, SeasonType: nflverse.SeasonTypeRegular, WeekNum: 2,
+			Team: "BUF", Opponent: "NE", Position: "WR",
+			OffensePct: 0.90, TargetShare: 0.30, Targets: 10, Receptions: 7, RecYds: 100, TotalEPA: 3.0, ExpRecYds: 85,
+		},
+		{
+			ESPNID: "buf-wr2", Season: 2025, SeasonType: nflverse.SeasonTypeRegular, WeekNum: 2,
+			Team: "BUF", Opponent: "NE", Position: "WR",
+			OffensePct: 0.78, TargetShare: 0.16, Targets: 5, Receptions: 4, RecYds: 45, TotalEPA: 0.8, ExpRecYds: 38,
+		},
+		{
+			ESPNID: "buf-wr1", Season: 2025, SeasonType: nflverse.SeasonTypeRegular, WeekNum: 3,
+			Team: "BUF", Opponent: "JAX", Position: "WR",
+			OffensePct: 0.90, TargetShare: 0.30, Targets: 10, Receptions: 8, RecYds: 110, TotalEPA: 4.0, ExpRecYds: 85,
+		},
+		{
+			ESPNID: "buf-wr2", Season: 2025, SeasonType: nflverse.SeasonTypeRegular, WeekNum: 3,
+			Team: "BUF", Opponent: "JAX", Position: "WR",
+			OffensePct: 0.78, TargetShare: 0.16, Targets: 5, Receptions: 3, RecYds: 35, TotalEPA: 0.4, ExpRecYds: 38,
+		},
+		// Week 4 (same week) & Week 5 (future): poison WR2 > WR1 and poison MIA defense allowed!
+		{
+			ESPNID: "buf-wr1", Season: 2025, SeasonType: nflverse.SeasonTypeRegular, WeekNum: 4,
+			Team: "BUF", Opponent: "MIA", PlayerName: "Top WR", Position: "WR",
+			OffensePct: 0.10, TargetShare: 0.01, Targets: 1, Receptions: 0, RecYds: 0, TotalEPA: -5.0, ExpRecYds: 5,
+		},
+		{
+			ESPNID:      "buf-wr2",
+			Season:      2025,
+			SeasonType:  nflverse.SeasonTypeRegular,
+			WeekNum:     4,
+			Team:        "BUF",
+			Opponent:    "MIA",
+			PlayerName:  "Second WR",
+			Position:    "WR",
+			OffensePct:  0.99,
+			TargetShare: 0.95,
+			Targets:     25,
+			Receptions:  20,
+			RecYds:      320,
+			TotalEPA:    20.0,
+			ExpRecYds:   280,
+		},
+		{
+			ESPNID:      "kc-wr1",
+			Season:      2025,
+			SeasonType:  nflverse.SeasonTypeRegular,
+			WeekNum:     5,
+			Team:        "KC",
+			Opponent:    "MIA",
+			PlayerName:  "KC WR1",
+			Position:    "WR",
+			OffensePct:  0.95,
+			TargetShare: 0.50,
+			Targets:     18,
+			Receptions:  15,
+			RecYds:      260,
+			TotalEPA:    14.0,
+			ExpRecYds:   210,
+		},
+	}
+	_, err = store.UpsertNFLversePlayerWeeks(ctx, playerRows)
+	require.NoError(t, err)
+
+	seedSlipLeg := func(weekID int64, gameID, playerID, market string) {
+		slip, err := store.CreateSlip(
+			ctx,
+			group.ID,
+			weekID,
+			nil,
+			"Slip "+gameID,
+			db.SlateScopeFullWeek,
+			2,
+			[]int64{user.ID},
+		)
+		require.NoError(t, err)
+		leg, err := store.CreateLeg(ctx, db.Leg{
+			SlipID: slip.ID, UserID: user.ID, GameID: new(gameID),
+			MarketType: market, Selection: playerID, Team: new("BUF"),
+			PlayerID: new(playerID), PlayerName: new(playerID), Side: new("OVER"), Line: new(50.5), Odds: -110,
+		})
+		require.NoError(t, err)
+		require.NoError(t, store.SetLegResult(ctx, leg.ID, parlay.Won, "test"))
+		require.NoError(t, store.SetSlipGrade(ctx, slip.ID, parlay.Won, db.SlipGraded))
+	}
+	seedSlipLeg(week1.ID, "g-w1", "buf-wr1", "REC_YDS")
+	seedSlipLeg(week2.ID, "g-w2", "buf-wr2", "REC_YDS")
+	seedSlipLeg(week4.ID, "g-w4", "buf-wr1", "REC_YDS")
+
+	ds, err := eval.LoadDataset(ctx, store, eval.ReplayFilter{Season: 2025})
+	require.NoError(t, err)
+	require.Len(t, ds.Weeks, 3)
+
+	// Week 1: 0 prior weeks -> no EWMA, no RoleDefense, no leakage from Week 1..5.
+	w1 := ds.Weeks[0]
+	assert.Equal(t, 1, w1.WeekNum)
+	assert.Nil(t, w1.Games["g-w1"].HomeRoleDefense)
+	assert.Nil(t, w1.Games["g-w1"].AwayRoleDefense)
+	assert.Empty(t, w1.Stats["buf-wr1"].EWMA)
+
+	// Week 2: sparse 1 prior week -> EWMA and Role populated despite <3 weeks, Usage stays nil.
+	w2 := ds.Weeks[1]
+	assert.Equal(t, 2, w2.WeekNum)
+	psW2 := w2.Stats["buf-wr2"]
+	assert.Nil(t, psW2.Usage)
+	require.NotNil(t, psW2.EWMA)
+	assert.Equal(t, 1, psW2.EWMA.GamesPlayed)
+	assert.Equal(t, analyzer.RoleWR2, psW2.Role)
+	assert.InDelta(t, 0.16, psW2.EWMA.TargetShare, 1e-9)
+	miaDefW2 := w2.Games["g-w2"].OpponentRoleDefense("BUF", analyzer.RoleWR1)
+	require.NotNil(t, miaDefW2)
+	assert.Equal(t, 1, miaDefW2.Games)
+	assert.InDelta(t, 80.0, miaDefW2.RecYdsAllowed, 1e-9)
+
+	// Week 4: strictly Weeks 1..3 -> buf-wr1 remains WR1 with 0.30 target share (Week 4/5 poison ignored).
+	w4 := ds.Weeks[2]
+	assert.Equal(t, 4, w4.WeekNum)
+	psW4 := w4.Stats["buf-wr1"]
+	assert.Equal(t, analyzer.RoleWR1, psW4.Role)
+	require.NotNil(t, psW4.EWMA)
+	assert.Equal(t, 3, psW4.EWMA.GamesPlayed)
+	assert.InDelta(t, 0.30, psW4.EWMA.TargetShare, 1e-9)
+	assert.InDelta(t, 85.0, psW4.EWMA.ExpRecYds, 1e-9)
+	miaDefW4 := w4.Games["g-w4"].OpponentRoleDefense("BUF", analyzer.RoleWR1)
+	require.NotNil(t, miaDefW4)
+	assert.Equal(t, 1, miaDefW4.Games)
+	assert.InDelta(t, 80.0, miaDefW4.RecYdsAllowed, 1e-9)
+}
+
+func TestLoadDatasetMarketScriptPreKickoffAndNoLeakage(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	store := newTestStore(t)
+
+	group, user := seedGroupAndMember(t, store, "script")
+	week, err := store.UpsertWeek(ctx, 2025, nflverse.SeasonTypeRegular, 6)
+	require.NoError(t, err)
+
+	kickoff := time.Date(2025, 10, 19, 17, 0, 0, 0, time.UTC)
+	homeScore, awayScore := 31, 24
+	_, err = store.UpsertGame(ctx, db.Game{
+		ID: "g-ms-1", WeekID: week.ID, OddsEventID: new("evt-ms-1"),
+		HomeTeam: "BUF", AwayTeam: "MIA", HomeName: "Buffalo Bills", AwayName: "Miami Dolphins",
+		Kickoff: kickoff, Status: db.GameFinal, HomeScore: &homeScore, AwayScore: &awayScore,
+	})
+	require.NoError(t, err)
+
+	preBody := `[{
+		"id": "evt-ms-1",
+		"commence_time": "2025-10-19T17:00:00Z",
+		"home_team": "Buffalo Bills",
+		"away_team": "Miami Dolphins",
+		"bookmakers": [{
+			"key": "pinnacle",
+			"markets": [
+				{
+					"key": "spreads",
+					"outcomes": [
+						{"name": "Buffalo Bills", "price": -110, "point": -6.5},
+						{"name": "Miami Dolphins", "price": -110, "point": 6.5}
+					]
+				},
+				{
+					"key": "totals",
+					"outcomes": [
+						{"name": "Over", "price": -110, "point": 49.5},
+						{"name": "Under", "price": -110, "point": 49.5}
+					]
+				}
+			]
+		}]
+	}]`
+	postBody := `[{
+		"id": "evt-ms-1",
+		"commence_time": "2025-10-19T17:00:00Z",
+		"home_team": "Buffalo Bills",
+		"away_team": "Miami Dolphins",
+		"bookmakers": [{
+			"key": "pinnacle",
+			"markets": [
+				{
+					"key": "spreads",
+					"outcomes": [
+						{"name": "Buffalo Bills", "price": -110, "point": -14.5},
+						{"name": "Miami Dolphins", "price": -110, "point": 14.5}
+					]
+				},
+				{
+					"key": "totals",
+					"outcomes": [
+						{"name": "Over", "price": -110, "point": 62.5},
+						{"name": "Under", "price": -110, "point": 62.5}
+					]
+				}
+			]
+		}]
+	}]`
+	require.NoError(t, store.SaveAPIResponse(ctx, archive.Record{
+		Source: "odds", Key: db.ArchiveOddsLinesKey, Method: "GET",
+		URL: "https://example.test/pre", Status: 200,
+		FetchedAt: kickoff.Add(-45 * time.Minute), Body: []byte(preBody),
+	}))
+	require.NoError(t, store.SaveAPIResponse(ctx, archive.Record{
+		Source: "odds", Key: db.ArchiveOddsLinesKey, Method: "GET",
+		URL: "https://example.test/post", Status: 200,
+		FetchedAt: kickoff.Add(45 * time.Minute), Body: []byte(postBody),
+	}))
+
+	slip, err := store.CreateSlip(ctx, group.ID, week.ID, nil, "MS", db.SlateScopeFullWeek, 1, []int64{user.ID})
+	require.NoError(t, err)
+	leg, err := store.CreateLeg(ctx, db.Leg{
+		SlipID: slip.ID, UserID: user.ID, GameID: new("g-ms-1"),
+		MarketType: "SPREAD", Selection: "BUF -6.5", Team: new("BUF"), Side: new("TEAM"), Line: new(-6.5), Odds: -110,
+	})
+	require.NoError(t, err)
+	require.NoError(t, store.SetLegResult(ctx, leg.ID, parlay.Won, "test"))
+	require.NoError(t, store.SetSlipGrade(ctx, slip.ID, parlay.Won, db.SlipGraded))
+
+	for _, mode := range []eval.ReplayMode{eval.ModeSlips, eval.ModeMarket} {
+		ds, err := eval.LoadDataset(ctx, store, eval.ReplayFilter{Season: 2025, Mode: mode})
+		require.NoError(t, err)
+		require.Len(t, ds.Weeks, 1)
+
+		ms := ds.Weeks[0].Games["g-ms-1"].MarketScript
+		assert.True(t, ms.HasSpread)
+		assert.True(t, ms.HasTotal)
+		assert.InDelta(t, -6.5, ms.HomeSpread, 1e-9)
+		assert.InDelta(t, 49.5, ms.GameTotal, 1e-9)
+		assert.InDelta(t, 28.0, ms.HomeImpliedTotal, 1e-9)
+		assert.InDelta(t, 21.5, ms.AwayImpliedTotal, 1e-9)
+	}
 }

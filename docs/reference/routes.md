@@ -382,15 +382,16 @@ and the member leaderboard (stacked cards below `sm:` and a table at `sm:+`). Se
 
 | Method + path            | Purpose                                                         | Response |
 | ------------------------ | --------------------------------------------------------------- | -------- |
-| `GET /analyzer/guide`    | Grading & Analyzer Guide backed by `RuleDocs()` and `GradeRubric()` | Full page; optional `?from=` back-link path. |
+| `GET /analyzer/guide`    | Grading & Analyzer Guide backed by `RuleDocs()`, `DefaultV2Config`, and `GradeRubric()` | Full page; optional `?from=` back-link path. |
 
-`GET /analyzer/guide` renders `web/templates/analyzer_guide.html` behind `RequireUser` and `Scope`. It displays the live
-`A`–`F` leg and slip grading rubric (`analyzer.GradeRubric()`), pick-board badge descriptions, and every active warning
-rule (`analyzer.RuleDocs()`) grouped by category with stable anchors (`#leg-grades`, `#slip-grade`, `#suggestions`,
-`#rules`, and `#rule-<id>`). It links to `/analyzer/results` ("Grading results"), and an optional `?from=` query
-parameter renders a `"← Back"` link when it passes `safeReturnPath` (starts with `/` and not `//`); external or
-protocol-relative targets are ignored. See [Analyzer](../concepts/analyzer.md) and
-[Analyzer rules](analyzer-rules.md).
+`GET /analyzer/guide` renders `web/templates/analyzer_guide.html` behind `RequireUser` and `Scope`. It displays the
+active grading engine badge (`v2`), the four v2 grading pillars and weights (`analyzer.DefaultV2Config`), uncertainty
+badge rules, `A`–`F` letter bands and legacy v1 rubric reference (`analyzer.GradeRubric()`), pick-board badge
+descriptions, and every active warning rule (`analyzer.RuleDocs()`) grouped by category with stable anchors (`#pillars`,
+`#leg-grades`, `#slip-grade`, `#suggestions`, `#rules`, and `#rule-<id>`). It links to `/analyzer/results`
+("Grading results"), and an optional `?from=` query parameter renders a `"← Back"` link when it passes `safeReturnPath`
+(starts with `/` and not `//`); external or protocol-relative targets are ignored. See [Analyzer](../concepts/analyzer.md)
+and [Analyzer rules](analyzer-rules.md).
 
 ### Analyzer results
 
@@ -407,14 +408,16 @@ newly `FINAL` game or `syncNFLverse` commits changes. Sandbox stage transitions 
 Query parameters:
 
 - `?source=`: `slips` (default, `User slips` across all groups) or `market` (`Market-wide` pre-kickoff consensus lines on
-  `FINAL` games). Invalid values return `400 Bad Request`. Preserved on all season and rubric filter URLs. In `market`
-  mode, `Slip Calibration (A-F)` and `Slip Factor Attribution` are hidden (replaced with a note linking back to
-  `User slips`), and `Pre-Kickoff Data Coverage` adds `Sharp benchmarks` and `nflverse L5 fallback` tiles.
+  `FINAL` games). Invalid values return `400 Bad Request`. Preserved on all season and engine filter URLs. In `market`
+  mode, `Slip Calibration (A-F)`, `SGP Correlation Lift`, and `Slip Factor Attribution` are hidden (replaced with a note
+  linking back to `User slips`), and `Pre-Kickoff Data Coverage` adds `Sharp benchmarks` and `nflverse L5 fallback`
+  tiles.
 - `?season=`: `all` (or `0`) for all seasons, or a positive season year. Defaults to the latest season with graded slips
   across all groups (`GradedSeasons`) in `slips` mode, or the latest season with `FINAL` games (`FinalSeasons`) in
   `market` mode, falling back to `Seasons` or `all`. Unreadable or non-positive values return `400 Bad Request`.
-- `?rubric=`: selects which built-in rubric to display (defaults to `analyzer.ActiveRubric.Name`).
-- `?from=`: optional safe return path validated by `safeReturnPath`, preserved on source/season/rubric pills and the
+- `?engine=`: selects which registered `GradingEngine` to inspect (`v2` or `v1`, defaulting to `ActiveEngine.Name()`).
+  Legacy `?rubric=` is still accepted as a fallback alias when `?engine=` is omitted.
+- `?from=`: optional safe return path validated by `safeReturnPath`, preserved on source/season/engine pills and the
   `"How grading works"` link back to `/analyzer/guide`. See [Analyzer](../concepts/analyzer.md).
 
 ### Profile

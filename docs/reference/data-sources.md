@@ -372,25 +372,34 @@ Refresh writes the current regular-season week's matching rows into `nfelo_games
 
 ## nflverse (free, no auth)
 
-Base: `https://github.com/nflverse/nflverse-data/releases/download`. The data comes from public `nflverse-data` GitHub
-releases and needs no key or account. `nflverse.NewClient(baseURL, httpClient)` defaults an empty base URL to the root
-above and a nil client to a 30 second timeout, sends `User-Agent: parlay-club`, and parses every CSV by header name. A
-missing required column or non-numeric cell is an error.
+Base: `https://github.com/nflverse/nflverse-data/releases/download` (`DefaultBaseURL`), with `FFOpportunity` reading
+from `https://github.com/ffverse/ffopportunity/releases/download/latest-data` (`DefaultFFOpportunityBaseURL`) when
+using `DefaultBaseURL`. The data comes from public GitHub releases and needs no key or account.
+`nflverse.NewClient(baseURL, httpClient)` defaults an empty base URL to `DefaultBaseURL` and a nil client to a 30
+second timeout, sends `User-Agent: parlay-club`, and parses every CSV by header name. A missing required column or
+non-numeric cell is an error; optional columns (`passing_cpoe` on player stats, `season_type` on `ep_weekly`) are read
+when present.
 
 | Method | Path | Key columns / behavior |
 | --- | --- | --- |
 | `Players(ctx)` | `GET /players/players.csv` | Maps `gsis_id`, `pfr_id`, and `espn_id` (plus `display_name`, `latest_team`, `position`); skips rows missing `gsis_id` or `espn_id`. |
 | `TeamStats(ctx, season)` | `GET /stats_team/stats_team_week_{season}.csv` | Reads `season`, `week`, `season_type`, `team`, `opponent_team`, `passing_epa`, `rushing_epa`, `attempts`, `carries`, `passing_yards`, `rushing_yards`, and joins each game's opponent row onto `OppPassingEPA`, `OppRushingEPA`, `OppAttempts`, `OppCarries`, `OppPassingYards`, and `OppRushingYards`. |
-| `PlayerStats(ctx, season)` | `GET /stats_player/stats_player_week_{season}.csv` | Reads `player_id` (GSIS ID), `player_display_name` (falling back to `player_name`), `position` (`FB`/`HB` normalized to `RB`), `team`, `opponent_team` (mapped via `mapTeam`), `season`, `week`, `season_type`, `target_share`, `air_yards_share`, `wopr`, `passing_epa`, `rushing_epa`, `receiving_epa`, `targets`, `carries`, `attempts`, `receptions`, yard/TD counts (`passing_*`, `rushing_*`, `receiving_*`), `fg_made`, and `pat_made` (stored as `kicker_pts = 3*fg_made + pat_made`); skips rows missing identity cells and defaults blank/`NA` optional stat cells to `0`. |
+| `PlayerStats(ctx, season)` | `GET /stats_player/stats_player_week_{season}.csv` | Reads `player_id` (GSIS ID), `player_display_name` (falling back to `player_name`), `position` (`FB`/`HB` normalized to `RB`), `team`, `opponent_team` (mapped via `mapTeam`), `season`, `week`, `season_type`, `target_share`, `air_yards_share`, `wopr`, `passing_epa`, optional `passing_cpoe`, `rushing_epa`, `receiving_epa`, `targets`, `carries`, `attempts`, `receptions`, yard/TD counts (`passing_*`, `rushing_*`, `receiving_*`), `fg_made`, and `pat_made` (stored as `kicker_pts = 3*fg_made + pat_made`); skips rows missing identity cells and defaults blank/`NA` optional stat cells to `0`. |
 | `SnapCounts(ctx, season)` | `GET /snap_counts/snap_counts_{season}.csv` | Reads `pfr_player_id`, `player`, `team`, `season`, `game_type` (`REG`, `POST`, `WC`, `DIV`, `CON`, `SB`, `PRE`), `week`, `offense_snaps`, and `offense_pct`. |
+| `FFOpportunity(ctx, season)` | `GET https://github.com/ffverse/ffopportunity/releases/download/latest-data/ep_weekly_{season}.csv` (or `/ff_opportunity/ep_weekly_{season}.csv` on custom base URLs) | Reads `season`, `posteam` (mapped via `mapTeam`), `week` (deriving `SeasonTypeRegular` vs `SeasonTypePostseason` when optional `season_type` is absent), `player_id` (GSIS ID), `full_name`, `position` (`FB`/`HB` normalized to `RB`), and expected volume/TD columns (`pass_yards_gained_exp`, `rush_yards_gained_exp`, `rec_yards_gained_exp`, `receptions_exp`, `pass_touchdown_exp`, `rush_touchdown_exp`, `rec_touchdown_exp`); defaults blank/`NA` numeric cells to `0`, and refresh treats failures as fail-soft. |
 
-- Season types normalize to ESPN integers: `PRE` → `1`, `REG` → `2`, and `POST`/`WC`/`DIV`/`CON`/`SB` → `3`.
+- Season types normalize to ESPN integers: `PRE` → `1`, `REG` → `2`, and `POST`/`WC`/`DIV`/`CON`/`SB` → `3`. When
+  `ep_weekly_{season}.csv` omits `season_type`, weeks `> 18` (`> 17` for seasons `<= 2020`) map to `3` and earlier weeks
+  map to `2`.
 - Team abbreviations that differ from ESPN normalize via `mapTeam`: `JAC` → `JAX`, `LA` → `LAR`, `OAK` → `LV`, `SD` →
   `LAC`, `STL` → `LAR`, and `WAS` → `WSH`.
 - Refresh writes regular and postseason rows for the active season into `nflverse_player_ids`, `nflverse_team_weeks`,
-  and `nflverse_player_weeks` under `nflverse:season:{year}`; see [Data refresh](../concepts/data-refresh.md). Responses
-  up to 8 MiB are archived under `nflverse:season:{year}` (larger responses pass through unrecorded). Real 2026 fixtures
-  saved on 2026-11-15 live in `internal/ingest/nflverse/testdata/`.
+  and `nflverse_player_weeks` under `nflverse:season:{year}`, deriving `carry_share` (`carries / team_carries`),
+  copying `passing_cpoe` to `cpoe`, and merging `FFOpportunity` expected yards, receptions, and touchdowns onto
+  `espn_id` (or logging a warning and continuing without expected opportunity on error); see
+  [Data refresh](../concepts/data-refresh.md). Responses up to 8 MiB are archived under `nflverse:season:{year}`
+  (larger responses pass through unrecorded). Real 2026 fixtures saved on 2026-11-15 (and `ep_weekly_2026.csv` saved on
+  2026-11-25) live in `internal/ingest/nflverse/testdata/`.
 
 ## Player matching
 

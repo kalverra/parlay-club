@@ -2,8 +2,8 @@
 id: odds-math
 title: Odds math
 type: reference
-summary: Formulas in internal/parlay for odds, implied probability, de-vigging, price edge, payouts, and units, plus internal/progress for live leg and parlay progress and hit probability.
-tags: [odds, parlay, math, payout, units, reference-price, implied-probability, devig, price-edge, live-progress, hit-probability]
+summary: Formulas in internal/parlay for odds, implied probability, multiplicative, Power, and Shin de-vigging, price edge, fair EV, payouts, and units, plus internal/progress for live leg and parlay progress and hit probability.
+tags: [odds, parlay, math, payout, units, reference-price, implied-probability, devig, power-devig, shin-devig, price-edge, fair-ev, live-progress, hit-probability]
 ---
 
 # Odds math
@@ -126,23 +126,69 @@ parlay odds:
 
 ### Two-way de-vigging
 
-`DevigTwoWay(priceA, priceB)` removes bookmaker vig from a two-way market by normalizing both raw implied probabilities
-to sum to `1`:
+All two-way de-vigging helpers share the same input guardrails:
 
 ```text
 pA = ImpliedProb(priceA)
 pB = ImpliedProb(priceB)
 overround = pA + pB
+```
+
+If either price is invalid (`0`) or `overround` falls outside `[0.95, 1.25]`, every two-way helper returns `ok = false`
+(and `0` for all numeric outputs) to guard against corrupt or mispaired quotes.
+
+`VigPct(priceA, priceB)` returns the overround vig as a decimal fraction:
+
+```text
+vig = overround - 1
+```
+
+#### Multiplicative (`DevigTwoWay`)
+
+`DevigTwoWay(priceA, priceB)` normalizes both raw implied probabilities proportionally so they sum to `1`:
+
+```text
 probA = pA / overround
 probB = pB / overround
 ```
 
-It returns `ok = false` (and `0, 0`) if either price is invalid (`0`) or if `overround` falls outside `[0.95, 1.25]`,
-which guards against corrupt or mispaired quotes.
+#### Power (`DevigTwoWayPower`)
 
-### Price edge
+Multiplicative normalization under-corrects favorite-longshot bias in retail prop and touchdown markets.
+`DevigTwoWayPower(priceA, priceB)` solves for the exponent `k > 0` such that the powered implied probabilities sum
+to `1`:
 
-`PriceEdge(retailAmerican, fairProb)` compares a retail American price against a sharp fair probability:
+```text
+pA^k + pB^k = 1
+probA = pA^k
+probB = pB^k
+vig   = overround - 1
+```
+
+When `|vig| ≤ 1e-13`, it returns `(pA, pB, 0, true)` directly. Otherwise it finds `k` via 80-step bisection starting on
+`[0.05, 20]` (doubling the upper bound up to `1e6` if needed) until `|pA^k + pB^k − 1| ≤ 1e-13`. For positive vig
+(`k > 1`), raising probabilities to `k` shrinks the smaller probability faster in relative terms, allocating more vig to
+the longshot than multiplicative normalization.
+
+#### Shin (`DevigTwoWayShin`)
+
+`DevigTwoWayShin(priceA, priceB)` models bookmaker vig using Shin's insider-trading fraction `z ∈ (0, 1)` and solves
+`probA(z) + probB(z) = 1`:
+
+```text
+prob_i(z) = (sqrt(z^2 + 4 × (1 − z) × (p_i^2 / overround)) − z) / (2 × (1 − z))
+vig       = overround - 1
+```
+
+It returns `(pA, pB, 0, true)` when `|vig| ≤ 1e-13`, and falls back to multiplicative normalization when `vig < 0`
+(since `z ∈ (0, 1)` requires a positive overround). For positive overround, it solves for `z` via 80-step bisection
+on `[0, 1 − 1e-12]` until `|probA + probB − 1| ≤ 1e-13`. Like Power, Shin assigns a higher fair probability to the
+favorite and a lower fair probability to the longshot than multiplicative normalization on asymmetric lines.
+
+### Price edge and fair EV
+
+`PriceEdge(retailAmerican, fairProb)` measures probability-point difference between a sharp fair probability and a
+retail American price:
 
 ```text
 edge = fairProb - ImpliedProb(retailAmerican)
@@ -150,6 +196,16 @@ edge = fairProb - ImpliedProb(retailAmerican)
 
 Positive values mean the retail price pays better than the sharp fair probability; negative values mean extra juice or
 shading. Invalid inputs (`retailAmerican == 0` or `fairProb` outside `(0, 1)`) return `0`.
+
+`FairEV(fairProb, retailAmerican)` computes expected value per unit staked as a decimal fraction (used as an internal
+scoring signal rather than user-facing `"+EV %"` copy):
+
+```text
+ev = fairProb × AmericanToDecimal(retailAmerican) - 1
+```
+
+It returns `0` when `fairProb` is not strictly inside `(0, 1)` (including `NaN`, `Inf`, `≤ 0`, or `≥ 1`) or when
+`retailAmerican == 0` (`AmericanToDecimal(retailAmerican) ≤ 1`).
 
 ## Live progress and hit probability
 
@@ -268,8 +324,12 @@ a person logged a wager.
 | `DecimalToAmerican(decimal float64) int`                    | Rounded American price, or `0` for `d ≤ 1`.                     |
 | `DecimalImpliedProb(decimal float64) float64`               | Raw implied probability in `(0, 1)`, or `0` for `d ≤ 1`, `NaN`, or `Inf`. |
 | `ImpliedProb(american int) float64`                         | Raw implied probability in `(0, 1)`, or `0` for `0`.            |
-| `DevigTwoWay(priceA, priceB int) (float64, float64, bool)`  | Fair probabilities `(probA, probB)` and `ok`.           |
-| `PriceEdge(retailAmerican int, fairProb float64) float64`   | `fairProb - ImpliedProb(retailAmerican)`, or `0`.       |
+| `DevigTwoWay(priceA, priceB int) (float64, float64, bool)` | Multiplicative fair probabilities `(probA, probB)` and `ok`. |
+| `DevigTwoWayPower(priceA, priceB int) (float64, float64, float64, bool)` | Power-method fair probabilities `(probA, probB, vig, ok)`. |
+| `DevigTwoWayShin(priceA, priceB int) (float64, float64, float64, bool)` | Shin-model fair probabilities `(probA, probB, vig, ok)`. |
+| `VigPct(priceA, priceB int) (float64, bool)` | Two-way overround vig (`overround - 1`) and `ok`. |
+| `PriceEdge(retailAmerican int, fairProb float64) float64` | `fairProb - ImpliedProb(retailAmerican)`, or `0`. |
+| `FairEV(fairProb float64, retailAmerican int) float64` | `fairProb * AmericanToDecimal(retailAmerican) - 1`, or `0`. |
 | `CombinedOdds(legs []Leg) float64`                          | Product of counting leg decimals, or `1`.               |
 | `ReferencePrice(candidates []float64, own float64) float64` | Candidate median, or `own` when empty.                  |
 | `Payout(stake, decimal, boostPct float64) float64`          | Total return including the stake.                       |

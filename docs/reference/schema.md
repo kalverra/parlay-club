@@ -24,7 +24,8 @@ hook) refreshes `roster_players.norm_name`, deduplicates colliding `odds` rows o
 values, and backfills missing `legs.player_id` and `legs.team` values. `0014_roster_injuries.sql` adds `injury_status` and `injury_date` to `roster_players`. `0015_research_context.sql` adds
 `games_json` to `player_gamelogs` and adds opponent, player name, position, passing/rushing/receiving/kicking stat
 columns, and `idx_nflverse_player_weeks_opp_pos` to `nflverse_player_weeks`. `0018_live_game_state.sql` adds nullable
-`period`, `clock`, and `boxscore_json` columns to `games`.
+`period`, `clock`, and `boxscore_json` columns to `games`. `0019_v2_opportunity_signals.sql` adds expected opportunity,
+`carry_share`, and `cpoe` columns to `nflverse_player_weeks`.
 
 ## Connection settings
 
@@ -56,7 +57,7 @@ writer handle.
 - `db.Migrate` applies every file whose number is greater than `PRAGMA user_version`, in number order.
 - Each file runs in its own transaction. The migration's statements and its `user_version` bump commit together, so a
   failed migration leaves neither behind.
-- A fresh database ends at version 18 with every table below.
+- A fresh database ends at version 19 with every table below.
 - `0001_init.sql` creates `groups`, `group_members`, and `slips.group_id`. A database created before groups existed has
   the old `slips` shape, so delete it and let the migrations rebuild.
 - `0002_google_identity.sql` rebuilds `users` in its transaction with the SQLite 12-step method and
@@ -90,7 +91,9 @@ writer handle.
 - `0017_slip_games.sql` creates `slip_games` (`slip_id`, `game_id`) with `idx_slip_games_slip_id` to store explicit
   eligible games for slips with `slate_scope = 'custom'`.
 - `0018_live_game_state.sql` adds nullable `period`, `clock`, and `boxscore_json` columns to `games`.
-- Never edit an applied file. Add `0019_name.sql` and up.
+- `0019_v2_opportunity_signals.sql` adds `exp_pass_yds`, `exp_rush_yds`, `exp_rec_yds`, `exp_receptions`,
+  `exp_pass_tds`, `exp_rush_tds`, `exp_rec_tds`, `carry_share`, and `cpoe` to `nflverse_player_weeks`.
+- Never edit an applied file. Add `0020_name.sql` and up.
 - `PRAGMA user_version` on the database file is the only record of what ran.
 
 ## Tables
@@ -106,7 +109,7 @@ writer handle.
 | `nfelo_games`     | nfelo's pre-game model spread, win probability, and QB adjustments per game. |
 | `nflverse_player_ids`   | Crosswalk mapping ESPN athlete IDs to nflverse GSIS and PFR IDs. |
 | `nflverse_team_weeks`   | Weekly team offensive and defensive-allowed EPA, play volume, and pass rate. |
-| `nflverse_player_weeks` | Weekly player snaps, target/air-yards share, WOPR, volume, total EPA, opponent, position, and box stats. |
+| `nflverse_player_weeks` | Weekly player snaps, target/air-yards/carry share, WOPR, volume, total EPA, CPOE, expected opportunity, opponent, position, and box stats. |
 | `slips`           | One shared parlay per group per week, with status, `slate_scope` (`thursday`, `sunday_main`, `weekend`, `full_week`, `custom`), and result. |
 | `slip_games`      | Explicit eligible games for `custom` one-off slips.          |
 | `slip_members`    | Who is on a slip and when they locked in.                     |
@@ -285,6 +288,15 @@ CREATE TABLE nflverse_player_weeks (
   rec_yds         INTEGER NOT NULL DEFAULT 0,
   rec_tds         INTEGER NOT NULL DEFAULT 0,
   kicker_pts      INTEGER NOT NULL DEFAULT 0,  -- 3*fg_made + pat_made
+  exp_pass_yds    REAL    NOT NULL DEFAULT 0,
+  exp_rush_yds    REAL    NOT NULL DEFAULT 0,
+  exp_rec_yds     REAL    NOT NULL DEFAULT 0,
+  exp_receptions  REAL    NOT NULL DEFAULT 0,
+  exp_pass_tds    REAL    NOT NULL DEFAULT 0,
+  exp_rush_tds    REAL    NOT NULL DEFAULT 0,
+  exp_rec_tds     REAL    NOT NULL DEFAULT 0,
+  carry_share     REAL    NOT NULL DEFAULT 0,  -- player carries / team carries
+  cpoe            REAL    NOT NULL DEFAULT 0,  -- passing_cpoe when present in nflverse
   PRIMARY KEY (espn_id, season, season_type, week_num)
 );
 CREATE INDEX idx_nflverse_player_weeks_opp_pos
@@ -462,6 +474,8 @@ how to read it.
   changes, so rerunning with the same CSV is a no-op.
 - `nflverse_player_ids`, `nflverse_team_weeks`, and `nflverse_player_weeks` hold global season rows keyed by ESPN IDs
   and team abbreviations. Syncs upsert them idempotently and move `updated_at` only when a stored value changes.
+  `nflverse_player_weeks` also stores derived `carry_share`, optional `cpoe`, and fail-soft `ff_opportunity` expected
+  volume/TD metrics (all `0` when absent).
 - A slip's reference odds are not stored; any view that shows them computes them.
 - `leg_votes` holds only cast votes. Clearing one deletes its row, and deleting a leg cascades. A vote changes no slip or
   leg field and writes no activity entry.

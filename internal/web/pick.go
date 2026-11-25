@@ -1218,7 +1218,7 @@ func (h *slipHandlers) dockFrom(
 	view.CombinedImplied = formatImpliedChance(parlay.DecimalImpliedProb(combined))
 
 	gamesByID, stats := analyzer.LoadSlipSignals(ctx, h.deps.Store, now, slip.WeekID, games, legs)
-	analysis, legGrades := analyzerView(legs, gamesByID, stats, names)
+	analysis, legGrades := analyzerView(legs, gamesByID, stats, names, h.deps.GradingEngine)
 	view.Grade = analysis.Grade
 	for i := range view.Legs {
 		view.Legs[i].Grade = legGrades[view.Legs[i].ID]
