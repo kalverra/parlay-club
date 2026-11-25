@@ -968,3 +968,118 @@ func TestCompareRubricsAndIdentityMigrations(t *testing.T) {
 	assert.Equal(t, "B", zeroIDDiff.Migrations[1].ToBand)
 	assert.Equal(t, 1, zeroIDDiff.Migrations[1].Losses)
 }
+
+func TestEvaluateMarketLegsAndMigrations(t *testing.T) {
+	t.Parallel()
+
+	games := testGame()
+	stats := testStats()
+
+	dataset := ReplayDataset{
+		Weeks: []ReplayedWeek{
+			{
+				Season:   2025,
+				WeekNum:  4,
+				WeekType: "REG",
+				Games:    games,
+				Stats:    stats,
+				MarketLegs: []ReplayedLeg{
+					{
+						Leg: analyzer.Leg{
+							GameID: "g1", Market: "REC_YDS", Team: "BUF",
+							PlayerID: "p_hot", Side: "OVER", Line: new(55.5), Odds: 100,
+						},
+						Result:      parlay.Won,
+						DecimalOdds: 2.0,
+					},
+					{
+						Leg: analyzer.Leg{
+							GameID: "g1", Market: "REC_YDS", Team: "BUF",
+							PlayerID: "p_cold", Side: "OVER", Line: new(55.5), Odds: -110,
+						},
+						Result:      parlay.Lost,
+						DecimalOdds: parlay.AmericanToDecimal(-110),
+					},
+				},
+			},
+			{
+				Season:   2025,
+				WeekNum:  5,
+				WeekType: "REG",
+				Games:    games,
+				Stats:    stats,
+				MarketLegs: []ReplayedLeg{
+					{
+						Leg: analyzer.Leg{
+							GameID: "g1", Market: "REC_YDS", Team: "BUF",
+							PlayerID: "p_hot", Side: "OVER", Line: new(55.5), Odds: 100,
+						},
+						Result:      parlay.Push,
+						DecimalOdds: 2.0,
+					},
+					{
+						Leg: analyzer.Leg{
+							GameID: "g1", Market: "REC_YDS", Team: "BUF",
+							PlayerID: "p_cold", Side: "OVER", Line: new(55.5), Odds: 100,
+						},
+						Result:      parlay.Won,
+						DecimalOdds: 2.0,
+					},
+				},
+			},
+		},
+	}
+
+	report := Evaluate(dataset, analyzer.RubricV1)
+
+	// Slip sections must remain completely empty in market-only datasets.
+	for _, b := range report.SlipBands {
+		assert.Zero(t, b.Total, "slip band %s should be empty", b.Band)
+		assert.Zero(t, b.Decided, "slip band %s decided should be empty", b.Band)
+	}
+	assert.Empty(t, report.SlipFactors)
+	require.Len(t, report.Weekly, 2)
+	for _, ws := range report.Weekly {
+		for _, b := range ws.SlipBands {
+			assert.Zero(t, b.Total)
+		}
+	}
+
+	// Band A: 1 Won (at 2.0) + 1 Push (at 2.0) -> Total=2, Decided=1, Wins=1, Pushes=1.
+	bandA, ok := bandByName(report.LegBands, "A")
+	require.True(t, ok)
+	assert.Equal(t, 2, bandA.Total)
+	assert.Equal(t, 1, bandA.Decided)
+	assert.Equal(t, 1, bandA.Wins)
+	assert.Equal(t, 1, bandA.Pushes)
+	assert.InDelta(t, 1.0, bandA.WinRate, 1e-9)
+	assert.InDelta(t, 0.5, bandA.AvgImpliedProb, 1e-9)
+	assert.InDelta(t, 0.5, bandA.Lift, 1e-9)
+	assert.InDelta(t, 1.0, bandA.FlatROI, 1e-9)
+	assert.InDelta(t, 0.25, bandA.BrierScore, 1e-9)
+
+	// Factor attribution must include hit_rate and median_trap from MarketLegs.
+	hitRate, ok := factorByRule(report.Factors, "hit_rate")
+	require.True(t, ok)
+	assert.Equal(t, 1, hitRate.Count)
+	assert.Equal(t, 1, hitRate.Wins)
+
+	medianTrap, ok := factorByRule(report.Factors, "median_trap")
+	require.True(t, ok)
+	assert.Equal(t, 2, medianTrap.Count)
+	assert.Equal(t, 1, medianTrap.Wins)
+	assert.Equal(t, 1, medianTrap.Losses)
+
+	// Rubric comparison must match each market leg across weeks without key collisions.
+	cand := analyzer.RubricV1
+	cand.Name = "v2-market"
+	cand.HitRate = 0
+	cand.MedianTrap = 0
+
+	_, _, diff := CompareRubrics(dataset, analyzer.RubricV1, cand)
+	totalMigrated := 0
+	for _, cell := range diff.Migrations {
+		totalMigrated += cell.Total
+	}
+	assert.Equal(t, 4, totalMigrated)
+}

@@ -1014,3 +1014,220 @@ func TestLoadDatasetNFLverseL5Fallback(t *testing.T) {
 	}
 	assert.Contains(t, rules3, "hit_rate")
 }
+
+func TestLoadDatasetMarketModeEndToEnd(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	store := newTestStore(t)
+
+	group, user := seedGroupAndMember(t, store, "market-e2e")
+	week6, err := store.UpsertWeek(ctx, 2025, nflverse.SeasonTypeRegular, 6)
+	require.NoError(t, err)
+
+	kickoff := time.Date(2025, 10, 12, 17, 0, 0, 0, time.UTC)
+	_, err = store.UpsertGame(ctx, db.Game{
+		ID:          "g6",
+		WeekID:      week6.ID,
+		HomeTeam:    "BUF",
+		AwayTeam:    "MIA",
+		HomeName:    "Buffalo Bills",
+		AwayName:    "Miami Dolphins",
+		HomeESPNID:  "2",
+		AwayESPNID:  "15",
+		OddsEventID: new("evt-g6"),
+		Kickoff:     kickoff,
+		Status:      db.GameFinal,
+		HomeScore:   new(27),
+		AwayScore:   new(20),
+	})
+	require.NoError(t, err)
+
+	// Scheduled game in the same week must be excluded from ModeMarket.
+	_, err = store.UpsertGame(ctx, db.Game{
+		ID:          "g6_sched",
+		WeekID:      week6.ID,
+		HomeTeam:    "KC",
+		AwayTeam:    "LV",
+		HomeName:    "Kansas City Chiefs",
+		AwayName:    "Las Vegas Raiders",
+		OddsEventID: new("evt-sched"),
+		Kickoff:     kickoff.Add(3 * time.Hour),
+		Status:      db.GameScheduled,
+	})
+	require.NoError(t, err)
+
+	// Prior-week nflverse data (Weeks 1..5) for L5 fallback and EPA.
+	var teamRows []db.NFLverseTeamWeek
+	var playerRows []db.NFLversePlayerWeek
+	for w := 1; w <= 5; w++ {
+		teamRows = append(
+			teamRows,
+			db.NFLverseTeamWeek{
+				Season:            2025,
+				SeasonType:        nflverse.SeasonTypeRegular,
+				WeekNum:           w,
+				Team:              "BUF",
+				DefPassEPAAllowed: -0.05,
+				PlaysPerGame:      65,
+				PassRate:          0.56,
+			},
+			db.NFLverseTeamWeek{
+				Season:            2025,
+				SeasonType:        nflverse.SeasonTypeRegular,
+				WeekNum:           w,
+				Team:              "MIA",
+				DefPassEPAAllowed: 0.14,
+				PlaysPerGame:      64,
+				PassRate:          0.58,
+			},
+		)
+		playerRows = append(playerRows, db.NFLversePlayerWeek{
+			Season: 2025, SeasonType: nflverse.SeasonTypeRegular, WeekNum: w,
+			ESPNID: "espn-wr-l5", PlayerName: "L5 Market WR", Team: "BUF", Position: "WR",
+			Receptions: 6, RecYds: 70 + w*2,
+		})
+	}
+	_, err = store.UpsertNFLverseTeamWeeks(ctx, teamRows)
+	require.NoError(t, err)
+	_, err = store.UpsertNFLversePlayerWeeks(ctx, playerRows)
+	require.NoError(t, err)
+
+	// Pre-kickoff roster archive for BUF (ESPN team 2).
+	rosterBody := `{"athletes":[{"position":"WR","items":[{"id":"espn-wr-l5","fullName":"L5 Market WR","position":{"abbreviation":"WR"}}]}]}`
+	mustArchiveResponse(t, store, "espn", db.ArchiveRosterKey("2"), kickoff.Add(-2*time.Hour), []byte(rosterBody))
+
+	// Pre-kickoff odds:lines with 2 books (Pinnacle + DraftKings) for g6 and g6_sched.
+	linesBody := `[
+		{
+			"id": "evt-g6",
+			"home_team": "Buffalo Bills",
+			"away_team": "Miami Dolphins",
+			"commence_time": "2025-10-12T17:00:00Z",
+			"bookmakers": [
+				{
+					"key": "pinnacle",
+					"markets": [
+						{"key": "spreads", "outcomes": [{"name": "Buffalo Bills", "point": -3.5, "price": -108}, {"name": "Miami Dolphins", "point": 3.5, "price": -102}]},
+						{"key": "totals", "outcomes": [{"name": "Over", "point": 46.5, "price": -105}, {"name": "Under", "point": 46.5, "price": -105}]}
+					]
+				},
+				{
+					"key": "draftkings",
+					"markets": [
+						{"key": "spreads", "outcomes": [{"name": "Buffalo Bills", "point": -3.5, "price": -110}, {"name": "Miami Dolphins", "point": 3.5, "price": -110}]},
+						{"key": "totals", "outcomes": [{"name": "Over", "point": 46.5, "price": -110}, {"name": "Under", "point": 46.5, "price": -110}]}
+					]
+				}
+			]
+		},
+		{
+			"id": "evt-sched",
+			"home_team": "Kansas City Chiefs",
+			"away_team": "Las Vegas Raiders",
+			"commence_time": "2025-10-12T20:00:00Z",
+			"bookmakers": [
+				{
+					"key": "draftkings",
+					"markets": [{"key": "spreads", "outcomes": [{"name": "Kansas City Chiefs", "point": -7.5, "price": -110}]}]
+				}
+			]
+		}
+	]`
+	mustArchiveResponse(t, store, "odds", db.ArchiveOddsLinesKey, kickoff.Add(-30*time.Minute), []byte(linesBody))
+
+	// Pre-kickoff odds:props:g6 for player prop.
+	propsBody := `{
+		"id": "evt-g6",
+		"bookmakers": [
+			{
+				"key": "fanduel",
+				"markets": [
+					{
+						"key": "player_reception_yds",
+						"outcomes": [
+							{"name": "Over", "description": "L5 Market WR", "point": 55.5, "price": -115},
+							{"name": "Under", "description": "L5 Market WR", "point": 55.5, "price": -105}
+						]
+					}
+				]
+			}
+		]
+	}`
+	mustArchiveResponse(t, store, "odds", db.ArchiveOddsPropsKey("g6"), kickoff.Add(-30*time.Minute), []byte(propsBody))
+
+	// Completed post-game ESPN summary box score for grading player props.
+	boxSummaryBody := `{
+		"header": {"competitions": [{"status": {"type": {"completed": true}}}]},
+		"boxscore": {
+			"players": [
+				{
+					"team": {"abbreviation": "BUF"},
+					"statistics": [
+						{
+							"name": "receiving",
+							"keys": ["receptions", "receivingYards", "receivingTouchdowns"],
+							"athletes": [
+								{
+									"athlete": {"id": "espn-wr-l5", "displayName": "L5 Market WR"},
+									"stats": ["7", "82", "1"]
+								}
+							]
+						}
+					]
+				}
+			]
+		}
+	}`
+	mustArchiveResponse(t, store, "espn", db.ArchiveSummaryKey("g6"), kickoff.Add(4*time.Hour), []byte(boxSummaryBody))
+
+	// Seed a settled user slip to verify ModeMarket ignores slips.
+	slip, err := store.CreateSlip(ctx, group.ID, week6.ID, nil, "User Slip", db.SlateScopeFullWeek, 4, []int64{user.ID})
+	require.NoError(t, err)
+	leg, err := store.CreateLeg(ctx, db.Leg{
+		SlipID: slip.ID, UserID: user.ID, GameID: new("g6"),
+		MarketType: "SPREAD", Selection: "BUF -3.5", Team: new("BUF"), Side: new("HOME"), Line: new(-3.5), Odds: -110,
+	})
+	require.NoError(t, err)
+	require.NoError(t, store.SetLegResult(ctx, leg.ID, parlay.Won, "test"))
+	require.NoError(t, store.SetSlipGrade(ctx, slip.ID, parlay.Won, db.SlipGraded))
+
+	// Invalid mode must fail.
+	_, err = eval.LoadDataset(ctx, store, eval.ReplayFilter{Mode: eval.ReplayMode("bogus")})
+	require.Error(t, err)
+
+	ds, err := eval.LoadDataset(ctx, store, eval.ReplayFilter{Mode: eval.ModeMarket})
+	require.NoError(t, err)
+	require.Len(t, ds.Weeks, 1)
+
+	w := ds.Weeks[0]
+	assert.Empty(t, w.Slips)
+	// Deduplicated: 2 spread sides + 2 total sides + 2 rec_yds sides = 6 market legs.
+	require.Len(t, w.MarketLegs, 6)
+	for _, ml := range w.MarketLegs {
+		assert.Equal(t, "g6", ml.Leg.GameID, "scheduled game must not emit market legs")
+	}
+
+	assert.Equal(t, 6, ds.Coverage.TotalLegs)
+	assert.Equal(t, 6, ds.Coverage.WithOdds)
+	assert.Equal(t, 4, ds.Coverage.WithSharp)
+	assert.Equal(t, 2, ds.Coverage.WithL5Fallback)
+
+	rubrics := analyzer.BuiltInRubrics()
+	suite := eval.EvaluateAll(ds, rubrics)
+	require.Len(t, suite.Reports, len(rubrics))
+	for _, r := range suite.Reports {
+		for _, sb := range r.SlipBands {
+			assert.Zero(t, sb.Total)
+		}
+		assert.Empty(t, r.SlipFactors)
+	}
+
+	// Verify JSON round-trip of MarketLegs dataset computes TotalLegs automatically.
+	raw, err := json.Marshal(eval.ReplayDataset{Weeks: ds.Weeks})
+	require.NoError(t, err)
+	jsonPath := filepath.Join(t.TempDir(), "market.json")
+	require.NoError(t, os.WriteFile(jsonPath, raw, 0o600))
+	loaded, err := eval.LoadDatasetJSON(jsonPath)
+	require.NoError(t, err)
+	assert.Equal(t, 6, loaded.Coverage.TotalLegs)
+}

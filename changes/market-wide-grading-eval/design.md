@@ -281,7 +281,7 @@ Risk: low (read-only evaluation over finished games and archived snapshots; unit
   `board.Build` median deduplication and deterministic offline grader (`internal/eval/market_grade.go`) over final
   scores, completed archived ESPN box scores, and same-week `nflverse_player_weeks` with unit tests covering all markets
   and missing-data guards.
-- [ ] Add `ReplayMode` (`ModeSlips` / `ModeMarket`) to `ReplayFilter`, `MarketLegs` to `ReplayedWeek`, and market-leg
+- [x] Add `ReplayMode` (`ModeSlips` / `ModeMarket`) to `ReplayFilter`, `MarketLegs` to `ReplayedWeek`, and market-leg
   scoring and rubric migration matching in `internal/eval/metrics.go` and `internal/eval/replay.go`, with end-to-end
   replay and comparison tests verifying calibration, lift, flat ROI, Brier score, factor attribution, and empty slip
   sections.
