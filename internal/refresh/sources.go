@@ -73,9 +73,8 @@ func (s *Service) syncScoreboard(ctx context.Context, now time.Time) (bool, erro
 	if allBoardFinal(board.Games) {
 		next, err := s.nextScoreboard(ctx, board)
 		if err != nil {
-			return false, err
-		}
-		if len(next.Games) > 0 && !sameScoreboardWeek(next, board) {
+			s.logger.Warn().Err(err).Int("week", board.Week.Number+1).Msg("fetch next scoreboard")
+		} else if len(next.Games) > 0 && !sameScoreboardWeek(next, board) {
 			boards = append(boards, next)
 		}
 	}
