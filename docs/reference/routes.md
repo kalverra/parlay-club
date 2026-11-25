@@ -88,7 +88,7 @@ accept the shared invite. A forged group cookie still falls back to a real membe
 | `GET /research`           | Research page: week games, player search, injury reports, and last-5 hit bars                     |
 | `GET /record`             | Season Record Book for the active group (optional `?season=`)                                    |
 | `GET /analyzer/guide`     | Grading & Analyzer Guide: live `A`–`F` rubric, pick-board badges, and every warning rule         |
-| `GET /analyzer/results`   | Grading Results: group-scoped `A`–`F` calibration, rubric diffs, weekly progression, and factors |
+| `GET /analyzer/results`   | Grading Results: global or market-wide `A`–`F` calibration, rubric diffs, weekly progression, and factors |
 
 The bottom bar has three destinations: Groups (`/`), This week (`/groups/{active}/week`), and Record Book. Research
 keeps a full page but leaves the bar; the hub links to the pick board, and pick rows link to Research.
@@ -396,20 +396,25 @@ protocol-relative targets are ignored. See [Analyzer](../concepts/analyzer.md) a
 
 | Method + path            | Purpose                                                               | Response |
 | ------------------------ | --------------------------------------------------------------------- | -------- |
-| `GET /analyzer/results`  | Global Grading Results backed by `eval.Cache` and `EvaluateAll` | Full page; invalid or non-positive `?season=` is 400. |
+| `GET /analyzer/results`  | Global or market-wide Grading Results backed by `eval.Cache` and `EvaluateAll` | Full page; invalid `?season=` or `?source=` is 400. |
 
-`GET /analyzer/results` renders `web/templates/analyzer_results.html` behind `RequireUser`, aggregating replayed
-calibration data across all groups. It reads from `eval.Cache` keyed by `(0, season)`, which invalidates whenever
-`SetLegResult` or `AutoGradeLegs` commits a settlement change for any group, and clears globally on sandbox stage
-transitions or resets.
+`GET /analyzer/results` renders `web/templates/analyzer_results.html` behind `RequireUser`. It reads from `eval.Cache`
+keyed by `(mode, 0, season)`. In `slips` mode, it aggregates settled slips across all groups and invalidates whenever
+`SetLegResult` or `AutoGradeLegs` commits a settlement change for any group. In `market` mode, it replays deduplicated
+pre-kickoff consensus lines across `FINAL` games and invalidates via `InvalidateMarket` when `syncScoreboard` records a
+newly `FINAL` game or `syncNFLverse` commits changes. Sandbox stage transitions or resets clear the whole cache.
 
 Query parameters:
 
+- `?source=`: `slips` (default, `User slips` across all groups) or `market` (`Market-wide` pre-kickoff consensus lines on
+  `FINAL` games). Invalid values return `400 Bad Request`. Preserved on all season and rubric filter URLs. In `market`
+  mode, `Slip Calibration (A-F)` and `Slip Factor Attribution` are hidden (replaced with a note linking back to
+  `User slips`), and `Pre-Kickoff Data Coverage` adds `Sharp benchmarks` and `nflverse L5 fallback` tiles.
 - `?season=`: `all` (or `0`) for all seasons, or a positive season year. Defaults to the latest season with graded slips
-  across all groups (`GradedSeasons`), falling back to `Seasons` or `all`. Unreadable or non-positive values return
-  `400 Bad Request`.
+  across all groups (`GradedSeasons`) in `slips` mode, or the latest season with `FINAL` games (`FinalSeasons`) in
+  `market` mode, falling back to `Seasons` or `all`. Unreadable or non-positive values return `400 Bad Request`.
 - `?rubric=`: selects which built-in rubric to display (defaults to `analyzer.ActiveRubric.Name`).
-- `?from=`: optional safe return path validated by `safeReturnPath`, preserved on season/rubric pills and the
+- `?from=`: optional safe return path validated by `safeReturnPath`, preserved on source/season/rubric pills and the
   `"How grading works"` link back to `/analyzer/guide`. See [Analyzer](../concepts/analyzer.md).
 
 ### Profile

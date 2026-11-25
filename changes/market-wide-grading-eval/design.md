@@ -297,6 +297,10 @@ Risk: low (isolated to in-memory cache invalidation, offline CLI flags, and the 
 - [x] Add `?source=slips|market` to `GET /analyzer/results` (`internal/web/eval_results.go`) and phone-first source
   switcher pills plus sharp/L5-fallback coverage tiles to `web/templates/analyzer_results.html` (hiding slip-only
   sections in market mode and preserving `?source=` on filter URLs), run `go generate ./...`, and add HTTP tests.
-- [ ] Docs: update `docs/concepts/analyzer.md`, `docs/reference/routes.md`, and `docs/guides/local-dev.md` for
+- [x] Docs: update `docs/concepts/analyzer.md`, `docs/reference/routes.md`, and `docs/guides/local-dev.md` for
   market-wide grading evaluation, sharp/L5 signal reconstruction, `--mode market`, and `?source=market`, and run
   `good-vibes docs lint`.
+
+## Reviews
+
+- [x] Final review: agy@gemini-4-neon-medium

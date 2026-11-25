@@ -238,12 +238,25 @@ go tool pprof -http=:6060 http://localhost:8080/debug/pprof/heap
 
 ## Offline grading evals
 
-Run offline grading evals to check how well A–F grades calibrate against settled slips and legs, or to compare a candidate `Rubric` JSON file against the baseline `v1` rubric. The eval CLI opens the database read-only, makes no external API calls, and reconstructs historical inputs strictly from pre-kickoff `api_archive` rows and prior-week `nflverse` data so live overwritten tables never leak future outcomes.
+Run offline grading evals to check how well A–F grades calibrate against settled slips or market-wide pre-kickoff lines,
+or to compare a candidate `Rubric` JSON file against the baseline `v1` rubric. The eval CLI opens the database
+read-only, makes no external API calls, and reconstructs historical inputs strictly from pre-kickoff `api_archive` rows
+(including sharp benchmarks from archived odds) and prior-week `nflverse` data (including L5 game-log fallbacks when
+archived ESPN game logs are missing) so live overwritten tables never leak future outcomes.
 
 ### Against a local database
 
 ```sh
 go run ./cmd/eval --db ./data/parlay.db --rubric v1
+```
+
+Pass `--mode market` to evaluate deduplicated pre-kickoff consensus lines on `FINAL` games instead of settled user
+slips (`--mode slips`, the default). Market mode grades game lines and team totals from final scores, grades player props
+from completed archived ESPN box scores or same-week `nflverse` rows, and omits empty slip calibration and slip factor
+sections from text, Markdown, and JSON outputs (`--mode` cannot be combined with `--dataset`):
+
+```sh
+go run ./cmd/eval --db ./data/parlay.db --mode market --all
 ```
 
 Filter by season or week range, or emit JSON for scripting:
@@ -258,7 +271,7 @@ To compare the built-in `v1` rubric against a candidate rubric file (for example
 go run ./cmd/eval --db ./data/parlay.db --baseline v1 --candidate-file ./rubric-v2.json
 ```
 
-Use `--candidate <name>` instead of `--candidate-file` when comparing two built-in rubrics, or `--all` to evaluate every built-in rubric and emit side-by-side diffs. The diff output prints data coverage counts, per-band leg and slip calibration deltas (win rate, lift over implied odds, flat ROI), per-factor attribution, and the leg band migration matrix.
+Use `--candidate <name>` instead of `--candidate-file` when comparing two built-in rubrics, or `--all` to evaluate every built-in rubric and emit side-by-side diffs. Coverage output includes `sharp=<N>` and `l5_fallback=<N>` counts alongside game logs, injuries, nflverse, nfelo, and odds. The diff output prints data coverage counts, per-band leg and slip calibration deltas (win rate, lift over implied odds, flat ROI), per-factor attribution, and the leg band migration matrix.
 
 To replay the synthetic benchmark fixture (the same check CI runs with `--format markdown` to populate `$GITHUB_STEP_SUMMARY`):
 
@@ -268,7 +281,7 @@ go run ./cmd/eval --dataset internal/eval/testdata/benchmark_dataset.json --all 
 
 ### Against a Litestream-restored database
 
-Run `mise run eval-prod` (backed by `scripts/eval-prod.sh`) to restore a read-only production snapshot into a temporary directory under `./data/`, run `cmd/eval`, and clean up the temporary files automatically on exit:
+Run `mise run eval-prod` (backed by `scripts/eval-prod.sh`) to restore a read-only production snapshot into a temporary directory under ./data/, run `cmd/eval`, and clean up the temporary files automatically on exit:
 
 ```sh
 LITESTREAM_BUCKET=<bucket> mise run eval-prod
@@ -277,7 +290,7 @@ LITESTREAM_BUCKET=<bucket> mise run eval-prod
 By default, `eval-prod` passes `--all` to `cmd/eval`. Pass custom `cmd/eval` flags after `--` (set `LITESTREAM_REPLICA_URL` instead of `LITESTREAM_BUCKET` if using a custom replica URL):
 
 ```sh
-LITESTREAM_BUCKET=<bucket> mise run eval-prod -- --baseline v1 --candidate-file ./rubric-v2.json
+LITESTREAM_BUCKET=<bucket> mise run eval-prod -- --mode market --all
 ```
 
 ## Check your work
