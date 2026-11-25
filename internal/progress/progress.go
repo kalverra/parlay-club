@@ -69,7 +69,7 @@ type SlipProgress struct {
 
 // EvaluateLeg computes the live or settled progress and hit probability for a
 // single leg given its game state and optional ESPN box score.
-func EvaluateLeg(leg db.Leg, game *db.Game, _ *espn.BoxScore) LegProgress {
+func EvaluateLeg(leg db.Leg, game *db.Game, box *espn.BoxScore) LegProgress {
 	preProb := parlay.ImpliedProb(leg.Odds)
 	clockLabel := ""
 	if game != nil {
@@ -108,7 +108,12 @@ func EvaluateLeg(leg db.Leg, game *db.Game, _ *espn.BoxScore) LegProgress {
 		return evaluateTotal(leg, game, preProb, p0, remFrac, clockLabel)
 	case "TEAM_TOTAL":
 		return evaluateTeamTotal(leg, game, preProb, p0, remFrac, clockLabel)
+	case "OTHER":
+		return unavailableLeg(preProb, clockLabel)
 	default:
+		if db.IsPlayerMarket(market) {
+			return evaluatePlayerProp(market, leg, box, preProb, p0, remFrac, clockLabel)
+		}
 		return unavailableLeg(preProb, clockLabel)
 	}
 }
@@ -278,32 +283,44 @@ func evaluateMonotonicNormalTotal(
 	statLabel, clockLabel string,
 ) LegProgress {
 	if cur > line {
-		if side == "OVER" {
-			return LegProgress{
-				State:       StateCashed,
-				ProgressPct: 100,
-				Tone:        toneWon,
-				StatLabel:   statLabel,
-				ClockLabel:  clockLabel,
-				PreGameProb: preProb,
-				LiveProb:    1.0,
-				Counts:      true,
-				HasLive:     true,
-			}
-		}
+		return earlyMonotonicResult(side == "OVER", preProb, statLabel, clockLabel)
+	}
+	return evaluateNormalOverUnder(cur, line, side, sigmaFull, preProb, p0, remFrac, statLabel, clockLabel)
+}
+
+func earlyMonotonicResult(won bool, preProb float64, statLabel, clockLabel string) LegProgress {
+	if won {
 		return LegProgress{
-			State:       StateBusted,
-			ProgressPct: 0,
-			Tone:        toneLost,
+			State:       StateCashed,
+			ProgressPct: 100,
+			Tone:        toneWon,
 			StatLabel:   statLabel,
 			ClockLabel:  clockLabel,
 			PreGameProb: preProb,
-			LiveProb:    0.0,
+			LiveProb:    1.0,
 			Counts:      true,
 			HasLive:     true,
 		}
 	}
+	return LegProgress{
+		State:       StateBusted,
+		ProgressPct: 0,
+		Tone:        toneLost,
+		StatLabel:   statLabel,
+		ClockLabel:  clockLabel,
+		PreGameProb: preProb,
+		LiveProb:    0.0,
+		Counts:      true,
+		HasLive:     true,
+	}
+}
 
+func evaluateNormalOverUnder(
+	cur, line float64,
+	side string,
+	sigmaFull, preProb, p0, remFrac float64,
+	statLabel, clockLabel string,
+) LegProgress {
 	sigmaRem := sigmaFull * math.Sqrt(remFrac)
 	var liveProb float64
 	var progressPct float64
