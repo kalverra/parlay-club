@@ -701,9 +701,8 @@ func TestEngineV2SlipCopulaScriptTaxAndConflicts(t *testing.T) {
 	})
 }
 
+//nolint:paralleltest // Wall-clock latency budget test must not contend with parallel tests for CPU.
 func TestEngineV2FullSlateLatencyBudget(t *testing.T) {
-	t.Parallel()
-
 	gamesMap, statsMap, legs := fullSlateV2Fixture(16, 12)
 	v2 := analyzer.EngineV2
 
