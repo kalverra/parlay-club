@@ -40,4 +40,8 @@ mentions a doc only when a judgment needs explaining.
 
 1. A run may have written `changes/<slug>/closeout.md` already. Read every section against the proposal, design, and
    handoffs, and fix what is wrong.
-2. Run `good-vibes done <slug>`.
+2. When the repo declares `docs.areas`, check the proposal has an `area` from that list and set one if it is missing.
+   `done` fails an `area` check, and `--force` skips it only when the missing area is deliberate.
+3. Check every `replaces` slug names a closed change whose ADR is in the decisions folder, and never the change itself.
+   The ADR stores them as ids such as `adr-<slug>`.
+4. Run `good-vibes done <slug>`.
