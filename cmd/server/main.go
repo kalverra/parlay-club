@@ -358,6 +358,8 @@ func newMux(
 	mux.Handle("GET /healthz", healthz)
 	mux.Handle("GET /readyz", healthz)
 	mux.Handle("GET /static/{path...}", static)
+	mux.Handle("GET /manifest.webmanifest", web.ManifestHandler())
+	mux.Handle("GET /sw.js", web.ServiceWorkerHandler())
 	mux.Handle("GET /screenshots/{file}", screenshots)
 	handlers.Routes(mux)
 

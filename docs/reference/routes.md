@@ -3,7 +3,10 @@ id: routes
 title: Routes
 type: reference
 summary: Every HTTP route the server serves, the middleware in front of them, and the status codes, HTMX headers, and SSE frames handlers return.
-tags: [routes, http, handlers, middleware, htmx, sse, props, prefill, research, schedules, wagers, record, analyzer, guide, docs, glossary, themes]
+tags: [routes, http, handlers, middleware, htmx, sse, props, prefill, research, schedules, wagers, record, analyzer, guide, docs, glossary, themes, manifest, service-worker, pwa]
+budget:
+  max_lines: 620
+  reason: Every HTTP route, the middleware around it, and its response behavior live in one reference table.
 ---
 
 # Routes
@@ -16,11 +19,11 @@ One `http.ServeMux` holds every route, using Go 1.22 method patterns. Handlers s
 
 ## Middleware
 
-All routes except `/healthz`, `/readyz`, `/static/`, `/screenshots/{token}.jpg`, `/login`, `POST /logout`, the Google
-sign-in routes, the dev sign-in routes, and `POST /internal/prefill` need a signed-in user. Those public/internal routes
-are registered outside session checks (`POST /internal/prefill` also sits on an outer mux outside `CSRF` and uses bearer
-auth instead). Everything else runs through three wrappers, outermost first. See [Access](../concepts/access.md) for
-cookies and sign-in.
+All routes except `/healthz`, `/readyz`, `/static/`, `/manifest.webmanifest`, `/sw.js`, `/screenshots/{token}.jpg`,
+`/login`, `POST /logout`, the Google sign-in routes, the dev sign-in routes, and `POST /internal/prefill` need a
+signed-in user. Those public/internal routes are registered outside session checks (`POST /internal/prefill` also sits
+on an outer mux outside `CSRF` and uses bearer auth instead). Everything else runs through three wrappers, outermost
+first. See [Access](../concepts/access.md) for cookies and sign-in.
 
 | Middleware    | Rejects                                                        | Response                          |
 | ------------- | -------------------------------------------------------------- | --------------------------------- |
@@ -39,7 +42,9 @@ of their groups makes that group active instead.
 | Method + path                       | Purpose                                                                 | Notes |
 | ----------------------------------- | ----------------------------------------------------------------------- | ----- |
 | `GET /healthz`                      | Startup and liveness probe                                              | Pings SQLite with a two-second timeout. 200 `ok` when it answers, 503 `unavailable` when it does not; the SQLite error goes to the log. |
-| `GET /static/{path...}`             | Embedded CSS, JS, and other assets                                      | One-year cache. A missing or escaping path is 404. |
+| `GET /static/{path...}`             | Embedded CSS, JS, icons, and other assets                               | One-year cache. A missing or escaping path is 404. |
+| `GET /manifest.webmanifest`         | Web app manifest for home-screen install                                | `application/manifest+json`, `no-cache`. Icon URLs carry the static content hash, and the list includes 192, 512, and a maskable 512. |
+| `GET /sw.js`                        | Service worker for install and Web Push                                 | `text/javascript`, `no-cache`, `nosniff`. Has `install`, `push`, and `notificationclick` listeners and no `fetch` handler, so it never intercepts a page load. |
 | `GET /screenshots/{token}.jpg`      | Capability URL for a bug report screenshot                              | Registered as `GET /screenshots/{file}` and checks the `.jpg` suffix. One-year immutable cache with `nosniff`; unknown token, missing image, or non-`.jpg` suffix is 404. |
 | `GET /login`                        | Sign-in page                                                            | Shows the Google button, plus a dev link when Google is off. |
 | `POST /logout`                      | Clear the session and active-group cookies                              | 303 to `/login`. |
@@ -349,8 +354,8 @@ opens the same leg form with `game_id` set and `quick=1`.
 `GET /research` renders the week's game and player pickers, the explorer, and, when targeted, the deeper sheet. It
 accepts `?q=`, `?game_id=`, `?player_id=`, `?cat=`, `?grade=`, `?signal=`, `?sort=`, and `?limit=`, plus the older
 `?leg_id=`, `?market=`, `?line=`, and `?player=` deep links (`?player=` resolves a roster athlete by normalized name).
-Requested with `Hx-Request` and a `player_id` but no `game_id`, it renders the player sheet partial; with a `game_id`, it
-renders the game sheet partial.
+Requested with `Hx-Request` and a `player_id` but no `game_id`, it renders the player sheet partial; with a `game_id`,
+it renders the game sheet partial.
 
 The explorer reads one week of cached games, odds, and rosters (`GamesForWeek`, `OddsForWeek`, `RosterForTeams`), folds
 them with `board.Build`, and scores each row with `analyzer.ScoreLeg` before `board.Explore` filters and sorts. It never
@@ -380,19 +385,20 @@ CSRF guard before it reaches the handler.
 
 `GET /research/bet` matches the query's selection to one cached row with `db.SameSelection`, so it ignores `line` and
 `odds`, and answers 404 with a short reason when the game is unknown, has kicked off, or the selection is not on the
-board. The page shows the summary with grade, odds, and implied chance; cached home-book, consensus, and best prices with
-a de-vigged edge when both sides are cached; the full analyzer breakdown; and the research for its market. Player props
-reuse the player sheet scoped to the bet's market and line; game markets (`SPREAD`, `ML`, `TOTAL`, `TEAM_TOTAL`) render
-`TeamBetContextView` with nfelo's model spread and win chances against the market, both teams' EPA ranks, venue, weather,
-and key injuries. Up to five related bets follow, same player first. `?from=` restores the explorer on the back link.
+board. The page shows the summary with grade, odds, and implied chance; cached home-book, consensus, and best prices
+with a de-vigged edge when both sides are cached; the full analyzer breakdown; and the research for its market. Player
+props reuse the player sheet scoped to the bet's market and line; game markets (`SPREAD`, `ML`, `TOTAL`, `TEAM_TOTAL`)
+render `TeamBetContextView` with nfelo's model spread and win chances against the market, both teams' EPA ranks, venue,
+weather, and key injuries. Up to five related bets follow, same player first. `?from=` restores the explorer on the back
+link.
 
 `+ Add to slip` appears for each `OPEN` slip whose next step is `pick` and whose slate includes the game. Each button
 posts `POST /slips/{id}/legs` with `from=research` and the bet page as `return`; an optional `?slip_id=` narrows it.
 
 `GET /research/games/{id}` reads cached injuries and rosters and renders injuries filtered to key positions (`QB`, `RB`,
-`WR`, `TE`, `LT`, `OT`, `C`, `CB`, `S`), plus sportsbook prop names against their matched athlete. `POST /research/matches`
-saves a manual match from `odds_name`, `team`, and `athlete_id`, removes conflicting non-manual matches, backfills
-`player_id` and `team` on matching odds and legs, and returns the refreshed game research partial.
+`WR`, `TE`, `LT`, `OT`, `C`, `CB`, `S`), plus sportsbook prop names against their matched athlete.
+`POST /research/matches` saves a manual match from `odds_name`, `team`, and `athlete_id`, removes conflicting non-manual
+matches, backfills `player_id` and `team` on matching odds and legs, and returns the refreshed game research partial.
 
 `GET /research/players/{espnID}` reads the cached game log and renders the matchup strip, last-5 and season hit rates,
 the last-5 range and median, and the opposing-defense chart. Both charts share a dotted O/U line when available, with

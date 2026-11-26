@@ -87,6 +87,15 @@ if (document.readyState === "loading") {
   formatTimes(document);
 }
 
+// The service worker carries install support and push notifications. It has no
+// fetch handler, so page loads still come straight from the server. A browser
+// without workers, or one that refuses registration, leaves the app working.
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js").catch(() => {});
+  });
+}
+
 // Image load errors do not bubble, so listen in capture phase to hide any
 // failed team logo or player portrait and reveal its sibling fallback badge.
 document.addEventListener(

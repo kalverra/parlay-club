@@ -1,6 +1,8 @@
 package web_test
 
 import (
+	"bytes"
+	"image/png"
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
@@ -139,6 +141,47 @@ func TestAppJSPausesAndResumesLiveEventSource(t *testing.T) {
 		"refreshLive",
 	} {
 		assert.Contains(t, script, want)
+	}
+}
+
+func TestAppJSRegistersTheServiceWorker(t *testing.T) {
+	t.Parallel()
+
+	source, err := fs.ReadFile(assets.Static, "static/app.js")
+	require.NoError(t, err)
+	script := string(source)
+
+	assert.Contains(t, script, `navigator.serviceWorker.register("/sw.js")`)
+	assert.Contains(t, script, `"serviceWorker" in navigator`, "browsers without a worker skip registration")
+}
+
+func TestStaticHasTheInstallIcons(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		size int
+	}{
+		{name: "icon-180.png", size: 180},
+		{name: "icon-192.png", size: 192},
+		{name: "icon-512.png", size: 512},
+		{name: "icon-maskable-512.png", size: 512},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			source, err := fs.ReadFile(assets.Static, "static/"+test.name)
+			require.NoError(t, err)
+
+			icon, err := png.Decode(bytes.NewReader(source))
+			require.NoError(t, err)
+
+			bounds := icon.Bounds()
+			assert.Equal(t, test.size, bounds.Dx())
+			assert.Equal(t, test.size, bounds.Dy())
+		})
 	}
 }
 

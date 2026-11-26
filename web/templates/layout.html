@@ -5,6 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <meta name="color-scheme" content="{{.ActiveTheme.ColorScheme}}">
     <meta name="theme-color" content="{{.ActiveTheme.ThemeColor}}">
+    <link rel="manifest" href="/manifest.webmanifest">
+    <link rel="apple-touch-icon" sizes="180x180" href="{{asset "icon-180.png"}}">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="Parlay Club">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>{{.Title}} · Sunday Parlay Club</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -26,7 +31,7 @@
     >
 
     {{if or .WeekLabel .User .Groups}}
-    <header class="sticky top-0 z-30 border-b border-chrome-border bg-chrome/95 text-chrome-ink backdrop-blur">
+    <header class="sticky top-0 z-30 border-b border-chrome-border bg-chrome/95 text-chrome-ink backdrop-blur pt-[env(safe-area-inset-top)]">
       <div class="mx-auto flex h-14 w-full {{if .Wide}}max-w-6xl{{else}}max-w-3xl{{end}} items-center gap-2 px-3">
         <a
           href="/"
@@ -131,7 +136,7 @@
 
     <main
       id="content"
-      class="mx-auto w-full {{if .Wide}}max-w-6xl{{else}}max-w-3xl{{end}} px-4 pt-4 pb-28{{if .Wide}} lg:h-[calc(100dvh-3.5rem)] lg:overflow-hidden lg:pb-4{{end}}"
+      class="mx-auto w-full {{if .Wide}}max-w-6xl{{else}}max-w-3xl{{end}} px-4 pt-4 pb-[calc(7rem+env(safe-area-inset-bottom))]{{if .Wide}} lg:h-[calc(100dvh-3.5rem)] lg:overflow-hidden lg:pb-4{{end}}"
     >
       {{template "content" .}}
     </main>

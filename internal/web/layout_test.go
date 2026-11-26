@@ -95,6 +95,25 @@ func TestLayoutLinksAssets(t *testing.T) {
 	}
 }
 
+func TestLayoutShipsTheInstallShell(t *testing.T) {
+	t.Parallel()
+
+	out := renderPage(t, "slip", webui.Page{
+		Title:     "Slip",
+		Tab:       webui.TabWeek,
+		WeekLabel: "Week 9",
+	})
+	assert.Contains(t, out, `<link rel="manifest" href="/manifest.webmanifest">`)
+	assert.Regexp(t, `<link rel="apple-touch-icon" sizes="180x180" href="/static/icon-180\.png\?v=[0-9a-f]{10}">`, out)
+	assert.Contains(t, out, `<meta name="apple-mobile-web-app-capable" content="yes">`)
+	assert.Contains(t, out, `<meta name="apple-mobile-web-app-title" content="Parlay Club">`)
+	assert.Contains(t, out, `<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">`)
+
+	assert.Contains(t, out, "pt-[env(safe-area-inset-top)]", "the header clears the notch")
+	assert.Contains(t, out, "pb-[env(safe-area-inset-bottom)]", "the bottom bar clears the home indicator")
+	assert.Contains(t, out, "pb-[calc(7rem+env(safe-area-inset-bottom))]", "content clears the taller bottom bar")
+}
+
 func TestLayoutTopBar(t *testing.T) {
 	t.Parallel()
 

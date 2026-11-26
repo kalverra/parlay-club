@@ -189,6 +189,47 @@ func TestMuxServesStaticWithoutAuth(t *testing.T) {
 	assert.Equal(t, http.StatusNoContent, recorder.Code, "static files load on the login page")
 }
 
+func TestMuxServesPWAWithoutAuth(t *testing.T) {
+	t.Parallel()
+
+	mux := newMux(
+		http.NotFoundHandler(),
+		http.NotFoundHandler(),
+		http.NotFoundHandler(),
+		http.NotFoundHandler(),
+		nil,
+		newTestHandlers(),
+		nil,
+		passthrough,
+		nil,
+		nil,
+	)
+
+	tests := []struct {
+		path        string
+		contentType string
+	}{
+		{path: "/manifest.webmanifest", contentType: "application/manifest+json; charset=utf-8"},
+		{path: "/sw.js", contentType: "text/javascript; charset=utf-8"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.path, func(t *testing.T) {
+			t.Parallel()
+
+			recorder := httptest.NewRecorder()
+			mux.ServeHTTP(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodGet, test.path, nil))
+
+			assert.Equal(t, http.StatusOK, recorder.Code, "the browser fetches this before sign-in")
+			assert.Equal(t, test.contentType, recorder.Header().Get("Content-Type"))
+			assert.Equal(t, "no-cache", recorder.Header().Get("Cache-Control"))
+			assert.Empty(t, recorder.Header().Get("Hx-Redirect"), "an expired session never redirects the worker fetch")
+			assert.Empty(t, recorder.Header().Get("Set-Cookie"), "no session is needed or issued")
+			assert.NotEmpty(t, recorder.Body.String())
+		})
+	}
+}
+
 func TestMuxServesScreenshotsWithoutAuth(t *testing.T) {
 	t.Parallel()
 
