@@ -93,13 +93,20 @@ func TestRunSourcesNeverRunsOneSourceTwiceAtOnce(t *testing.T) {
 		runs        atomic.Int32
 		running     atomic.Int32
 		maxRunning  atomic.Int32
+		finished    atomic.Bool
 		release     = make(chan struct{})
 		entered     = make(chan struct{})
 		enteredOnce sync.Once
 	)
 	src := source{
 		key: "test:single-flight",
-		due: alwaysDue,
+		// A real source stays stale until it records its sync, then reads
+		// fresh. Keeping it due forever would let a caller that slipped past
+		// the in-flight run start a second one, so the run count would depend
+		// on scheduling instead of single-flight.
+		due: func(context.Context, db.SyncState) (bool, error) {
+			return !finished.Load(), nil
+		},
 		run: func(context.Context) (bool, error) {
 			runs.Add(1)
 			current := running.Add(1)
@@ -112,6 +119,7 @@ func TestRunSourcesNeverRunsOneSourceTwiceAtOnce(t *testing.T) {
 			enteredOnce.Do(func() { close(entered) })
 			<-release
 			running.Add(-1)
+			finished.Store(true)
 			return true, nil
 		},
 	}
@@ -124,8 +132,9 @@ func TestRunSourcesNeverRunsOneSourceTwiceAtOnce(t *testing.T) {
 	}
 
 	<-entered
-	// Give the other callers time to join the in-flight call before the first
-	// one finishes. A single-flight makes them wait, so no second run starts.
+	// Hold the run open so the other callers can share it through the flight.
+	// A caller that still arrives after it returns finds the source fresh and
+	// skips a redundant fetch.
 	time.Sleep(250 * time.Millisecond)
 	close(release)
 	callers.Wait()

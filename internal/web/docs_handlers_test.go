@@ -1,6 +1,7 @@
 package web_test
 
 import (
+	"html"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -14,7 +15,17 @@ import (
 var (
 	renderedID     = regexp.MustCompile(`\sid="([^"]+)"`)
 	renderedAnchor = regexp.MustCompile(`href="#([^"]+)"`)
+	renderedHref   = regexp.MustCompile(`href="([^"]+)"`)
 )
+
+// renderedIDs returns every element id on a rendered page.
+func renderedIDs(body string) map[string]struct{} {
+	ids := make(map[string]struct{})
+	for _, match := range renderedID.FindAllStringSubmatch(body, -1) {
+		ids[match[1]] = struct{}{}
+	}
+	return ids
+}
 
 // assertUniqueIDs fails when the page draws the same id twice, which would make
 // every deep link ambiguous.
@@ -34,14 +45,57 @@ func assertUniqueIDs(t *testing.T, body string) {
 func assertAnchorsResolve(t *testing.T, body string) {
 	t.Helper()
 
-	ids := make(map[string]struct{})
-	for _, match := range renderedID.FindAllStringSubmatch(body, -1) {
-		ids[match[1]] = struct{}{}
-	}
+	ids := renderedIDs(body)
 	for _, match := range renderedAnchor.FindAllStringSubmatch(body, -1) {
 		_, ok := ids[match[1]]
 		assert.Truef(t, ok, "anchor #%s has no matching id", match[1])
 	}
+}
+
+// TestDocsHubLinksTargetExistingAnchors walks every link the hub renders and
+// checks that each one stays inside the docs pages and lands on an anchor that
+// page draws. The hub's quick jumps, section links, and FAQ links are static
+// strings in docsHubView(), so a typo or a renamed anchor would otherwise send
+// a person to the top of a page.
+func TestDocsHubLinksTargetExistingAnchors(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	fetch := func(path string) string {
+		t.Helper()
+
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
+		fixture.handler.ServeHTTP(recorder, request)
+		require.Equalf(t, http.StatusOK, recorder.Code, "GET %s", path)
+		return recorder.Body.String()
+	}
+
+	pages := map[string]string{}
+	ids := map[string]map[string]struct{}{}
+	for _, path := range []string{"/docs", "/docs/glossary", "/docs/grading"} {
+		pages[path] = fetch(path)
+		ids[path] = renderedIDs(pages[path])
+	}
+
+	checked := 0
+	for _, match := range renderedHref.FindAllStringSubmatch(pages["/docs"], -1) {
+		href := html.UnescapeString(match[1])
+		target, err := url.Parse(href)
+		require.NoErrorf(t, err, "parse hub link %q", href)
+
+		path := target.Path
+		if path == "" {
+			path = "/docs"
+		}
+		if _, inDocs := pages[path]; !inDocs || target.Fragment == "" {
+			continue
+		}
+		_, ok := ids[path][target.Fragment]
+		assert.Truef(t, ok, "hub link %q points at a missing anchor in %s", href, path)
+		checked++
+	}
+	assert.NotZero(t, checked, "the hub should deep-link into the docs pages")
 }
 
 func TestDocsHubRendersSystemsFAQAndCurrentTab(t *testing.T) {

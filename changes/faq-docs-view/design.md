@@ -196,3 +196,7 @@ grading math changes)
       `/docs/glossary`, or `/docs/grading`.
 - [x] Docs: update `docs/concepts/analyzer.md` and `docs/concepts/slips.md` to describe the Docs hub and two-step `?`
       help-bubble pattern.
+
+## Reviews
+
+- [x] Final review: claude@claude-sonnet-5-5

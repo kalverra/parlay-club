@@ -121,7 +121,7 @@ func TestEvalResultsAuthEmptyStateAndInvalidSeason(t *testing.T) {
 	assert.Contains(t, body, "All groups")
 	assert.Contains(t, body, "No settled slips yet for All seasons.")
 	assert.Contains(t, body, `href="/slips/1"`)
-	assert.Contains(t, body, `href="/analyzer/guide?from=%2Fslips%2F1"`)
+	assert.Contains(t, body, `href="/docs/grading?from=%2Fslips%2F1"`)
 
 	// Unsafe ?from= is stripped.
 	unsafe := httptest.NewRecorder()
@@ -142,14 +142,14 @@ func TestEvalResultsAuthEmptyStateAndInvalidSeason(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, bad.Code)
 	}
 
-	// Guide page links to /analyzer/results.
+	// The guide's switcher links to the eval results under Docs.
 	guide := httptest.NewRecorder()
 	f.handler.ServeHTTP(
 		guide,
 		httptest.NewRequestWithContext(ctx, http.MethodGet, "/analyzer/guide?from=/slips/1", nil),
 	)
 	require.Equal(t, http.StatusOK, guide.Code)
-	assert.Contains(t, guide.Body.String(), `/analyzer/results?from=%2Fslips%2F1`)
+	assert.Contains(t, guide.Body.String(), `/docs/evals?from=%2Fslips%2F1`)
 }
 
 // TestDocsEvalsServesResultsUnderTheDocsTab covers both URLs that land on the
@@ -970,7 +970,6 @@ func TestAnalyzerResultsTemplateRendersCalibrationAndPhoneWidthLayout(t *testing
 
 	page := webui.EvalResultsPage{
 		Title:          "Grading Results",
-		GuideURL:       "/analyzer/guide",
 		ScopeLabel:     "All groups",
 		Source:         "slips",
 		SlipsURL:       "/analyzer/results?source=slips",

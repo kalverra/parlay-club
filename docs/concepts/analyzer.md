@@ -3,10 +3,7 @@ id: analyzer
 title: Analyzer
 type: concept
 summary: How the sharp-friend analyzer turns legs, games, weather, player stats, nfelo's model, and nflverse efficiency into plain-Go warnings and calibrated four-pillar A–F grades.
-tags: [analyzer, warnings, grades, pillars, copula, overlays, banner, severity, tone, slips, weather, rules, nfelo, nflverse, model, props, player-stats, docs, glossary, help-bubbles]
-budget:
-  max_lines: 270
-  reason: Keeps the Docs hub and the canonical `?` help-bubble target map beside the grading rules the analyzer renders.
+tags: [analyzer, warnings, grades, pillars, copula, overlays, banner, severity, tone, slips, weather, rules, nfelo, nflverse, model, props, player-stats]
 ---
 
 # Analyzer
@@ -38,7 +35,7 @@ flowchart LR
   EngineV2 --> UI
   Highlights --> UI
   UI -->|"tap ? bubble"| Guide["GET /docs/grading (alias /analyzer/guide)"]
-  Guide <-->|"results / how grading works"| Results["GET /docs/evals (alias /analyzer/results)"]
+  Guide <-->|"docs switcher"| Results["GET /docs/evals (alias /analyzer/results)"]
   EngineDocs["RuleDocs() + DefaultV2Config + GradeRubric()"] --> Guide
   Cache["eval.Cache (Slips & Market)"] --> Results
 ```
@@ -60,10 +57,8 @@ The slip panel renders the Analyzer section under the legs, with a "How grading 
   Danger, Warn, then Info and colored red, amber, and blue. Each card carries the message, the severity, a chip for
   every leg involved with its owner's name, and a `?` bubble to `/docs/grading#rule-<id>`.
 
-Other inline annotations pair with the same `?` bubble: the `nfelo` model chip points at `#term-nfelo`, implied chance
-at `#term-implied-prob`, reference odds at `#term-reference-odds`, live hit chance at `#sys-live`, and the pick detail's
-badge row at `#suggestions`. [Docs hub and help bubbles](#docs-hub-and-help-bubbles) lists every bubble and its target
-and explains the two-step pattern.
+Other inline annotations carry the same `?` bubble: the `nfelo` model chip, implied chance, reference odds, live hit
+chance, and the pick detail's badge row. [Docs hub](docs-hub.md#help-bubbles) lists every bubble and its target.
 
 The banner is part of the slip panel, so it refreshes with the panel on `slip-updated` and `board-updated`. A weather or
 nflverse update needs no separate wiring: the next board refresh re-renders the slip, and the rules and grades see the
@@ -185,62 +180,10 @@ for CLI and `mise run eval-prod` usage.
 
 ## Docs hub and help bubbles
 
-The Docs tab (`/docs`) is the standing explanation for every annotation the app shows. It has four destinations behind
-one section switcher. The overview and glossary render from static Go structs and read no database; the grading and
-eval screens read the analyzer package and the eval cache.
-
-- **Overview (`GET /docs`)**: quick jumps, seven plain-language "How systems work" sections with stable anchors
-  (`#sys-grading`, `#sys-odds`, `#sys-badges`, `#sys-live`, `#sys-autograde`, `#sys-sources`, `#sys-export`), and
-  common questions.
-- **Glossary (`GET /docs/glossary`)**: a static term list at `#term-<slug>` covering odds, usage, and betting ideas.
-  `?q=` filters the terms in memory by name, category, summary, or example.
-- **Grading & Rules (`GET /docs/grading`)** and **Eval Results (`GET /docs/evals`)**: the rubric and calibration
-  screens described here.
-
-`GET /docs/grading` renders the four v2 pillars, uncertainty badge behavior, active engine badge, live A–F bands, v1
-rubric reference, and every warning rule (`RuleDocs`) directly from `internal/analyzer`, so the guide cannot drift from
-live thresholds. `GET /analyzer/guide` serves the same page, as `GET /analyzer/results` does for `/docs/evals`. Every
-path sets `page.Tab = TabDocs` and renders the switcher, so the Docs tab stays lit and an older `/analyzer/...`
-bookmark still lands on the same page with the right section marked.
-
-Each annotation is a two-step help surface. The first tap opens the item's own popover, with this leg's pillars, this
-slip's rollup, or this warning's legs. The round `?` bubble in that panel then opens the standing explanation in Docs.
-The bubble sits inside the expanded panel or beside the annotation, never inside a `<summary>`, because a nested link
-there double-fires on mobile Safari. Tapping outside an open grade breakdown closes it, so only one stays open on a
-phone.
-
-| Annotation | `?` bubble target |
-| --- | --- |
-| Slip grade breakdown | `/docs/grading#slip-grade` |
-| Leg grade breakdown | `/docs/grading#leg-grades` |
-| Warning card | `/docs/grading#rule-<id>` |
-| Pick-board badges | `/docs/grading#suggestions` |
-| `nfelo` model chip | `/docs/glossary#term-nfelo` |
-| Implied chance | `/docs/glossary#term-implied-prob` |
-| Reference odds | `/docs/glossary#term-reference-odds` |
-| Live hit chance | `/docs#sys-live` |
-
-Each bubble appends the current screen as `?from=`. The docs page renders a `← Back` link only when `safeReturnPath`
-accepts that path, so a forwarded external URL is dropped, and the switcher forwards the same path across its four
-sections.
-
-### Grading results
-
-`GET /analyzer/results` shows live calibration across `?source=slips|market` and `?engine=v2|v1`:
-
-- **Probability calibration & SGP lift**: displays Log Loss, Brier Score, Classwise ECE, 10-bin spread, market
-  baselines, a 10% reliability table, and SGP Correlation Lift comparing copula joint log loss against naive leg
-  multiplication on settled SGPs.
-- **User slips (`?source=slips`, default)**: aggregates settled slips across all groups for A–F leg and slip bands,
-  side-by-side Engine Comparison, engine diffs/migrations, weekly progression, leg and slip factor attribution, and
-  pre-kickoff data coverage.
-- **Market-wide (`?source=market`)**: replays pre-kickoff consensus lines across final games, hides slip-only sections,
-  and adds Sharp benchmarks and nflverse L5 fallback coverage tiles.
-
-`eval.Cache` (`internal/eval/cache.go`) memoizes suite reports in memory by mode, group ID, and season. Settlement in
-`internal/slips` invalidates slip entries via `SetOnGradeChange` without evicting market entries;
-`refresh.Service.SetOnMarketDataChange` calls `InvalidateMarket` when games reach `FINAL` or `syncNFLverse` commits; and
-sandbox transitions clear the cache.
+Every annotation pairs with a `?` bubble that opens its standing explanation in Docs: the slip panel's "How grading
+works" link points at `/docs/grading`, and the grade, warning, badge, model, odds, and live-chance bubbles carry
+`?from=` so the page can offer a way back. The four destinations, the bubble-to-anchor map, and the two-step pattern
+live in [Docs hub](docs-hub.md).
 
 ## Tone
 
@@ -274,4 +217,5 @@ deterministic and stable across reloads.
   copula threshold, overlay table, and v1 rubric reference.
 - [Odds math](../reference/odds-math.md): Power and Shin de-vigging, fair EV, and live progress math.
 - [Slips](slips.md): the legs, highlights, and games the banner reads.
+- [Docs hub](docs-hub.md): the Docs screens and the `?` bubble targets.
 - [Data refresh](data-refresh.md): where weather, nfelo, nflverse, and expected-opportunity signals come from.

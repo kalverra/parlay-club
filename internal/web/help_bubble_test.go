@@ -121,8 +121,10 @@ func TestHelpBubblesTargetExistingDocsAnchors(t *testing.T) {
 	screens["live slip panel"] = fetch(fmt.Sprintf("/slips/%d/panel", fixture.slip.ID), false)
 
 	docs := map[string]string{}
+	docsIDs := map[string]map[string]struct{}{}
 	for _, path := range []string{"/docs", "/docs/glossary", "/docs/grading"} {
 		docs[path] = fetch(path, false)
+		docsIDs[path] = renderedIDs(docs[path])
 	}
 
 	var hrefs []string
@@ -138,17 +140,18 @@ func TestHelpBubblesTargetExistingDocsAnchors(t *testing.T) {
 		target, err := url.Parse(href)
 		require.NoErrorf(t, err, "parse help bubble %q", href)
 
-		docsBody, ok := docs[target.Path]
-		if !assert.Truef(t, ok, "help bubble %q points outside the docs pages", href) {
+		_, inDocs := docs[target.Path]
+		if !assert.Truef(t, inDocs, "help bubble %q points outside the docs pages", href) {
 			continue
 		}
 		require.NotEmptyf(t, target.Fragment, "help bubble %q has no anchor", href)
-		assert.Containsf(
+		_, ok := docsIDs[target.Path][target.Fragment]
+		assert.Truef(
 			t,
-			docsBody,
-			`id="`+target.Fragment+`"`,
-			"help bubble %q points at a missing anchor",
+			ok,
+			"help bubble %q points at a missing anchor in %s",
 			href,
+			target.Path,
 		)
 		fragments[target.Fragment] = struct{}{}
 	}

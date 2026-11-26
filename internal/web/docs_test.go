@@ -89,6 +89,56 @@ func TestDocsHubSectionsAreUniqueAndComplete(t *testing.T) {
 	}
 }
 
+// TestDocsHubAnchorsResolveInData walks the hub's own links and checks each
+// bare fragment against the data that draws it: #sys-<id> to a section and
+// #term-<slug> to a glossary entry. The rendered-page walk in
+// docs_handlers_test.go covers cross-page grading and glossary targets.
+func TestDocsHubAnchorsResolveInData(t *testing.T) {
+	t.Parallel()
+
+	hub := docsHubView()
+	sections := make(map[string]struct{}, len(hub.Sections))
+	for _, section := range hub.Sections {
+		sections[section.ID] = struct{}{}
+	}
+	terms := make(map[string]struct{}, len(glossaryEntries))
+	for _, entry := range glossaryEntries {
+		terms[entry.Slug] = struct{}{}
+	}
+
+	links := make([]string, 0, len(hub.QuickJumps)*2+len(hub.Sections)*2+len(hub.FAQ))
+	for _, jump := range hub.QuickJumps {
+		links = append(links, jump.Href)
+	}
+	for _, section := range hub.Sections {
+		for _, link := range section.Links {
+			links = append(links, link.Href)
+		}
+	}
+	for _, item := range hub.FAQ {
+		if item.LinkHref != "" {
+			links = append(links, item.LinkHref)
+		}
+	}
+
+	for _, href := range links {
+		fragment, ok := strings.CutPrefix(href, "#")
+		if !ok {
+			continue
+		}
+		switch {
+		case strings.HasPrefix(fragment, "sys-"):
+			_, ok := sections[strings.TrimPrefix(fragment, "sys-")]
+			assert.Truef(t, ok, "hub link %q names no system section", href)
+		case strings.HasPrefix(fragment, "term-"):
+			_, ok := terms[strings.TrimPrefix(fragment, "term-")]
+			assert.Truef(t, ok, "hub link %q names no glossary term", href)
+		default:
+			assert.Failf(t, "unknown hub anchor", "hub link %q uses #%s", href, fragment)
+		}
+	}
+}
+
 func TestFilterGlossary(t *testing.T) {
 	t.Parallel()
 

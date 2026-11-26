@@ -19,7 +19,6 @@ type EvalResultsPage struct {
 	Page
 	BackURL           string
 	Nav               []DocsNavView
-	GuideURL          string
 	ScopeLabel        string
 	Source            string
 	IsMarket          bool
@@ -253,7 +252,6 @@ func (h *slipHandlers) evalResults(w http.ResponseWriter, r *http.Request) {
 			Page:        page,
 			BackURL:     backURL,
 			Nav:         docsNav("evals", backURL),
-			GuideURL:    buildGuideURL(backURL),
 			ScopeLabel:  scopeLabel,
 			Source:      string(source),
 			IsMarket:    isMarket,
@@ -484,7 +482,6 @@ func buildEvalResultsPage(
 		Page:              page,
 		BackURL:           backURL,
 		Nav:               docsNav("evals", backURL),
-		GuideURL:          buildGuideURL(backURL),
 		ScopeLabel:        scopeLabel,
 		Source:            sourceStr,
 		IsMarket:          isMarket,
@@ -535,13 +532,6 @@ func buildEvalSources(current eval.ReplayMode, season, engine, backURL string) [
 			URL:     buildResultsURL(string(eval.ModeMarket), season, engine, backURL),
 		},
 	}
-}
-
-func buildGuideURL(backURL string) string {
-	if backURL == "" {
-		return "/analyzer/guide"
-	}
-	return "/analyzer/guide?from=" + url.QueryEscape(backURL)
 }
 
 func buildResultsURL(source, season, engine, backURL string) string {

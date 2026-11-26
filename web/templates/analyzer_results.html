@@ -7,19 +7,11 @@
       </a>
     {{end}}
 
-    <div class="flex flex-wrap items-start justify-between gap-3">
-      <div class="space-y-1">
-        <h1 class="text-xl font-semibold">Grading Results</h1>
-        <p class="text-sm text-page-muted">
-          {{.ScopeLabel}} &middot; {{.SeasonLabel}}{{if .SelectedEngine}} &middot; Engine {{.SelectedEngine}}{{end}}
-        </p>
-      </div>
-      <a
-        href="{{.GuideURL}}"
-        class="inline-flex items-center rounded-lg border border-line-strong bg-surface px-3 py-1.5 text-xs font-medium text-ink hover:bg-surface-2"
-      >
-        How grading works
-      </a>
+    <div class="space-y-1">
+      <h1 class="text-xl font-semibold">Grading Results</h1>
+      <p class="text-sm text-page-muted">
+        {{.ScopeLabel}} &middot; {{.SeasonLabel}}{{if .SelectedEngine}} &middot; Engine {{.SelectedEngine}}{{end}}
+      </p>
     </div>
 
     {{template "docs-nav" .}}

@@ -5,9 +5,9 @@ type: concept
 summary: How a group builds and tracks shared parlays from the slate, covering slate scopes, deadlines, the hub, live progress, A-grade highlights, the pick board, votes, wagers, grading, and editing rules.
 tags: [slips, weeks, legs, members, locking, grading, results, activity, groups, games, quick-add, nfelo, props, autocomplete, research, next-step, hub, pick-board, slate, drilldown, tabs, search, dock, tray, votes, voting, wagers, slate-scopes, deadlines, multi-slip, highlights, live-progress, docs, help-bubbles]
 budget:
-  max_lines: 590
+  max_lines: 575
   max_spans_per_100_lines: 105
-  reason: Covers the full slip lifecycle, pick board, highlights, voting, research, grading, docs deep links, wagers, and multi-slip rules in one concept doc.
+  reason: Covers the full slip lifecycle, pick board, highlights, voting, research, grading, wagers, and multi-slip rules in one concept doc.
 ---
 
 # Slips
@@ -44,12 +44,9 @@ slips in the active week, one horizontal sibling pill switcher bar (`[data-sibli
 with links to each sibling slip, their status summary (`(Locked)`, `(1/2 Picks)`, `(Won)`), and `+ New slip` as a
 trailing pill. In the `export` step the export card moves above the banner, because placing the picks is the one thing
 left. `slip-wager` sits outside `slip-panel`, so live `slip-updated` refreshes do not wipe out in-progress wager inputs.
-The bottom bar keeps Groups, This week, Record Book, and Docs; the hub's one primary action is the way into picking. The hub
-stays one column at every width. Docs (`/docs`) holds the standing explanation: an overview of grading, odds,
-pick-board badges, live progress, autograding, sources, and export, a searchable glossary at `/docs/glossary`, the full
-rubric at `/docs/grading`, and calibration at `/docs/evals`. A `?` bubble beside an annotation opens the matching Docs
-section and carries `?from=` so the page can offer a way back; [Analyzer](analyzer.md#docs-hub-and-help-bubbles) maps
-every bubble to its target.
+The bottom bar keeps Groups, This week, Record Book, and Docs; the hub's one primary action is the way into picking. The
+hub stays one column at every width. Docs (`/docs`) holds the standing explanation; a `?` bubble beside an annotation
+opens the matching section with `?from=`, and [Docs hub](docs-hub.md#help-bubbles) maps every bubble.
 
 When the slip is `OPEN` and the viewer is in the `pick` step (has remaining leg slots), `#slip-panel` renders a compact
 **"Top A-grade ideas"** strip below the step banner. It runs `analyzer.LoadBoardSignals` and `board.SelectHighlights`
@@ -202,21 +199,17 @@ line, American odds, and a display `selection` generated from those fields.
 
 The slip panel draws each leg as a row: a leading media badge when available, then the selection, the odds with a muted
 implied percentage chance (e.g., `-110 (52%)`), a "Research &rarr;" link when the leg has a resolved player or game, the
-model chip, the grade pill, and the result. The grade pill is a two-step help surface: tapping it opens that leg's
-four-pillar breakdown, and the `?` bubble in the panel then opens the standing explanation at
-`/docs/grading#leg-grades`. The implied chance carries a `?` bubble to `/docs/glossary#term-implied-prob`. A matched
-player leg shows the player's portrait (or the team logo if no headshot URL is stored, or player initials if neither
-image exists); a team-scoped leg shows the team logo; a game `TOTAL` leg shows paired away and home logos; and an
-unlinked custom or historical leg stays plain text. A `SPREAD` or `ML` leg with a fresh nfelo model shows it beside the
-odds, from that leg's team's side: `nfelo -5.0` for a spread or `nfelo 76%` for a moneyline, paired with a `?` bubble to
-`/docs/glossary#term-nfelo`. Totals and props show no chip, and a missing row, a fetch older than 72 hours, or a live
-game leaves it off.
-
-`db.Store.CreateLeg` starts every leg `PENDING` and treats an odds value of 0 as -110.
+model chip, the grade pill, and the result. The grade pill opens that leg's four-pillar breakdown, and its `?` bubble
+opens the standing explanation in Docs; the implied chance and the nfelo model chip carry glossary bubbles. A matched
+player leg shows the player's portrait (or the team logo, or player initials); a team-scoped leg shows the team logo; a
+game `TOTAL` leg shows paired away and home logos; and an unlinked custom or historical leg stays plain text. A `SPREAD`
+or `ML` leg with a fresh nfelo model shows it beside the odds, from that leg's team's side: `nfelo -5.0` for a spread or
+`nfelo 76%` for a moneyline. Totals and props show no chip, and a missing row, a fetch older than 72 hours, or a live
+game leaves it off. `db.Store.CreateLeg` starts every leg `PENDING` and treats an odds value of 0 as -110.
 
 The slip's **reference odds** multiply each leg's reference price: the median of the prices the slip members' home books
 carry for that leg via `db.MatchBookOdds` (one price per book, preferring an exact `Line` match and falling back to the
-book's current line for the same selection). A leg whose members' books do not price it keeps its own price. The payout calculator shows muted implied percentage chances inline beside both **Combined** and **Reference** odds, omitting them when no legs count (empty or all-`PUSH`/`VOID` slips). Each chance pairs with a `?` bubble: `#term-implied-prob` on Combined and `#term-reference-odds` on Reference. The formulas are in [Odds math](../reference/odds-math.md).
+book's current line for the same selection). A leg whose members' books do not price it keeps its own price. The payout calculator shows muted implied percentage chances inline beside both **Combined** and **Reference** odds, omitting them when no legs count (empty or all-`PUSH`/`VOID` slips). Each chance pairs with a `?` bubble. The formulas are in [Odds math](../reference/odds-math.md).
 
 ### Selection identity
 
@@ -313,9 +306,8 @@ per player card in priority order):
 - **High volume:** player `OVER`/`YES` prop with top-quartile `WOPR`, `TargetShare`, `OffensePct`, or carries for their
   position.
 
-The pinned detail header carries one `?` bubble to `/docs/grading#suggestions` that explains all four, because each
-badge sits inside an option button where a nested link is invalid. Missing or stale signals omit badges cleanly
-without hiding any pick.
+The pinned detail header carries one `?` bubble that explains all four, because each badge sits inside an option button
+where a nested link is invalid. Missing or stale signals omit badges cleanly without hiding any pick.
 
 Game selection replaces `#pick-body`, which can reset the slate's scroll. `app.js` saves the `scrollTop` of the
 `[data-keep-scroll]` pane before an HTMX swap and restores it after. Times keep the existing contract: a `<time>`
@@ -435,27 +427,23 @@ progress bars and deterministic hit chances without spending paid odds credits:
 - **Slip hub (`#slip-panel`):** Renders a live parlay progress card above the member list with a status badge (`Live`,
   `Cashed`, `Busted`, `Push`, or `Scheduled`), hit/live/lost summary, `role="progressbar"` fill bar, and
   `Live chance X%` beside the muted `Pre-game Y%` implied probability (omitting chances when every leg pushes or voids).
-  `Live chance` carries a `?` bubble to `/docs#sys-live` that explains how progress moves, and each leg row's implied
-  chance bubbles to `/docs/glossary#term-implied-prob`. A `LIVE` or settled leg row adds a slim progress strip showing
-  the live stat or score, game clock/quarter (or `Live · stats pending` before box-score stats arrive), and leg hit
-  chance (`100%` when cashed, `0%` when busted).
-- **Group overview (`GET /groups/{id}/week`):** Spotlight cards show a compact single-row progress bar with the status
-  badge, summary, and `Live X%`.
+  `Live chance` carries a `?` bubble to `#sys-live` that explains how progress moves, and each leg row's implied chance
+  bubbles to the glossary at `#term-implied-prob`. A `LIVE` or settled leg row adds a slim progress strip showing the live
+  stat or score, game clock/quarter (or `Live · stats pending` before box-score stats arrive), and leg hit chance (`100%`
+  when cashed, `0%` when busted).
+- **Group overview:** Spotlight cards show a single-row progress bar, status badge, summary, and `Live X%`.
 - **Probability and early settlement (`internal/progress`):** `EvaluateLeg` and `EvaluateSlip` anchor each leg to its
-  pre-game implied probability (`parlay.ImpliedProb`) and update it deterministically from ESPN scoreboard scores/clock
-  and `games.boxscore_json`. `PUSH` and `VOID` legs drop out of the parlay product and bar average, and any `LOST` or
-  busted leg drops the parlay live chance to `0%`. Monotonic markets (totals, TDs, attempts, receptions, kicking
-  points) cash or bust as soon as a live stat crosses the line; yardage props stay live until `FINAL` because negative
-  plays can reduce totals. `#slip-panel` refreshes automatically when `slip-updated` arrives over SSE.
+  pre-game implied probability (`parlay.ImpliedProb`) and update it deterministically from ESPN scores/clock and
+  `games.boxscore_json`. `PUSH` and `VOID` legs drop out of the parlay product and bar average, and any `LOST` or busted
+  leg drops the parlay live chance to `0%`. Monotonic markets (totals, TDs, attempts, receptions, kicking points) cash
+  or bust as soon as a live stat crosses the line; yardage props stay live until `FINAL` because negative plays can
+  reduce totals.
 
 ## Grading
 
-Every leg carries a result: `PENDING`, `NEEDS_GRADING`, `WON`, `LOST`, `PUSH`, or `VOID`. New legs are `PENDING`.
-
-Grades sit above results. The A–F pill is the analyzer's quality read; the result chip records what happened. The slip
-grade and each leg grade open their four-pillar breakdown with a `?` bubble to `/docs/grading#slip-grade` or
-`#leg-grades`, and a warning card bubbles to its own rule at `#rule-<id>`. See
-[Analyzer](analyzer.md#what-the-banner-shows).
+Every leg carries a result: `PENDING`, `NEEDS_GRADING`, `WON`, `LOST`, `PUSH`, or `VOID`. New legs are `PENDING`. Grades
+sit above results. The A–F pill is the analyzer's quality read; the result chip records what happened. Grades and
+warning cards carry a `?` bubble into Docs. See [Analyzer](analyzer.md#what-the-banner-shows).
 
 Any slip member can grade any leg, not just their own, at any time; locking in or a kickoff does not stop a grade. The
 result chip on each leg opens a menu of `PENDING`, `WON`, `LOST`, `PUSH`, and `VOID`. Each choice sends
