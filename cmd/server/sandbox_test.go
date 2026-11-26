@@ -29,6 +29,7 @@ import (
 	"github.com/kalverra/parlay-club/internal/live"
 	"github.com/kalverra/parlay-club/internal/parlay"
 	"github.com/kalverra/parlay-club/internal/refresh"
+	"github.com/kalverra/parlay-club/internal/reminders"
 	"github.com/kalverra/parlay-club/internal/sandbox"
 	webui "github.com/kalverra/parlay-club/internal/web"
 	assets "github.com/kalverra/parlay-club/web"
@@ -120,6 +121,7 @@ func openSandboxApp(t *testing.T) *sandboxApp {
 		http.NotFoundHandler(),
 		http.NotFoundHandler(),
 		http.NotFoundHandler(),
+		nil,
 		nil,
 		handlers,
 		groupHandlers,
@@ -583,6 +585,7 @@ func TestSandboxResetRecoversTheCurrentSession(t *testing.T) {
 		http.NotFoundHandler(),
 		http.NotFoundHandler(),
 		nil,
+		nil,
 		handlers,
 		nil,
 		scope,
@@ -678,6 +681,8 @@ func TestSandboxControlsPageShowsScenarioAtPhoneWidth(t *testing.T) {
 		"Reset to Sunday morning",
 		`hx-post="/dev/sandbox/reset"`,
 		`hx-post="/dev/sandbox/persona"`,
+		"Send reminders now",
+		`hx-post="/dev/sandbox/reminders"`,
 		"Open shared invite",
 		`<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">`,
 		"grid-cols-1",
@@ -898,6 +903,7 @@ func TestSandboxControlRoutesStayOffOutsideSandbox(t *testing.T) {
 		http.NotFoundHandler(),
 		http.NotFoundHandler(),
 		nil,
+		nil,
 		handlers,
 		nil,
 		scope,
@@ -917,6 +923,7 @@ func TestSandboxControlRoutesStayOffOutsideSandbox(t *testing.T) {
 		{method: http.MethodPost, path: "/dev/sandbox/reset"},
 		{method: http.MethodPost, path: "/dev/sandbox/stage"},
 		{method: http.MethodPost, path: "/dev/sandbox/persona"},
+		{method: http.MethodPost, path: "/dev/sandbox/reminders"},
 	}
 	for _, test := range tests {
 		t.Run(test.method+" "+test.path, func(t *testing.T) {
@@ -1094,6 +1101,39 @@ func TestSandboxStagePublishesCommittedSignals(t *testing.T) {
 	games, err := store.GamesForWeek(t.Context(), staged.Week.ID)
 	require.NoError(t, err)
 	assert.NotEmpty(t, games)
+}
+
+func TestSandboxSendRemindersNow(t *testing.T) {
+	t.Parallel()
+
+	app := openSandboxApp(t)
+	seed := app.runtime.Seed()
+	sender := &reminderTestSender{}
+	app.runtime.reminders = reminders.New(reminders.Deps{
+		Store:  app.store,
+		Sender: sender,
+		Now:    app.runtime.scenario.Now,
+		Logger: zerolog.Nop(),
+	})
+
+	client := app.client(t)
+	app.signInAsAda(t, client)
+
+	response := app.request(t, client, http.MethodPost, "/dev/sandbox/reminders", nil, true)
+	require.Equal(t, http.StatusOK, response.status, response.body)
+	assert.Equal(t, "true", response.header.Get("Hx-Refresh"))
+	require.NotEmpty(t, sender.calls)
+
+	members, err := app.store.SlipMemberIDs(t.Context(), seed.Slip.ID)
+	require.NoError(t, err)
+	for _, userID := range sender.calls {
+		assert.Contains(t, members, userID, "only members of the open slip hear")
+	}
+
+	before := len(sender.calls)
+	again := app.request(t, client, http.MethodPost, "/dev/sandbox/reminders", nil, true)
+	require.Equal(t, http.StatusOK, again.status, again.body)
+	assert.Len(t, sender.calls, before, "push_log stops a second press")
 }
 
 func TestSandboxStageRouteReissuesSessionAndShowsTheState(t *testing.T) {

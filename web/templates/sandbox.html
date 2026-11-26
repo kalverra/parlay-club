@@ -129,6 +129,24 @@
     </section>
   {{end}}
 
+  <section class="ui-card p-4">
+    <div>
+      <h2 class="text-sm font-semibold text-ink">Reminders</h2>
+      <p class="mt-1 text-xs text-ink-subtle">
+        Sends the kickoff reminder now for this group's open slip, using the scenario clock. Switch personas to check
+        who gets it.
+      </p>
+    </div>
+    <form class="mt-3" hx-post="/dev/sandbox/reminders" hx-swap="none">
+      <button
+        type="submit"
+        class="w-full rounded-lg border border-line-strong bg-surface-2 px-3 py-2 text-sm font-medium text-ink hover:opacity-90"
+      >
+        Send reminders now
+      </button>
+    </form>
+  </section>
+
   <section class="ui-card border-danger p-4">
     <h2 class="text-sm font-semibold text-ink">Reset</h2>
     <p class="mt-1 text-xs text-ink-subtle">

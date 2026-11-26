@@ -41,6 +41,7 @@ func TestMuxProtectsPushRoutes(t *testing.T) {
 		http.NotFoundHandler(),
 		http.NotFoundHandler(),
 		nil,
+		nil,
 		handlers,
 		nil,
 		passthrough,

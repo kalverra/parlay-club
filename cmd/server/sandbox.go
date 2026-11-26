@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -28,6 +29,7 @@ import (
 	"github.com/kalverra/parlay-club/internal/ingest/weather"
 	"github.com/kalverra/parlay-club/internal/live"
 	"github.com/kalverra/parlay-club/internal/refresh"
+	"github.com/kalverra/parlay-club/internal/reminders"
 	"github.com/kalverra/parlay-club/internal/sandbox"
 	"github.com/kalverra/parlay-club/internal/slips"
 	webui "github.com/kalverra/parlay-club/internal/web"
@@ -56,6 +58,9 @@ type sandboxRuntime struct {
 	logger    zerolog.Logger
 	refresher *refresh.Service
 	slips     *slips.Service
+	// reminders delivers the sandbox button's reminder. The composition root
+	// sets it after construction because it needs the push service.
+	reminders *reminders.Service
 	scenario  *sandbox.Scenario
 	transport *sandbox.Transport
 	client    *http.Client
@@ -426,6 +431,7 @@ func (r *sandboxRuntime) MountRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /dev/sandbox/reset", r.reset)
 	mux.HandleFunc("POST /dev/sandbox/stage", r.selectStage)
 	mux.HandleFunc("POST /dev/sandbox/persona", r.switchPersona)
+	mux.HandleFunc("POST /dev/sandbox/reminders", r.sendReminders)
 }
 
 // controls renders the current persona, group, stage, scenario time, and the
@@ -582,6 +588,60 @@ func (r *sandboxRuntime) selectStage(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	r.finishRebuild(w, user, seed)
+}
+
+// sendReminders stands in for the scheduler in sandbox. The scenario clock is
+// frozen, so a wall-clock timer would never fire; this uses the service clock,
+// skips the fire window, and still checks that the slip is OPEN and its start
+// has not moved.
+func (r *sandboxRuntime) sendReminders(w http.ResponseWriter, req *http.Request) {
+	if r.reminders == nil {
+		http.Error(w, "reminders are not configured", http.StatusServiceUnavailable)
+		return
+	}
+	if _, ok := auth.UserFrom(req.Context()); !ok {
+		http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+		return
+	}
+	group, ok := groups.From(req.Context())
+	if !ok {
+		http.Error(w, "No active group.", http.StatusUnprocessableEntity)
+		return
+	}
+	slip, ok := r.openSlipForGroup(req.Context(), group.ID)
+	if !ok {
+		http.Error(w, "No open slip in this group to remind.", http.StatusUnprocessableEntity)
+		return
+	}
+
+	report, err := r.reminders.SendNow(req.Context(), slip.ID)
+	if err != nil {
+		r.logger.Error().Err(err).Int64("slip", slip.ID).Msg("sandbox reminders")
+		http.Error(w, "Reminder send failed. Check the server log and try again.", http.StatusInternalServerError)
+		return
+	}
+	r.logger.Info().
+		Int64("slip", slip.ID).
+		Int("sent", report.Sent).
+		Str("skipped", report.Skipped).
+		Msg("sandbox reminders")
+	w.Header().Set("Hx-Refresh", "true")
+	w.WriteHeader(http.StatusOK)
+}
+
+// openSlipForGroup returns the group's newest OPEN slip, if it has one.
+func (r *sandboxRuntime) openSlipForGroup(ctx context.Context, groupID int64) (db.Slip, bool) {
+	open, err := r.store.OpenSlips(ctx)
+	if err != nil {
+		r.logger.Error().Err(err).Msg("sandbox reminders: list open slips")
+		return db.Slip{}, false
+	}
+	for _, o := range slices.Backward(open) {
+		if o.GroupID == groupID {
+			return o, true
+		}
+	}
+	return db.Slip{}, false
 }
 
 // finishRebuild reissues the acting browser's session and group after a rebuild

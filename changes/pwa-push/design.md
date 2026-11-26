@@ -304,8 +304,9 @@ flowchart TD
   appears through `EnsureWeekSlips` on a page load, so the pass that load starts schedules it too.
 - After `POST /slips` creates a slip by hand, so a one-off slip gets its task before the person leaves the page.
 
-The `reminder_tasks` row keeps `Sync` cheap. A normal pass is one SQLite query and no API call. The Cloud Tasks API is
-called only when a slip is new or its start moved. That happens a few times a week per group.
+The `reminder_tasks` row keeps `Sync` cheap. A normal pass reads the open slips, the task rows, and each week's
+games, with no per-slip queries and no API call. The Cloud Tasks API is called only when a slip is new or its start
+moved. That happens a few times a week per group.
 
 A pass started from a page load runs in the background, so request-based CPU can slow it down. That is fine here: the
 task only has to exist 20 minutes before kickoff, and any later page load retries.
@@ -571,7 +572,7 @@ a new bearer-auth endpoint across refresh, web, and cmd/server)
 Risk: high (a new external Cloud Tasks integration and IAM that tests cover only through an httptest stand-in, plus new
 persistent scheduling state)
 
-- [ ] Add `slips.FirstKickoff(slip, games)`, the fixed slip start (not the rolling `NextStep.Deadline`). Add migration
+- [x] Add `slips.FirstKickoff(slip, games)`, the fixed slip start (not the rolling `NextStep.Deadline`). Add migration
       `0021_reminder_tasks.sql`, `internal/reminders` (`Due`, `Sync`, the `Scheduler` seam, and `LocalTimers`),
       `REMINDER_TOKEN` config, and `POST /internal/reminders?slip=&start=` beside prefill in `newMux`, with the
       fire-window and stale checks and once-per-person-per-slip `push_log` dedupe. Call `Sync` from a new

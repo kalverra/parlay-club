@@ -33,14 +33,26 @@ import (
 // slipFixture wires the slip handlers the way the server does, with stubs for
 // the signed-in person and the active group.
 type slipFixture struct {
-	handler http.Handler
-	store   *db.Store
-	hub     *live.Hub
-	user    db.User
-	group   db.Group
-	week    db.Week
-	slip    db.Slip
-	as      func(db.User)
+	handler   http.Handler
+	store     *db.Store
+	hub       *live.Hub
+	user      db.User
+	group     db.Group
+	week      db.Week
+	slip      db.Slip
+	reminders *recordingReminderScheduler
+	as        func(db.User)
+}
+
+// recordingReminderScheduler counts the reconcile passes a handler starts.
+type recordingReminderScheduler struct {
+	calls int
+	err   error
+}
+
+func (s *recordingReminderScheduler) SyncNow(context.Context) error {
+	s.calls++
+	return s.err
 }
 
 func newSlipFixture(t *testing.T, legsPerMember int) *slipFixture {
@@ -84,6 +96,7 @@ func newSlipFixtureAt(t *testing.T, legsPerMember int, now func() time.Time) *sl
 	hub := &live.Hub{}
 	service := slips.New(store, hub, nil)
 	stream := live.NewStream(hub, func(int64) bool { return false })
+	reminders := &recordingReminderScheduler{}
 
 	signedIn := user
 	handler := webui.NewWithDeps(webui.Dependencies{
@@ -98,21 +111,23 @@ func newSlipFixtureAt(t *testing.T, legsPerMember int, now func() time.Time) *sl
 		GroupFrom: func(context.Context) (db.Group, bool) {
 			return group, true
 		},
-		Store:  store,
-		Slips:  service,
-		Stream: stream,
-		Now:    now,
+		Store:     store,
+		Slips:     service,
+		Stream:    stream,
+		Reminders: reminders,
+		Now:       now,
 	})
 
 	return &slipFixture{
-		handler: handler,
-		store:   store,
-		hub:     hub,
-		user:    user,
-		group:   group,
-		week:    week,
-		slip:    slip,
-		as:      func(u db.User) { signedIn = u },
+		handler:   handler,
+		store:     store,
+		hub:       hub,
+		user:      user,
+		group:     group,
+		week:      week,
+		slip:      slip,
+		reminders: reminders,
+		as:        func(u db.User) { signedIn = u },
 	}
 }
 
@@ -1183,6 +1198,31 @@ func TestCreateSlipFormSlateScopeSelection(t *testing.T) {
 	require.Equal(t, http.StatusOK, recGames.Code)
 	assert.Contains(t, recGames.Body.String(), "All Thursday")
 	assert.Contains(t, recGames.Body.String(), "g-thu")
+}
+
+func TestCreateSlipSchedulesItsReminder(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 11, 24, 12, 0, 0, 0, time.UTC)
+	fixture := newSlipFixtureAt(t, 2, func() time.Time { return now })
+	_, err := fixture.store.UpsertGame(t.Context(), db.Game{
+		ID: "g-sun", WeekID: fixture.week.ID, HomeTeam: "BUF", AwayTeam: "KC",
+		HomeName: "Buffalo Bills", AwayName: "Kansas City Chiefs",
+		HomeESPNID: "2", AwayESPNID: "12",
+		Kickoff: now.Add(5 * 24 * time.Hour), Status: db.GameScheduled, UpdatedAt: now,
+	})
+	require.NoError(t, err)
+
+	rec := postForm(t, fixture.handler, "/slips", url.Values{
+		"mode":            {"one_off"},
+		"week_id":         {strconv.FormatInt(fixture.week.ID, 10)},
+		"name":            {"One Game"},
+		"legs_per_member": {"1"},
+		"member_id":       {strconv.FormatInt(fixture.user.ID, 10)},
+		"game_id":         {"g-sun"},
+	})
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, 1, fixture.reminders.calls, "the create route schedules before the redirect")
 }
 
 func TestCreateSlipWithSlateScope(t *testing.T) {

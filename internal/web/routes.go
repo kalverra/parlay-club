@@ -42,6 +42,12 @@ type Refresher interface {
 	ForcePickRefresh(ctx context.Context, weekID int64, gameID string) error
 }
 
+// ReminderScheduler reconciles kickoff reminder tasks. A nil scheduler skips
+// scheduling.
+type ReminderScheduler interface {
+	SyncNow(ctx context.Context) error
+}
+
 // Dependencies are the services the app's routes need. A nil store or slip
 // service leaves the slip screen in its placeholder state, which keeps the
 // shell's own tests small.
@@ -57,6 +63,7 @@ type Dependencies struct {
 	Bugs          *bugs.Service
 	Stream        *live.Stream
 	Refresh       Refresher
+	Reminders     ReminderScheduler
 	EvalCache     *eval.Cache
 	GradingEngine analyzer.GradingEngine
 	// Push stores browser subscriptions and sends notifications. A nil or

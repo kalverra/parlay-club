@@ -646,6 +646,7 @@ func (h *slipHandlers) createSlip(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.syncReminders(r.Context())
 	h.redirect(w, r, fmt.Sprintf("/slips/%d", created.ID))
 }
 
@@ -690,13 +691,27 @@ func (h *slipHandlers) createRecurringFromForm(
 		}
 		for _, s := range createdSlips {
 			if s.ScheduleID != nil && *s.ScheduleID == sched.ID {
+				h.syncReminders(r.Context())
 				h.redirect(w, r, fmt.Sprintf("/slips/%d", s.ID))
 				return
 			}
 		}
 	}
 
+	h.syncReminders(r.Context())
 	h.redirect(w, r, fmt.Sprintf("/groups/%d/week", group.ID))
+}
+
+// syncReminders schedules a task for a slip this request just created. A
+// failure is logged and dropped: the next refresh pass retries it, and the
+// person's page load must not wait on a scheduler error.
+func (h *slipHandlers) syncReminders(ctx context.Context) {
+	if h.deps.Reminders == nil {
+		return
+	}
+	if err := h.deps.Reminders.SyncNow(ctx); err != nil {
+		h.deps.Logger.Warn().Err(err).Msg("reminders: sync after slip create")
+	}
 }
 
 func (h *slipHandlers) filterGroupMembers(ctx context.Context, groupID int64, rawIDs []string) ([]int64, error) {

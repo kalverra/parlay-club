@@ -492,3 +492,64 @@ func TestCustomScopeFilterGamesAndScopeBadge(t *testing.T) {
 	assert.Equal(t, "1 Game", slips.ScopeBadge(db.Slip{SlateScope: db.SlateScopeCustom, GameIDs: []string{"g-sun-1"}}))
 	assert.Equal(t, "Sunday Slate", slips.ScopeBadge(db.Slip{SlateScope: db.SlateScopeSundayMain}))
 }
+
+func TestFirstKickoffIsTheSlipsFixedStart(t *testing.T) {
+	t.Parallel()
+
+	thursday := time.Date(2026, 11, 6, 1, 20, 0, 0, time.UTC)
+	sunEarly := time.Date(2026, 11, 8, 18, 0, 0, 0, time.UTC)
+	sunLate := time.Date(2026, 11, 8, 21, 25, 0, 0, time.UTC)
+	monNight := time.Date(2026, 11, 10, 1, 15, 0, 0, time.UTC)
+	games := []db.Game{
+		{ID: "thu", Kickoff: thursday},
+		{ID: "sun-early", Kickoff: sunEarly},
+		{ID: "sun-late", Kickoff: sunLate},
+		{ID: "mon", Kickoff: monNight},
+	}
+
+	t.Run("scope picks the earliest scoped game", func(t *testing.T) {
+		t.Parallel()
+
+		start, ok := slips.FirstKickoff(db.Slip{SlateScope: db.SlateScopeSundayMain}, games)
+		require.True(t, ok)
+		assert.True(t, sunEarly.Equal(start))
+
+		start, ok = slips.FirstKickoff(db.Slip{SlateScope: db.SlateScopeThursday}, games)
+		require.True(t, ok)
+		assert.True(t, thursday.Equal(start))
+	})
+
+	t.Run("custom slip picks its earliest selected game", func(t *testing.T) {
+		t.Parallel()
+
+		start, ok := slips.FirstKickoff(db.Slip{
+			SlateScope: db.SlateScopeCustom,
+			GameIDs:    []string{"sun-late", "mon"},
+		}, games)
+		require.True(t, ok)
+		assert.True(t, sunLate.Equal(start))
+	})
+
+	t.Run("a passed start stays the start", func(t *testing.T) {
+		t.Parallel()
+
+		start, ok := slips.FirstKickoff(db.Slip{SlateScope: db.SlateScopeFullWeek}, games)
+		require.True(t, ok)
+		assert.True(t, thursday.Equal(start), "the fixed start does not roll forward")
+	})
+
+	t.Run("no scoped games", func(t *testing.T) {
+		t.Parallel()
+
+		_, ok := slips.FirstKickoff(db.Slip{SlateScope: db.SlateScopeSundayMain}, []db.Game{
+			{ID: "thu", Kickoff: thursday},
+		})
+		assert.False(t, ok)
+
+		_, ok = slips.FirstKickoff(db.Slip{
+			SlateScope: db.SlateScopeCustom,
+			GameIDs:    []string{"missing"},
+		}, games)
+		assert.False(t, ok)
+	})
+}

@@ -37,6 +37,7 @@ import (
 	"github.com/kalverra/parlay-club/internal/live"
 	"github.com/kalverra/parlay-club/internal/push"
 	"github.com/kalverra/parlay-club/internal/refresh"
+	"github.com/kalverra/parlay-club/internal/reminders"
 	"github.com/kalverra/parlay-club/internal/seed"
 	"github.com/kalverra/parlay-club/internal/slips"
 	"github.com/kalverra/parlay-club/internal/web"
@@ -58,6 +59,10 @@ const healthzPingTimeout = 2 * time.Second
 // prefillTimeout caps one synchronous POST /internal/prefill sweep under Cloud
 // Scheduler's 3-minute default deadline.
 const prefillTimeout = 2 * time.Minute
+
+// reminderTimeout caps one reminder fire. Sends have their own short cap, so
+// this only bounds a slow database and a long member list.
+const reminderTimeout = time.Minute
 
 func main() {
 	if err := run(); err != nil {
@@ -121,6 +126,7 @@ func run() error {
 	var (
 		refresher   *refresh.Service
 		slipService *slips.Service
+		sandboxRun  *sandboxRuntime
 		appNow      func() time.Time
 		kick        func()
 		drain       func(context.Context) error
@@ -140,6 +146,7 @@ func run() error {
 		runtime.evalCache = evalCache
 		refresher = runtime.refresher
 		slipService = runtime.slips
+		sandboxRun = runtime
 		slipService.SetOnGradeChange(evalCache.InvalidateGroup)
 		refresher.SetOnMarketDataChange(evalCache.InvalidateMarket)
 		appNow = runtime.scenario.Now
@@ -170,6 +177,28 @@ func run() error {
 	} else {
 		slipService.SetNotifier(nil)
 	}
+
+	reminderService := reminders.New(reminders.Deps{
+		Store:  store,
+		Sender: pushService,
+		Now:    appNow,
+		Logger: logger,
+	})
+	// A dev server stays up, so an in-process timer can deliver a reminder.
+	// Sandbox keeps its frozen clock and uses its own button instead, and prod
+	// gets the Cloud Tasks scheduler. Until that exists, prod schedules nothing.
+	if !cfg.Sandbox && !cfg.IsProd() && cfg.ReminderToken != "" {
+		reminderService.SetScheduler(reminders.NewLocalTimers(reminderService.Fire, logger))
+	}
+	if sandboxRun != nil {
+		sandboxRun.reminders = reminderService
+	}
+	refresher.SetAfterPass(func(passCtx context.Context) {
+		if err := reminderService.SyncNow(passCtx); err != nil {
+			logger.Warn().Err(err).Msg("reminders: sync after refresh")
+		}
+	})
+
 	bugService := bugs.NewService(bugs.Deps{
 		Store:       store,
 		Repo:        cfg.GitHubRepo,
@@ -189,6 +218,7 @@ func run() error {
 		Bugs:       bugService,
 		Stream:     stream,
 		Refresh:    refresher,
+		Reminders:  reminderService,
 		EvalCache:  evalCache,
 		Push:       pushService,
 		Now:        appNow,
@@ -203,6 +233,7 @@ func run() error {
 				web.ScreenshotHandler(store, logger),
 				newHealthzHandler(database, logger),
 				newPrefillHandler(ctx, cfg.PrefillToken, cfg.Sandbox, refresher, logger),
+				newReminderHandler(cfg.ReminderToken, reminderService, logger),
 				handlers,
 				groupHandlers,
 				scope,
@@ -355,13 +386,13 @@ func newLogger(cfg config.Config, out io.Writer) zerolog.Logger {
 }
 
 // newMux builds the routes. Health, static files, and the sign-in screens sit
-// outside the shell's checks. POST /internal/prefill sits outside cookie/CSRF
-// middleware and uses bearer auth instead. Everything else needs a signed-in
-// user and an active group, and every non-GET form must come from HTMX or be
-// one of the plain forms. mountExtra adds dev-only routes behind those same
-// checks; it may be nil outside sandbox mode.
+// outside the shell's checks. POST /internal/prefill and POST /internal/reminders
+// sit outside cookie/CSRF middleware and use bearer auth instead. Everything
+// else needs a signed-in user and an active group, and every non-GET form must
+// come from HTMX or be one of the plain forms. mountExtra adds dev-only routes
+// behind those same checks; it may be nil outside sandbox mode.
 func newMux(
-	shell, static, screenshots, healthz, prefill http.Handler,
+	shell, static, screenshots, healthz, prefill, reminders http.Handler,
 	handlers *auth.Handlers,
 	groupHandlers *groups.Handlers,
 	scope func(http.Handler) http.Handler,
@@ -388,11 +419,19 @@ func newMux(
 	mux.Handle("/", handlers.RequireUser(scope(kickOnPage(kick)(app))))
 
 	csrfProtected := handlers.CSRF(mux)
-	if prefill == nil {
+	outer := http.NewServeMux()
+	mounted := false
+	if prefill != nil {
+		outer.Handle("POST /internal/prefill", prefill)
+		mounted = true
+	}
+	if reminders != nil {
+		outer.Handle("POST /internal/reminders", reminders)
+		mounted = true
+	}
+	if !mounted {
 		return csrfProtected
 	}
-	outer := http.NewServeMux()
-	outer.Handle("POST /internal/prefill", prefill)
 	outer.Handle("/", csrfProtected)
 	return outer
 }
@@ -439,6 +478,54 @@ func newPrefillHandler(
 				"error":  err.Error(),
 				"report": report,
 			})
+			return
+		}
+		writeJSON(w, http.StatusOK, report)
+	})
+}
+
+// reminderRunner delivers one reminder fire. *reminders.Service satisfies it.
+type reminderRunner interface {
+	Fire(ctx context.Context, slipID int64, start time.Time) (reminders.Report, error)
+}
+
+// newReminderHandler serves POST /internal/reminders?slip=&start= with the
+// prefill handler's fail-closed bearer auth. The task only has to arrive on
+// time: the fire rechecks the slip, its start, and the window from SQLite, and
+// push_log makes a retry send nothing.
+func newReminderHandler(token string, runner reminderRunner, logger zerolog.Logger) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if token == "" {
+			http.NotFound(w, r)
+			return
+		}
+		if !validBearerToken(r.Header.Get("Authorization"), token) {
+			w.Header().Set("WWW-Authenticate", "Bearer")
+			http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+			return
+		}
+		if runner == nil {
+			http.Error(w, "reminders are disabled", http.StatusServiceUnavailable)
+			return
+		}
+
+		slipID, err := strconv.ParseInt(strings.TrimSpace(r.URL.Query().Get("slip")), 10, 64)
+		if err != nil || slipID <= 0 {
+			http.Error(w, "slip must be a positive number", http.StatusBadRequest)
+			return
+		}
+		startUnix, err := strconv.ParseInt(strings.TrimSpace(r.URL.Query().Get("start")), 10, 64)
+		if err != nil || startUnix <= 0 {
+			http.Error(w, "start must be a unix timestamp", http.StatusBadRequest)
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(r.Context(), reminderTimeout)
+		defer cancel()
+		report, err := runner.Fire(ctx, slipID, time.Unix(startUnix, 0).UTC())
+		if err != nil {
+			logger.Error().Err(err).Int64("slip", slipID).Msg("reminders: fire")
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
 			return
 		}
 		writeJSON(w, http.StatusOK, report)

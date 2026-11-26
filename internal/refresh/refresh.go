@@ -264,6 +264,7 @@ type Service struct {
 	mu                 sync.Mutex
 	backoff            map[string]time.Time
 	onMarketDataChange func()
+	afterPass          func(context.Context)
 
 	// stopCtx cancels the work Shutdown must not outlive: a sync still
 	// fetching or writing while the database closes. stopMu makes the check
@@ -357,6 +358,34 @@ func (s *Service) notifyMarketDataChange() {
 	}
 }
 
+// SetAfterPass registers a callback that runs after a refresh pass has read and
+// written its sources. Reminder scheduling uses it: a kickoff change lands in
+// the slate sync, and the callback runs once the pass has done its work. A nil
+// fn disables the callback.
+func (s *Service) SetAfterPass(fn func(context.Context)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.afterPass = fn
+}
+
+// notifyAfterPass hands the finished pass to the callback under its own
+// timeout. Shutdown cancels it, and the work detaches from the caller because a
+// page request may already have returned.
+func (s *Service) notifyAfterPass(parent context.Context) {
+	s.mu.Lock()
+	fn := s.afterPass
+	s.mu.Unlock()
+	if fn == nil {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), syncTimeout)
+	defer cancel()
+	unregister := context.AfterFunc(s.stopCtx, cancel)
+	defer unregister()
+	fn(ctx)
+}
+
 // Kick starts a background refresh pass and returns at once. It detaches from
 // the caller's context so a finished page request does not cancel a sync.
 func (s *Service) Kick() {
@@ -431,6 +460,7 @@ func (s *Service) kick(ctx context.Context) {
 			Int("sources", sourcesCount).
 			Msg("refresh kick")
 	}()
+	defer s.notifyAfterPass(ctx)
 
 	now := s.now()
 
@@ -522,6 +552,7 @@ func (s *Service) maybeRunGameDayPrefill(ctx context.Context, games []db.Game, n
 // joined.
 func (s *Service) RunOnce(ctx context.Context) error {
 	now := s.now()
+	defer s.notifyAfterPass(ctx)
 
 	_, games, err := s.currentWeek(ctx)
 	if err != nil {

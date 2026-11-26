@@ -194,6 +194,27 @@ func TestRunOnceWaitsForEverySource(t *testing.T) {
 	assert.Equal(t, 1, lines.lineCalls)
 }
 
+func TestSetAfterPassRunsAfterAPass(t *testing.T) {
+	t.Parallel()
+
+	now := novemberTime(7, 11, 0)
+	service := New(Deps{
+		Store:      openTestStore(t),
+		Scoreboard: fakeScoreboard{},
+		Now:        func() time.Time { return now },
+		Logger:     zerolog.Nop(),
+	})
+
+	var calls atomic.Int32
+	service.SetAfterPass(func(ctx context.Context) {
+		require.NoError(t, ctx.Err())
+		calls.Add(1)
+	})
+
+	service.kick(t.Context())
+	assert.Equal(t, int32(1), calls.Load())
+}
+
 func TestRunOnceReturnsJoinedFailures(t *testing.T) {
 	t.Parallel()
 

@@ -243,6 +243,20 @@ func FilterGamesByScope(games []db.Game, scope db.SlateScope) []db.Game {
 	return filtered
 }
 
+// FirstKickoff returns the earliest kickoff among the slip's scoped games,
+// whether it has passed or not. This is the slip's fixed start: a reminder
+// keyed to it fires once, while NextStep.Deadline rolls forward as games kick
+// off. It reports false when no game belongs to the slip.
+func FirstKickoff(slip db.Slip, games []db.Game) (time.Time, bool) {
+	var first time.Time
+	for _, game := range FilterGamesForSlip(games, slip) {
+		if first.IsZero() || game.Kickoff.Before(first) {
+			first = game.Kickoff
+		}
+	}
+	return first, !first.IsZero()
+}
+
 // firstKickoff is the earliest game still ahead of now, or nil when the week
 // has none left.
 func firstKickoff(games []db.Game, now time.Time) *time.Time {

@@ -36,6 +36,7 @@ func TestLoadDevDefaults(t *testing.T) {
 	assert.Empty(t, cfg.GitHubToken)
 	assert.Equal(t, "kalverra/parlay-club", cfg.GitHubRepo)
 	assert.Empty(t, cfg.PrefillToken)
+	assert.Empty(t, cfg.ReminderToken)
 	assert.Empty(t, cfg.VAPIDPublicKey)
 	assert.Empty(t, cfg.VAPIDPrivateKey)
 	assert.False(t, cfg.PushEnabled())
@@ -67,6 +68,7 @@ func TestLoadOverridesEveryValue(t *testing.T) {
 		"GITHUB_TOKEN":         "  ghp_secret  ",
 		"GITHUB_REPO":          "  other/repo  ",
 		"PREFILL_TOKEN":        "  prefill-secret  ",
+		"REMINDER_TOKEN":       "  reminder-secret  ",
 		"VAPID_PUBLIC_KEY":     "  public-key  ",
 		"VAPID_PRIVATE_KEY":    "  private-key  ",
 		"LOG_LEVEL":            "warn",
@@ -85,6 +87,7 @@ func TestLoadOverridesEveryValue(t *testing.T) {
 	assert.Equal(t, "ghp_secret", cfg.GitHubToken)
 	assert.Equal(t, "other/repo", cfg.GitHubRepo)
 	assert.Equal(t, "prefill-secret", cfg.PrefillToken)
+	assert.Equal(t, "reminder-secret", cfg.ReminderToken)
 	assert.Equal(t, "public-key", cfg.VAPIDPublicKey)
 	assert.Equal(t, "private-key", cfg.VAPIDPrivateKey)
 	assert.True(t, cfg.PushEnabled())
@@ -116,6 +119,7 @@ func TestLoadProdDefaults(t *testing.T) {
 	assert.Empty(t, cfg.GitHubToken)
 	assert.Equal(t, "kalverra/parlay-club", cfg.GitHubRepo)
 	assert.Empty(t, cfg.PrefillToken)
+	assert.Empty(t, cfg.ReminderToken)
 	assert.Empty(t, cfg.VAPIDPublicKey)
 	assert.Empty(t, cfg.VAPIDPrivateKey)
 	assert.False(t, cfg.PushEnabled())
