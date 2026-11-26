@@ -22,9 +22,11 @@ func TestLayoutRendersBottomTabs(t *testing.T) {
 		Groups: []webui.GroupOption{{ID: 7, Name: "Sunday Parlay Club", Current: true}},
 	})
 
-	for _, label := range []string{"Groups", "This week", "Record Book", "Docs"} {
+	for _, label := range []string{"Groups", "This week", "Research", "Record Book", "Docs"} {
 		assert.Contains(t, out, ">"+label+"</a")
 	}
+
+	assert.Contains(t, out, `href="/research"`, "the Research tab links to the explorer")
 
 	assert.Contains(t, out, `href="/docs"`, "the Docs tab links to the hub")
 	assert.Contains(t, out, "grid-flow-col auto-cols-fr", "the bar shares width across however many tabs exist")
@@ -42,6 +44,20 @@ func TestLayoutRendersBottomTabs(t *testing.T) {
 	require.Len(t, match, 2)
 	assert.Equal(t, "/record", match[1])
 	assert.Contains(t, out, `href="/groups/7/week"`, "This week names the active group")
+}
+
+func TestLayoutMarksTheResearchTab(t *testing.T) {
+	t.Parallel()
+
+	out := renderPage(t, "research", webui.Page{Title: "Research", Tab: webui.TabResearch})
+
+	assert.Contains(t, out, `href="/research"`)
+	assert.Equal(t, 1, strings.Count(out, `aria-current="page"`))
+
+	current := regexp.MustCompile(`<a\s+href="([^"]+)"[^>]*aria-current="page"`)
+	match := current.FindStringSubmatch(out)
+	require.Len(t, match, 2)
+	assert.Equal(t, "/research", match[1])
 }
 
 func TestLayoutWidensForATwoPanePage(t *testing.T) {

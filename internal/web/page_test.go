@@ -25,6 +25,7 @@ func TestPageTabs(t *testing.T) {
 			"/groups/7/week",
 			[]webui.GroupOption{{ID: 4, Name: "Just me"}, {ID: 7, Name: "Sunday Parlay Club", Current: true}},
 		},
+		{"research", webui.TabResearch, "/research", nil},
 		{"record", webui.TabRecord, "/record", nil},
 		{"docs", webui.TabDocs, "/docs", nil},
 	}
@@ -34,7 +35,7 @@ func TestPageTabs(t *testing.T) {
 			t.Parallel()
 
 			tabs := webui.Page{Tab: test.tab, Groups: test.group}.Tabs()
-			require.Len(t, tabs, 4)
+			require.Len(t, tabs, 5)
 
 			labels := make([]string, 0, len(tabs))
 			for _, tab := range tabs {
@@ -47,7 +48,7 @@ func TestPageTabs(t *testing.T) {
 				}
 			}
 
-			assert.Equal(t, []string{"Groups", "This week", "Record Book", "Docs"}, labels)
+			assert.Equal(t, []string{"Groups", "This week", "Research", "Record Book", "Docs"}, labels)
 		})
 	}
 }

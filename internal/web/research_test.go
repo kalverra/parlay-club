@@ -112,6 +112,12 @@ func TestResearchPage(t *testing.T) {
 	body := rec.Body.String()
 	assert.Contains(t, body, "Research")
 	assert.Contains(t, body, "Player and game research shows up here.")
+	assert.Regexp(
+		t,
+		`<a\s+href="/research"\s+class="flex flex-col[^>]*aria-current="page"`,
+		body,
+		"the Research tab is the current destination",
+	)
 	assert.Contains(t, body, game.HomeTeam)
 	assert.Contains(t, body, "Josh Allen")
 

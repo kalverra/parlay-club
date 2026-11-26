@@ -240,7 +240,7 @@ Complexity: medium (updates primary nav, redesigns `research.html` around target
 preserves existing game/player sheets) Risk: medium (touches primary navigation and full-slate cached odds loading; must
 enforce zero paid API calls on browse via automated tests)
 
-- [ ] Add `TabResearch` (`Research`, `/research`) to `internal/web/page.go` (using `grid-flow-col auto-cols-fr` in
+- [x] Add `TabResearch` (`Research`, `/research`) to `internal/web/page.go` (using `grid-flow-col auto-cols-fr` in
       `web/templates/layout.html`) and set `page.Tab = TabResearch` in `internal/web/research.go`, updating nav/layout
       tests.
 - [ ] Redesign `GET /research` and add `GET /research/explore` (HTMX partial + `Hx-Push-Url`) in
