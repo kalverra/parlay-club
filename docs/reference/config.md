@@ -29,10 +29,10 @@ exits with status 1 when any value is invalid.
 | `GITHUB_TOKEN`         | empty                    | GitHub token for creating bug report issues. Optional in dev and prod; empty saves reports to SQLite only. |
 | `GITHUB_REPO`          | `kalverra/parlay-club`   | Target `owner/repo` for bug report issues. Defaults to `kalverra/parlay-club` in dev and prod. |
 | `PREFILL_TOKEN`        | empty                    | Bearer token for `POST /internal/prefill`. Optional in dev and prod; empty disables the endpoint (`404`). |
-| `REMINDER_TOKEN`       | empty                    | Bearer token for `POST /internal/reminders`. Optional in dev and prod; empty disables the endpoint (`404`) and scheduling. |
+| `REMINDER_TOKEN`       | empty                    | Bearer token for `POST /internal/reminders`. A secret: the deploy workflow mounts it from Secret Manager. Optional in dev and prod; empty disables the endpoint (`404`) and scheduling. |
 | `REMINDER_QUEUE`       | empty                    | Full Cloud Tasks queue path, `projects/{project}/locations/{region}/queues/{queue}`. Prod needs it with `REMINDER_TOKEN` to schedule reminders. Optional in dev. |
 | `VAPID_PUBLIC_KEY`     | empty                    | Web Push public key, base64url. Push is on only when both VAPID keys are set. Generate a pair with `go run ./cmd/vapidkeys`. Optional in dev and prod. |
-| `VAPID_PRIVATE_KEY`    | empty                    | The matching private key. A secret: keep it in Secret Manager in prod and pass it to the service as an environment variable. Optional in dev and prod. |
+| `VAPID_PRIVATE_KEY`    | empty                    | The matching private key. A secret: the deploy workflow mounts it from Secret Manager. Optional in dev and prod. |
 | `LOG_LEVEL`            | `debug`                  | A zerolog level: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `panic`, `disabled`. `prod` defaults to `info`. |
 | `SUNDAY_SANDBOX`       | empty                    | `1` runs the offline Sunday sandbox. It fixes the database to `sunday-sandbox.db` in `data` and ignores `DB_PATH`. Rejected in prod. |
 | `LITESTREAM_BUCKET`    | unset                    | Read by Litestream, not by the app. The entrypoint restores and replicates `gs://$LITESTREAM_BUCKET/parlay.db`. |
@@ -73,15 +73,17 @@ the bearer value the queue sends to `POST /internal/reminders`; when it is empty
 scheduled. Production also needs `REMINDER_QUEUE`, the full queue path, so the app can enqueue one Cloud Tasks task per
 open slip. With both set, a bad queue path or `BASE_URL` logs one error at boot and leaves reminders off; the server
 still starts. A dev server schedules with an in-process timer from `REMINDER_TOKEN` alone. Reminders also stay off while
-push is off, because there is no sender. [Push setup](../runbooks/push-setup.md) creates the queue and both values.
+push is off, because there is no sender. [Push setup](../runbooks/push-setup.md) creates the queue, stores the token as
+a secret, and sets the `REMINDER_QUEUE` repository variable.
 
 `VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY` are the Web Push key pair, trimmed of surrounding whitespace. Push is on only
 when both are set. With either missing, `/me` hides the notifications card and the three push routes answer `404`; a
 half pair is accepted rather than rejected because push is optional. The pair is not validated at startup, so a
 malformed key fails when a browser subscribes or a send runs, not when the server boots. `go run ./cmd/vapidkeys` prints
-a fresh pair, and [Push setup](../runbooks/push-setup.md) covers storing the private key and setting the service
-environment. Push uses `BASE_URL` as the VAPID subject, so prod needs its public `https` URL. Local dev works without
-TLS because browsers treat `localhost` as a secure context.
+a fresh pair, and [Push setup](../runbooks/push-setup.md) covers storing the keys in Secret Manager and enabling the
+service. The deploy workflow mounts `VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY` from `vapid-public-key` and
+`vapid-private-key` when both have an `ENABLED` version. Push uses `BASE_URL` as the VAPID subject, so prod needs its
+public `https` URL. Local dev works without TLS because browsers treat `localhost` as a secure context.
 
 Sign-up is open, so there is no email list to configure. Group membership is what decides who sees which slips; see
 [Groups](../concepts/groups.md).

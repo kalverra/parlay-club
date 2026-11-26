@@ -85,8 +85,10 @@ standard library `image/png`, so the art can be swapped later without code chang
 The VAPID subject is `BASE_URL`; Apple accepts an `https:` URL. Push is on only when both keys are set. Otherwise the
 notifications card is hidden, the subscription routes return 404, and `slips.Service` gets a nil `Notifier`. A one-shot
 `go run ./cmd/vapidkeys` prints a fresh pair for local use and for the runbook. Local dev works because browsers treat
-`localhost` as a secure context. The deploy workflow does not mount the pair, so the push setup runbook stores both
-halves in Secret Manager and sets them on the service; later deploys keep them because they update env vars.
+`localhost` as a secure context. The deploy workflow mounts `vapid-public-key` and `vapid-private-key` as secrets when
+both have an `ENABLED` version, and passes `REMINDER_QUEUE` from a repository variable, so adding a version and
+redeploying is all a rotation needs. Neither the private key nor the reminder token ever sits in plain text in the
+revision config.
 
 **Schema (migration `0020_push.sql`).**
 
@@ -334,7 +336,9 @@ type Scheduler interface {
   - The HTTP target is `POST {BASE_URL}/internal/reminders?slip={id}&start={unix}`, with header
     `Authorization: Bearer {REMINDER_TOKEN}`.
 - **`LocalTimers` (dev).** `time.AfterFunc` calls the same handler logic in-process. A local server stays up, so a timer
-  is enough. It uses the wall clock.
+  is enough, and it uses the wall clock. A restart drops every pending timer, so `Sync` does not trust `reminder_tasks`
+  for this scheduler and re-enqueues on the next pass; `LocalTimers` keeps an in-memory set so a repeat call does not
+  arm a second timer.
 - **None (sandbox).** Sandbox mode wires no `Scheduler`; the sandbox button below stands in for it.
 - **Off.** When `REMINDER_TOKEN` or push is unset, or when prod has no `REMINDER_QUEUE`, `Sync` is a no-op.
 
@@ -509,10 +513,6 @@ few dozen, and the instance wakes once per slip instead of 56 times a day.
   reminder. Accepted: flexes are announced days ahead, and someone visits in between.
 - **Queue misconfigured or no IAM.** Enqueue fails and logs on every `Sync`, and reminders stop. Events still work. The
   runbook's first-week check catches it.
-- **VAPID keys in production.** The deploy workflow does not mount the pair, so the push setup runbook sets both
-  variables on the service from Secret Manager. Later deploys keep them because they update env vars, but a deploy that
-  replaced env vars would turn push off until the runbook ran again. Mounting the private key in the workflow is the
-  durable fix.
 
 ## TODO
 
@@ -589,3 +589,7 @@ persistent scheduling state)
       `REMINDER_TOKEN` and `REMINDER_QUEUE` to `docs/reference/config.md` and `reminder_tasks` to
       `docs/reference/schema.md`. Add the queue setup and the first-week check to `docs/runbooks/push-setup.md`. Add the
       glossary term "Slip start" to `GLOSSARY.md`.
+
+## Reviews
+
+- [x] Final review: claude@claude-opus-5-5

@@ -14,16 +14,17 @@ budget:
 ## Purpose
 
 Turn on Web Push and kickoff reminders. The app ships with push off, because it needs a VAPID key pair before it can
-subscribe a device or send a notification. This runbook generates the pair, stores the private half, sets both
-variables on the service, wires the Cloud Tasks reminder queue and its bearer token, and checks delivery with Send test
-and the first-week check.
+subscribe a device or send a notification. This runbook generates the pair, stores the private half, points the deploy
+at the secrets, wires the Cloud Tasks reminder queue and its bearer token, and checks delivery with Send test and the
+first-week check.
 
 ## Preconditions
 
 - The app runs. For production, the Cloud Run service is deployed and `BASE_URL` is its public `https` URL, because the
   app uses that URL as the VAPID subject.
-- `gcloud` is signed in with permission to update the Cloud Run service, add Secret Manager secrets, and read the Cloud
-  Tasks queue. The project ID and region match the deploy variables.
+- `gcloud` is signed in with permission to add Secret Manager secrets, read the Cloud Tasks queue, and run the Deploy
+  workflow. The project ID and region match the deploy variables.
+- `gh` is signed in for the repository, so you can set the `REMINDER_QUEUE` repository variable.
 - `deploy/setup.sh` has run, so the `cloudtasks.googleapis.com` API is enabled, the queue exists, and the runtime
   service account holds `roles/cloudtasks.enqueuer` on it.
 - You can sign in to `/me` from the device you want to test. An iPhone needs iOS 16.4 or later and the installed app.
@@ -86,37 +87,9 @@ printf '%s' "$VAPID_PRIVATE_KEY" | gcloud secrets versions add vapid-private-key
 ```
 
 The public key is not sensitive, but keeping it beside its private half avoids a service that has one and not the other.
+The deploy workflow mounts both as secrets, so the private key never sits in the revision's plain environment.
 
-### 4. Set the service environment
-
-The server reads both values from the environment. Read the pair from Secret Manager and update the service in one call:
-
-```sh
-VAPID_PUBLIC_KEY=$(gcloud secrets versions access latest --secret=vapid-public-key)
-VAPID_PRIVATE_KEY=$(gcloud secrets versions access latest --secret=vapid-private-key)
-gcloud run services update parlay-club \
-  --project "$GCP_PROJECT" --region "$GCP_REGION" \
-  --update-env-vars "VAPID_PUBLIC_KEY=$VAPID_PUBLIC_KEY,VAPID_PRIVATE_KEY=$VAPID_PRIVATE_KEY"
-```
-
-`--update-env-vars` changes only these two variables and leaves the rest of the service environment alone. Later deploys
-also update env vars, so the pair survives. The deploy workflow does not mount the secret itself, so this call is what
-copies the pair from Secret Manager into the revision's environment.
-
-### 5. Set up kickoff reminders
-
-Reminders need the queue that `deploy/setup.sh` created, a bearer token, and both variables on the service. Confirm the
-queue and read its full path:
-
-```sh
-gcloud tasks queues describe parlay-club-reminders \
-  --project "$GCP_PROJECT" --location "$GCP_REGION" \
-  --format='value(name)'
-```
-
-The path has the shape `projects/{project}/locations/{region}/queues/parlay-club-reminders`. The queue allows three
-attempts with a 30 second minimum backoff. The runtime account's `roles/cloudtasks.enqueuer` grant on this queue is what
-lets the app enqueue, so a `403` here means the grant is missing.
+### 4. Store the reminder token
 
 Create the token secret once, then add versions when it changes:
 
@@ -132,24 +105,40 @@ If the secret already exists:
 printf '%s' "$(openssl rand -hex 32)" | gcloud secrets versions add reminder-token --data-file=-
 ```
 
-Set both values on the service:
+A task already in the queue carries the old token in its `Authorization` header, so a rotation with tasks pending makes
+those fires answer `401` and burn their retries. Rotate only when the queue is empty, meaning no open slip has a kickoff
+ahead. If you must rotate mid-week, add the new version and redeploy first, then purge the queue and delete the
+`reminder_tasks` rows from the app's database, so the next `Sync` enqueues fresh tasks with the new token:
 
 ```sh
-REMINDER_TOKEN=$(gcloud secrets versions access latest --secret=reminder-token)
-QUEUE_PATH=$(gcloud tasks queues describe parlay-club-reminders \
-  --project "$GCP_PROJECT" --location "$GCP_REGION" --format='value(name)')
-gcloud run services update parlay-club \
-  --project "$GCP_PROJECT" --region "$GCP_REGION" \
-  --update-env-vars "REMINDER_TOKEN=$REMINDER_TOKEN,REMINDER_QUEUE=$QUEUE_PATH"
+gcloud tasks purge --queue=parlay-club-reminders \
+  --project "$GCP_PROJECT" --location "$GCP_REGION"
+sqlite3 parlay.db 'DELETE FROM reminder_tasks;'
 ```
 
-`--update-env-vars` leaves the VAPID pair and the rest of the environment alone, and later deploys update only their own
-variables, so both reminder values survive. The deploy workflow does not mount `reminder-token`, so this call is what
-puts it in the revision. Rotation is the same as adding a version and repeating the update.
+### 5. Enable push and reminders in production
 
-Reminders also stay off while push is off, because there is no sender. Do this step after the VAPID pair is set. A bad
-queue path or `BASE_URL` logs one `reminders: cloud tasks scheduler; reminders are off` error at boot; it does not stop
-the service.
+Nothing is set on the service by hand. The deploy workflow mounts `vapid-public-key`, `vapid-private-key`, and
+`reminder-token` as secrets when each has an `ENABLED` version, and passes `REMINDER_QUEUE` from a repository variable.
+Point that variable at the queue that `deploy/setup.sh` created:
+
+```sh
+QUEUE_PATH=$(gcloud tasks queues describe parlay-club-reminders \
+  --project "$GCP_PROJECT" --location "$GCP_REGION" --format='value(name)')
+gh variable set REMINDER_QUEUE --body "$QUEUE_PATH"
+```
+
+The path has the shape `projects/{project}/locations/{region}/queues/parlay-club-reminders`. The queue allows three
+attempts with a 30 second minimum backoff. The runtime account's `roles/cloudtasks.enqueuer` grant on this queue is what
+lets the app enqueue, so a `403` here means the grant is missing.
+
+Then redeploy by running the **Deploy** workflow from the Actions tab or by pushing a commit. Manual dispatches always
+deploy. The pre-flight logs which optional secrets it found, and a missing version is a notice rather than a failure:
+that variable stays unset and the feature stays off. Because the variables are secret references, a rotation is also
+just "add a version and redeploy", and no key or token is copied into the revision's environment.
+
+Reminders also stay off while push is off, because there is no sender. Enable the VAPID pair first. A bad queue path or
+`BASE_URL` logs one `reminders: cloud tasks scheduler; reminders are off` error at boot; it does not stop the service.
 
 ### 6. Check delivery
 
@@ -160,9 +149,9 @@ the service.
 
 ## Rotating the pair
 
-Generate a new pair, add both values as new secret versions, and repeat step 4. Every browser subscription was created
-with the old public key, so sends signed with the new key fail with a `403` and those rows stay stored. Only a `404` or
-`410` prunes an endpoint.
+Generate a new pair, add both values as new secret versions, and redeploy (step 5). Every browser subscription was
+created with the old public key, so sends signed with the new key fail with a `403` and those rows stay stored. Only a
+`404` or `410` prunes an endpoint.
 
 Announce the rotation, then have each person turn notifications off and on, which replaces the subscription with one
 signed for the new key. There is no automatic cleanup for a rotation.
@@ -193,29 +182,25 @@ says which: `{skipped: "stale"}` when the start or status changed, `{skipped: "n
 
 ## Rollback
 
-Remove both variables from the service:
+Turn push off by disabling the enabled version of each VAPID secret and redeploying. The pre-flight then finds no complete
+pair, so the next revision starts with push off:
 
 ```sh
-gcloud run services update parlay-club \
-  --project "$GCP_PROJECT" --region "$GCP_REGION" \
-  --remove-env-vars VAPID_PUBLIC_KEY,VAPID_PRIVATE_KEY
+gcloud secrets versions disable "$(gcloud secrets versions list vapid-public-key \
+  --project "$GCP_PROJECT" --filter='state=ENABLED' --limit=1 --format='value(name)')" \
+  --secret=vapid-public-key --project "$GCP_PROJECT"
 ```
 
-The Notifications card disappears, the push routes answer `404`, and nothing is sent. Reminders also stop, because there
-is no sender, even though their endpoint and tasks still exist. Stored subscriptions remain, and a browser keeps its
-local subscription until someone turns notifications off. Delete the secrets if the pair is no longer needed.
-
-To remove reminders as well, drop their two variables and optionally the queue:
-
-```sh
-gcloud run services update parlay-club \
-  --project "$GCP_PROJECT" --region "$GCP_REGION" \
-  --remove-env-vars REMINDER_TOKEN,REMINDER_QUEUE
-```
+Do the same for `vapid-private-key`. The Notifications card disappears, the push routes answer `404`, and nothing is
+sent. Reminders also stop, because there is no sender, even though their endpoint and tasks still exist. To turn
+reminders off on their own, unset the `REMINDER_QUEUE` repository variable and redeploy, or disable the `reminder-token`
+version. Stored subscriptions remain, and a browser keeps its local subscription until someone turns notifications off.
+Re-enable a version and redeploy to restore push; delete the secrets if the pair is no longer needed.
 
 ## Verify
 
-- The Cloud Run revision has both VAPID variables and boots without a config error.
+- The Cloud Run revision mounts both VAPID values and `REMINDER_TOKEN` from Secret Manager and boots without a config
+  error.
 - `/me` shows the Notifications card, and opening it in a browser without a stored subscription says Off for this
   device.
 - Send test delivers to a device that shows On, and the notification opens `/me`.
@@ -229,7 +214,7 @@ gcloud run services update parlay-club \
 
 | Symptom                                      | Cause and fix                                                                                  |
 | -------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| No Notifications card on `/me`               | One VAPID variable is missing or empty in the running revision. Set both and restart.           |
+| No Notifications card on `/me`               | One VAPID secret is missing an `ENABLED` version, so the deploy did not mount it. Add a version and redeploy. |
 | Card says notifications are unsupported      | The page is not a secure context, or an iPhone is in Safari instead of the installed app.       |
 | Card says Blocked for this device            | The browser's site settings deny notifications. Allow them, then reload the page.              |
 | Send test reports success but nothing arrives | The device has no stored endpoint, focus mode is on, or OS notifications are off for the app.  |

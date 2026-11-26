@@ -250,8 +250,11 @@ flowchart TD
 - A normal pass reads the open slips, the task rows, and one set of games per week, with no scheduler call when the start
   has not moved.
 
-The scheduler is `CloudTasks` in production and `LocalTimers` on a dev server. Sandbox mode wires none, because its clock
-is frozen.
+The scheduler is `CloudTasks` in production and `LocalTimers` on a dev server. Sandbox mode wires none, because its
+clock is frozen. Cloud Tasks is durable: a `reminder_tasks` row means the wake-up exists, so a normal pass makes no
+scheduler call. `LocalTimers` is not durable: a restart drops every pending timer, and the row does not count, so the
+next `Sync` enqueues again. `LocalTimers` keeps an in-memory set keyed by slip and start, so a repeat `Sync` in the same
+process arms nothing a second time. Duplicate fires are harmless anyway because `push_log` dedupes the send.
 
 ### Firing
 
@@ -290,6 +293,7 @@ partial send reaches only the people not yet sent to.
 | Everyone locks in before the fire time | The slip is `LOCKED`, so the handler skips it. |
 | A member is removed after scheduling | Members are read at fire time, so that person gets nothing. |
 | Deploy or cold start at fire time | Cloud Tasks waits for the instance. A cold start costs a few seconds. |
+| Dev server restarts before a fire | The pending timers are lost. The next page load's `Sync` arms them again from the open slips. |
 | Cloud Tasks retries after a partial send | `push_log` rows kept the first send from repeating. |
 | The start moves, so a second task fires | The empty `push_log` key still dedupes to one reminder per person per slip. |
 | Someone is in two slips that start together | Two tasks, two messages, each opening its own slip. |
@@ -304,7 +308,8 @@ personas and watch who gets a push.
 
 Reminders need a sender, `REMINDER_TOKEN`, and in production `REMINDER_QUEUE`. With push off, no token, or, in
 production, no queue, `Sync` does nothing and the endpoint answers `404` or skips as disabled. [Push
-setup](../runbooks/push-setup.md) creates the queue, the secret, and both variables. [Configuration](../reference/config.md)
+setup](../runbooks/push-setup.md) creates the queue, stores the token as a secret, and sets the `REMINDER_QUEUE`
+repository variable that the deploy passes to the service. [Configuration](../reference/config.md)
 lists the values.
 
 ## iPhone layout

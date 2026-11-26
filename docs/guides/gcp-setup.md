@@ -124,8 +124,9 @@ printf '%s' "$THE_ODDS_API_KEY" | gcloud secrets versions add the-odds-api-key -
 To replace a value later, add a new version of that secret and deploy again. `:latest` points Cloud Run at the newest
 version, so no flag changes.
 
-The two remaining secrets, `github-token` and `prefill-token`, are optional. The deploy checks each for an `ENABLED`
-version and mounts it only when one exists, so leaving either empty is safe.
+The remaining secrets are optional: `github-token`, `prefill-token`, `vapid-public-key`, `vapid-private-key`, and
+`reminder-token`. The deploy checks each for an `ENABLED` version and mounts it only when one exists, so leaving any of
+them empty is safe. The push secrets use the same rule; [Push setup](../runbooks/push-setup.md) creates them.
 
 With a `github-token` version, in-app bug reports open GitHub issues; without one, reports still save in SQLite. Add a
 fine-grained personal access token with **Issues: read and write** on the repo, or a classic token with the `repo`
@@ -164,6 +165,7 @@ secrets: none of them is sensitive.
 | `LITESTREAM_BUCKET` | the bucket name, without `gs://`                        |
 | `AR_REPO`           | `parlay-club` unless you changed it                     |
 | `ISSUES_REPO`       | optional; `owner/repo` for bug report issues, default the repo that runs the workflow |
+| `REMINDER_QUEUE`    | optional; the full Cloud Tasks queue path, set by [Push setup](../runbooks/push-setup.md) |
 
 `BASE_URL` comes after the first deploy, in step 6. `ISSUES_REPO` is optional: leave it unset to file bug issues against
 the repo itself. The workflow always passes it to the container as `GITHUB_REPO`. The workflow checks the seven required

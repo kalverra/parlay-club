@@ -360,9 +360,9 @@ Next:
      reports to open GitHub issues; without one they save locally instead.
      prefill-token is optional. Add a random bearer token version to enable
      the Sunday morning pre-fill endpoint (POST /internal/prefill).
-     Kickoff reminders are optional: the service needs REMINDER_TOKEN (the
-     bearer value the queue sends) and REMINDER_QUEUE, set to
-     ${QUEUE_PATH}.
+     Kickoff reminders are optional: add a version to the reminder-token
+     secret (a random bearer value) and set the REMINDER_QUEUE repository
+     variable to ${QUEUE_PATH}.
      Without both, reminders stay off and everything else works.
   2. Deploy once, then set BASE_URL to the Cloud Run URL it prints.
   3. Create a group in the app, then restart the service once so

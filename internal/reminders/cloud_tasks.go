@@ -122,6 +122,9 @@ func NewCloudTasks(cfg CloudTasksConfig, opts ...CloudTasksOption) (*CloudTasks,
 	return scheduler, nil
 }
 
+// Durable reports true: Cloud Tasks holds the task when this process stops.
+func (c *CloudTasks) Durable() bool { return true }
+
 // Enqueue creates one named task that POSTs the reminder endpoint at at. A
 // duplicate name comes back as a 409, which means the task already exists and
 // is not an error.

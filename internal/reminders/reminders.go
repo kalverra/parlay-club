@@ -231,8 +231,9 @@ func (s *Service) SendNow(ctx context.Context, slipID int64) (Report, error) {
 }
 
 // Sync makes sure every open slip whose start is ahead has a task for that
-// start. It never deletes a task: a stale one fires and skips. A reminder_tasks
-// row keeps the normal pass down to reads with no scheduler call.
+// start. It never deletes a task: a stale one fires and skips. For a durable
+// scheduler, a reminder_tasks row keeps the normal pass down to reads with no
+// scheduler call.
 func (s *Service) Sync(ctx context.Context, now time.Time) error {
 	if s == nil || s.scheduler == nil || s.sender == nil || !s.sender.Enabled() {
 		return nil
@@ -271,8 +272,13 @@ func (s *Service) Sync(ctx context.Context, now time.Time) error {
 		if !at.After(now) || start.Sub(now) > MaxHorizon {
 			continue
 		}
-		if task, ok := tasks[slip.ID]; ok && task.Start.Equal(start) {
-			continue
+		// A durable scheduler keeps its tasks across restarts, so the row alone
+		// says the wake-up exists. A non-durable one loses them with the
+		// process, so re-enqueue and let the scheduler collapse a repeat.
+		if s.scheduler.Durable() {
+			if task, ok := tasks[slip.ID]; ok && task.Start.Equal(start) {
+				continue
+			}
 		}
 
 		err := s.scheduler.Enqueue(ctx, slip.ID, start, at)

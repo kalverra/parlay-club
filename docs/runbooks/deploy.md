@@ -21,11 +21,10 @@ setup lives in [GCP setup](../guides/gcp-setup.md); this runbook covers every de
 
 - The [GCP setup](../guides/gcp-setup.md) is finished: the bucket, secrets, service accounts, Workload Identity, and
   GitHub variables all exist.
-- The five required secrets have an `ENABLED` version. `github-token` and `prefill-token` are optional: with a version,
-  bug reports open GitHub issues and the optional `POST /internal/prefill` fallback accepts bearer-token requests;
-  without one, bug reports stay in SQLite and `POST /internal/prefill` returns `404` (per-game-day pre-fill still runs
-  automatically on the first authenticated visit at or after 6:00 AM ET on any scheduled game day via `prefill:gameday`
-  in `sync_state`).
+- The five required secrets have an `ENABLED` version. `github-token`, `prefill-token`, the VAPID pair, and
+  `reminder-token` are optional: a version turns on bug reports, the prefill fallback, Web Push (both halves), and
+  reminders (with `REMINDER_QUEUE` set); without one they stay off. Per-game-day pre-fill still runs automatically on
+  the first authenticated visit at or after 6:00 AM ET on a scheduled game day via `prefill:gameday` in `sync_state`.
 - `parlay-deployer` can read Secret Manager metadata and the Litestream bucket, read replica objects, and write verified
   backups under `backups/`. A project set up before these checks existed needs `deploy/setup.sh` run once more; it
   grants `roles/secretmanager.viewer`, `roles/storage.bucketViewer`, `roles/storage.objectViewer`, and
@@ -81,16 +80,16 @@ push, so a broken gate fails before it can block or allow a deploy.
 2. Runs the blackout gate unless `force` is set.
 3. Checks the deployment variables before any GCP call. `GCP_PROJECT`, `GCP_REGION`, `WIF_PROVIDER`, `DEPLOY_SA`,
    `RUNTIME_SA`, `LITESTREAM_BUCKET`, and `AR_REPO` must be set, and a set `BASE_URL` must be `http` or `https` with a
-   host. A missing or malformed value fails in seconds and names the variable.
+   host. A set `REMINDER_QUEUE` must be a full `projects/{project}/locations/{region}/queues/{queue}` path. A missing or
+   malformed value fails in seconds and names the variable.
 4. Authenticates to Google Cloud through Workload Identity Federation as `parlay-deployer`. No service account key is
    stored in GitHub.
 5. Compares the tested commit against the commit currently live on Cloud Run (for CI-triggered runs). If no runtime,
    template, seed, or container files changed, the job skips the build and deploy. Manual dispatches always deploy.
 6. Pre-flights the GCP project in parallel: the Artifact Registry repo, the Litestream bucket, and an `ENABLED` version
-   of each required secret. It collects every failure, then exits before the build. `github-token` and `prefill-token`
-   are checked separately; when each has an `ENABLED` version the job sets `MOUNT_GITHUB_TOKEN=true` or
-   `MOUNT_PREFILL_TOKEN=true` so the deploy mounts it, and when one does not the job logs a notice and leaves bug
-   reports in SQLite or `POST /internal/prefill` disabled (`404`).
+   of each required secret. It collects every failure, then exits before the build. `github-token`, `prefill-token`,
+   the VAPID pair, and `reminder-token` are checked separately; when one has an `ENABLED` version the job sets
+   `MOUNT_<NAME>=true` so the deploy mounts it, and when one does not the job logs a notice and leaves that feature off.
 7. Restores the live replica with Litestream and runs `PRAGMA integrity_check` before spending time on a build. A
    corrupt replica fails here, so the old revision keeps serving.
 8. Builds the `Dockerfile` with Buildx and pushes the image to Artifact Registry tagged with the commit SHA, reusing
@@ -99,9 +98,10 @@ push, so a broken gate fails before it can block or allow a deploy.
    sync, then deploys. This prevents two Litestream processes from writing the same replica during the rollout.
 10. Runs `gcloud run deploy` with automatic scaling restored, one instance at most, concurrency 80, 1 CPU, 512 MiB, a
     3600 second timeout, CPU boost, public access, the runtime account, `APP_ENV=prod`, `DB_PATH=/data/parlay.db`,
-    `LITESTREAM_BUCKET`, optional `LITESTREAM_REPLICA_URL`, `BASE_URL`, and `GITHUB_REPO` (from the optional
-    `ISSUES_REPO` variable, or the repo that runs the workflow). It mounts the five required Secret Manager secrets,
-    plus `GITHUB_TOKEN` when `github-token` has a version and `PREFILL_TOKEN` when `prefill-token` has a version.
+    `LITESTREAM_BUCKET`, optional `LITESTREAM_REPLICA_URL`, `BASE_URL`, optional `REMINDER_QUEUE` (from a repository
+    variable), and `GITHUB_REPO` (from the optional `ISSUES_REPO` variable, or the repo that runs the workflow). It
+    mounts the five required Secret Manager secrets, plus `GITHUB_TOKEN`, `PREFILL_TOKEN`, the VAPID pair, and
+    `REMINDER_TOKEN` when their optional secrets have a version.
 11. Reads the service URL and retries once with `BASE_URL` set to that URL if the first revision could not boot. That is
     the first-deploy path; later deploys get `BASE_URL` from the repo variable.
 12. Probes `GET /readyz` on the new revision (Google Frontend reserves `/healthz` on `*.run.app`), then writes the image

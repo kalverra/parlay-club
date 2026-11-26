@@ -76,11 +76,15 @@ type scheduled struct {
 	at     time.Time
 }
 
-// recordingScheduler records enqueues and returns a prepared error.
+// recordingScheduler records enqueues and returns a prepared error. It is
+// durable unless a test says otherwise, to mirror Cloud Tasks.
 type recordingScheduler struct {
-	calls []scheduled
-	err   error
+	calls      []scheduled
+	err        error
+	notDurable bool
 }
+
+func (s *recordingScheduler) Durable() bool { return !s.notDurable }
 
 func (s *recordingScheduler) Enqueue(_ context.Context, slipID int64, start, at time.Time) error {
 	s.calls = append(s.calls, scheduled{slipID: slipID, start: start, at: at})
@@ -118,6 +122,27 @@ func TestSyncSchedulesANewSlipOnce(t *testing.T) {
 
 	require.NoError(t, service.Sync(t.Context(), now))
 	assert.Len(t, scheduler.calls, 1, "the stored start keeps a second pass quiet")
+}
+
+func TestSyncRearmsANonDurableSchedulerAfterARestart(t *testing.T) {
+	t.Parallel()
+
+	now := sundayKickoff.Add(-24 * time.Hour)
+	store, slip, _ := seedReminderSlip(t, []time.Time{sundayKickoff})
+	scheduler := &recordingScheduler{notDurable: true}
+
+	// The first server process arms the timer and records the row.
+	before := syncService(store, scheduler, now)
+	require.NoError(t, before.Sync(t.Context(), now))
+	require.Len(t, scheduler.calls, 1)
+
+	// A restart drops the timer. The row still matches the start, but the new
+	// process must enqueue again or that reminder never fires.
+	after := syncService(store, scheduler, now)
+	require.NoError(t, after.Sync(t.Context(), now))
+	require.Len(t, scheduler.calls, 2, "a non-durable scheduler is re-armed on every pass")
+	assert.Equal(t, slip.ID, scheduler.calls[1].slipID)
+	assert.True(t, sundayKickoff.Equal(scheduler.calls[1].start))
 }
 
 func TestSyncEnqueuesAgainWhenTheStartMoves(t *testing.T) {

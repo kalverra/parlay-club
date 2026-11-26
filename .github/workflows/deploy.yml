@@ -69,6 +69,7 @@ jobs:
           LITESTREAM_REPLICA_URL: ${{ vars.LITESTREAM_REPLICA_URL }}
           AR_REPO: ${{ vars.AR_REPO }}
           BASE_URL: ${{ vars.BASE_URL }}
+          REMINDER_QUEUE: ${{ vars.REMINDER_QUEUE }}
         run: |
           set -euo pipefail
 
@@ -87,6 +88,14 @@ jobs:
           # be http or https with a host.
           if [ -n "${BASE_URL:-}" ] && ! [[ "$BASE_URL" =~ ^https?://[^/?#[:space:]]+ ]]; then
             echo "::error::BASE_URL must be an http or https URL with a host, got '$BASE_URL'"
+            exit 1
+          fi
+
+          # Optional. Empty leaves kickoff reminders off. A set value must be the
+          # full queue path the app expects, or it logs one error at boot and
+          # leaves reminders off.
+          if [ -n "${REMINDER_QUEUE:-}" ] && ! [[ "$REMINDER_QUEUE" =~ ^projects/[^/]+/locations/[^/]+/queues/[^/]+$ ]]; then
+            echo "::error::REMINDER_QUEUE must be projects/{project}/locations/{region}/queues/{queue}, got '$REMINDER_QUEUE'"
             exit 1
           fi
 
@@ -212,44 +221,55 @@ jobs:
             ) &
           done
 
-          # github-token is optional. Mount it only when someone added a
-          # version; an empty secret would fail the revision at boot.
-          (
-            if versions=$(gcloud secrets versions list github-token \
-              --project "$PROJECT" \
-              --filter='state=ENABLED' \
-              --limit=1 \
-              --format='value(name)' 2>/dev/null) && [ -n "$versions" ]; then
-              echo "true" > "$tmpdir/opt-github-token"
-            fi
-          ) &
-
-          # prefill-token is optional. Mount it only when someone added a
-          # version; an empty secret would fail the revision at boot.
-          (
-            if versions=$(gcloud secrets versions list prefill-token \
-              --project "$PROJECT" \
-              --filter='state=ENABLED' \
-              --limit=1 \
-              --format='value(name)' 2>/dev/null) && [ -n "$versions" ]; then
-              echo "true" > "$tmpdir/opt-prefill-token"
-            fi
-          ) &
+          # These secrets are optional. Mount each only when someone added a
+          # version; an empty secret would fail the revision at boot. The VAPID
+          # pair and reminder-token are mounted here so the keys and bearer
+          # token never sit in plain text in the revision's env config.
+          for secret in github-token prefill-token vapid-public-key vapid-private-key reminder-token; do
+            (
+              if versions=$(gcloud secrets versions list "$secret" \
+                --project "$PROJECT" \
+                --filter='state=ENABLED' \
+                --limit=1 \
+                --format='value(name)' 2>/dev/null) && [ -n "$versions" ]; then
+                echo "true" > "$tmpdir/opt-$secret"
+              fi
+            ) &
+          done
 
           wait
 
+          for secret in github-token prefill-token vapid-public-key vapid-private-key reminder-token; do
+            if [ -f "$tmpdir/opt-$secret" ]; then
+              name=$(echo "$secret" | tr '[:lower:]-' '[:upper:]_')
+              echo "MOUNT_$name=true" >> "$GITHUB_ENV"
+            fi
+          done
+
           if [ -f "$tmpdir/opt-github-token" ]; then
-            echo "MOUNT_GITHUB_TOKEN=true" >> "$GITHUB_ENV"
             echo "github-token has an ENABLED version; bug reports will open GitHub issues"
           else
             echo "::notice::github-token has no ENABLED version; bug reports stay in SQLite"
           fi
 
           if [ -f "$tmpdir/opt-prefill-token" ]; then
-            echo "MOUNT_PREFILL_TOKEN=true" >> "$GITHUB_ENV"
             echo "prefill-token has an ENABLED version; POST /internal/prefill will be enabled"
           else
             echo "::notice::prefill-token has no ENABLED version; POST /internal/prefill stays disabled (404)"
+          fi
+
+          if [ -f "$tmpdir/opt-vapid-public-key" ] && [ -f "$tmpdir/opt-vapid-private-key" ]; then
+            echo "the VAPID pair has ENABLED versions; Web Push will be enabled"
+          elif [ -f "$tmpdir/opt-vapid-public-key" ] || [ -f "$tmpdir/opt-vapid-private-key" ]; then
+            echo "::warning::only one VAPID secret has an ENABLED version; Web Push stays off until both do"
+          else
+            echo "::notice::no VAPID secrets with an ENABLED version; Web Push stays off"
+          fi
+
+          if [ -f "$tmpdir/opt-reminder-token" ]; then
+            echo "reminder-token has an ENABLED version; kickoff reminders are on when REMINDER_QUEUE is set"
+          else
+            echo "::notice::reminder-token has no ENABLED version; kickoff reminders stay off"
           fi
 
           failed=0
@@ -332,6 +352,7 @@ jobs:
           BUCKET: ${{ vars.LITESTREAM_BUCKET }}
           REPLICA_URL: ${{ vars.LITESTREAM_REPLICA_URL }}
           BASE_URL_VAR: ${{ vars.BASE_URL }}
+          REMINDER_QUEUE: ${{ vars.REMINDER_QUEUE }}
           REPO: ${{ vars.ISSUES_REPO || github.repository }}
         run: |
           set -euo pipefail
@@ -351,12 +372,24 @@ jobs:
             if [ -n "${REPLICA_URL:-}" ]; then
               env_vars="$env_vars,LITESTREAM_REPLICA_URL=$REPLICA_URL"
             fi
+            if [ -n "${REMINDER_QUEUE:-}" ]; then
+              env_vars="$env_vars,REMINDER_QUEUE=$REMINDER_QUEUE"
+            fi
             local secrets="SESSION_KEY=session-key:latest,GOOGLE_CLIENT_ID=google-client-id:latest,GOOGLE_CLIENT_SECRET=google-client-secret:latest,ODDS_API_KEY=odds-api-key:latest,THE_ODDS_API_KEY=the-odds-api-key:latest"
             if [ "${MOUNT_GITHUB_TOKEN:-}" = "true" ]; then
               secrets="$secrets,GITHUB_TOKEN=github-token:latest"
             fi
             if [ "${MOUNT_PREFILL_TOKEN:-}" = "true" ]; then
               secrets="$secrets,PREFILL_TOKEN=prefill-token:latest"
+            fi
+            if [ "${MOUNT_VAPID_PUBLIC_KEY:-}" = "true" ]; then
+              secrets="$secrets,VAPID_PUBLIC_KEY=vapid-public-key:latest"
+            fi
+            if [ "${MOUNT_VAPID_PRIVATE_KEY:-}" = "true" ]; then
+              secrets="$secrets,VAPID_PRIVATE_KEY=vapid-private-key:latest"
+            fi
+            if [ "${MOUNT_REMINDER_TOKEN:-}" = "true" ]; then
+              secrets="$secrets,REMINDER_TOKEN=reminder-token:latest"
             fi
             gcloud run deploy "$SERVICE" \
               --project "$PROJECT" \
