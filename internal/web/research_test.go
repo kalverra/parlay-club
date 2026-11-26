@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/kalverra/parlay-club/internal/analyzer"
 	"github.com/kalverra/parlay-club/internal/db"
 	"github.com/kalverra/parlay-club/internal/live"
 	"github.com/kalverra/parlay-club/internal/slips"
@@ -1392,6 +1393,9 @@ func TestResearchExplorerBrowsesCachedBetsWithoutRefresh(t *testing.T) {
 	assert.Contains(t, body, "MIA @ BUF")
 	assert.Contains(t, body, "Josh Allen Over 265.5 Pass Yds")
 	assert.Contains(t, body, "Josh Allen Over 42.5 Rush Yds")
+	assert.Contains(t, body, "Research bet &rarr;")
+	assert.Contains(t, body, "/research/bet?")
+	assert.Contains(t, body, "from=%2Fresearch")
 
 	assert.Empty(t, refresher.gameResearchSynced, "browsing must not sync game research")
 	assert.Empty(t, refresher.playerResearchSynced, "browsing must not sync player research")
@@ -1558,4 +1562,376 @@ func TestResearchTargetedGameOffersPropsButton(t *testing.T) {
 	withPropsBody := recWithProps.Body.String()
 	assert.NotContains(t, withPropsBody, "Load props")
 	assert.Contains(t, withPropsBody, "Josh Allen Over 265.5 Pass Yds")
+}
+
+// seedBetResearchPlayer writes a rostered passer with a game log and three
+// books on both sides of one prop line.
+func seedBetResearchPlayer(t *testing.T, fixture *slipFixture, game db.Game) {
+	t.Helper()
+
+	now := time.Now().UTC()
+	require.NoError(t, fixture.store.UpsertRosterPlayers(t.Context(), []db.RosterPlayer{
+		{
+			AthleteID:  "3918298",
+			Team:       "BUF",
+			ESPNTeamID: "2",
+			FullName:   "Josh Allen",
+			Position:   "QB",
+			UpdatedAt:  now,
+		},
+	}))
+	require.NoError(t, fixture.store.UpsertPlayerGameLog(t.Context(), db.PlayerGameLog{
+		AthleteID:   "3918298",
+		GamesPlayed: 5,
+		StatsJSON:   `{"PASS_YDS":[280,310,195,240,265]}`,
+		UpdatedAt:   now,
+	}))
+
+	row := func(book, side string, price int) db.Odds {
+		return db.Odds{
+			GameID:     game.ID,
+			Book:       book,
+			MarketType: "PASS_YDS",
+			Team:       "BUF",
+			PlayerName: "Josh Allen",
+			Side:       side,
+			Line:       new(265.5),
+			Price:      price,
+			FetchedAt:  now,
+		}
+	}
+	_, err := fixture.store.UpsertOdds(t.Context(), []db.Odds{
+		row("betmgm", "OVER", -115),
+		row("betmgm", "UNDER", -105),
+		row("draftkings", "OVER", -110),
+		row("draftkings", "UNDER", -110),
+		row("fanduel", "OVER", -105),
+		row("fanduel", "UNDER", -115),
+	})
+	require.NoError(t, err)
+}
+
+func TestResearchBetPlayerPropRendersPlayerResearchAndPrices(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	game := addGame(t, fixture, gameKickoff())
+	seedBetResearchPlayer(t, fixture, game)
+
+	homeBook := "fanduel"
+	updated, err := fixture.store.SetUserHomeBook(t.Context(), fixture.user.ID, &homeBook)
+	require.NoError(t, err)
+
+	refresher := &researchTestRefresher{}
+	handler := researchHandlerWithRefresher(t, fixture, updated, refresher)
+
+	values := url.Values{
+		"game_id":   {game.ID},
+		"market":    {"PASS_YDS"},
+		"side":      {"OVER"},
+		"team":      {"BUF"},
+		"player_id": {"3918298"},
+		"from":      {"/research?cat=passing"},
+	}
+	req := httptest.NewRequestWithContext(
+		t.Context(), http.MethodGet, "/research/bet?"+values.Encode(), nil,
+	)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	body := rec.Body.String()
+	assert.Contains(t, body, "Josh Allen Over 265.5 Pass Yds")
+	assert.Contains(t, body, "MIA @ BUF")
+	assert.Contains(t, body, "Book prices")
+	assert.Contains(t, body, "Best price")
+	assert.Contains(t, body, "Your book")
+	assert.Contains(t, body, "De-vig fair")
+	assert.Contains(t, body, ">fanduel<")
+	assert.Contains(t, body, "Grade &amp; analyzer")
+	assert.Contains(t, body, "Last 5 Games · Pass Yds")
+	assert.Contains(t, body, "L5 Hit")
+	assert.Contains(t, body, "Full player sheet")
+	assert.NotContains(t, body, "Team context")
+	assert.Contains(t, body, `href="/research?cat=passing"`)
+	assert.Contains(t, body, "formaction=\"/slips/"+strconv.FormatInt(fixture.slip.ID, 10)+"/legs\"")
+
+	assert.Empty(t, refresher.propsSynced, "bet research must not fetch props")
+	assert.Empty(t, refresher.gameResearchSynced, "bet research must not sync game research")
+	assert.Empty(t, refresher.playerResearchSynced, "bet research must not sync player research")
+}
+
+func TestResearchBetGameMarketRendersTeamContext(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	game := addGame(t, fixture, gameKickoff())
+	now := time.Now().UTC()
+
+	row := func(book, market, team, side string, line *float64, price int) db.Odds {
+		return db.Odds{
+			GameID:     game.ID,
+			Book:       book,
+			MarketType: market,
+			Team:       team,
+			Side:       side,
+			Line:       line,
+			Price:      price,
+			FetchedAt:  now,
+		}
+	}
+	_, err := fixture.store.UpsertOdds(t.Context(), []db.Odds{
+		row("draftkings", "SPREAD", "BUF", "TEAM", new(-3.5), -110),
+		row("draftkings", "SPREAD", "MIA", "TEAM", new(3.5), -110),
+		row("fanduel", "SPREAD", "BUF", "TEAM", new(-3.0), -105),
+		row("fanduel", "SPREAD", "MIA", "TEAM", new(3.0), -115),
+		row("betmgm", "SPREAD", "BUF", "TEAM", new(-3.0), -115),
+		row("betmgm", "SPREAD", "MIA", "TEAM", new(3.0), -105),
+		row("draftkings", "TOTAL", "", "OVER", new(47.5), -110),
+		row("draftkings", "TOTAL", "", "UNDER", new(47.5), -110),
+	})
+	require.NoError(t, err)
+
+	injuriesJSON := `[
+		{
+			"team": {"id": "2", "displayName": "Buffalo Bills", "abbreviation": "BUF"},
+			"injuries": [
+				{
+					"status": "Questionable",
+					"athlete": {"id": "3918298", "fullName": "Josh Allen", "position": {"abbreviation": "QB"}},
+					"details": {"type": "Ankle"}
+				}
+			]
+		}
+	]`
+	_, err = fixture.store.SetGameInjuries(t.Context(), game.ID, injuriesJSON)
+	require.NoError(t, err)
+
+	require.NoError(t, fixture.store.RecordSync(t.Context(), analyzer.NfeloSource, now, nil))
+	_, err = fixture.store.UpsertNfeloGames(t.Context(), []db.NfeloGame{
+		{GameID: game.ID, HomeSpread: -2.5, HomeWinProb: 0.58, UpdatedAt: now},
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, fixture.store.RecordSync(t.Context(), "nflverse:season:2026", now, nil))
+	_, err = fixture.store.UpsertNFLverseTeamWeeks(t.Context(), []db.NFLverseTeamWeek{
+		{
+			Season:            2026,
+			SeasonType:        2,
+			WeekNum:           1,
+			Team:              "BUF",
+			OffPassEPA:        0.12,
+			OffRushEPA:        0.04,
+			DefPassEPAAllowed: 0.03,
+			DefRushEPAAllowed: 0.08,
+			UpdatedAt:         now,
+		},
+		{
+			Season:            2026,
+			SeasonType:        2,
+			WeekNum:           1,
+			Team:              "MIA",
+			OffPassEPA:        0.09,
+			OffRushEPA:        0.01,
+			DefPassEPAAllowed: 0.14,
+			DefRushEPAAllowed: 0.11,
+			UpdatedAt:         now,
+		},
+	})
+	require.NoError(t, err)
+
+	refresher := &researchTestRefresher{}
+	handler := researchHandlerWithRefresher(t, fixture, fixture.user, refresher)
+
+	values := url.Values{
+		"game_id": {game.ID},
+		"market":  {"SPREAD"},
+		"side":    {"TEAM"},
+		"team":    {"BUF"},
+	}
+	req := httptest.NewRequestWithContext(
+		t.Context(), http.MethodGet, "/research/bet?"+values.Encode(), nil,
+	)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	body := rec.Body.String()
+	assert.Contains(t, body, "BUF -3")
+	assert.Contains(t, body, "Team context")
+	assert.Contains(t, body, "Model spread")
+	assert.Contains(t, body, "BUF -2.5")
+	assert.Contains(t, body, "BUF 58%")
+	assert.Contains(t, body, "MIA 42%")
+	assert.Contains(t, body, "EPA ranks")
+	assert.Contains(t, body, "Off pass")
+	assert.Contains(t, body, "Def overall")
+	assert.Contains(t, body, "BUF")
+	assert.Contains(t, body, "MIA")
+	assert.Contains(t, body, "Key injuries")
+	assert.Contains(t, body, "Josh Allen")
+	assert.Contains(t, body, "Questionable")
+	assert.Contains(t, body, "Full game sheet")
+	assert.Contains(t, body, "De-vig fair")
+	assert.Contains(t, body, "More in this game", "the same game's other markets stay reachable")
+	assert.NotContains(t, body, "Player research")
+	assert.Empty(t, refresher.propsSynced)
+	assert.Empty(t, refresher.gameResearchSynced)
+	assert.Empty(t, refresher.playerResearchSynced)
+}
+
+func TestResearchBetMissingSelectionReturnsNotFound(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	game := addGame(t, fixture, gameKickoff())
+	handler := researchHandlerWithRefresher(t, fixture, fixture.user, &researchTestRefresher{})
+
+	cases := []string{
+		"/research/bet",
+		"/research/bet?game_id=missing&market=SPREAD&side=TEAM&team=BUF",
+		"/research/bet?game_id=" + game.ID + "&market=SPREAD&side=OVER&team=BUF",
+	}
+	for _, path := range cases {
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		assert.Equal(t, http.StatusNotFound, rec.Code, path)
+		assert.Contains(t, rec.Body.String(), "Bet not found", path)
+		assert.Contains(t, rec.Body.String(), `href="/research"`, path)
+	}
+}
+
+func TestResearchBetAddToSlipOnlyWhenOpenSlipIsPicking(t *testing.T) {
+	t.Parallel()
+
+	t.Run("open slip in the pick step offers the add", func(t *testing.T) {
+		t.Parallel()
+		fixture := newSlipFixture(t, 2)
+		game := addGame(t, fixture, gameKickoff())
+		seedBetResearchPlayer(t, fixture, game)
+		handler := researchHandlerWithRefresher(t, fixture, fixture.user, &researchTestRefresher{})
+
+		values := url.Values{
+			"game_id":   {game.ID},
+			"market":    {"PASS_YDS"},
+			"side":      {"OVER"},
+			"team":      {"BUF"},
+			"player_id": {"3918298"},
+		}
+		betURL := "/research/bet?" + values.Encode()
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, betURL, nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		require.Equal(t, http.StatusOK, rec.Code)
+
+		body := rec.Body.String()
+		assert.Contains(t, body, "Add to slip")
+		assert.Contains(t, body, "+ Week 9")
+		assert.Contains(t, body, "formaction=\"/slips/"+strconv.FormatInt(fixture.slip.ID, 10)+"/legs\"")
+
+		// The form posts the existing add-leg route and returns to this bet.
+		form := url.Values{
+			"quick":       {"1"},
+			"from":        {"research"},
+			"return":      {betURL},
+			"game_id":     {game.ID},
+			"market_type": {"PASS_YDS"},
+			"team":        {"BUF"},
+			"player_name": {"Josh Allen"},
+			"player_id":   {"3918298"},
+			"side":        {"OVER"},
+			"line":        {"265.5"},
+			"odds":        {"-105"},
+		}
+		reqAdd := httptest.NewRequestWithContext(
+			t.Context(),
+			http.MethodPost,
+			"/slips/"+strconv.FormatInt(fixture.slip.ID, 10)+"/legs",
+			strings.NewReader(form.Encode()),
+		)
+		reqAdd.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		recAdd := httptest.NewRecorder()
+		handler.ServeHTTP(recAdd, reqAdd)
+		assert.Equal(t, http.StatusSeeOther, recAdd.Code)
+		assert.Equal(t, betURL, recAdd.Header().Get("Location"))
+	})
+
+	t.Run("a game outside the slip's week offers nothing", func(t *testing.T) {
+		t.Parallel()
+		fixture := newSlipFixture(t, 2)
+		otherWeek, err := fixture.store.UpsertWeek(t.Context(), 2026, 2, 10)
+		require.NoError(t, err)
+		game, err := fixture.store.UpsertGame(t.Context(), db.Game{
+			ID:         "401772099",
+			WeekID:     otherWeek.ID,
+			HomeTeam:   "BUF",
+			AwayTeam:   "MIA",
+			HomeESPNID: "2",
+			AwayESPNID: "15",
+			Kickoff:    gameKickoff(),
+			Status:     db.GameScheduled,
+			UpdatedAt:  time.Now().UTC(),
+		})
+		require.NoError(t, err)
+		_, err = fixture.store.UpsertOdds(t.Context(), []db.Odds{
+			{
+				GameID:     game.ID,
+				Book:       "draftkings",
+				MarketType: "SPREAD",
+				Team:       "BUF",
+				Side:       "TEAM",
+				Line:       new(-3.5),
+				Price:      -110,
+				FetchedAt:  time.Now().UTC(),
+			},
+		})
+		require.NoError(t, err)
+
+		handler := researchHandlerWithRefresher(t, fixture, fixture.user, &researchTestRefresher{})
+		values := url.Values{
+			"game_id": {game.ID},
+			"market":  {"SPREAD"},
+			"side":    {"TEAM"},
+			"team":    {"BUF"},
+		}
+		req := httptest.NewRequestWithContext(
+			t.Context(), http.MethodGet, "/research/bet?"+values.Encode(), nil,
+		)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		require.Equal(t, http.StatusOK, rec.Code)
+
+		body := rec.Body.String()
+		assert.Contains(t, body, "BUF -3.5")
+		assert.NotContains(t, body, "Add to slip")
+	})
+
+	t.Run("a slip that is no longer open offers nothing", func(t *testing.T) {
+		t.Parallel()
+		fixture := newSlipFixture(t, 2)
+		game := addGame(t, fixture, gameKickoff())
+		seedBetResearchPlayer(t, fixture, game)
+		require.NoError(t, fixture.store.SetSlipStatus(t.Context(), fixture.slip.ID, db.SlipLocked))
+		handler := researchHandlerWithRefresher(t, fixture, fixture.user, &researchTestRefresher{})
+
+		values := url.Values{
+			"game_id":   {game.ID},
+			"market":    {"PASS_YDS"},
+			"side":      {"OVER"},
+			"team":      {"BUF"},
+			"player_id": {"3918298"},
+		}
+		req := httptest.NewRequestWithContext(
+			t.Context(), http.MethodGet, "/research/bet?"+values.Encode(), nil,
+		)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		require.Equal(t, http.StatusOK, rec.Code)
+
+		body := rec.Body.String()
+		assert.Contains(t, body, "Josh Allen Over 265.5 Pass Yds")
+		assert.NotContains(t, body, "Add to slip")
+		assert.NotContains(t, body, "formaction=\"/slips/")
+	})
 }

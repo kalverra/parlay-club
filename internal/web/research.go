@@ -1,6 +1,7 @@
 package web
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -18,6 +19,8 @@ import (
 	"github.com/kalverra/parlay-club/internal/board"
 	"github.com/kalverra/parlay-club/internal/db"
 	"github.com/kalverra/parlay-club/internal/ingest/espn"
+	"github.com/kalverra/parlay-club/internal/parlay"
+	"github.com/kalverra/parlay-club/internal/slips"
 )
 
 // researchHandlers serves the Research tab and partials.
@@ -28,6 +31,7 @@ type researchHandlers struct {
 // Routes mounts the Research tab and endpoints.
 func (h *researchHandlers) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /research", h.research)
+	mux.HandleFunc("GET /research/bet", h.researchBet)
 	mux.HandleFunc("GET /research/explore", h.researchExplore)
 	mux.HandleFunc("GET /research/games/{id}", h.researchGame)
 	mux.HandleFunc("POST /research/games/{id}/props", h.researchGameProps)
@@ -118,8 +122,133 @@ type ResearchCardView struct {
 	GradeClass      string
 	Reason          string
 	Badge           string
+	BetHref         string
 	GameSheetHref   string
 	PlayerSheetHref string
+}
+
+// BetResearchPage is the full per-bet research page.
+type BetResearchPage struct {
+	Page
+	View BetResearchView
+}
+
+// BetResearchView is one bet's summary, cached book prices, analyzer grade,
+// and the research that fits its market. Missing says the selection could not
+// be matched to a cached row, so the page renders a clean not-found state.
+type BetResearchView struct {
+	GameID          string
+	Market          string
+	MarketType      string
+	MarketLabel     string
+	Side            string
+	Team            string
+	PlayerID        string
+	PlayerName      string
+	Position        string
+	Selection       string
+	Badge           string
+	Matchup         string
+	HomeTeam        string
+	AwayTeam        string
+	HomeLogo        string
+	AwayLogo        string
+	HeadshotURL     string
+	Initials        string
+	TeamLogo        string
+	KickoffISO      string
+	KickoffFallback string
+	Odds            int
+	OddsText        string
+	Implied         string
+	LineInput       string
+	Reason          string
+	Grade           GradeView
+	Warnings        []AnalyzerWarningView
+	Pricing         BetPricingView
+	Player          *PlayerResearchView
+	TeamContext     *TeamBetContextView
+	Related         []ResearchCardView
+	AddSlips        []BetAddSlipView
+	BackHref        string
+	ReturnURL       string
+	PlayerSheetHref string
+	GameSheetHref   string
+	Missing         bool
+	MissingMessage  string
+}
+
+// BetPricingView compares the cached books for one selection.
+type BetPricingView struct {
+	HasPrices        bool
+	HomeBook         string
+	HomeLine         string
+	HomePrice        string
+	ConsensusLine    string
+	ConsensusPrice   string
+	ConsensusImplied string
+	BestBook         string
+	BestLine         string
+	BestPrice        string
+	BestImplied      string
+	DevigEdge        string
+	DevigNote        string
+	Books            []BetBookView
+}
+
+// BetBookView is one book's cached line and price for the bet.
+type BetBookView struct {
+	Book    string
+	Line    string
+	Price   string
+	Implied string
+	Home    bool
+	Best    bool
+}
+
+// BetAddSlipView is one open slip the viewer can add this bet to.
+type BetAddSlipView struct {
+	SlipID   int64
+	SlipName string
+	PostURL  string
+	Summary  string
+}
+
+// TeamBetContextView is the cached game context a game-market bet shows:
+// nfelo's projection versus the market, both teams' EPA ranks, weather, and
+// key injuries.
+type TeamBetContextView struct {
+	GameID          string
+	Matchup         string
+	Venue           string
+	Weather         string
+	Indoor          bool
+	KickoffISO      string
+	KickoffFallback string
+	HasModel        bool
+	ModelHomeSpread string
+	ModelHomeWin    string
+	ModelAwayWin    string
+	ModelBetSpread  string
+	ModelBetWin     string
+	BetTeam         string
+	MarketLabel     string
+	MarketValue     string
+	Teams           []TeamEPAContextView
+	Injuries        []TeamInjuriesView
+}
+
+// TeamEPAContextView is one team's offensive and defensive EPA ranks.
+type TeamEPAContextView struct {
+	Team       string
+	Name       string
+	Logo       string
+	HasEPA     bool
+	OffPass    string
+	OffRush    string
+	DefPass    string
+	DefRush    string
+	DefOverall string
 }
 
 // researchQuery is one explorer request. GameID and PlayerID target the slate;
@@ -345,6 +474,778 @@ func (h *researchHandlers) researchExplore(w http.ResponseWriter, r *http.Reques
 	explore := h.buildExplore(r.Context(), query, playerName)
 	w.Header().Set("Hx-Push-Url", researchPushURL(queryFromExplore(explore)))
 	h.renderPartial(w, "research-explore", explore)
+}
+
+// researchBet shows one bet's cached prices, analyzer grade, and the deeper
+// research for its market. It reads only cached SQLite data and never syncs.
+func (h *researchHandlers) researchBet(w http.ResponseWriter, r *http.Request) {
+	page := h.page(r)
+	page.Title = "Bet research"
+	view := h.buildBetResearch(r.Context(), r)
+	h.renderBet(w, BetResearchPage{Page: page, View: view})
+}
+
+// buildBetResearch loads and shapes one bet. A selection that is not on the
+// cached slate comes back with Missing set.
+func (h *researchHandlers) buildBetResearch(ctx context.Context, r *http.Request) BetResearchView {
+	query := r.URL.Query()
+	selection := db.SelectionKey{
+		GameID:     strings.TrimSpace(query.Get("game_id")),
+		MarketType: strings.ToUpper(strings.TrimSpace(query.Get("market"))),
+		Team:       strings.TrimSpace(query.Get("team")),
+		PlayerName: strings.TrimSpace(query.Get("player_name")),
+		PlayerID:   strings.TrimSpace(query.Get("player_id")),
+		Side:       strings.ToUpper(strings.TrimSpace(query.Get("side"))),
+	}
+	view := BetResearchView{
+		GameID:         selection.GameID,
+		MarketType:     selection.MarketType,
+		Market:         researchMarketLabel(selection.MarketType),
+		MarketLabel:    researchMarketLabel(selection.MarketType),
+		Side:           selection.Side,
+		Team:           selection.Team,
+		PlayerID:       selection.PlayerID,
+		PlayerName:     selection.PlayerName,
+		BackHref:       safeReturnPath(query.Get("from")),
+		ReturnURL:      r.URL.RequestURI(),
+		Missing:        true,
+		MissingMessage: "We couldn't match that bet to this week's cached lines.",
+	}
+	if view.BackHref == "" {
+		view.BackHref = "/research"
+	}
+	if h.deps.Store == nil || selection.GameID == "" || selection.MarketType == "" {
+		return view
+	}
+
+	game, err := h.deps.Store.GameByID(ctx, selection.GameID)
+	if errors.Is(err, db.ErrGameNotFound) {
+		return view
+	}
+	if err != nil {
+		h.deps.Logger.Error().Err(err).Str("game_id", selection.GameID).Msg("load game for bet research")
+		view.MissingMessage = "We couldn't load that game's cached odds."
+		return view
+	}
+	now := h.deps.now()
+	if !now.Before(game.Kickoff) {
+		view.MissingMessage = "That game has kicked off, so its cached lines are closed."
+		return view
+	}
+
+	odds, err := h.deps.Store.OddsForGame(ctx, game.ID)
+	if err != nil {
+		h.deps.Logger.Error().Err(err).Str("game_id", game.ID).Msg("load odds for bet research")
+		return view
+	}
+	roster, _ := h.deps.Store.RosterForTeams(ctx, []string{game.HomeTeam, game.AwayTeam})
+	homeBook := h.researchViewer(ctx)
+	rows := board.Build([]db.Game{game}, odds, roster, homeBook, nil, now)
+
+	var bet *board.Row
+	for i := range rows {
+		if db.SameSelection(selection, betRowSelection(rows[i])) {
+			bet = &rows[i]
+			break
+		}
+	}
+	if bet == nil {
+		return view
+	}
+
+	games, stats := analyzer.LoadBoardSignals(ctx, h.deps.Store, now, game.WeekID, []db.Game{game}, betPlayerIDs(*bet))
+	grade := analyzer.ScoreLeg(board.RowToAnalyzerLeg(*bet), games, stats)
+
+	view.Missing = false
+	view.MissingMessage = ""
+	view.Selection = bet.Text
+	view.MarketType = bet.Market
+	view.Market = researchMarketLabel(bet.Market)
+	view.MarketLabel = view.Market
+	view.Side = bet.Side
+	view.Team = bet.Team
+	view.PlayerID = bet.PlayerID
+	view.PlayerName = bet.PlayerName
+	view.Position = bet.Position
+	view.HeadshotURL = bet.HeadshotURL
+	view.Initials = Initials(bet.PlayerName)
+	view.Badge = bet.Badge
+	view.Matchup = game.AwayTeam + " @ " + game.HomeTeam
+	view.HomeTeam = game.HomeTeam
+	view.AwayTeam = game.AwayTeam
+	view.HomeLogo = db.StringValue(game.HomeLogo)
+	view.AwayLogo = db.StringValue(game.AwayLogo)
+	view.KickoffISO = kickoffISO(bet.Kickoff)
+	view.KickoffFallback = kickoffFallback(bet.Kickoff)
+	view.Odds = bet.Odds
+	view.OddsText = formatOdds(bet.Odds)
+	view.Implied = formatImpliedChance(parlay.ImpliedProb(bet.Odds))
+	view.LineInput = researchLineText(bet.Line)
+	view.Grade = LegGradeView(grade)
+	view.Reason = betReason(grade)
+	view.Warnings = betWarnings(*bet, games, stats)
+	switch bet.Team {
+	case game.AwayTeam:
+		view.TeamLogo = view.AwayLogo
+	case game.HomeTeam:
+		view.TeamLogo = view.HomeLogo
+	}
+	view.Pricing = buildBetPricing(odds, *bet, game, homeBook)
+
+	if db.IsPlayerMarket(bet.Market) {
+		playerID := bet.PlayerID
+		if playerID == "" {
+			playerID = selection.PlayerID
+		}
+		if playerID != "" {
+			if player, err := h.loadPlayerResearch(
+				ctx, playerID, "", bet.Market, researchLineText(bet.Line),
+			); err == nil {
+				view.Player = player
+				view.PlayerSheetHref = "/research?player_id=" + url.QueryEscape(playerID)
+			}
+		}
+	} else {
+		if gameResearch, err := h.loadGameResearch(ctx, game.ID); err == nil {
+			view.TeamContext = buildTeamBetContext(game, gameResearch, *bet, games[game.ID])
+			view.GameSheetHref = "/research?game_id=" + url.QueryEscape(game.ID)
+		}
+	}
+
+	view.Related = relatedBetCards(game, rows, games, stats, *bet, view.BackHref)
+	view.AddSlips = preferBetSlip(h.betAddSlips(ctx, game), query.Get("slip_id"))
+	return view
+}
+
+// preferBetSlip narrows the offered slips to the one a link asked for, when
+// that slip is still eligible.
+func preferBetSlip(options []BetAddSlipView, raw string) []BetAddSlipView {
+	id, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
+	if err != nil {
+		return options
+	}
+	for _, option := range options {
+		if option.SlipID == id {
+			return []BetAddSlipView{option}
+		}
+	}
+	return options
+}
+
+// renderBet writes the per-bet research page, answering 404 when the selection
+// is not on the cached slate.
+func (h *researchHandlers) renderBet(w http.ResponseWriter, page BetResearchPage) {
+	html, err := h.deps.Renderer.Render("research-bet", page)
+	if err != nil {
+		h.deps.Logger.Error().Err(err).Msg("render bet research page")
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	if page.View.Missing {
+		w.WriteHeader(http.StatusNotFound)
+	}
+	_, _ = w.Write(html)
+}
+
+// betRowSelection is the selection identity of one cached board row.
+func betRowSelection(row board.Row) db.SelectionKey {
+	return db.SelectionKey{
+		GameID:     row.GameID,
+		MarketType: row.Market,
+		Team:       row.Team,
+		PlayerName: row.PlayerName,
+		PlayerID:   row.PlayerID,
+		Side:       row.Side,
+	}
+}
+
+// betPlayerIDs lists the player IDs the analyzer can use for one bet.
+func betPlayerIDs(row board.Row) []string {
+	if row.PlayerID == "" {
+		return nil
+	}
+	return []string{row.PlayerID}
+}
+
+// betReason names the factor that moved the grade the most, preferring the
+// positive one when a positive and a negative tie.
+func betReason(grade analyzer.LegGrade) string {
+	best := analyzer.GradeFactor{}
+	found := false
+	for _, factor := range grade.Factors {
+		if factor.Delta == 0 {
+			continue
+		}
+		if !found || math.Abs(float64(factor.Delta)) > math.Abs(float64(best.Delta)) ||
+			(math.Abs(float64(factor.Delta)) == math.Abs(float64(best.Delta)) && factor.Delta > best.Delta) {
+			best = factor
+			found = true
+		}
+	}
+	if !found {
+		return "Balanced profile"
+	}
+	return best.Label
+}
+
+// betWarnings runs the analyzer over the bet on its own and returns the
+// warnings that name it.
+func betWarnings(
+	row board.Row,
+	games map[string]analyzer.Game,
+	stats map[string]analyzer.PlayerStats,
+) []AnalyzerWarningView {
+	leg := board.RowToAnalyzerLeg(row)
+	if leg.ID == 0 {
+		leg.ID = 1
+	}
+	evaluation := analyzer.EvaluateSlip([]analyzer.Leg{leg}, games, stats)
+	warnings := make([]AnalyzerWarningView, 0, len(evaluation.Warnings))
+	for _, warning := range evaluation.Warnings {
+		if len(warning.LegIDs) > 0 && !slices.Contains(warning.LegIDs, leg.ID) {
+			continue
+		}
+		label, class := analyzerSeverity(warning.Severity)
+		warnings = append(warnings, AnalyzerWarningView{
+			Rule:     warning.Rule,
+			Severity: label,
+			Class:    class,
+			Message:  warning.Message,
+		})
+	}
+	return warnings
+}
+
+// betBookPrice is one book's chosen cached price for the bet.
+type betBookPrice struct {
+	book string
+	key  string
+	odds int
+	line *float64
+}
+
+// buildBetPricing compares the cached books for one bet and removes the vig
+// when a book prices both sides.
+func buildBetPricing(odds []db.Odds, row board.Row, game db.Game, homeBook string) BetPricingView {
+	prices := betBookPrices(odds, betRowSelection(row), row.Line)
+	if len(prices) == 0 {
+		return BetPricingView{}
+	}
+
+	pool := prices
+	sameLine := make([]betBookPrice, 0, len(prices))
+	for _, price := range prices {
+		if db.SameLine(price.line, row.Line) {
+			sameLine = append(sameLine, price)
+		}
+	}
+	if len(sameLine) > 0 {
+		pool = sameLine
+	}
+
+	line := betMedianLine(pool)
+	view := BetPricingView{
+		HasPrices: true,
+		Books:     make([]BetBookView, 0, len(prices)),
+		HomeBook:  strings.TrimSpace(homeBook),
+	}
+	view.ConsensusLine = researchLineText(line)
+	view.ConsensusPrice, view.ConsensusImplied = betPriceTexts(betMedianPrice(pool))
+
+	best := pool[0]
+	for _, price := range pool[1:] {
+		if parlay.AmericanToDecimal(price.odds) > parlay.AmericanToDecimal(best.odds) {
+			best = price
+		}
+	}
+	view.BestBook = best.book
+	view.BestLine = researchLineText(best.line)
+	view.BestPrice, view.BestImplied = betPriceTexts(best.odds)
+
+	homeKey := db.NormalizeBook(view.HomeBook)
+	bestKey := best.key
+	for _, price := range prices {
+		bookView := BetBookView{
+			Book: price.book,
+			Line: researchLineText(price.line),
+		}
+		bookView.Price, bookView.Implied = betPriceTexts(price.odds)
+		bookView.Home = homeKey != "" && price.key == homeKey
+		bookView.Best = price.key == bestKey
+		view.Books = append(view.Books, bookView)
+		if bookView.Home {
+			view.HomeBook = price.book
+			view.HomeLine = bookView.Line
+			view.HomePrice = bookView.Price
+		}
+	}
+	slices.SortStableFunc(view.Books, func(left, right BetBookView) int {
+		if left.Home != right.Home {
+			if left.Home {
+				return -1
+			}
+			return 1
+		}
+		if left.Best != right.Best {
+			if left.Best {
+				return -1
+			}
+			return 1
+		}
+		return strings.Compare(left.Book, right.Book)
+	})
+
+	view.DevigEdge, view.DevigNote = betDevigEdge(odds, row, game, best.odds)
+	return view
+}
+
+// betBookPrices groups one selection's cached odds by book, choosing the book's
+// line closest to the bet's line when it prices more than one.
+func betBookPrices(odds []db.Odds, selection db.SelectionKey, want *float64) []betBookPrice {
+	byBook := make(map[string][]db.Odds)
+	display := make(map[string]string)
+	for _, o := range odds {
+		if !db.SameSelection(selection, db.OddsSelection(o)) {
+			continue
+		}
+		key := db.NormalizeBook(o.Book)
+		if key == "" {
+			continue
+		}
+		if _, ok := display[key]; !ok {
+			display[key] = o.Book
+		}
+		byBook[key] = append(byBook[key], o)
+	}
+	prices := make([]betBookPrice, 0, len(byBook))
+	for key, rows := range byBook {
+		chosen := closestBetLine(rows, want)
+		prices = append(prices, betBookPrice{
+			book: display[key],
+			key:  key,
+			odds: chosen.Price,
+			line: chosen.Line,
+		})
+	}
+	slices.SortFunc(prices, func(left, right betBookPrice) int {
+		return strings.Compare(left.key, right.key)
+	})
+	return prices
+}
+
+// closestBetLine picks the book's row on want's line, or the nearest line.
+func closestBetLine(rows []db.Odds, want *float64) db.Odds {
+	chosen := rows[0]
+	bestDelta := math.Inf(1)
+	for _, o := range rows {
+		if want != nil && o.Line != nil && *o.Line == *want {
+			return o
+		}
+		if want == nil {
+			if o.Line == nil {
+				return o
+			}
+			continue
+		}
+		if o.Line == nil {
+			continue
+		}
+		delta := math.Abs(*o.Line - *want)
+		if delta < bestDelta {
+			bestDelta = delta
+			chosen = o
+		}
+	}
+	return chosen
+}
+
+// betMedianPrice is the median American price across the books.
+func betMedianPrice(prices []betBookPrice) int {
+	decimals := make([]float64, 0, len(prices))
+	for _, price := range prices {
+		if price.odds == 0 {
+			continue
+		}
+		decimals = append(decimals, parlay.AmericanToDecimal(price.odds))
+	}
+	if len(decimals) == 0 {
+		return 0
+	}
+	return parlay.DecimalToAmerican(parlay.ReferencePrice(decimals, 0))
+}
+
+// betMedianLine is the median cached line across the books.
+func betMedianLine(prices []betBookPrice) *float64 {
+	lines := make([]float64, 0, len(prices))
+	for _, price := range prices {
+		if price.line != nil {
+			lines = append(lines, *price.line)
+		}
+	}
+	if len(lines) == 0 {
+		return nil
+	}
+	median := analyzer.Median(lines)
+	return &median
+}
+
+// betPriceTexts formats one American price and its implied chance.
+func betPriceTexts(odds int) (string, string) {
+	if odds == 0 {
+		return "", ""
+	}
+	return formatOdds(odds), formatImpliedChance(parlay.ImpliedProb(odds))
+}
+
+// betDevigEdge removes the vig from books that price both sides and reports the
+// edge between fair probability and the best price's implied probability.
+func betDevigEdge(odds []db.Odds, row board.Row, game db.Game, bestPrice int) (string, string) {
+	opposite, ok := betOppositeSelection(row, game)
+	if !ok || bestPrice == 0 {
+		return "", ""
+	}
+	selection := betRowSelection(row)
+	type twoWay struct {
+		sel      *db.Odds
+		opposite *db.Odds
+	}
+	byBook := make(map[string]*twoWay)
+	for i := range odds {
+		o := &odds[i]
+		key := db.NormalizeBook(o.Book)
+		if key == "" || !betSameMarketLine(*o, row) {
+			continue
+		}
+		entry, exists := byBook[key]
+		if !exists {
+			entry = &twoWay{}
+			byBook[key] = entry
+		}
+		if entry.sel == nil && db.SameSelection(selection, db.OddsSelection(*o)) {
+			entry.sel = o
+		}
+		if entry.opposite == nil && db.SameSelection(opposite, db.OddsSelection(*o)) {
+			entry.opposite = o
+		}
+	}
+
+	var fairProbs []float64
+	for _, entry := range byBook {
+		if entry.sel == nil || entry.opposite == nil {
+			continue
+		}
+		probability, _, ok := parlay.DevigTwoWay(entry.sel.Price, entry.opposite.Price)
+		if ok {
+			fairProbs = append(fairProbs, probability)
+		}
+	}
+	if len(fairProbs) == 0 {
+		return "", ""
+	}
+	fair := analyzer.Mean(fairProbs)
+	implied := parlay.ImpliedProb(bestPrice)
+	edge := fair - implied
+	if math.Abs(edge) < 0.001 {
+		return "Even", fmt.Sprintf("De-vig fair %s at the best price", formatImpliedChance(fair))
+	}
+	return fmt.Sprintf("%+.1f%%", edge*100),
+		fmt.Sprintf("De-vig fair %s at the best price", formatImpliedChance(fair))
+}
+
+// betSameMarketLine reports whether a two-way book row sits on the bet's line.
+// Spreads and moneylines have no shared number, so they always match.
+func betSameMarketLine(o db.Odds, row board.Row) bool {
+	switch row.Market {
+	case "SPREAD", "ML":
+		return true
+	default:
+		return db.SameLine(o.Line, row.Line)
+	}
+}
+
+// betOppositeSelection names the other side of the bet's two-way market.
+func betOppositeSelection(row board.Row, game db.Game) (db.SelectionKey, bool) {
+	side := oppositeBetSide(row.Side)
+	if side == "" {
+		return db.SelectionKey{}, false
+	}
+	key := betRowSelection(row)
+	key.Side = side
+	switch row.Market {
+	case "SPREAD", "ML":
+		switch row.Team {
+		case game.HomeTeam:
+			key.Team = game.AwayTeam
+		case game.AwayTeam:
+			key.Team = game.HomeTeam
+		default:
+			return db.SelectionKey{}, false
+		}
+		key.PlayerID = ""
+		key.PlayerName = ""
+	case "TOTAL":
+		key.Team = ""
+	case "TEAM_TOTAL":
+		key.PlayerID = ""
+		key.PlayerName = ""
+	case "ANYTIME_TD":
+		return db.SelectionKey{}, false
+	default:
+		if !db.IsPlayerMarket(row.Market) {
+			return db.SelectionKey{}, false
+		}
+	}
+	return key, true
+}
+
+// oppositeBetSide flips a two-way side.
+func oppositeBetSide(side string) string {
+	switch side {
+	case "OVER":
+		return "UNDER"
+	case "UNDER":
+		return "OVER"
+	case "TEAM":
+		return "TEAM"
+	default:
+		return ""
+	}
+}
+
+// buildTeamBetContext shapes a game-market bet's cached nfelo, EPA, weather,
+// and injury context.
+func buildTeamBetContext(
+	game db.Game,
+	research *GameResearchView,
+	row board.Row,
+	analyzed analyzer.Game,
+) *TeamBetContextView {
+	view := &TeamBetContextView{
+		GameID:          game.ID,
+		Matchup:         game.AwayTeam + " @ " + game.HomeTeam,
+		Venue:           db.StringValue(game.VenueName),
+		Weather:         betWeatherText(game),
+		Indoor:          game.Indoor,
+		KickoffISO:      kickoffISO(game.Kickoff),
+		KickoffFallback: kickoffFallback(game.Kickoff),
+		BetTeam:         row.Team,
+	}
+	if view.Matchup == " @ " {
+		view.Matchup = game.ID
+	}
+	if research != nil {
+		view.Injuries = research.Injuries
+	}
+
+	if analyzed.Nfelo != nil {
+		view.HasModel = true
+		if spread, ok := analyzed.ModelSpread(game.HomeTeam); ok {
+			view.ModelHomeSpread = game.HomeTeam + " " + formatSignedNumber(spread)
+		}
+		view.ModelHomeWin = fmt.Sprintf("%s %.0f%%", game.HomeTeam, analyzed.Nfelo.HomeWinProb*100)
+		view.ModelAwayWin = fmt.Sprintf("%s %.0f%%", game.AwayTeam, (1-analyzed.Nfelo.HomeWinProb)*100)
+		if row.Team != "" {
+			if spread, ok := analyzed.ModelSpread(row.Team); ok {
+				view.ModelBetSpread = formatSignedNumber(spread)
+			}
+			if probability, ok := analyzed.ModelWinProb(row.Team); ok {
+				view.ModelBetWin = fmt.Sprintf("%.0f%%", probability*100)
+			}
+		}
+	}
+	view.MarketLabel, view.MarketValue = betMarketLine(row)
+	view.Teams = []TeamEPAContextView{
+		teamEPAContext(game.AwayTeam, db.StringValue(game.AwayLogo), analyzed),
+		teamEPAContext(game.HomeTeam, db.StringValue(game.HomeLogo), analyzed),
+	}
+	return view
+}
+
+// teamEPAContext formats one team's offensive and defensive EPA ranks.
+func teamEPAContext(team, logo string, analyzed analyzer.Game) TeamEPAContextView {
+	view := TeamEPAContextView{Team: team, Logo: logo}
+	profile := analyzed.TeamEPA(team)
+	if profile == nil {
+		return view
+	}
+	view.HasEPA = true
+	view.OffPass = betRank(profile.OffPassEPARank)
+	view.OffRush = betRank(profile.OffRushEPARank)
+	view.DefPass = betRank(profile.DefPassEPAAllowedRank)
+	view.DefRush = betRank(profile.DefRushEPAAllowedRank)
+	view.DefOverall = betRank(profile.DefOverallEPARank)
+	return view
+}
+
+// betRank prints one league rank.
+func betRank(rank int) string {
+	if rank <= 0 {
+		return "—"
+	}
+	return fmt.Sprintf("#%d", rank)
+}
+
+// betMarketLine names the bet's own market line for the team context card.
+func betMarketLine(row board.Row) (string, string) {
+	line := researchLineText(row.Line)
+	switch row.Market {
+	case "SPREAD":
+		return "Spread", strings.TrimSpace(row.Team + " " + lineValueOf(row.Line))
+	case "ML":
+		return "Moneyline", strings.TrimSpace(row.Team + " " + formatOdds(row.Odds))
+	case "TOTAL":
+		return "Total", strings.TrimSpace(betSideLabel(row.Side) + " " + line)
+	case "TEAM_TOTAL":
+		return "Team total", strings.TrimSpace(row.Team + " " + betSideLabel(row.Side) + " " + line)
+	default:
+		return researchMarketLabel(row.Market), line
+	}
+}
+
+// lineValueOf prints a signed spread line, or nothing when it is missing.
+func lineValueOf(line *float64) string {
+	if line == nil {
+		return ""
+	}
+	return formatSignedNumber(*line)
+}
+
+// betSideLabel title-cases a side for display.
+func betSideLabel(side string) string {
+	switch side {
+	case "OVER":
+		return "Over"
+	case "UNDER":
+		return "Under"
+	case "YES":
+		return "Yes"
+	case "TEAM":
+		return ""
+	default:
+		return side
+	}
+}
+
+// betWeatherText prints a game's venue and weather.
+func betWeatherText(game db.Game) string {
+	if game.Indoor {
+		return "Indoor"
+	}
+	var parts []string
+	if game.TempF != nil {
+		parts = append(parts, fmt.Sprintf("%.0f°F", *game.TempF))
+	}
+	if game.WindMPH != nil {
+		parts = append(parts, fmt.Sprintf("%.0f mph wind", *game.WindMPH))
+	}
+	if game.WindGustMPH != nil {
+		parts = append(parts, fmt.Sprintf("%.0f mph gusts", *game.WindGustMPH))
+	}
+	if game.PrecipIN != nil && *game.PrecipIN > 0 {
+		parts = append(parts, fmt.Sprintf("%.2f in rain", *game.PrecipIN))
+	}
+	return strings.Join(parts, " · ")
+}
+
+// relatedBetCards lists the next-best cached bets in the same game, putting the
+// same player's other markets first.
+func relatedBetCards(
+	game db.Game,
+	rows []board.Row,
+	games map[string]analyzer.Game,
+	stats map[string]analyzer.PlayerStats,
+	current board.Row,
+	from string,
+) []ResearchCardView {
+	result := board.Explore(rows, games, stats, board.ExploreQuery{
+		GameID: game.ID,
+		Sort:   board.ExploreSortGrade,
+		Limit:  len(rows),
+	})
+	related := make([]board.ScoredRow, 0, len(result.Rows))
+	for _, scored := range result.Rows {
+		// The other side of the same market is a hedge, not a related bet.
+		if scored.Row.Market == current.Market {
+			continue
+		}
+		related = append(related, scored)
+	}
+	slices.SortStableFunc(related, func(left, right board.ScoredRow) int {
+		leftSame := current.PlayerID != "" && left.Row.PlayerID == current.PlayerID
+		rightSame := current.PlayerID != "" && right.Row.PlayerID == current.PlayerID
+		if leftSame != rightSame {
+			if leftSame {
+				return -1
+			}
+			return 1
+		}
+		if c := cmp.Compare(right.Grade.Score, left.Grade.Score); c != 0 {
+			return c
+		}
+		return cmp.Compare(left.Row.Text, right.Row.Text)
+	})
+	const maxRelated = 5
+	if len(related) > maxRelated {
+		related = related[:maxRelated]
+	}
+	return researchCards([]db.Game{game}, related, from)
+}
+
+// betAddSlips lists the viewer's open slips that are still in the pick step and
+// include the bet's game.
+func (h *researchHandlers) betAddSlips(ctx context.Context, game db.Game) []BetAddSlipView {
+	if h.deps.Store == nil || h.deps.UserFrom == nil || h.deps.GroupFrom == nil {
+		return nil
+	}
+	user, ok := h.deps.UserFrom(ctx)
+	if !ok {
+		return nil
+	}
+	group, ok := h.deps.GroupFrom(ctx)
+	if !ok {
+		return nil
+	}
+	weekSlips, err := h.deps.Store.SlipsForWeek(ctx, group.ID, game.WeekID)
+	if err != nil {
+		return nil
+	}
+	now := h.deps.now()
+	views := make([]BetAddSlipView, 0, len(weekSlips))
+	for _, slip := range weekSlips {
+		if slip.Status != db.SlipOpen {
+			continue
+		}
+		if len(slips.FilterGamesForSlip([]db.Game{game}, slip)) == 0 {
+			continue
+		}
+		members, err := h.deps.Store.SlipMembers(ctx, slip.ID)
+		if err != nil {
+			continue
+		}
+		legs, err := h.deps.Store.LegsForSlip(ctx, slip.ID)
+		if err != nil {
+			continue
+		}
+		next := slips.NextStep(slip, members, legs, []db.Game{game}, user.ID, now)
+		if next.Step != slips.StepPick {
+			continue
+		}
+		picked := 0
+		for _, leg := range legs {
+			if leg.UserID == user.ID {
+				picked++
+			}
+		}
+		views = append(views, BetAddSlipView{
+			SlipID:   slip.ID,
+			SlipName: slip.Name,
+			PostURL:  fmt.Sprintf("/slips/%d/legs", slip.ID),
+			Summary:  fmt.Sprintf("%d/%d picked", picked, slip.LegsPerMember),
+		})
+	}
+	return views
 }
 
 // researchGameProps loads props for one targeted game on an explicit tap, then
@@ -640,7 +1541,7 @@ func (h *researchHandlers) buildExplore(
 	markResearchSelection(&view)
 
 	now := h.deps.now()
-	_, homeBook := h.researchViewer(ctx)
+	homeBook := h.researchViewer(ctx)
 	odds, err := h.deps.Store.OddsForWeek(ctx, week.ID)
 	if err != nil {
 		view.NoLines = !view.NoGames
@@ -664,7 +1565,7 @@ func (h *researchHandlers) buildExplore(
 		Signals:  signals,
 	})
 
-	view.Cards = researchCards(games, result.Rows)
+	view.Cards = researchCards(games, result.Rows, researchPushURL(queryFromExplore(view)))
 	view.TotalMatched = result.TotalMatched
 	view.HasMore = result.HasMore
 	view.AllStarted = !view.NoGames && board.StartedCount(games, now) == len(games)
@@ -727,20 +1628,16 @@ func markResearchSelection(view *ResearchExploreView) {
 	}
 }
 
-// researchViewer returns the signed-in person and their home book.
-func (h *researchHandlers) researchViewer(ctx context.Context) (db.User, string) {
+// researchViewer returns the signed-in person's home book.
+func (h *researchHandlers) researchViewer(ctx context.Context) string {
 	if h.deps.UserFrom == nil {
-		return db.User{}, ""
+		return ""
 	}
 	user, ok := h.deps.UserFrom(ctx)
-	if !ok {
-		return db.User{}, ""
+	if !ok || user.HomeBook == nil {
+		return ""
 	}
-	homeBook := ""
-	if user.HomeBook != nil {
-		homeBook = *user.HomeBook
-	}
-	return user, homeBook
+	return *user.HomeBook
 }
 
 // loadResearchBoardSignals loads the nfelo, EPA, and player-stat context the
@@ -829,8 +1726,9 @@ func (h *researchHandlers) researchSlipLegs(ctx context.Context, weekID int64) [
 	return legs
 }
 
-// researchCards maps one explorer page to the candidate cards.
-func researchCards(games []db.Game, rows []board.ScoredRow) []ResearchCardView {
+// researchCards maps one explorer page to the candidate cards. from is the
+// explorer URL a card's per-bet page returns to.
+func researchCards(games []db.Game, rows []board.ScoredRow, from string) []ResearchCardView {
 	byID := make(map[string]db.Game, len(games))
 	for _, game := range games {
 		byID[game.ID] = game
@@ -866,6 +1764,7 @@ func researchCards(games []db.Game, rows []board.ScoredRow) []ResearchCardView {
 			AwayLogo:        db.StringValue(game.AwayLogo),
 			HomeLogo:        db.StringValue(game.HomeLogo),
 		}
+		card.BetHref = researchBetHref(card, from)
 		if row.Odds == 0 {
 			card.Odds = "—"
 		}
@@ -914,6 +1813,30 @@ func researchLineText(line *float64) string {
 		return ""
 	}
 	return formatNumber(*line)
+}
+
+// researchBetHref builds a per-bet research link from a candidate card. The
+// line and price stay out of the URL, so a shared link survives line drift.
+func researchBetHref(card ResearchCardView, from string) string {
+	values := url.Values{}
+	values.Set("game_id", card.GameID)
+	values.Set("market", card.MarketType)
+	if card.Side != "" {
+		values.Set("side", card.Side)
+	}
+	if card.Team != "" {
+		values.Set("team", card.Team)
+	}
+	if card.PlayerID != "" {
+		values.Set("player_id", card.PlayerID)
+	}
+	if card.PlayerName != "" {
+		values.Set("player_name", card.PlayerName)
+	}
+	if from != "" {
+		values.Set("from", from)
+	}
+	return "/research/bet?" + values.Encode()
 }
 
 // finishResearchExploreTargets records the sheet links and the explicit props

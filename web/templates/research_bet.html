@@ -1,0 +1,348 @@
+{{define "content"}}
+<section class="space-y-4">
+  <div class="flex items-center justify-between gap-3">
+    <a
+      href="{{.View.BackHref}}"
+      class="rounded-md border border-line-strong bg-surface-2 px-2 py-1 text-xs font-medium text-ink hover:bg-surface"
+      >&larr; Research</a
+    >
+    {{if .WeekLabel}}
+      <span class="shrink-0 text-xs font-medium text-page-muted">{{.WeekLabel}}</span>
+    {{end}}
+  </div>
+
+  {{if .View.Missing}}
+    <div class="ui-card space-y-3 border-dashed p-4">
+      <h1 class="text-lg font-semibold text-ink">Bet not found</h1>
+      <p class="text-sm text-ink-muted">{{.View.MissingMessage}}</p>
+      <a
+        href="{{.View.BackHref}}"
+        class="inline-flex min-h-10 items-center rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-accent-ink hover:opacity-90"
+        >Back to Research</a
+      >
+    </div>
+  {{else}}
+    <!-- Bet summary -->
+    <div class="ui-card p-4">
+      <div class="flex items-start gap-3">
+        {{if .View.HeadshotURL}}
+          {{template "player-portrait" (dict "URL" .View.HeadshotURL "Initials" .View.Initials "Size" "h-11 w-11" "TextSize" "text-xs")}}
+        {{else if .View.TeamLogo}}
+          {{template "team-logo" (dict "URL" .View.TeamLogo "Size" "h-9 w-9")}}
+        {{else}}
+          {{template "matchup-logos" (dict "AwayURL" .View.AwayLogo "HomeURL" .View.HomeLogo "Size" "h-7 w-7")}}
+        {{end}}
+        <div class="min-w-0 flex-1">
+          <div class="flex items-start justify-between gap-2">
+            <div class="min-w-0">
+              <h1 class="text-lg font-semibold leading-tight text-ink">{{.View.Selection}}</h1>
+              <p class="mt-0.5 truncate text-xs text-ink-muted">
+                {{.View.Matchup}}{{if .View.Position}} &middot; {{.View.Position}}{{end}}{{if .View.KickoffISO}} &middot; <time datetime="{{.View.KickoffISO}}">{{.View.KickoffFallback}}</time>{{end}}
+              </p>
+            </div>
+            <div class="shrink-0 text-right">
+              <span
+                class="inline-block rounded-full border px-2 py-0.5 text-sm font-semibold {{.View.Grade.Class}}"
+                title="Grade {{.View.Grade.Letter}} ({{.View.Grade.Score}}/100)"
+              >{{if .View.Grade.Letter}}{{.View.Grade.Letter}}{{else}}&mdash;{{end}}</span>
+              <p class="mt-1 font-mono text-sm font-semibold tabular-nums text-ink">
+                {{.View.OddsText}}{{if .View.Implied}} <span class="font-normal text-ink-muted">({{.View.Implied}})</span>{{end}}
+              </p>
+            </div>
+          </div>
+          <div class="mt-2 flex flex-wrap items-center gap-1.5 text-[11px]">
+            <span class="rounded-full border border-line-strong bg-surface-2 px-1.5 py-0.5 text-ink-muted">{{.View.MarketLabel}}</span>
+            {{if .View.Badge}}
+              <span class="rounded-full border border-accent bg-accent-soft px-1.5 py-0.5 font-medium text-ink">{{.View.Badge}}</span>
+            {{end}}
+            {{if .View.Reason}}
+              <span class="min-w-0 truncate text-ink-muted">{{.View.Reason}}</span>
+            {{end}}
+          </div>
+        </div>
+      </div>
+
+      {{if .View.AddSlips}}
+        <form action="{{(index .View.AddSlips 0).PostURL}}" method="post" class="mt-3 border-t border-line pt-3">
+          <input type="hidden" name="quick" value="1">
+          <input type="hidden" name="from" value="research">
+          <input type="hidden" name="return" value="{{.View.ReturnURL}}">
+          <input type="hidden" name="game_id" value="{{.View.GameID}}">
+          <input type="hidden" name="market_type" value="{{.View.MarketType}}">
+          <input type="hidden" name="team" value="{{.View.Team}}">
+          <input type="hidden" name="side" value="{{.View.Side}}">
+          <input type="hidden" name="player_name" value="{{.View.PlayerName}}">
+          {{if .View.PlayerID}}<input type="hidden" name="player_id" value="{{.View.PlayerID}}">{{end}}
+          {{if .View.LineInput}}<input type="hidden" name="line" value="{{.View.LineInput}}">{{end}}
+          <input type="hidden" name="odds" value="{{.View.Odds}}">
+          <p class="text-[11px] font-semibold uppercase tracking-wide text-ink-muted">Add to slip</p>
+          <div class="mt-1.5 flex flex-wrap items-center gap-2">
+            {{range .View.AddSlips}}
+              <button
+                type="submit"
+                formaction="{{.PostURL}}"
+                class="inline-flex min-h-10 items-center rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-accent-ink hover:opacity-90"
+              >
+                + {{.SlipName}}
+                <span class="ml-1 font-normal opacity-80">({{.Summary}})</span>
+              </button>
+            {{end}}
+          </div>
+        </form>
+      {{end}}
+    </div>
+
+    <!-- Book prices -->
+    <div class="ui-card p-4">
+      <h2 class="text-xs font-semibold uppercase tracking-wide text-ink-muted">Book prices</h2>
+      {{if .View.Pricing.HasPrices}}
+        <div class="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
+          <div class="rounded-lg border border-line bg-surface-2 p-2.5">
+            <p class="text-[10px] font-semibold uppercase tracking-wide text-ink-muted">Consensus</p>
+            <p class="mt-1 font-mono text-base font-bold tabular-nums text-ink">
+              {{.View.Pricing.ConsensusPrice}}
+            </p>
+            <p class="text-[11px] text-ink-muted">
+              {{if .View.Pricing.ConsensusLine}}{{.View.Pricing.ConsensusLine}} &middot; {{end}}{{.View.Pricing.ConsensusImplied}}
+            </p>
+          </div>
+          <div class="rounded-lg border border-accent bg-accent-soft p-2.5">
+            <p class="text-[10px] font-semibold uppercase tracking-wide text-ink-muted">Best price</p>
+            <p class="mt-1 font-mono text-base font-bold tabular-nums text-ink">
+              {{.View.Pricing.BestPrice}}
+            </p>
+            <p class="text-[11px] text-ink-muted">
+              {{.View.Pricing.BestBook}}{{if .View.Pricing.BestLine}} &middot; {{.View.Pricing.BestLine}}{{end}}{{if .View.Pricing.BestImplied}} &middot; {{.View.Pricing.BestImplied}}{{end}}
+            </p>
+          </div>
+          <div class="rounded-lg border border-line bg-surface-2 p-2.5">
+            <p class="text-[10px] font-semibold uppercase tracking-wide text-ink-muted">
+              {{if .View.Pricing.HomeBook}}Your book{{else}}Home book{{end}}
+            </p>
+            <p class="mt-1 font-mono text-base font-bold tabular-nums text-ink">
+              {{if .View.Pricing.HomePrice}}{{.View.Pricing.HomePrice}}{{else}}&mdash;{{end}}
+            </p>
+            <p class="text-[11px] text-ink-muted">
+              {{if .View.Pricing.HomeBook}}{{.View.Pricing.HomeBook}}{{else}}Set a home book in Profile{{end}}{{if .View.Pricing.HomeLine}} &middot; {{.View.Pricing.HomeLine}}{{end}}
+            </p>
+          </div>
+        </div>
+
+        {{if .View.Pricing.DevigEdge}}
+          <p class="mt-2 rounded-lg border border-line bg-surface-2 px-3 py-2 text-[11px] text-ink-muted">
+            <span class="font-mono font-semibold tabular-nums text-ink">{{.View.Pricing.DevigEdge}}</span>
+            {{if .View.Pricing.DevigNote}}{{.View.Pricing.DevigNote}}{{end}}
+          </p>
+        {{end}}
+
+        <ul class="mt-3 divide-y divide-line rounded-lg border border-line">
+          {{range .View.Pricing.Books}}
+            <li class="flex items-center justify-between gap-2 px-3 py-2 text-xs">
+              <div class="flex min-w-0 items-center gap-1.5">
+                <span class="min-w-0 truncate font-medium text-ink">{{.Book}}</span>
+                {{if .Home}}<span class="rounded border border-accent bg-accent-soft px-1 py-0.5 text-[10px] font-semibold text-ink">Your book</span>{{end}}
+                {{if .Best}}<span class="rounded border border-positive bg-positive-soft px-1 py-0.5 text-[10px] font-semibold text-positive-ink">Best</span>{{end}}
+              </div>
+              <div class="flex shrink-0 items-center gap-3 text-right">
+                {{if .Line}}<span class="font-mono tabular-nums text-ink-muted">{{.Line}}</span>{{end}}
+                <span class="font-mono font-semibold tabular-nums text-ink">{{.Price}}</span>
+                {{if .Implied}}<span class="text-ink-subtle">{{.Implied}}</span>{{end}}
+              </div>
+            </li>
+          {{end}}
+        </ul>
+      {{else}}
+        <p class="mt-2 text-sm text-ink-muted">No book prices are cached for this bet.</p>
+      {{end}}
+    </div>
+
+    <!-- Grade and analyzer -->
+    <div class="ui-card p-4">
+      <div class="flex items-center justify-between gap-2">
+        <h2 class="text-xs font-semibold uppercase tracking-wide text-ink-muted">Grade &amp; analyzer</h2>
+        <span class="text-[11px] text-ink-muted">{{.View.Grade.Score}}/100</span>
+      </div>
+      {{if .View.Grade.Factors}}
+        <ul class="mt-3 space-y-1.5">
+          {{range .View.Grade.Factors}}
+            <li class="flex items-start justify-between gap-2 rounded-lg border border-line bg-surface-2 px-3 py-2">
+              <div class="min-w-0">
+                <p class="text-xs font-medium text-ink">{{.Label}}</p>
+                {{if .Detail}}<p class="mt-0.5 text-[11px] text-ink-muted">{{.Detail}}</p>{{end}}
+              </div>
+              <span class="shrink-0 font-mono text-xs font-semibold tabular-nums {{if .Positive}}text-positive-ink{{else if .Negative}}text-danger-ink{{else}}text-ink-muted{{end}}">
+                {{.DeltaText}}
+              </span>
+            </li>
+          {{end}}
+        </ul>
+      {{else}}
+        <p class="mt-2 text-sm text-ink-muted">No scoring factors were applied to this bet.</p>
+      {{end}}
+
+      {{if .View.Warnings}}
+        <div class="mt-3 space-y-2">
+          {{range .View.Warnings}}
+            <div class="rounded-lg border px-3 py-2 {{.Class}}">
+              <p class="text-xs font-semibold">{{.Severity}} &middot; {{.Rule}}</p>
+              <p class="mt-0.5 text-[11px]">{{.Message}}</p>
+            </div>
+          {{end}}
+        </div>
+      {{else}}
+        <p class="mt-3 text-[11px] text-ink-muted">No analyzer warnings on this bet.</p>
+      {{end}}
+    </div>
+
+    <!-- Player research -->
+    {{if .View.Player}}
+      <div class="space-y-2">
+        <div class="flex items-center justify-between gap-2 px-1">
+          <h2 class="text-xs font-semibold uppercase tracking-wide text-ink-muted">Player research</h2>
+          {{if .View.PlayerSheetHref}}
+            <a href="{{.View.PlayerSheetHref}}" class="text-xs font-medium text-ink underline decoration-line-strong underline-offset-2 hover:opacity-75">Full player sheet &rarr;</a>
+          {{end}}
+        </div>
+        <div id="research-panel">{{template "research-player" .View.Player}}</div>
+      </div>
+    {{end}}
+
+    <!-- Game market team context -->
+    {{with .View.TeamContext}}
+      <div class="ui-card space-y-4 p-4">
+        <div class="flex items-center justify-between gap-2">
+          <h2 class="text-xs font-semibold uppercase tracking-wide text-ink-muted">Team context</h2>
+          {{if $.View.GameSheetHref}}
+            <a href="{{$.View.GameSheetHref}}" class="text-xs font-medium text-ink underline decoration-line-strong underline-offset-2 hover:opacity-75">Full game sheet &rarr;</a>
+          {{end}}
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2 text-xs text-ink-muted">
+          <span class="font-semibold text-ink">{{.Matchup}}</span>
+          {{if .Venue}}<span class="text-ink-subtle">&middot;</span><span>{{.Venue}}</span>{{end}}
+          {{if .Weather}}<span class="text-ink-subtle">&middot;</span><span>{{.Weather}}</span>{{end}}
+          {{if .KickoffISO}}<span class="text-ink-subtle">&middot;</span><time datetime="{{.KickoffISO}}">{{.KickoffFallback}}</time>{{end}}
+        </div>
+
+        <div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <div class="rounded-lg border border-line bg-surface-2 p-2.5">
+            <p class="text-[10px] font-semibold uppercase tracking-wide text-ink-muted">Market</p>
+            <p class="mt-1 text-xs font-semibold text-ink">{{.MarketLabel}}</p>
+            <p class="font-mono text-sm font-bold tabular-nums text-ink">{{.MarketValue}}</p>
+          </div>
+          {{if .HasModel}}
+            <div class="rounded-lg border border-line bg-surface-2 p-2.5">
+              <p class="text-[10px] font-semibold uppercase tracking-wide text-ink-muted">Model spread</p>
+              <p class="mt-1 font-mono text-sm font-bold tabular-nums text-ink">{{.ModelHomeSpread}}</p>
+            </div>
+            <div class="rounded-lg border border-line bg-surface-2 p-2.5">
+              <p class="text-[10px] font-semibold uppercase tracking-wide text-ink-muted">Model win %</p>
+              <p class="mt-1 text-xs font-medium text-ink">{{.ModelHomeWin}}</p>
+              <p class="text-xs font-medium text-ink-muted">{{.ModelAwayWin}}</p>
+            </div>
+            {{if .ModelBetSpread}}
+              <div class="rounded-lg border border-line bg-surface-2 p-2.5">
+                <p class="text-[10px] font-semibold uppercase tracking-wide text-ink-muted">Model &middot; {{.BetTeam}}</p>
+                <p class="mt-1 font-mono text-sm font-bold tabular-nums text-ink">{{.ModelBetSpread}}{{if .ModelBetWin}} &middot; {{.ModelBetWin}}{{end}}</p>
+              </div>
+            {{end}}
+          {{end}}
+        </div>
+
+        <div>
+          <h3 class="text-xs font-semibold uppercase tracking-wide text-ink-muted">EPA ranks</h3>
+          <div class="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+            {{range .Teams}}
+              <div class="rounded-lg border border-line bg-surface-2 p-3">
+                <div class="flex items-center gap-2">
+                  {{template "team-logo" (dict "URL" .Logo "Size" "h-4 w-4")}}
+                  <p class="text-xs font-semibold text-ink">{{.Team}}</p>
+                </div>
+                {{if .HasEPA}}
+                  <dl class="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px]">
+                    <div class="flex justify-between gap-2"><dt class="text-ink-muted">Off pass</dt><dd class="font-mono font-semibold tabular-nums text-ink">{{.OffPass}}</dd></div>
+                    <div class="flex justify-between gap-2"><dt class="text-ink-muted">Off rush</dt><dd class="font-mono font-semibold tabular-nums text-ink">{{.OffRush}}</dd></div>
+                    <div class="flex justify-between gap-2"><dt class="text-ink-muted">Def pass</dt><dd class="font-mono font-semibold tabular-nums text-ink">{{.DefPass}}</dd></div>
+                    <div class="flex justify-between gap-2"><dt class="text-ink-muted">Def rush</dt><dd class="font-mono font-semibold tabular-nums text-ink">{{.DefRush}}</dd></div>
+                    <div class="flex justify-between gap-2"><dt class="text-ink-muted">Def overall</dt><dd class="font-mono font-semibold tabular-nums text-ink">{{.DefOverall}}</dd></div>
+                  </dl>
+                {{else}}
+                  <p class="mt-1 text-[11px] text-ink-subtle">No fresh EPA data.</p>
+                {{end}}
+              </div>
+            {{end}}
+          </div>
+        </div>
+
+        <div>
+          <h3 class="text-xs font-semibold uppercase tracking-wide text-ink-muted">Key injuries</h3>
+          <div class="mt-2 space-y-2">
+            {{range .Injuries}}
+              <div class="rounded-lg border border-line bg-surface-2 p-3">
+                <div class="flex items-center gap-2">
+                  {{template "team-logo" (dict "URL" .LogoURL "Size" "h-4 w-4")}}
+                  <h4 class="text-xs font-medium text-ink">{{.Team}}</h4>
+                </div>
+                {{if .Injuries}}
+                  <ul class="mt-2 space-y-1.5">
+                    {{range .Injuries}}
+                      <li class="flex items-center justify-between gap-2 text-xs">
+                        <div class="flex min-w-0 items-center gap-2">
+                          {{template "player-portrait" (dict "URL" .HeadshotURL "Initials" .Initials "Size" "h-6 w-6" "TextSize" "text-[10px]")}}
+                          <span class="shrink-0 rounded border border-line bg-surface px-1.5 py-0.5 text-[10px] font-semibold text-ink-muted">{{.Position}}</span>
+                          <span class="min-w-0 truncate font-medium text-ink">{{.FullName}}</span>
+                        </div>
+                        <span class="shrink-0 rounded border border-warning bg-warning-soft px-1.5 py-0.5 text-[10px] font-medium text-warning-ink">{{.Status}}</span>
+                      </li>
+                    {{end}}
+                  </ul>
+                {{else}}
+                  <p class="mt-1 text-[11px] text-ink-subtle">No key injuries reported.</p>
+                {{end}}
+              </div>
+            {{else}}
+              <p class="text-[11px] text-ink-subtle">No injury reports available.</p>
+            {{end}}
+          </div>
+        </div>
+      </div>
+    {{end}}
+
+    <!-- Related bets -->
+    {{if .View.Related}}
+      <div class="space-y-2">
+        <h2 class="px-1 text-xs font-semibold uppercase tracking-wide text-ink-muted">More in this game</h2>
+        <div class="space-y-2">
+          {{range .View.Related}}
+            <article class="ui-card p-3">
+              <div class="flex items-start gap-2.5">
+                {{if .HeadshotURL}}
+                  {{template "player-portrait" (dict "URL" .HeadshotURL "Initials" .Initials "Size" "h-8 w-8" "TextSize" "text-[10px]")}}
+                {{else if .TeamLogo}}
+                  {{template "team-logo" (dict "URL" .TeamLogo "Size" "h-7 w-7")}}
+                {{else}}
+                  {{template "matchup-logos" (dict "AwayURL" .AwayLogo "HomeURL" .HomeLogo "Size" "h-6 w-6")}}
+                {{end}}
+                <div class="min-w-0 flex-1">
+                  <div class="flex items-start justify-between gap-2">
+                    <div class="min-w-0">
+                      <a href="{{.BetHref}}" class="text-sm font-semibold text-ink hover:underline">{{.Selection}}</a>
+                      <p class="mt-0.5 truncate text-[11px] text-ink-muted">
+                        {{.Market}}{{if .Reason}} &middot; {{.Reason}}{{end}}
+                      </p>
+                    </div>
+                    <div class="shrink-0 text-right">
+                      <span class="inline-block rounded-full border px-1.5 py-0.5 text-[11px] font-semibold {{.GradeClass}}">{{if .GradeLetter}}{{.GradeLetter}}{{else}}&mdash;{{end}}</span>
+                      <p class="mt-0.5 font-mono text-xs font-semibold tabular-nums text-ink">{{.Odds}}</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </article>
+          {{end}}
+        </div>
+      </div>
+    {{end}}
+  {{end}}
+</section>
+{{end}}

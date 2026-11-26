@@ -1026,6 +1026,14 @@ func (h *slipHandlers) addLeg(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Hx-Trigger", "tray-updated, slip-updated")
 		h.renderPartialCtx(r.Context(), w, "pick-body", data.Body)
 		return
+	case "research":
+		w.Header().Set("Hx-Trigger", "slip-updated")
+		target := safeReturnPath(r.PostForm.Get("return"))
+		if target == "" {
+			target = "/research"
+		}
+		h.redirect(w, r, target)
+		return
 	}
 	// Tell the browser the bottom sheet can close now that the leg landed.
 	w.Header().Set("Hx-Trigger", "leg-saved")

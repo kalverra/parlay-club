@@ -257,7 +257,7 @@ Complexity: medium (assembles cached book pricing, analyzer grade/warnings, mark
 matchup context, and optional slip-scope eligibility) Risk: low (read-only research view reusing existing
 `POST /slips/{id}/legs` validation and `db.SameSelection` matching)
 
-- [ ] Implement `GET /research/bet` (`BetResearchView`, `TeamBetContextView`, book pricing comparison, grade/warning
+- [x] Implement `GET /research/bet` (`BetResearchView`, `TeamBetContextView`, book pricing comparison, grade/warning
       breakdown, market-scoped `PlayerResearchView` for props, nfelo/EPA/weather/injury context for game markets, and
       optional `+ Add to slip` for eligible open slips) in `internal/web/research.go`,
       `web/templates/research_bet.html`, and `internal/web/render.go`, with tests covering player props, game markets,

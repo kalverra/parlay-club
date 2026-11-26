@@ -1281,6 +1281,9 @@
               <span class="min-w-0 truncate text-ink-muted">{{.Reason}}</span>
             </div>
             <div class="mt-1.5 flex flex-wrap items-center gap-3 text-[11px] font-medium">
+              {{if .BetHref}}
+                <a href="{{.BetHref}}" class="text-ink underline decoration-line-strong underline-offset-2 hover:opacity-75">Research bet &rarr;</a>
+              {{end}}
               {{if .PlayerSheetHref}}
                 <a href="{{.PlayerSheetHref}}" class="text-ink underline decoration-line-strong underline-offset-2 hover:opacity-75">Player sheet &rarr;</a>
               {{end}}
