@@ -3,7 +3,10 @@ id: analyzer
 title: Analyzer
 type: concept
 summary: How the sharp-friend analyzer turns legs, games, weather, player stats, nfelo's model, and nflverse efficiency into plain-Go warnings and calibrated four-pillar A–F grades.
-tags: [analyzer, warnings, grades, pillars, copula, overlays, banner, severity, tone, slips, weather, rules, nfelo, nflverse, model, props, player-stats]
+tags: [analyzer, warnings, grades, pillars, copula, overlays, banner, severity, tone, slips, weather, rules, nfelo, nflverse, model, props, player-stats, docs, glossary, help-bubbles]
+budget:
+  max_lines: 270
+  reason: Keeps the Docs hub and the canonical `?` help-bubble target map beside the grading rules the analyzer renders.
 ---
 
 # Analyzer
@@ -59,8 +62,8 @@ The slip panel renders the Analyzer section under the legs, with a "How grading 
 
 Other inline annotations pair with the same `?` bubble: the `nfelo` model chip points at `#term-nfelo`, implied chance
 at `#term-implied-prob`, reference odds at `#term-reference-odds`, live hit chance at `#sys-live`, and the pick detail's
-badge row at `#suggestions`. Every bubble carries the current screen as `?from=` so the docs page can link back. Tapping
-outside an open grade breakdown closes it, so popovers never stack on a phone.
+badge row at `#suggestions`. [Docs hub and help bubbles](#docs-hub-and-help-bubbles) lists every bubble and its target
+and explains the two-step pattern.
 
 The banner is part of the slip panel, so it refreshes with the panel on `slip-updated` and `board-updated`. A weather or
 nflverse update needs no separate wiring: the next board refresh re-renders the slip, and the rules and grades see the
@@ -180,17 +183,48 @@ migrations. In CI, `.github/workflows/ci.yml` runs `cmd/eval` against the real 2
 `internal/eval/testdata/benchmark_dataset.json`. See [Local development](../guides/local-dev.md#offline-grading-evals)
 for CLI and `mise run eval-prod` usage.
 
-## In-app grading guide and results
+## Docs hub and help bubbles
 
-`GET /analyzer/guide` renders the four v2 pillars, uncertainty badge behavior, active engine badge, live A–F bands,
-v1 rubric reference, and every warning rule (`RuleDocs`) directly from `internal/analyzer`, so the guide cannot drift
-from live thresholds. Stable anchors (`#pillars`, `#leg-grades`, `#slip-grade`, `#suggestions`, `#rule-<id>`) let any
-warning card or grade breakdown link straight to its explanation, with a safe `?from=` back link and a "Grading results"
-link to `/analyzer/results`.
+The Docs tab (`/docs`) is the standing explanation for every annotation the app shows. It has four destinations behind
+one section switcher. The overview and glossary render from static Go structs and read no database; the grading and
+eval screens read the analyzer package and the eval cache.
 
-`GET /docs/grading` and `GET /analyzer/guide` share one handler, as do `GET /docs/evals` and `GET /analyzer/results`.
-Every path sets `page.Tab = TabDocs` and renders the docs section switcher (`Overview`, `Glossary`, `Grading & Rules`,
-`Eval Results`), so the Docs tab stays lit and an older `/analyzer/...` bookmark still lands on the same page.
+- **Overview (`GET /docs`)**: quick jumps, seven plain-language "How systems work" sections with stable anchors
+  (`#sys-grading`, `#sys-odds`, `#sys-badges`, `#sys-live`, `#sys-autograde`, `#sys-sources`, `#sys-export`), and
+  common questions.
+- **Glossary (`GET /docs/glossary`)**: a static term list at `#term-<slug>` covering odds, usage, and betting ideas.
+  `?q=` filters the terms in memory by name, category, summary, or example.
+- **Grading & Rules (`GET /docs/grading`)** and **Eval Results (`GET /docs/evals`)**: the rubric and calibration
+  screens described here.
+
+`GET /docs/grading` renders the four v2 pillars, uncertainty badge behavior, active engine badge, live A–F bands, v1
+rubric reference, and every warning rule (`RuleDocs`) directly from `internal/analyzer`, so the guide cannot drift from
+live thresholds. `GET /analyzer/guide` serves the same page, as `GET /analyzer/results` does for `/docs/evals`. Every
+path sets `page.Tab = TabDocs` and renders the switcher, so the Docs tab stays lit and an older `/analyzer/...`
+bookmark still lands on the same page with the right section marked.
+
+Each annotation is a two-step help surface. The first tap opens the item's own popover, with this leg's pillars, this
+slip's rollup, or this warning's legs. The round `?` bubble in that panel then opens the standing explanation in Docs.
+The bubble sits inside the expanded panel or beside the annotation, never inside a `<summary>`, because a nested link
+there double-fires on mobile Safari. Tapping outside an open grade breakdown closes it, so only one stays open on a
+phone.
+
+| Annotation | `?` bubble target |
+| --- | --- |
+| Slip grade breakdown | `/docs/grading#slip-grade` |
+| Leg grade breakdown | `/docs/grading#leg-grades` |
+| Warning card | `/docs/grading#rule-<id>` |
+| Pick-board badges | `/docs/grading#suggestions` |
+| `nfelo` model chip | `/docs/glossary#term-nfelo` |
+| Implied chance | `/docs/glossary#term-implied-prob` |
+| Reference odds | `/docs/glossary#term-reference-odds` |
+| Live hit chance | `/docs#sys-live` |
+
+Each bubble appends the current screen as `?from=`. The docs page renders a `← Back` link only when `safeReturnPath`
+accepts that path, so a forwarded external URL is dropped, and the switcher forwards the same path across its four
+sections.
+
+### Grading results
 
 `GET /analyzer/results` shows live calibration across `?source=slips|market` and `?engine=v2|v1`:
 

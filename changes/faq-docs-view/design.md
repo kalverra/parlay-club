@@ -194,5 +194,5 @@ grading math changes)
       `web/templates/partials.html` (plus outside-click popover close in `web/static/app.js`), keeping `?` bubbles
       outside `<summary>` elements and adding tests that verify every rendered `?` bubble anchor exists in `/docs`,
       `/docs/glossary`, or `/docs/grading`.
-- [ ] Docs: update `docs/concepts/analyzer.md` and `docs/concepts/slips.md` to describe the Docs hub and two-step `?`
+- [x] Docs: update `docs/concepts/analyzer.md` and `docs/concepts/slips.md` to describe the Docs hub and two-step `?`
       help-bubble pattern.
