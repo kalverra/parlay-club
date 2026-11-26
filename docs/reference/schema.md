@@ -2,35 +2,36 @@
 id: schema
 title: Database schema
 type: reference
-summary: SQLite schema, migrations, connection pools, and table conventions for groups, users, games, odds, nfelo, nflverse, slips, legs, rosters, game logs, and the API archive.
-tags: [database, sqlite, migrations, groups, archive, api, raw-responses, odds, links, nfelo, nflverse, projections, roster, gamelog, player-matching, injuries, votes]
+summary: SQLite schema, migrations, connection pools, and table conventions for groups, users, games, odds, nfelo, nflverse, slips, legs, rosters, game logs, push subscriptions, and the API archive.
+tags: [database, sqlite, migrations, groups, archive, api, raw-responses, odds, links, nfelo, nflverse, projections, roster, gamelog, player-matching, injuries, votes, push, web-push, subscriptions]
 ---
 
 # Database schema
 
 ## Summary
 
-One SQLite file, opened by `db.Open` in `internal/db`, holds every table the app uses. `0001_init.sql` creates the tables,
-including groups, their members, and `slips.group_id`. `0002_google_identity.sql` rebuilds `users` to add Google
+One SQLite file, opened by `db.Open` in `internal/db`, holds every table the app uses. `0001_init.sql` creates the
+tables, including groups, their members, and `slips.group_id`. `0002_google_identity.sql` rebuilds `users` to add Google
 identity columns and drop the unique name rule. `0003_api_archive.sql` adds the raw response archive, `api_bodies` and
 `api_responses`; see [Archive](../concepts/archive.md). `0004_odds_links.sql` adds each book's deep link and selection
-ID to `odds`, and `0005_odds_event_sid.sql` adds the book's own event ID. `0006_nfelo_games.sql` adds `nfelo_games`,
-one model projection per game. `0007_props_research.sql` adds `roster_players` and `player_gamelogs` for props research.
+ID to `odds`, and `0005_odds_event_sid.sql` adds the book's own event ID. `0006_nfelo_games.sql` adds `nfelo_games`, one
+model projection per game. `0007_props_research.sql` adds `roster_players` and `player_gamelogs` for props research.
 `0008_leg_votes.sql` adds `leg_votes`, the up and down votes members cast on each other's legs.
 `0011_logos_portraits.sql` adds `home_logo` and `away_logo` to `games` and `headshot_url` to `roster_players`.
 `0012_nflverse_signals.sql` adds `nflverse_player_ids`, `nflverse_team_weeks`, and `nflverse_player_weeks` for nflverse
 team efficiency, player usage, and snap-count signals. `0013_canonical_players.sql` (paired with the `Migrate` backfill
 hook) refreshes `roster_players.norm_name`, deduplicates colliding `odds` rows onto canonical `player_name` and `team`
-values, and backfills missing `legs.player_id` and `legs.team` values. `0014_roster_injuries.sql` adds `injury_status` and `injury_date` to `roster_players`. `0015_research_context.sql` adds
-`games_json` to `player_gamelogs` and adds opponent, player name, position, passing/rushing/receiving/kicking stat
-columns, and `idx_nflverse_player_weeks_opp_pos` to `nflverse_player_weeks`. `0018_live_game_state.sql` adds nullable
-`period`, `clock`, and `boxscore_json` columns to `games`. `0019_v2_opportunity_signals.sql` adds expected opportunity,
-`carry_share`, and `cpoe` columns to `nflverse_player_weeks`.
+values, and backfills missing `legs.player_id` and `legs.team` values. `0014_roster_injuries.sql` adds `injury_status`
+and `injury_date` to `roster_players`. `0015_research_context.sql` adds `games_json` to `player_gamelogs` and adds
+opponent, player name, position, passing/rushing/receiving/kicking stat columns, and `idx_nflverse_player_weeks_opp_pos`
+to `nflverse_player_weeks`. `0018_live_game_state.sql` adds nullable `period`, `clock`, and `boxscore_json` columns to
+`games`. `0019_v2_opportunity_signals.sql` adds expected opportunity, `carry_share`, and `cpoe` columns to
+`nflverse_player_weeks`. `0020_push.sql` adds `push_subscriptions` and `push_log`.
 
 ## Connection settings
 
-`db.Open` opens the writer handle capped at one connection (`SetMaxOpenConns(1)`) with `_txlock=immediate` and
-sets these pragmas on every connection:
+`db.Open` opens the writer handle capped at one connection (`SetMaxOpenConns(1)`) with `_txlock=immediate` and sets
+these pragmas on every connection:
 
 | Pragma        | Value    | Why                                               |
 | ------------- | -------- | ------------------------------------------------- |
@@ -57,7 +58,7 @@ writer handle.
 - `db.Migrate` applies every file whose number is greater than `PRAGMA user_version`, in number order.
 - Each file runs in its own transaction. The migration's statements and its `user_version` bump commit together, so a
   failed migration leaves neither behind.
-- A fresh database ends at version 19 with every table below.
+- A fresh database ends at version 20 with every table below.
 - `0001_init.sql` creates `groups`, `group_members`, and `slips.group_id`. A database created before groups existed has
   the old `slips` shape, so delete it and let the migrations rebuild.
 - `0002_google_identity.sql` rebuilds `users` in its transaction with the SQLite 12-step method and
@@ -71,8 +72,8 @@ writer handle.
 - `0006_nfelo_games.sql` creates `nfelo_games`, keyed by `game_id` with `ON DELETE CASCADE` to `games`. A game without a
   matching nfelo row simply has no projection, and a game that drops out of the CSV keeps its last one. It changes no
   existing table.
-- `0007_props_research.sql` creates `roster_players` and `player_gamelogs` for ESPN NFL team rosters and athlete
-  game logs.
+- `0007_props_research.sql` creates `roster_players` and `player_gamelogs` for ESPN NFL team rosters and athlete game
+  logs.
 - `0008_leg_votes.sql` creates `leg_votes`, one row per member per leg they voted on, cascading from `legs`. It changes
   no existing table.
 - `0011_logos_portraits.sql` adds nullable `home_logo` and `away_logo` columns to `games` and a
@@ -93,7 +94,10 @@ writer handle.
 - `0018_live_game_state.sql` adds nullable `period`, `clock`, and `boxscore_json` columns to `games`.
 - `0019_v2_opportunity_signals.sql` adds `exp_pass_yds`, `exp_rush_yds`, `exp_rec_yds`, `exp_receptions`,
   `exp_pass_tds`, `exp_rush_tds`, `exp_rec_tds`, `carry_share`, and `cpoe` to `nflverse_player_weeks`.
-- Never edit an applied file. Add `0020_name.sql` and up.
+- `0020_push.sql` creates `push_subscriptions` (one browser endpoint per device, cascading from `users`, with a
+  per-person lookup index) and `push_log` (dedupe reservations keyed by kind, slip, user, and key). It changes no
+  existing table.
+- Never edit an applied file. Add `0021_name.sql` and up.
 - `PRAGMA user_version` on the database file is the only record of what ran.
 
 ## Tables
@@ -120,6 +124,8 @@ writer handle.
 | `roster_players`  | ESPN NFL team rosters by athlete ID with normalized names and injury status. |
 | `player_gamelogs` | ESPN athlete game logs, market stats, and per-game opponent metadata by athlete ID. |
 | `activity`        | Human-readable slip history; `user_id` is NULL for system entries. |
+| `push_subscriptions` | One browser push endpoint per device, its keys, and the person who owns it. |
+| `push_log`        | Reservation rows that dedupe graded and reminder notifications. |
 | `sync_state`      | Last fetch time per outside data source, plus remaining odds credits. |
 | `api_bodies`      | Raw external response bodies, gzipped and keyed by the SHA-256 of the uncompressed bytes. |
 | `api_responses`   | One row per archived external call: source, key, redacted URL, status, time, and body hash. |
@@ -419,6 +425,25 @@ CREATE TABLE activity (
 );
 CREATE INDEX activity_slip ON activity(slip_id, id DESC);
 
+CREATE TABLE push_subscriptions (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  endpoint   TEXT NOT NULL UNIQUE,           -- browser push endpoint; one per device
+  p256dh     TEXT NOT NULL,                  -- browser public key, base64url
+  auth       TEXT NOT NULL,                  -- browser auth secret, base64url
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+);
+CREATE INDEX push_subscriptions_user ON push_subscriptions(user_id, created_at);
+
+CREATE TABLE push_log (
+  kind    TEXT NOT NULL,                     -- graded | reminder
+  slip_id INTEGER NOT NULL,
+  user_id INTEGER NOT NULL DEFAULT 0,        -- 0 for a slip-wide row
+  "key"   TEXT NOT NULL DEFAULT '',          -- per-kind discriminator, e.g. kickoff unix
+  sent_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+  PRIMARY KEY (kind, slip_id, user_id, "key")
+);
+
 CREATE TABLE sync_state (
   source                 TEXT PRIMARY KEY,     -- see data-sources.md "Sources"
   fetched_at             TEXT NOT NULL,
@@ -477,8 +502,16 @@ how to read it.
   `nflverse_player_weeks` also stores derived `carry_share`, optional `cpoe`, and fail-soft `ff_opportunity` expected
   volume/TD metrics (all `0` when absent).
 - A slip's reference odds are not stored; any view that shows them computes them.
-- `leg_votes` holds only cast votes. Clearing one deletes its row, and deleting a leg cascades. A vote changes no slip or
-  leg field and writes no activity entry.
+- `leg_votes` holds only cast votes. Clearing one deletes its row, and deleting a leg cascades. A vote changes no slip
+  or leg field and writes no activity entry.
+- `push_subscriptions.endpoint` is unique. Saving an endpoint that exists reassigns it to the caller and refreshes its
+  keys and `created_at`; each person keeps at most 10, and older rows are dropped past the cap. Rows cascade with their
+  user, and a push service's `404` or `410` deletes one.
+- `push_log` exists for dedupe: a sender writes a row with `INSERT OR IGNORE` before it sends and sends only when the
+  insert was new. `user_id` is `0` for a slip-wide event, and `key` carries a per-kind discriminator such as a kickoff
+  time. Nothing writes it yet.
+- `push_subscriptions` accepts only `https` endpoints on a known browser push host. `internal/push` checks that before
+  the store sees a row.
 - `slips.status` and `slips.result` stay in step with lock and leg-result changes.
 - `groups`, `group_members`, `slips`, and the rows that hang off a slip are scoped to one group. Weeks, games, odds,
   nfelo projections, nflverse signals, player matches, rosters, player game logs, and `sync_state` are global.
@@ -489,9 +522,12 @@ how to read it.
 - `odds.player_name` stores the canonical `roster_players.full_name` when matched (with trailing `(TEAM)` tags stripped)
   or a batch-unified spelling when unmatched; `odds.team` stores the matched team or valid `(TEAM)` tag hint.
 - `games.home_logo` and `games.away_logo` store validated `https://` ESPN team logo URLs (`NULL` when missing).
-- `player_gamelogs.stats_json` stores parsed season market values as a JSON map of float arrays, ordered most recent first. `player_gamelogs.games_json` stores the aligned JSON array of `espn.GameLogEntry` objects (`eventId`, `week`, `opponent`, `atVs`, `result`, `score`) in the same most-recent-first order.
+- `player_gamelogs.stats_json` stores parsed season market values as a JSON map of float arrays, ordered most recent
+  first. `player_gamelogs.games_json` stores the aligned JSON array of `espn.GameLogEntry` objects (`eventId`, `week`,
+  `opponent`, `atVs`, `result`, `score`) in the same most-recent-first order.
 - `player_matches` maps normalized sportsbook player names and teams to ESPN athlete IDs. A row with `manual = 1` was
   corrected by a user and is never overwritten by automated matching.
 - `games.period` and `games.clock` are populated only while a game is `LIVE` (`NULL` for `SCHEDULED` and `FINAL`).
-- `games.injuries_json` stores the raw ESPN summary injuries JSON array; `games.boxscore_json` stores the marshaled `espn.BoxScore` JSON for `LIVE` games (preserved when `SetGameSummary` is called with `nil` `boxscoreJSON`).
+- `games.injuries_json` stores the raw ESPN summary injuries JSON array; `games.boxscore_json` stores the marshaled
+  `espn.BoxScore` JSON for `LIVE` games (preserved when `SetGameSummary` is called with `nil` `boxscoreJSON`).
 - An invite token is a bearer secret. Do not log it or echo it in an error.

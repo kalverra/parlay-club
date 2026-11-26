@@ -21,3 +21,10 @@ One orchestrated execution of a change's TODO in its own worktree, from start to
 
 _Avoid:_ job, session
 ```
+
+## Push subscription
+
+One browser's Web Push endpoint and encryption keys, stored per device rather than per account. A person may have
+several, and turning notifications off, signing out, or a `404` or `410` from the push service removes one.
+
+_Avoid:_ push token

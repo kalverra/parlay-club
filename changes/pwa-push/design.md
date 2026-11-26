@@ -85,7 +85,8 @@ standard library `image/png`, so the art can be swapped later without code chang
 The VAPID subject is `BASE_URL`; Apple accepts an `https:` URL. Push is on only when both keys are set. Otherwise the
 notifications card is hidden, the subscription routes return 404, and `slips.Service` gets a nil `Notifier`. A one-shot
 `go run ./cmd/vapidkeys` prints a fresh pair for local use and for the runbook. Local dev works because browsers treat
-`localhost` as a secure context.
+`localhost` as a secure context. The deploy workflow does not mount the pair, so the push setup runbook stores both
+halves in Secret Manager and sets them on the service; later deploys keep them because they update env vars.
 
 **Schema (migration `0020_push.sql`).**
 
@@ -507,6 +508,10 @@ few dozen, and the instance wakes once per slip instead of 56 times a day.
   reminder. Accepted: flexes are announced days ahead, and someone visits in between.
 - **Queue misconfigured or no IAM.** Enqueue fails and logs on every `Sync`, and reminders stop. Events still work. The
   runbook's first-week check catches it.
+- **VAPID keys in production.** The deploy workflow does not mount the pair, so the push setup runbook sets both
+  variables on the service from Secret Manager. Later deploys keep them because they update env vars, but a deploy that
+  replaced env vars would turn push off until the runbook ran again. Mounting the private key in the workflow is the
+  durable fix.
 
 ## TODO
 
@@ -538,7 +543,7 @@ Risk: medium (new persistent table and an external push integration; real-device
       `/me`: browser-driven state, the iPhone install hint, the denied hint, on/off/test, and unsubscribe on logout. Add
       the `push` and `notificationclick` handlers to `sw.js`. Add route tests for auth, CSRF, reassign, the push-host
       allowlist, the 10-subscription cap, the expired-session redirect, and the VAPID-off 404.
-- [ ] Docs: extend `docs/concepts/notifications.md` with opt-in and sending. Update `docs/reference/config.md` and
+- [x] Docs: extend `docs/concepts/notifications.md` with opt-in and sending. Update `docs/reference/config.md` and
       `docs/reference/schema.md`. Add `docs/runbooks/push-setup.md` (generate keys, store the private key in Secret
       Manager, set env, and verify with Send test). Add the glossary term "Push subscription" to `GLOSSARY.md`.
 

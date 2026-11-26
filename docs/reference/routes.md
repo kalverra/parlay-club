@@ -488,12 +488,19 @@ fetches nothing. See [Docs hub](../concepts/docs-hub.md).
 
 | Method + path                  | Purpose                                                   | Response |
 | ------------------------------ | --------------------------------------------------------- | -------- |
-| `GET /me`                      | Profile: home book, plus the group member list             | Full page |
+| `GET /me`                      | Profile: home book, the group member list, and the per-device notifications card | Full page |
 | `POST /me`                     | Save `home_book`; blank means the median price             | 303 to `/me` |
 | `POST /users/{id}/active`      | Turn a group member on or off from `active`                | 303 to `/me` |
+| `POST /push/subscription`      | Store or reassign this device's Web Push subscription (`endpoint`, `keys.p256dh`, `keys.auth`) | 204; 400 for bad JSON or a refused endpoint; 404 when VAPID is off |
+| `DELETE /push/subscription`    | Remove this device's endpoint when it belongs to the caller (`endpoint`) | 204; 404 when VAPID is off |
+| `POST /push/test`              | Send the test notification to the caller's own devices     | 204, even with no stored device; 404 when VAPID is off |
 
 `POST /users/{id}/active` answers 422 for "You can't turn yourself off." and for a value that is not on or off. A user
 outside the active group is 404.
+
+The three push routes require `HX-Request: true` like every other write, and an expired HTMX session gets
+`HX-Redirect: /login`. The endpoint must be `https` on a known browser push host, and each person keeps at most 10; an
+11th replaces the oldest. See [Notifications](../concepts/notifications.md) and [Push setup](../runbooks/push-setup.md).
 
 ### Bug reports
 
