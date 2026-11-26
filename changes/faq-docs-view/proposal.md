@@ -1,6 +1,6 @@
 ---
 slug: faq-docs-view
-status: designed
+status: implementing
 created: "2026-11-25"
 accepted_by:
     - Adam Hamrick

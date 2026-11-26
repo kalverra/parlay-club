@@ -64,11 +64,12 @@ func (p Page) CurrentGroup() string {
 	return ""
 }
 
-// The three bottom-bar destinations.
+// The bottom-bar destinations.
 const (
 	TabGroups Tab = "groups"
 	TabWeek   Tab = "week"
 	TabRecord Tab = "record"
+	TabDocs   Tab = "docs"
 )
 
 // navTabs is the bottom bar in display order. The This week link is filled in
@@ -77,6 +78,7 @@ var navTabs = []NavTab{
 	{Tab: TabGroups, Label: "Groups", Href: "/"},
 	{Tab: TabWeek, Label: "This week", Href: "/"},
 	{Tab: TabRecord, Label: "Record Book", Href: "/record"},
+	{Tab: TabDocs, Label: "Docs", Href: "/docs"},
 }
 
 // Tabs returns the bottom bar with the page's own tab marked current.

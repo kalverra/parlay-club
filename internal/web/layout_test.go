@@ -22,9 +22,18 @@ func TestLayoutRendersBottomTabs(t *testing.T) {
 		Groups: []webui.GroupOption{{ID: 7, Name: "Sunday Parlay Club", Current: true}},
 	})
 
-	for _, label := range []string{"Groups", "This week", "Record Book"} {
+	for _, label := range []string{"Groups", "This week", "Record Book", "Docs"} {
 		assert.Contains(t, out, ">"+label+"</a")
 	}
+
+	assert.Contains(t, out, `href="/docs"`, "the Docs tab links to the hub")
+	assert.Contains(t, out, "grid-flow-col auto-cols-fr", "the bar shares width across however many tabs exist")
+	assert.NotContains(
+		t,
+		out,
+		"max-w-3xl grid-cols-3",
+		"the bottom bar no longer hardcodes three columns",
+	)
 
 	assert.Equal(t, 1, strings.Count(out, `aria-current="page"`))
 

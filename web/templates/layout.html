@@ -129,7 +129,7 @@
       class="fixed inset-x-0 bottom-0 z-20 border-t border-chrome-border bg-chrome/95 text-chrome-ink pb-[env(safe-area-inset-bottom)] backdrop-blur"
       aria-label="Main"
     >
-      <div class="mx-auto grid w-full max-w-3xl grid-cols-3">
+      <div class="mx-auto grid w-full max-w-3xl grid-flow-col auto-cols-fr">
         {{range .Tabs}}<a
             href="{{.Href}}"
             class="flex flex-col items-center gap-1 px-1 py-3 text-center text-[11px] leading-tight font-medium text-chrome-muted aria-[current=page]:font-semibold aria-[current=page]:text-chrome-ink"

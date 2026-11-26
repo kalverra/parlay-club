@@ -162,7 +162,7 @@ Complexity: medium (touches shared layout/nav contract, template registration, a
 data model) Risk: low (read-only routes and additive navigation; existing routes unchanged and covered by layout/route
 tests)
 
-- [ ] Add `TabDocs` (`Docs`, `/docs`) to `internal/web/page.go` and switch the bottom nav container in
+- [x] Add `TabDocs` (`Docs`, `/docs`) to `internal/web/page.go` and switch the bottom nav container in
       `web/templates/layout.html` from `grid-cols-3` to `grid-flow-col auto-cols-fr`, updating
       `internal/web/page_test.go` and `internal/web/layout_test.go`.
 - [ ] Implement `internal/web/docs.go` and `web/templates/docs.html` serving `GET /docs` (How Systems Work + FAQ with
