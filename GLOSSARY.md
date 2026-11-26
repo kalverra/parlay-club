@@ -28,3 +28,11 @@ One browser's Web Push endpoint and encryption keys, stored per device rather th
 several, and turning notifications off, signing out, or a `404` or `410` from the push service removes one.
 
 _Avoid:_ push token
+
+## Slip start
+
+The earliest kickoff among a slip's eligible games, fixed even after it passes. A kickoff reminder is keyed to it, so a
+moved kickoff or a later kickoff wave cannot send a second reminder. A slip's next deadline is different: it rolls
+forward to the next kickoff still ahead.
+
+_Avoid:_ first game, deadline

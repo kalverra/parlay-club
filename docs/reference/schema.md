@@ -2,8 +2,8 @@
 id: schema
 title: Database schema
 type: reference
-summary: SQLite schema, migrations, connection pools, and table conventions for groups, users, games, odds, nfelo, nflverse, slips, legs, rosters, game logs, push subscriptions, and the API archive.
-tags: [database, sqlite, migrations, groups, archive, api, raw-responses, odds, links, nfelo, nflverse, projections, roster, gamelog, player-matching, injuries, votes, push, web-push, subscriptions]
+summary: SQLite schema, migrations, connection pools, and table conventions for groups, users, games, odds, nfelo, nflverse, slips, legs, rosters, game logs, push subscriptions, reminder tasks, and the API archive.
+tags: [database, sqlite, migrations, groups, archive, api, raw-responses, odds, links, nfelo, nflverse, projections, roster, gamelog, player-matching, injuries, votes, push, web-push, subscriptions, reminders, cloud-tasks]
 ---
 
 # Database schema
@@ -26,7 +26,8 @@ and `injury_date` to `roster_players`. `0015_research_context.sql` adds `games_j
 opponent, player name, position, passing/rushing/receiving/kicking stat columns, and `idx_nflverse_player_weeks_opp_pos`
 to `nflverse_player_weeks`. `0018_live_game_state.sql` adds nullable `period`, `clock`, and `boxscore_json` columns to
 `games`. `0019_v2_opportunity_signals.sql` adds expected opportunity, `carry_share`, and `cpoe` columns to
-`nflverse_player_weeks`. `0020_push.sql` adds `push_subscriptions` and `push_log`.
+`nflverse_player_weeks`. `0020_push.sql` adds `push_subscriptions` and `push_log`. `0021_reminder_tasks.sql` adds
+`reminder_tasks`.
 
 ## Connection settings
 
@@ -58,7 +59,7 @@ writer handle.
 - `db.Migrate` applies every file whose number is greater than `PRAGMA user_version`, in number order.
 - Each file runs in its own transaction. The migration's statements and its `user_version` bump commit together, so a
   failed migration leaves neither behind.
-- A fresh database ends at version 20 with every table below.
+- A fresh database ends at version 21 with every table below.
 - `0001_init.sql` creates `groups`, `group_members`, and `slips.group_id`. A database created before groups existed has
   the old `slips` shape, so delete it and let the migrations rebuild.
 - `0002_google_identity.sql` rebuilds `users` in its transaction with the SQLite 12-step method and
@@ -97,7 +98,9 @@ writer handle.
 - `0020_push.sql` creates `push_subscriptions` (one browser endpoint per device, cascading from `users`, with a
   per-person lookup index) and `push_log` (dedupe reservations keyed by kind, slip, user, and key). It changes no
   existing table.
-- Never edit an applied file. Add `0021_name.sql` and up.
+- `0021_reminder_tasks.sql` creates `reminder_tasks`, one row per slip whose kickoff reminder was enqueued. It changes no
+  existing table.
+- Never edit an applied file. Add `0022_name.sql` and up.
 - `PRAGMA user_version` on the database file is the only record of what ran.
 
 ## Tables
@@ -126,6 +129,7 @@ writer handle.
 | `activity`        | Human-readable slip history; `user_id` is NULL for system entries. |
 | `push_subscriptions` | One browser push endpoint per device, its keys, and the person who owns it. |
 | `push_log`        | Reservation rows that dedupe graded and reminder notifications. |
+| `reminder_tasks`  | The slip start each enqueued kickoff reminder is for, and when it fires. |
 | `sync_state`      | Last fetch time per outside data source, plus remaining odds credits. |
 | `api_bodies`      | Raw external response bodies, gzipped and keyed by the SHA-256 of the uncompressed bytes. |
 | `api_responses`   | One row per archived external call: source, key, redacted URL, status, time, and body hash. |
@@ -444,6 +448,13 @@ CREATE TABLE push_log (
   PRIMARY KEY (kind, slip_id, user_id, "key")
 );
 
+CREATE TABLE reminder_tasks (
+  slip_id      INTEGER PRIMARY KEY REFERENCES slips(id) ON DELETE CASCADE,
+  start_utc    TEXT NOT NULL,                -- RFC 3339 UTC; the slip's fixed first kickoff
+  scheduled_at TEXT NOT NULL,                -- RFC 3339 UTC; start minus the reminder lead
+  updated_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+);
+
 CREATE TABLE sync_state (
   source                 TEXT PRIMARY KEY,     -- see data-sources.md "Sources"
   fetched_at             TEXT NOT NULL,
@@ -508,8 +519,13 @@ how to read it.
   keys and `created_at`; each person keeps at most 10, and older rows are dropped past the cap. Rows cascade with their
   user, and a push service's `404` or `410` deletes one.
 - `push_log` exists for dedupe: a sender writes a row with `INSERT OR IGNORE` before it sends and sends only when the
-  insert was new. `user_id` is `0` for a slip-wide event, and `key` carries a per-kind discriminator such as a kickoff
-  time. Nothing writes it yet.
+  insert was new. `user_id` is `0` for a slip-wide event. Grades write `kind=graded` with an empty `key`; reminders write
+  `kind=reminder` with the person's `user_id` and an empty `key`, so each person gets one per slip. `key` stays for a
+  future per-kind discriminator.
+- `reminder_tasks` holds at most one row per slip, keyed by `slip_id` and cascading with it. `start_utc` is the slip's
+  fixed first kickoff and `scheduled_at` is that minus 20 minutes. A row is written only after the scheduler accepts the
+  task or reports that it already exists, so a failed enqueue leaves no row and the next sync retries. `updated_at` moves
+  when the start changes.
 - `push_subscriptions` accepts only `https` endpoints on a known browser push host. `internal/push` checks that before
   the store sees a row.
 - `slips.status` and `slips.result` stay in step with lock and leg-result changes.

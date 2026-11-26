@@ -585,7 +585,7 @@ persistent scheduling state)
       the after-commit Notifier, and the Apple and Google push services. Update the free-tier guardrail in `AGENTS.md`
       and the scheduled-jobs guardrail in `docs/concepts/data-refresh.md` so both allow per-slip reminder tasks on Cloud
       Tasks next to the optional prefill job. Cover it with `httptest` tests.
-- [ ] Docs: add reminders, including the lifecycle and edge cases, to `docs/concepts/notifications.md`. Add
+- [x] Docs: add reminders, including the lifecycle and edge cases, to `docs/concepts/notifications.md`. Add
       `REMINDER_TOKEN` and `REMINDER_QUEUE` to `docs/reference/config.md` and `reminder_tasks` to
       `docs/reference/schema.md`. Add the queue setup and the first-week check to `docs/runbooks/push-setup.md`. Add the
       glossary term "Slip start" to `GLOSSARY.md`.

@@ -20,10 +20,10 @@ One `http.ServeMux` holds every route, using Go 1.22 method patterns. Handlers s
 ## Middleware
 
 All routes except `/healthz`, `/readyz`, `/static/`, `/manifest.webmanifest`, `/sw.js`, `/screenshots/{token}.jpg`,
-`/login`, `POST /logout`, the Google sign-in routes, the dev sign-in routes, and `POST /internal/prefill` need a
-signed-in user. Those public/internal routes are registered outside session checks (`POST /internal/prefill` also sits
-on an outer mux outside `CSRF` and uses bearer auth instead). Everything else runs through three wrappers, outermost
-first. See [Access](../concepts/access.md) for cookies and sign-in.
+`/login`, `POST /logout`, the Google sign-in routes, the dev sign-in routes, `POST /internal/prefill`, and
+`POST /internal/reminders` need a signed-in user. Those public/internal routes are registered outside session checks
+(the internal posts also sit on an outer mux outside `CSRF` and use bearer auth instead). Everything else runs through
+three wrappers, outermost first. See [Access](../concepts/access.md) for cookies and sign-in.
 
 | Middleware    | Rejects                                                        | Response                          |
 | ------------- | -------------------------------------------------------------- | --------------------------------- |
@@ -52,6 +52,7 @@ of their groups makes that group active instead.
 | `GET /auth/google/callback`         | Finish Google sign-in                                                   | Bad `state`, code exchange, or identity answers 400 with the sign-in page. |
 | `GET /dev/login`, `POST /dev/login` | Local sign-in form and submit                                           | Registered only when `APP_ENV=dev` and `GOOGLE_CLIENT_ID` is empty. |
 | `POST /internal/prefill`            | Run the per-game-day pre-fill sweep synchronously                       | Warms lines and Parlay-only props for today's upcoming non-`FINAL` games in ET (or all upcoming week games on a non-game day) and records `prefill:gameday`. Outside cookie/CSRF middleware; requires `Authorization: Bearer <PREFILL_TOKEN>` (constant-time compare). Returns 404 when `PREFILL_TOKEN` is empty, 401 on missing/invalid token, 503 in sandbox mode, 200 JSON `PrefillReport` on success, or 500 JSON on failure. |
+| `POST /internal/reminders`          | Fire one slip's kickoff reminder                                        | Reads `?slip=` and `?start=` (unix), then rechecks the slip, its start, the 30-to-10-minute fire window, and each member's next step from SQLite. Outside cookie/CSRF middleware; requires `Authorization: Bearer <REMINDER_TOKEN>` (constant-time compare). Returns 404 when the token is empty, 401 on missing/invalid token, 400 on a bad slip or start, 200 JSON `reminders.Report` for a send or a skip, or 500 JSON on a store error so Cloud Tasks retries. |
 
 `GET /healthz` is what Cloud Run's startup and liveness probes call. It pings SQLite with a two-second timeout derived
 from the request, so a probe never waits on a busy database. A healthy handle answers 200 with the body `ok`; a closed
@@ -575,12 +576,12 @@ Templates under `web/templates/` and view-model helpers in `internal/web/` use t
 | 201  | A created resource for JSON requests, such as adding a recurring schedule. |
 | 204  | A successful write with no content returned, such as deleting a schedule. |
 | 303  | A plain form redirect or landing redirect, such as create slip, save profile, logout, joining a group, or the one-group landing. |
-| 400  | A malformed form body, a bug report validation error, or a failed Google round trip. |
-| 401  | Missing or invalid bearer token on `POST /internal/prefill`. |
+| 400  | A malformed form body, a bug report validation error, a bad `slip` or `start` on the reminder post, or a failed Google round trip. |
+| 401  | Missing or invalid bearer token on `POST /internal/prefill` or `POST /internal/reminders`. |
 | 403  | A non-GET request without `HX-Request: true`. |
-| 404  | A missing slip, leg, member, or group; a resource in another group; an unknown invite token; a selection not on the cached slate at `/research/bet`; or `POST /internal/prefill` when `PREFILL_TOKEN` is empty. |
+| 404  | A missing slip, leg, member, or group; a resource in another group; an unknown invite token; a selection not on the cached slate at `/research/bet`; or either internal post when its token is empty. |
 | 422  | A fixable rule refusal or form error. The body is the short message shown in the form. |
-| 500  | An unexpected store or render failure, a signed-in user with no group, or a failed `RunPrefill` pass. |
+| 500  | An unexpected store or render failure, a signed-in user with no group, a failed `RunPrefill` pass, or a failed reminder fire. |
 | 503  | `POST /internal/prefill` in sandbox mode, or `/healthz` when SQLite is unreachable. |
 
 Rule violations from `internal/slips` (`ErrLegLimit`, `ErrKickoffLocked`, `ErrGameOutsideScope`, `ErrLockedIn`,

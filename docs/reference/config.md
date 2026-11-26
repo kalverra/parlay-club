@@ -2,8 +2,8 @@
 id: config
 title: Configuration
 type: reference
-summary: Environment variables the server reads, including dev defaults, odds and Web Push keys, the pre-fill bearer token, the sandbox switch, and the values it rejects in prod.
-tags: [config, environment, startup, google, oauth, odds, parlay-api, the-odds-api, prefill, sandbox, offline, github, bug-reports, vapid, push, web-push]
+summary: Environment variables the server reads, including dev defaults, odds and Web Push keys, the pre-fill and reminder bearer tokens, the Cloud Tasks queue, the sandbox switch, and the values it rejects in prod.
+tags: [config, environment, startup, google, oauth, odds, parlay-api, the-odds-api, prefill, reminders, cloud-tasks, sandbox, offline, github, bug-reports, vapid, push, web-push]
 ---
 
 # Configuration
@@ -29,6 +29,8 @@ exits with status 1 when any value is invalid.
 | `GITHUB_TOKEN`         | empty                    | GitHub token for creating bug report issues. Optional in dev and prod; empty saves reports to SQLite only. |
 | `GITHUB_REPO`          | `kalverra/parlay-club`   | Target `owner/repo` for bug report issues. Defaults to `kalverra/parlay-club` in dev and prod. |
 | `PREFILL_TOKEN`        | empty                    | Bearer token for `POST /internal/prefill`. Optional in dev and prod; empty disables the endpoint (`404`). |
+| `REMINDER_TOKEN`       | empty                    | Bearer token for `POST /internal/reminders`. Optional in dev and prod; empty disables the endpoint (`404`) and scheduling. |
+| `REMINDER_QUEUE`       | empty                    | Full Cloud Tasks queue path, `projects/{project}/locations/{region}/queues/{queue}`. Prod needs it with `REMINDER_TOKEN` to schedule reminders. Optional in dev. |
 | `VAPID_PUBLIC_KEY`     | empty                    | Web Push public key, base64url. Push is on only when both VAPID keys are set. Generate a pair with `go run ./cmd/vapidkeys`. Optional in dev and prod. |
 | `VAPID_PRIVATE_KEY`    | empty                    | The matching private key. A secret: keep it in Secret Manager in prod and pass it to the service as an environment variable. Optional in dev and prod. |
 | `LOG_LEVEL`            | `debug`                  | A zerolog level: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `panic`, `disabled`. `prod` defaults to `info`. |
@@ -65,6 +67,13 @@ creating a GitHub issue. `GITHUB_REPO` defaults to `kalverra/parlay-club`.
 `PREFILL_TOKEN` is trimmed of surrounding whitespace and is optional in both dev and prod. When empty,
 `POST /internal/prefill` returns `404` fail-closed. When set, callers must send `Authorization: Bearer <PREFILL_TOKEN>`,
 verified with constant-time comparison (`subtle.ConstantTimeCompare`).
+
+`REMINDER_TOKEN` and `REMINDER_QUEUE` drive kickoff reminders, both trimmed of surrounding whitespace. `REMINDER_TOKEN` is
+the bearer value the queue sends to `POST /internal/reminders`; when it is empty the endpoint answers `404` and nothing is
+scheduled. Production also needs `REMINDER_QUEUE`, the full queue path, so the app can enqueue one Cloud Tasks task per
+open slip. With both set, a bad queue path or `BASE_URL` logs one error at boot and leaves reminders off; the server
+still starts. A dev server schedules with an in-process timer from `REMINDER_TOKEN` alone. Reminders also stay off while
+push is off, because there is no sender. [Push setup](../runbooks/push-setup.md) creates the queue and both values.
 
 `VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY` are the Web Push key pair, trimmed of surrounding whitespace. Push is on only
 when both are set. With either missing, `/me` hides the notifications card and the three push routes answer `404`; a

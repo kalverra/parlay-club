@@ -2,8 +2,11 @@
 id: notifications
 title: Notifications
 type: concept
-summary: How the app installs to a phone or desktop home screen, turns on per-device Web Push from the profile page, stores subscriptions, and sends test messages and slip events through VAPID.
-tags: [pwa, install, manifest, service-worker, icons, ios, safe-area, notifications, web-push, vapid, push-subscriptions, slip-events]
+summary: How the app installs to a phone or desktop home screen, turns on per-device Web Push from the profile page, stores subscriptions, and sends test messages, slip events, and timed kickoff reminders through VAPID.
+tags: [pwa, install, manifest, service-worker, icons, ios, safe-area, notifications, web-push, vapid, push-subscriptions, slip-events, reminders, cloud-tasks, kickoff]
+budget:
+  max_lines: 380
+  reason: Install, per-device push, slip events, and the kickoff reminder lifecycle all end at the same worker and sender, so they read as one concept.
 ---
 
 # Notifications
@@ -158,7 +161,8 @@ so the work survives a client disconnect. Send test sends "Notifications are on 
 devices. Slip events send the same way, described below.
 
 The `push_log` table exists for dedupe: a sender reserves a row before it sends, so a retried event never sends twice.
-Slip grades use it, one slip-wide row per grade.
+Slip grades use it, one slip-wide row per grade. Reminders use it too, one row per person per slip, so a moved kickoff
+and a Cloud Tasks retry cannot send a second one.
 
 ## Slip events
 
@@ -187,6 +191,122 @@ the one pick when only one was added. `internal/push` implements it and decides 
 `cmd/server` passes an untyped `nil` notifier when push is off, never a nil `*push.Service`, because a typed nil inside
 an interface is not `== nil`.
 
+## Reminders
+
+Each person gets at most one reminder per slip, 20 minutes before the slip starts, and only while they still owe legs or
+have not locked in. Nothing polls. Every open slip gets one timed Cloud Tasks task made ahead of time, and the fire
+rechecks the slip from SQLite, so the task only has to arrive on time.
+
+```mermaid
+stateDiagram-v2
+  [*] --> Unscheduled: slip created
+  Unscheduled --> Scheduled: Sync enqueues at start - 20m
+  Unscheduled --> Skipped: start - 20m already past
+  Scheduled --> Scheduled: kickoff moves; Sync enqueues the new start
+  Scheduled --> Fired: Cloud Tasks calls the endpoint
+  Fired --> Sent: OPEN, start matches, member still picking or locking in
+  Fired --> Skipped: stale task, LOCKED or GRADED, everyone done, or already sent
+  Sent --> [*]
+  Skipped --> [*]
+```
+
+### The slip start
+
+The reminder targets the **slip start**: `slips.FirstKickoff`, the earliest kickoff among the slip's scoped games,
+whether it has passed or not. A Thursday slip starts Thursday night. A Sunday-main slip starts at the 1 PM kickoff, or
+9:30 AM on a London week. A custom one-game slip starts at that game.
+
+This is not `NextStep`'s deadline. That deadline rolls forward to the next kickoff still ahead, because picks stay open
+until every game has kicked off. A reminder keyed to it would fire again before each kickoff wave. The fixed start plus
+one `push_log` row per person per slip keeps it to one.
+
+### Scheduling
+
+`reminders.Sync(ctx, now)` gives a task to every open slip whose start is still ahead. It runs after each refresh pass,
+which every full-page load already starts, and after `POST /slips` creates a slip by hand. The pass that creates a
+scheduled slip also schedules its reminder.
+
+```mermaid
+flowchart TD
+  CALL[Sync runs] --> Q[OPEN slips]
+  Q --> D["start = FirstKickoff"]
+  D -->|"none, or start - 20m already past"| NEXT[next slip]
+  D -->|"more than 30 days out"| NEXT
+  D --> R{reminder_tasks row matches start?}
+  R -->|yes| NEXT
+  R -->|no| E["Scheduler.Enqueue at start - 20m"]
+  E -->|"ok or already exists"| U[upsert reminder_tasks]
+  E -->|error| LOG[log; next Sync retries]
+  U --> NEXT
+```
+
+- Less than 20 minutes before the start, or after it, means no task. A person creating a slip that late is already in
+  the app.
+- Cloud Tasks refuses a task more than 30 days out, so `Sync` skips it and a later pass picks it up.
+- A moved first kickoff enqueues a new task for the new start. The old one is not deleted: it fires, sees the start no
+  longer matches, and skips.
+- The `reminder_tasks` row is written only after the scheduler accepts the task or answers that it already exists. An
+  error leaves no row, so the next `Sync` retries.
+- A normal pass reads the open slips, the task rows, and one set of games per week, with no scheduler call when the start
+  has not moved.
+
+The scheduler is `CloudTasks` in production and `LocalTimers` on a dev server. Sandbox mode wires none, because its clock
+is frozen.
+
+### Firing
+
+`POST /internal/reminders?slip={id}&start={unix}` is public like `POST /internal/prefill`. It sits outside cookie and
+CSRF middleware, requires `Authorization: Bearer <REMINDER_TOKEN>`, and answers `404` when the token is empty. The handler
+loads the slip, members, legs, and week games, then asks the pure `reminders.Due` who should hear from it.
+
+A fire sends only when all of these hold:
+
+- The slip is `OPEN`.
+- `start` still equals the slip's first kickoff.
+- The clock is between 30 and 10 minutes before the start. That covers the 15–30 minute target with room for delivery
+  and one retry.
+- The person is active and `NextStep` is `pick` or `lock_in`.
+- The `push_log` row for this person, slip, and `reminder` kind was new.
+
+| Person's step | Body |
+| ------------- | ---- |
+| `pick`        | "Kickoff in 20 minutes. You still need 2 legs." (the count follows what is left) |
+| `lock_in`     | "Kickoff in 20 minutes. Your legs are in; lock them in." |
+
+Each message is titled with the slip's name, opens `/slips/{id}`, and uses tag `slip-{id}-reminder`. The tag replaces an
+earlier reminder for the same slip on the device. Someone in two slips with the same start gets one message per slip.
+
+A stale or no-op fire answers `200 {skipped: ...}`, so Cloud Tasks stops. A database error answers `500`, and the queue
+retries up to three attempts with a 30 second minimum backoff. Rows are reserved before each send, so a retry after a
+partial send reaches only the people not yet sent to.
+
+### Edge cases
+
+| Case | What happens |
+| ---- | ------------ |
+| Kickoff flexed later | The next `Sync` enqueues a new task. The old one fires early, sees the start mismatch, and skips. |
+| Kickoff moved earlier | The same, if a page load runs `Sync` before the new fire time. Otherwise the old task fires after kickoff and no reminder goes out. |
+| Slip created under 20 minutes before its start, or after it | No task. The creator is already in the app. |
+| Everyone locks in before the fire time | The slip is `LOCKED`, so the handler skips it. |
+| A member is removed after scheduling | Members are read at fire time, so that person gets nothing. |
+| Deploy or cold start at fire time | Cloud Tasks waits for the instance. A cold start costs a few seconds. |
+| Cloud Tasks retries after a partial send | `push_log` rows kept the first send from repeating. |
+| The start moves, so a second task fires | The empty `push_log` key still dedupes to one reminder per person per slip. |
+| Someone is in two slips that start together | Two tasks, two messages, each opening its own slip. |
+
+### Sandbox
+
+`/dev/sandbox` has a **Send reminders now** button. It sends for the active group's newest open slip against the frozen
+scenario clock, skipping only the fire-window check. The start and status checks still apply, so a tester can switch
+personas and watch who gets a push.
+
+### Configuration
+
+Reminders need a sender, `REMINDER_TOKEN`, and in production `REMINDER_QUEUE`. With push off, no token, or, in
+production, no queue, `Sync` does nothing and the endpoint answers `404` or skips as disabled. [Push
+setup](../runbooks/push-setup.md) creates the queue, the secret, and both variables. [Configuration](../reference/config.md)
+lists the values.
+
 ## iPhone layout
 
 `layout.html` adds the manifest link, a 180 `apple-touch-icon`, and the Apple standalone tags. The status bar style is
@@ -210,8 +330,15 @@ nothing. Notify tests cover each event: the actor is left out, an outsider gets 
 once across two passes, and the message text matches the table above. A recording notifier in `internal/slips` checks
 that each mutation raises its event only after the commit, and that a rolled-back transaction or a no-op raises nothing.
 
-Real-phone behavior stays manual: the permission prompt inside the tap, the iOS install flow, and a dropped subscription
-showing Off.
+Reminder tests use a fixed clock. `Due` table tests cover the fire window, a stale start, a locked slip, scoped games,
+and each member step. `Sync` tests with a recording scheduler check one enqueue per start, a moved start, the 30-day
+horizon, the 20-minute cut-off, an already-exists answer, and an error leaving no row. `CloudTasks` tests point at a
+stand-in metadata server and API and check the task name, schedule time, URL, bearer header, and a `409`. Handler tests
+check the bearer token, the empty-token `404`, a stale fire, a database error, and one send across two fires. Sandbox
+tests check that only the personas who still need something get a reminder.
+
+Real-phone behavior stays manual: the permission prompt inside the tap, the iOS install flow, a dropped subscription
+showing Off, and the first-week reminder check in [Push setup](../runbooks/push-setup.md).
 
 ## Trade-offs
 
@@ -233,13 +360,18 @@ showing Off.
   pointed at an arbitrary URL.
 - On a shared phone the last person to subscribe owns the endpoint. Signing out clears it, but a session that simply
   expires leaves the previous person's notifications arriving until someone turns them off.
+- No page load, no reminder task. Every way of creating a slip runs `Sync`, so this is rare, and a slip made inside the
+  last 20 minutes has no reminder anyway. A kickoff moved earlier with no visit since has the same result: the old task
+  fires after kickoff and skips.
+- A broken queue or missing IAM stops reminders without stopping anything else. Enqueue errors are logged on each
+  `Sync`, event pushes keep working, and the runbook's first-week check catches it.
 
 ## Related
 
 - [Access](access.md): the public routes and the session checks everything else runs through.
 - [Routes](../reference/routes.md): the manifest, worker, push, and static route table.
-- [Configuration](../reference/config.md): `VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY`.
-- [Database schema](../reference/schema.md): `push_subscriptions` and `push_log`.
-- [Push setup](../runbooks/push-setup.md): generating a key pair and turning push on in dev and prod.
+- [Configuration](../reference/config.md): `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `REMINDER_TOKEN`, and `REMINDER_QUEUE`.
+- [Database schema](../reference/schema.md): `push_subscriptions`, `push_log`, and `reminder_tasks`.
+- [Push setup](../runbooks/push-setup.md): generating a key pair, turning push and reminders on in dev and prod, and the first-week check.
 - [Live updates](live-updates.md): the `EventSource` stream the worker deliberately does not sit in front of.
 - [Local development](../guides/local-dev.md): serving the app on `localhost`, which browsers treat as a secure context.
