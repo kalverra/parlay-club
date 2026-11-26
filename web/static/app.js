@@ -203,6 +203,16 @@ function closeGroupSwitcher(event) {
   }
 }
 
+// Closes an open grade breakdown when a tap lands outside it, so two popovers
+// never stack awkwardly on a phone.
+function closeHelpPopovers(event) {
+  for (const popover of document.querySelectorAll("details[data-help-popover][open]")) {
+    if (!popover.contains(event.target)) {
+      popover.open = false;
+    }
+  }
+}
+
 // Theme cycling and pc_theme cookie persistence.
 const themeCatalog = [
   { id: "paper-turf", label: "Paper & Turf", shortLabel: "Paper", colorScheme: "dark", themeColor: "#0f1e16" },
@@ -278,6 +288,7 @@ document.addEventListener("click", (event) => {
     return;
   }
   closeGroupSwitcher(event);
+  closeHelpPopovers(event);
 });
 
 // The leg form opens in a bottom sheet. The sheet shell lives on the slip page

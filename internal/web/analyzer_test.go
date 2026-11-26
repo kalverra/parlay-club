@@ -718,17 +718,17 @@ func TestSlipPanelAndTrayWireNFLverseGradesAndRuleLinks(t *testing.T) {
 		panelBody := panelRec.Body.String()
 		assert.Contains(t, panelBody, `data-rule="tough_matchup"`)
 		assert.Contains(t, panelBody, `data-rule="shrinking_role"`)
-		assert.Contains(t, panelBody, fmt.Sprintf(`/analyzer/guide?from=/slips/%d#rule-tough_matchup`, fixture.slip.ID))
+		assert.Contains(t, panelBody, fmt.Sprintf(`/docs/grading?from=/slips/%d#rule-tough_matchup`, fixture.slip.ID))
 		assert.Contains(
 			t,
 			panelBody,
-			fmt.Sprintf(`/analyzer/guide?from=/slips/%d#rule-shrinking_role`, fixture.slip.ID),
+			fmt.Sprintf(`/docs/grading?from=/slips/%d#rule-shrinking_role`, fixture.slip.ID),
 		)
-		assert.Contains(t, panelBody, fmt.Sprintf(`/analyzer/guide?from=/slips/%d"`, fixture.slip.ID))
+		assert.Contains(t, panelBody, fmt.Sprintf(`/docs/grading?from=/slips/%d"`, fixture.slip.ID))
 		assert.Contains(t, panelBody, `data-slip-grade`)
 		assert.Contains(t, panelBody, `data-leg-grade`)
-		assert.Contains(t, panelBody, fmt.Sprintf(`/analyzer/guide?from=/slips/%d#leg-grades`, fixture.slip.ID))
-		assert.Contains(t, panelBody, fmt.Sprintf(`/analyzer/guide?from=/slips/%d#slip-grade`, fixture.slip.ID))
+		assert.Contains(t, panelBody, fmt.Sprintf(`/docs/grading?from=/slips/%d#leg-grades`, fixture.slip.ID))
+		assert.Contains(t, panelBody, fmt.Sprintf(`/docs/grading?from=/slips/%d#slip-grade`, fixture.slip.ID))
 
 		trayRec := httptest.NewRecorder()
 		trayReq := httptest.NewRequestWithContext(
@@ -746,9 +746,9 @@ func TestSlipPanelAndTrayWireNFLverseGradesAndRuleLinks(t *testing.T) {
 		assert.Contains(
 			t,
 			trayBody,
-			fmt.Sprintf(`/analyzer/guide?from=/slips/%d/pick#rule-tough_matchup`, fixture.slip.ID),
+			fmt.Sprintf(`/docs/grading?from=/slips/%d/pick#rule-tough_matchup`, fixture.slip.ID),
 		)
-		assert.Contains(t, trayBody, fmt.Sprintf(`/analyzer/guide?from=/slips/%d/pick#leg-grades`, fixture.slip.ID))
+		assert.Contains(t, trayBody, fmt.Sprintf(`/docs/grading?from=/slips/%d/pick#leg-grades`, fixture.slip.ID))
 	})
 
 	t.Run("stale nflverse fails soft without rules", func(t *testing.T) {

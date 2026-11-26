@@ -189,7 +189,7 @@ Complexity: medium (coordinates a shared template partial across slip, pick, hig
 validating every anchor target) Risk: low (UI-only markup and progressive-enhancement popover dismissal; no state or
 grading math changes)
 
-- [ ] Add a reusable `help-bubble` partial and wire it into leg grades, slip grades, analyzer warnings, pick-board
+- [x] Add a reusable `help-bubble` partial and wire it into leg grades, slip grades, analyzer warnings, pick-board
       signal badges, `nfelo` model chips, implied probability / reference odds, and live hit chance in
       `web/templates/partials.html` (plus outside-click popover close in `web/static/app.js`), keeping `?` bubbles
       outside `<summary>` elements and adding tests that verify every rendered `?` bubble anchor exists in `/docs`,

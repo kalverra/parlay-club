@@ -34,7 +34,7 @@ flowchart LR
   Rules --> UI["Slip Panel & Pick Tray (375px Breakdown)"]
   EngineV2 --> UI
   Highlights --> UI
-  UI -->|"tap Why? or rubric"| Guide["GET /docs/grading (alias /analyzer/guide)"]
+  UI -->|"tap ? bubble"| Guide["GET /docs/grading (alias /analyzer/guide)"]
   Guide <-->|"results / how grading works"| Results["GET /docs/evals (alias /analyzer/results)"]
   EngineDocs["RuleDocs() + DefaultV2Config + GradeRubric()"] --> Guide
   Cache["eval.Cache (Slips & Market)"] --> Results
@@ -42,20 +42,25 @@ flowchart LR
 
 ## What the banner shows
 
-The slip panel renders the Analyzer section under the legs, with a "How grading works" link to `/analyzer/guide`:
+The slip panel renders the Analyzer section under the legs, with a "How grading works" link to `/docs/grading`:
 
 - **Overall slip grade**: a clickable A–F pill with a one-line sharp-friend summary. Tapping it opens an inline
   `<details>` breakdown formatted for 375px phone width: an optional "High uncertainty" badge, a copula Script
   multiplier summary on multi-leg slips, the four 0–100 pillar meters (Price & Vig, Script Fit, Stability & Tail Risk,
-  Context & Traps), up to three plain-English "Why" bullets from the strongest drivers, and a "See full rubric" link to
-  `/analyzer/guide#slip-grade`. When `Pillars` is empty (such as under `EngineV1`), the popover falls back to the factor
+  Context & Traps), up to three plain-English "Why" bullets from the strongest drivers, and a `?` bubble to
+  `/docs/grading#slip-grade`. When `Pillars` is empty (such as under `EngineV1`), the popover falls back to the factor
   list.
 - **Per-leg grade pills**: each graded leg row displays its A–F pill; tapping it opens the same compact four-pillar
-  breakdown for that leg and links to `/analyzer/guide#leg-grades`. Legs with market `OTHER` or an unmatched game show
-  no grade pill.
+  breakdown for that leg and a `?` bubble to `/docs/grading#leg-grades`. Legs with market `OTHER` or an unmatched game
+  show no grade pill.
 - **Warning cards**: with no warnings it shows a green "Looks clean". Otherwise it shows one card per warning, sorted
   Danger, Warn, then Info and colored red, amber, and blue. Each card carries the message, the severity, a chip for
-  every leg involved with its owner's name, and a "Why?" link to `/analyzer/guide#rule-<id>`.
+  every leg involved with its owner's name, and a `?` bubble to `/docs/grading#rule-<id>`.
+
+Other inline annotations pair with the same `?` bubble: the `nfelo` model chip points at `#term-nfelo`, implied chance
+at `#term-implied-prob`, reference odds at `#term-reference-odds`, live hit chance at `#sys-live`, and the pick detail's
+badge row at `#suggestions`. Every bubble carries the current screen as `?from=` so the docs page can link back. Tapping
+outside an open grade breakdown closes it, so popovers never stack on a phone.
 
 The banner is part of the slip panel, so it refreshes with the panel on `slip-updated` and `board-updated`. A weather or
 nflverse update needs no separate wiring: the next board refresh re-renders the slip, and the rules and grades see the
