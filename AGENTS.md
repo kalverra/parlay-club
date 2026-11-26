@@ -25,7 +25,8 @@ passing overs are risky"). Every pick stays allowed, and the tone stays free of 
 - Close idle SSE streams per the live-updates policy; an open stream keeps the instance billed.
 - Background `Kick()` runs on authenticated full-page loads only, syncing free/unmetered sources outside the one-shot
   per-game-day morning pre-fill (`prefill:gameday`); scheduled jobs are limited to the optional `POST /internal/prefill`
-  fallback, and any additional scheduled jobs require a plan change.
+  fallback and per-slip reminder tasks on Cloud Tasks (one task per open slip at its start minus 20 minutes), and any
+  additional scheduled jobs require a plan change.
 
 <!-- good-vibes:begin -->
 <!-- Managed by `good-vibes init`. Edits inside this block are overwritten. -->

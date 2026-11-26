@@ -65,3 +65,32 @@ flowchart TD
   PROJECT --> ENV[environment]
   ENV --> FLAGS[command flags]
 ```
+
+### Outbound push and timed reminders
+
+<!--
+  Caption: every way a phone hears from the server. Slip events leave after the commit, inside the request that caused
+  them. Reminders wait in Cloud Tasks and recheck SQLite when they fire.
+-->
+
+```mermaid
+flowchart LR
+  SYNC["reminders.Sync<br/>after a refresh pass or a slip create"] -->|"one task per slip start"| QUEUE["Cloud Tasks queue"]
+  QUEUE -->|"at start − 20m"| REM["POST /internal/reminders"]
+  REM --> PUSH["push.Service"]
+  SLIPS["slips.Service"] -->|"after commit: Notifier"| PUSH
+  PUSH --> DB[("push_subscriptions, push_log")]
+  PUSH -->|"Web Push, VAPID"| APPLE["Apple push service"]
+  PUSH -->|"Web Push, VAPID"| GOOGLE["Google push service"]
+```
+
+Two paths reach the same sender. Slip events (`legs_added`, `slip_locked`, `slip_graded`) go out after the commit,
+inside the request that caused them, because Cloud Run throttles CPU once the response is written. Reminders cannot wait
+on a request: `reminders.Sync` gives every open slip one Cloud Tasks task at its fixed first kickoff minus 20 minutes,
+so the instance can scale to zero between page loads and nothing polls.
+
+When a task fires, the endpoint rechecks the slip, its start, the fire window, and each member's next step from SQLite.
+A stale task is harmless, so `Sync` never deletes one. `push_log` reserves each send before it happens, which keeps a
+Cloud Tasks retry from doubling a nudge. `LocalTimers` stands in for the queue on a dev server, and sandbox mode wires
+no scheduler at all because its clock is frozen. See [Notifications](docs/concepts/notifications.md).
+

@@ -49,6 +49,7 @@ type Config struct {
 	GitHubRepo         string
 	PrefillToken       string
 	ReminderToken      string
+	ReminderQueue      string
 	VAPIDPublicKey     string
 	VAPIDPrivateKey    string
 	LogLevel           zerolog.Level
@@ -97,6 +98,7 @@ func Load(env Env) (Config, error) {
 		GitHubRepo:         gitHubRepoOr(env),
 		PrefillToken:       strings.TrimSpace(env("PREFILL_TOKEN")),
 		ReminderToken:      strings.TrimSpace(env("REMINDER_TOKEN")),
+		ReminderQueue:      strings.TrimSpace(env("REMINDER_QUEUE")),
 		VAPIDPublicKey:     strings.TrimSpace(env("VAPID_PUBLIC_KEY")),
 		VAPIDPrivateKey:    strings.TrimSpace(env("VAPID_PRIVATE_KEY")),
 		LogLevel:           levelOr(env, prod, &problems),

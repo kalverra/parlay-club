@@ -578,7 +578,7 @@ persistent scheduling state)
       fire-window and stale checks and once-per-person-per-slip `push_log` dedupe. Call `Sync` from a new
       `refresh.Service.SetAfterPass` hook and after `POST /slips`. Add the sandbox **Send reminders now** button. Cover
       it with `Due`, `Sync`, and handler tests.
-- [ ] Add the `CloudTasks` scheduler (REST plus a cached metadata-server token, hash-prefixed task names, the 30-day
+- [x] Add the `CloudTasks` scheduler (REST plus a cached metadata-server token, hash-prefixed task names, the 30-day
       horizon, and no new client library) and `REMINDER_QUEUE` config. In `deploy/setup.sh`, enable the API, create the
       queue, and grant `roles/cloudtasks.enqueuer`. Amend `ARCHITECTURE.md` "Cross-cutting concerns" with an "Outbound
       push and timed reminders" subsection, including a diagram of `Sync`, the Cloud Tasks queue, the reminder endpoint,

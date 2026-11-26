@@ -13,8 +13,9 @@ usage() {
 	cat >&2 <<'EOF'
 usage: deploy/setup.sh PROJECT_ID BILLING_ACCOUNT
 
-Creates the Cloud Run, Artifact Registry, Secret Manager, GCS, service account,
-Workload Identity, and billing budget resources. Safe to re-run.
+Creates the Cloud Run, Artifact Registry, Cloud Tasks, Secret Manager, GCS,
+service account, Workload Identity, and billing budget resources. Safe to
+re-run.
 
 Environment overrides:
   REGION         Cloud Run and bucket region (default us-central1)
@@ -22,6 +23,7 @@ Environment overrides:
   SERVICE        Cloud Run service name (default parlay-club)
   AR_REPO        Artifact Registry repository id (default parlay-club)
   BUCKET         Litestream bucket name (default PROJECT_ID-parlay-litestream)
+  QUEUE          Cloud Tasks reminder queue name (default SERVICE-reminders)
   BUDGET_AMOUNT  monthly budget in USD (default 5)
 EOF
 }
@@ -43,8 +45,11 @@ GITHUB_REPO="${GITHUB_REPO:-kalverra/parlay-club}"
 SERVICE="${SERVICE:-parlay-club}"
 AR_REPO="${AR_REPO:-parlay-club}"
 BUCKET="${BUCKET:-${PROJECT_ID}-parlay-litestream}"
+QUEUE="${QUEUE:-${SERVICE}-reminders}"
 BUDGET_AMOUNT="${BUDGET_AMOUNT:-5}"
 BUDGET_NAME="${BUDGET_NAME:-parlay-club monthly}"
+
+QUEUE_PATH="projects/${PROJECT_ID}/locations/${REGION}/queues/${QUEUE}"
 
 RUNTIME_SA_NAME="parlay-runtime"
 DEPLOY_SA_NAME="parlay-deployer"
@@ -79,6 +84,7 @@ gcloud services enable \
 	artifactregistry.googleapis.com \
 	secretmanager.googleapis.com \
 	cloudscheduler.googleapis.com \
+	cloudtasks.googleapis.com \
 	iamcredentials.googleapis.com \
 	sts.googleapis.com \
 	billingbudgets.googleapis.com \
@@ -187,6 +193,29 @@ for entry in "${RUNTIME_SA_NAME}:Parlay Club runtime" "${DEPLOY_SA_NAME}:Parlay 
 			--display-name="$display"
 	fi
 done
+
+# Reminders enqueue one named task per slip start, so the instance can scale
+# to zero between page loads. Three attempts with a 30 second backoff ride out
+# a cold start; push_log keeps a retry from sending twice.
+say "Creating the Cloud Tasks reminder queue $QUEUE"
+if gcloud tasks queues describe "$QUEUE" \
+	--project="$PROJECT_ID" --location="$REGION" >/dev/null 2>&1; then
+	ok "already exists"
+else
+	gcloud tasks queues create "$QUEUE" \
+		--project="$PROJECT_ID" \
+		--location="$REGION" \
+		--max-attempts=3 \
+		--min-backoff=30s
+fi
+
+say "Granting the runtime account enqueue on $QUEUE"
+gcloud tasks queues add-iam-policy-binding "$QUEUE" \
+	--project="$PROJECT_ID" \
+	--location="$REGION" \
+	--member="serviceAccount:$RUNTIME_SA" \
+	--role=roles/cloudtasks.enqueuer \
+	--quiet
 
 say "Granting the runtime account the bucket and the secrets"
 gcloud storage buckets add-iam-policy-binding "gs://$BUCKET" \
@@ -331,6 +360,10 @@ Next:
      reports to open GitHub issues; without one they save locally instead.
      prefill-token is optional. Add a random bearer token version to enable
      the Sunday morning pre-fill endpoint (POST /internal/prefill).
+     Kickoff reminders are optional: the service needs REMINDER_TOKEN (the
+     bearer value the queue sends) and REMINDER_QUEUE, set to
+     ${QUEUE_PATH}.
+     Without both, reminders stay off and everything else works.
   2. Deploy once, then set BASE_URL to the Cloud Run URL it prints.
   3. Create a group in the app, then restart the service once so
      seed/history.yaml imports. It waits for a group and only runs at boot.

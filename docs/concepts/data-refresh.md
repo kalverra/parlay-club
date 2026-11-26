@@ -334,9 +334,9 @@ see [Live updates](live-updates.md).
 ## Guardrails
 
 - `Kick()` runs on authenticated full-page loads only, syncing free/unmetered sources outside the one-shot per-game-day
-  morning pre-fill (`prefill:gameday`). Scheduled jobs are limited to the optional `POST /internal/prefill` fallback;
-  adding other cron or scheduled jobs needs a plan change, because it spends free-tier credits and keeps the instance
-  warm.
+  morning pre-fill (`prefill:gameday`). Scheduled work is limited to the optional `POST /internal/prefill` fallback and
+  per-slip reminder tasks on Cloud Tasks, one task per open slip at its start minus 20 minutes; adding any other cron or
+  scheduled job needs a plan change, because it spends free-tier credits and keeps the instance warm.
 - Keep the work detached from the request and bounded by its own timeout.
 - Put background writes in the service's `WaitGroup`, so the shutdown drain waits for them before the database closes.
 - Check each provider's credit floor after its free event list and before its paid call. Never buy lines on a stale or

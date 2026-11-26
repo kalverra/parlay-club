@@ -185,10 +185,27 @@ func run() error {
 		Logger: logger,
 	})
 	// A dev server stays up, so an in-process timer can deliver a reminder.
-	// Sandbox keeps its frozen clock and uses its own button instead, and prod
-	// gets the Cloud Tasks scheduler. Until that exists, prod schedules nothing.
-	if !cfg.Sandbox && !cfg.IsProd() && cfg.ReminderToken != "" {
-		reminderService.SetScheduler(reminders.NewLocalTimers(reminderService.Fire, logger))
+	// Production enqueues one Cloud Tasks task per slip start, because the
+	// instance scales to zero and a timer dies with it. Sandbox keeps its
+	// frozen clock and uses its Send reminders now button instead. Missing
+	// config leaves reminders off rather than failing the boot.
+	if !cfg.Sandbox {
+		if cfg.IsProd() {
+			if cfg.ReminderQueue != "" && cfg.ReminderToken != "" {
+				tasks, err := reminders.NewCloudTasks(reminders.CloudTasksConfig{
+					Queue:   cfg.ReminderQueue,
+					BaseURL: cfg.BaseURL,
+					Token:   cfg.ReminderToken,
+				})
+				if err != nil {
+					logger.Error().Err(err).Msg("reminders: cloud tasks scheduler; reminders are off")
+				} else {
+					reminderService.SetScheduler(tasks)
+				}
+			}
+		} else if cfg.ReminderToken != "" {
+			reminderService.SetScheduler(reminders.NewLocalTimers(reminderService.Fire, logger))
+		}
 	}
 	if sandboxRun != nil {
 		sandboxRun.reminders = reminderService
