@@ -262,5 +262,5 @@ matchup context, and optional slip-scope eligibility) Risk: low (read-only resea
       optional `+ Add to slip` for eligible open slips) in `internal/web/research.go`,
       `web/templates/research_bet.html`, and `internal/web/render.go`, with tests covering player props, game markets,
       missing selections, and open-slip eligibility.
-- [ ] Docs: update `docs/reference/routes.md` and `docs/concepts/slips.md` to document the Research primary view,
+- [x] Docs: update `docs/reference/routes.md` and `docs/concepts/slips.md` to document the Research primary view,
       explorer filters/sorts, and per-bet research route.

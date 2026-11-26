@@ -44,9 +44,9 @@ slips in the active week, one horizontal sibling pill switcher bar (`[data-sibli
 with links to each sibling slip, their status summary (`(Locked)`, `(1/2 Picks)`, `(Won)`), and `+ New slip` as a
 trailing pill. In the `export` step the export card moves above the banner, because placing the picks is the one thing
 left. `slip-wager` sits outside `slip-panel`, so live `slip-updated` refreshes do not wipe out in-progress wager inputs.
-The bottom bar keeps Groups, This week, Record Book, and Docs; the hub's one primary action is the way into picking. The
-hub stays one column at every width. Docs (`/docs`) holds the standing explanation; a `?` bubble beside an annotation
-opens the matching section with `?from=`, and [Docs hub](docs-hub.md#help-bubbles) maps every bubble.
+The bottom bar keeps Groups, This week, Research, Record Book, and Docs; the hub's one primary action is the way into
+picking. The hub stays one column at every width. Docs (`/docs`) holds the standing explanation; a `?` bubble beside an
+annotation opens the matching section with `?from=`, and [Docs hub](docs-hub.md#help-bubbles) maps every bubble.
 
 When the slip is `OPEN` and the viewer is in the `pick` step (has remaining leg slots), `#slip-panel` renders a compact
 **"Top A-grade ideas"** strip below the step banner. It runs `analyzer.LoadBoardSignals` and `board.SelectHighlights`
@@ -395,29 +395,28 @@ for the Record Book.
 
 ## Research
 
-The Research page (`GET /research`) offers game injury reports and player hit bars. It opens from a player, prop, leg,
-or game link. It is not a bottom-bar tab.
+Research (`GET /research`) is a primary tab: a slate-wide explorer of every cached bet this week, with a targeted game or
+player sheet below it when a link names one. It opens from a player, prop, leg, or game link.
 
-- **Game research (`GET /research/games/{id}`):** fetches ESPN summary injuries on demand, merges them with key-position
-  injuries from `roster_players` via `analyzer.MergeGameInjuries` so players truncated past ESPN's 5-per-team summary
-  cap still appear, shows paired matchup logos in the header, and displays injuries filtered to key positions (`QB`,
-  `RB`, `WR`, `TE`, `LT`, `OT`, `C`, `CB`, `S`) with team logos on team headers and player portraits on injury rows. A
-  player-match section resolves sportsbook prop names
-  in memory via `db.BatchPlayerResolver` against the game's preloaded rosters and `player_matches` (persisting newly
-  discovered matches), lists them against matched ESPN roster athletes with portraits, and provides a manual match form
-  (`POST /research/matches`) to fix unmatched names or corrections.
-- **Player research (`GET /research/players/{espnID}`):** fetches the player's ESPN game log on demand, shows the
-  player's portrait and team logo in the header, and displays last-5 hit bars (green over the line, red under), callouts
-  for the last-5 median and season mean, and total games played this season. When fresh nflverse data is cached, a
-  2-column usage grid also surfaces `Snap % (L3)`, `Target share`, `WOPR`, and the opponent defense EPA rank (`Opp Pass
-  Def` or `Opp Rush Def`, switching with the active market or RB default); stale or missing data omits the grid cleanly.
-  Opening from a slip leg or prop pill preselects that market and line; otherwise it picks the player's primary prop
-  line or the first available market.
-- **Media fallbacks:** Team logos and player portraits (`web/templates/media.html`) load lazily from stored ESPN CDN
-  URLs. When a URL is missing or fails to load in the browser, `app.js` hides the broken image and reveals the initials
-  or text fallback badge.
-- **Responsive layout:** Phone and desktop screens keep Research in a single column, reached from the page or leg that
-  names the player or game.
+- **Explorer:** `board.Build` folds one cached row per selection and `board.Explore` scores each with
+  `analyzer.ScoreLeg`, so browsing, searching, filtering, and sorting spend no paid API credits. Search covers player,
+  team, matchup, and market; the pickers target one game or athlete. Chips are bet type (Lines, Team totals, and each
+  prop group), grade (A, A–B, C+), signal (Smash matchup, High volume, Role bump, Fits slip), and sort (Best grade,
+  Matchup, Odds, Line, Kickoff, Player). Each count clears only that chip's own filter, a change swaps
+  `#research-explore` and pushes the URL, and each card links to the per-bet page.
+- **Per-bet research (`GET /research/bet`):** keys on `db.SameSelection` (`game_id`, `market`, `side`, `team`,
+  `player_id`, optional `player_name`), never line or price, so a shared link survives line drift. It compares home,
+  consensus, and best cached prices with a de-vigged edge when both sides are cached, lists every book, and gives the
+  full analyzer breakdown. A prop shows the player sheet scoped to the market and line; game markets show nfelo's model
+  spread and win chances against the market, both teams' EPA ranks, venue, weather, and key injuries. Up to five related
+  bets follow, same player first. An `OPEN` slip in the `pick` step that includes the game offers `+ Add to slip`, which
+  posts the normal add-leg route and returns here. A missing or kicked-off selection gets a not-found page.
+- **Game research (`GET /research/games/{id}`):** reads cached injuries, merges key-position `roster_players` injuries,
+  filters to `QB`, `RB`, `WR`, `TE`, `LT`, `OT`, `C`, `CB`, and `S`, and fixes unmatched prop names.
+- **Player research (`GET /research/players/{espnID}`):** reads the cached game log and shows the matchup strip, last-5
+  and season hit rates, the last-5 range and median, and the opposing-defense chart with per-bar rank badges. Fresh
+  nflverse data adds L3 usage tiles; opening from a leg or prop pill preselects that market and line.
+- **Media fallbacks and layout:** logos and portraits fall back to initials or text, and Research stays one column.
 
 ## Live progress
 

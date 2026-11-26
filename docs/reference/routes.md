@@ -85,7 +85,7 @@ accept the shared invite. A forged group cookie still falls back to a real membe
 | `GET /{$}`                | Landing page: one card per group; a person with one group is sent to that group's week            |
 | `GET /groups/{id}/week`   | Make the group active, ensure scheduled slips exist, and render the per-group overview landing page |
 | `GET /games`              | 303 to the active group's week; the pick board owns the week                                     |
-| `GET /research`           | Research page: week games, player search, injury reports, and last-5 hit bars                     |
+| `GET /research`           | Research tab: slate-wide bet explorer, targeted game and player search, and research sheets       |
 | `GET /record`             | Season Record Book for the active group (optional `?season=`)                                    |
 | `GET /docs`               | Docs hub: quick jumps, "How systems work" explainers, and common questions                       |
 | `GET /docs/glossary`      | Searchable glossary of betting and app terms (optional `?q=`)                                    |
@@ -94,9 +94,9 @@ accept the shared invite. A forged group cookie still falls back to a real membe
 | `GET /analyzer/guide`     | Grading & Analyzer Guide: live `A`–`F` rubric, pick-board badges, and every warning rule         |
 | `GET /analyzer/results`   | Grading Results: global or market-wide `A`–`F` calibration, rubric diffs, weekly progression, and factors |
 
-The bottom bar has four destinations: Groups (`/`), This week (`/groups/{active}/week`), Record Book (`/record`), and
-Docs (`/docs`). Research keeps a full page but leaves the bar; the hub links to the pick board, and pick rows link to
-Research.
+The bottom bar has five destinations: Groups (`/`), This week (`/groups/{active}/week`), Research (`/research`), Record
+Book (`/record`), and Docs (`/docs`). Research is the bet explorer; the hub links to the pick board, and pick rows link
+to Research.
 
 `GET /{$}` lists every group oldest first and carries `data-refresh-on-visible`, so the browser refetches the list when
 the tab becomes visible instead of holding a stream. A person in one group gets a 303 to `/groups/{id}/week`.
@@ -165,7 +165,7 @@ slip outside every group is 404.
 | `POST /slips/{id}/members`                 | Add a group member from `user_id`                               | Panel partial. |
 | `DELETE /slips/{id}/members/{userID}`      | Remove a member                                                 | Panel partial. |
 | `PATCH /slips/{id}`                        | Change `name` or `legs_per_member`                              | Panel partial. |
-| `POST /slips/{id}/legs`                    | Add the signed-in member's leg                                  | Panel partial, the `leg-added` partial for a quick add, the refreshed pair row for `from=board` (`Hx-Trigger: tray-updated`), or `#pick-body` for `from=pick` (`Hx-Trigger: tray-updated, slip-updated`). |
+| `POST /slips/{id}/legs`                    | Add the signed-in member's leg                                  | Panel partial, the `leg-added` partial for a quick add, the refreshed pair row for `from=board` (`Hx-Trigger: tray-updated`), `#pick-body` for `from=pick` (`Hx-Trigger: tray-updated, slip-updated`), or `HX-Redirect` back to `return` (default `/research`) for `from=research` (`Hx-Trigger: slip-updated`). |
 | `POST /slips/{id}/legs/batch`              | Atomically add a combo of legs for the signed-in member         | Panel partial (`Hx-Trigger: slip-updated`), `#pick-body` for `from=board` or `from=pick` (`Hx-Trigger: tray-updated, slip-updated`), or `pick-dock` for `from=dock` (`Hx-Trigger: tray-updated, board-updated, slip-updated`). |
 | `GET /legs/{id}/edit`                      | Edit form filled from the leg with player autocomplete          | Leg form partial. |
 | `PUT /legs/{id}`                           | Save the leg's pick fields                                      | Panel partial with `Hx-Trigger: leg-saved`, or the refreshed pair row with `Hx-Trigger: tray-updated` for `from=board` (plus `board-updated` when the leg moves to another line). |
@@ -336,35 +336,67 @@ opens the same leg form with `game_id` set and `quick=1`.
 
 ### Research
 
-| Method + path                          | Purpose                                                              | Response |
-| -------------------------------------- | -------------------------------------------------------------------- | -------- |
-| `GET /research`                        | Full research page or target partial                                 | Full page or partial |
-| `GET /research/games/{id}`             | Game research: filtered injuries and prop player match list          | Partial |
-| `GET /research/players/{espnID}`       | Player research: matchup strip, L5 and opp-defense charts, hit rates, usage | Partial |
-| `POST /research/matches`               | Save manual player match from `odds_name`, `team`, and `athlete_id`  | Partial (refreshed game research) |
+| Method + path                     | Purpose                                                                    | Response |
+| --------------------------------- | -------------------------------------------------------------------------- | -------- |
+| `GET /research`                   | Research tab: the explorer plus a targeted game or player sheet            | Full page, or an HTMX sheet partial |
+| `GET /research/explore`           | `#research-explore` for a search, chip, or sort change                     | Explorer partial with `HX-Push-Url` |
+| `GET /research/bet`               | Per-bet research: cached prices, grade, and the research for the bet's market | Full page; 404 for a selection not on the cached slate |
+| `GET /research/games/{id}`        | Game research: filtered injuries and prop player match list                | Partial |
+| `GET /research/players/{espnID}`  | Player research: matchup strip, L5 and opp-defense charts, hit rates, usage | Partial |
+| `POST /research/games/{id}/props` | Load one game's props from an explicit tap                                 | Explorer partial, or 303 to `/research?game_id=` |
+| `POST /research/matches`          | Save manual player match from `odds_name`, `team`, and `athlete_id`        | Partial (refreshed game research) |
 
-`GET /research` renders the week's game selector and player autocomplete picker. It accepts optional `?game_id=`,
-`?player_id=`, `?leg_id=`, `?market=`, and `?line=`. When requested with an `Hx-Request` header and `player_id` or
-`game_id`, it delegates directly to the matching partial for `#research-panel`.
+`GET /research` renders the week's game and player pickers, the explorer, and, when targeted, the deeper sheet. It
+accepts `?q=`, `?game_id=`, `?player_id=`, `?cat=`, `?grade=`, `?signal=`, `?sort=`, and `?limit=`, plus the older
+`?leg_id=`, `?market=`, `?line=`, and `?player=` deep links (`?player=` resolves a roster athlete by normalized name).
+Requested with `Hx-Request` and a `player_id` but no `game_id`, it renders the player sheet partial; with a `game_id`, it
+renders the game sheet partial.
 
-`GET /research/games/{id}` syncs injuries on demand (`espn:summary:{game}`) and renders injuries filtered to key
-positions (`QB`, `RB`, `WR`, `TE`, `LT`, `OT`, `C`, `CB`, `S`). It also lists sportsbook prop names with their matched
-ESPN athlete, and provides a form to manually link unmatched players.
+The explorer reads one week of cached games, odds, and rosters (`GamesForWeek`, `OddsForWeek`, `RosterForTeams`), folds
+them with `board.Build`, and scores each row with `analyzer.ScoreLeg` before `board.Explore` filters and sorts. It never
+syncs odds, injuries, or game logs, so searching, filtering, and sorting spend no Odds API or Parlay API credits.
 
-`GET /research/players/{espnID}` syncs game logs on demand (`espn:gamelog:{id}`). It renders a matchup context strip
-(upcoming opponent, spread, game total, weather or `Indoor`, and injury badge when present), last-5 and season hit
-rates, last-5 min–max range, last-5 median, season mean, and total games played. Both the player's Last-5 chart and the
-opposing-defense Last-5 chart (leading opposing player at the same position against this week's opponent) share a
-horizontal dotted O/U line when a comparison line is available, with per-bar opponent and overall/position defense rank
-badges (`Def #N`, `vs POS #N`) on the player chart. When fresh nflverse data is cached, it also renders
-position-tailored L3 usage tiles (`Pass Att/g`, `EPA/g`, `Rush Att/g`, and `Opp Def` for `QB`; `Snap %`, `Carries/g`,
-`Targets/g`, and `RZ Opps/g` for `RB`; `Snap %`, `Target share`, `Air Yards %`, and `WOPR` for `WR`/`TE`). If `market`
-is omitted, it resolves from `?leg_id=` or the player's stored odds; switching market tabs resolves each market's own
-stored O/U line unless `?line=` is explicitly set.
+| Parameter | Meaning |
+| --------- | ------- |
+| `q`       | Case- and accent-insensitive search over player, team, matchup, and market. |
+| `game_id`, `player_id` | Target one game or one ESPN athlete. Unknown ids match nothing. |
+| `cat`     | Bet type: `lines`, `team_totals`, `passing`, `rushing`, `receiving`, `tds`, or `kicking`. An unknown value filters nothing. |
+| `grade`   | Grade band: `a` (A only), `ab` (A and B), or `c` (C or better). An unknown value filters nothing. |
+| `signal`  | Signal: `smash`, `volume`, `role_bump`, or `fits_slip`. An unknown value filters nothing. |
+| `sort`    | `grade` (default, highest score then best price), `matchup` (strongest signal and softest opposing EPA rank), `odds` (shortest price), `line` (highest line), `kickoff` (earliest), or `player` (alphabetical). An unknown value reads as `grade`. |
+| `limit`   | Page size, default 50. Show more adds 50. |
 
-`POST /research/matches` accepts `odds_name`, `team`, and `athlete_id`. It saves a manual player match (`manual=1`) in
-`player_matches`, removes conflicting non-manual matches for that game, backfills `player_id` and `team` on matching
-odds and legs, and returns the refreshed game research partial.
+Each chip shows a count tallied as if only that chip's own filter were cleared. Each card shows the selection, market,
+odds with implied chance, grade with its strongest factor, any signal pill, matchup, kickoff, and links to the per-bet
+page and both sheets. Its `Research bet →` link carries `db.SameSelection` identity (`game_id`, `market`, `side`,
+`team`, `player_id`, `player_name`) plus the explorer URL as `from`, never line or price, so shared links survive drift.
+
+The search input debounces at 300 ms. A search, chip, or sort calls `GET /research/explore`, swaps `#research-explore`
+with `outerHTML`, and sets `HX-Push-Url` to the matching `/research?...` URL. Empty states name why: no stored games, no
+lines, every game started, or nothing matches. A targeted game with lines but no props offers `Load props`, which posts
+`POST /research/games/{id}/props`, runs `SyncGameProps` for that one game with the usual credit floors, and answers the
+refreshed explorer plus `HX-Push-Url` (303 to `/research?game_id=` for a plain post). It is the only paid research route.
+
+`GET /research/bet` matches the query's selection to one cached row with `db.SameSelection`, so it ignores `line` and
+`odds`, and answers 404 with a short reason when the game is unknown, has kicked off, or the selection is not on the
+board. The page shows the summary with grade, odds, and implied chance; cached home-book, consensus, and best prices with
+a de-vigged edge when both sides are cached; the full analyzer breakdown; and the research for its market. Player props
+reuse the player sheet scoped to the bet's market and line; game markets (`SPREAD`, `ML`, `TOTAL`, `TEAM_TOTAL`) render
+`TeamBetContextView` with nfelo's model spread and win chances against the market, both teams' EPA ranks, venue, weather,
+and key injuries. Up to five related bets follow, same player first. `?from=` restores the explorer on the back link.
+
+`+ Add to slip` appears for each `OPEN` slip whose next step is `pick` and whose slate includes the game. Each button
+posts `POST /slips/{id}/legs` with `from=research` and the bet page as `return`; an optional `?slip_id=` narrows it.
+
+`GET /research/games/{id}` reads cached injuries and rosters and renders injuries filtered to key positions (`QB`, `RB`,
+`WR`, `TE`, `LT`, `OT`, `C`, `CB`, `S`), plus sportsbook prop names against their matched athlete. `POST /research/matches`
+saves a manual match from `odds_name`, `team`, and `athlete_id`, removes conflicting non-manual matches, backfills
+`player_id` and `team` on matching odds and legs, and returns the refreshed game research partial.
+
+`GET /research/players/{espnID}` reads the cached game log and renders the matchup strip, last-5 and season hit rates,
+the last-5 range and median, and the opposing-defense chart. Both charts share a dotted O/U line when available, with
+per-bar `Def #N` and `vs POS #N` badges, and fresh nflverse data adds L3 usage tiles. If `market` is omitted it resolves
+from `?leg_id=` or stored odds; market tabs use each market's own stored O/U line unless `?line=` is set.
 
 ### Record Book
 
@@ -532,7 +564,7 @@ Templates under `web/templates/` and view-model helpers in `internal/web/` use t
 | 400  | A malformed form body, a bug report validation error, or a failed Google round trip. |
 | 401  | Missing or invalid bearer token on `POST /internal/prefill`. |
 | 403  | A non-GET request without `HX-Request: true`. |
-| 404  | A missing slip, leg, member, or group; a resource in another group; an unknown invite token; or `POST /internal/prefill` when `PREFILL_TOKEN` is empty. |
+| 404  | A missing slip, leg, member, or group; a resource in another group; an unknown invite token; a selection not on the cached slate at `/research/bet`; or `POST /internal/prefill` when `PREFILL_TOKEN` is empty. |
 | 422  | A fixable rule refusal or form error. The body is the short message shown in the form. |
 | 500  | An unexpected store or render failure, a signed-in user with no group, or a failed `RunPrefill` pass. |
 | 503  | `POST /internal/prefill` in sandbox mode, or `/healthz` when SQLite is unreachable. |
@@ -547,6 +579,7 @@ or invalid leg count) answer 422 with a short descriptive message. The form show
 | ------------- | ------- |
 | `HX-Redirect` | Navigate the browser to a new page without swapping an empty body. |
 | `HX-Refresh`  | Reload the current page, used after a group switch, invite reset, or leave. |
+| `HX-Push-Url` | Write a full page URL into the address bar after a partial swap, used by the pick board and the research explorer. |
 | `HX-Trigger`  | Fire a client event. `leg-saved` closes the leg form's bottom sheet. `tray-updated` refreshes the pick dock and tray, and `board-updated` refreshes `#pick-slate` and the open game's `#pick-detail`. |
 
 Writes that change the slip return the refreshed panel, so the page reflects the new state without a reload. Partials
