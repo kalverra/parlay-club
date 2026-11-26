@@ -2,7 +2,7 @@
 
 # Build the server as a static binary. The SQLite driver is pure Go, so CGO is
 # not needed and the binary runs in the small runtime image.
-FROM golang:1.27.3-alpine AS build
+FROM golang:1.27.4-alpine AS build
 
 WORKDIR /src
 
