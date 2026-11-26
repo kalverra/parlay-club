@@ -34,8 +34,8 @@ flowchart LR
   Rules --> UI["Slip Panel & Pick Tray (375px Breakdown)"]
   EngineV2 --> UI
   Highlights --> UI
-  UI -->|"tap Why? or rubric"| Guide["GET /analyzer/guide"]
-  Guide <-->|"results / how grading works"| Results["GET /analyzer/results"]
+  UI -->|"tap Why? or rubric"| Guide["GET /docs/grading (alias /analyzer/guide)"]
+  Guide <-->|"results / how grading works"| Results["GET /docs/evals (alias /analyzer/results)"]
   EngineDocs["RuleDocs() + DefaultV2Config + GradeRubric()"] --> Guide
   Cache["eval.Cache (Slips & Market)"] --> Results
 ```
@@ -182,6 +182,10 @@ v1 rubric reference, and every warning rule (`RuleDocs`) directly from `internal
 from live thresholds. Stable anchors (`#pillars`, `#leg-grades`, `#slip-grade`, `#suggestions`, `#rule-<id>`) let any
 warning card or grade breakdown link straight to its explanation, with a safe `?from=` back link and a "Grading results"
 link to `/analyzer/results`.
+
+`GET /docs/grading` and `GET /analyzer/guide` share one handler, as do `GET /docs/evals` and `GET /analyzer/results`.
+Every path sets `page.Tab = TabDocs` and renders the docs section switcher (`Overview`, `Glossary`, `Grading & Rules`,
+`Eval Results`), so the Docs tab stays lit and an older `/analyzer/...` bookmark still lands on the same page.
 
 `GET /analyzer/results` shows live calibration across `?source=slips|market` and `?engine=v2|v1`:
 

@@ -13,10 +13,12 @@ import (
 	"github.com/kalverra/parlay-club/internal/eval"
 )
 
-// EvalResultsPage is the in-app Grading Results screen at GET /analyzer/results.
+// EvalResultsPage is the in-app Grading Results screen at GET /analyzer/results
+// and GET /docs/evals.
 type EvalResultsPage struct {
 	Page
 	BackURL           string
+	Nav               []DocsNavView
 	GuideURL          string
 	ScopeLabel        string
 	Source            string
@@ -223,9 +225,10 @@ type EvalCoverageView struct {
 	WithSharp      int
 }
 
-// evalResults serves GET /analyzer/results, showing global calibration across
-// all groups (or market-wide pre-kickoff lines when ?source=market), week-over-week
-// progression, factor attribution, and data coverage.
+// evalResults serves GET /analyzer/results and GET /docs/evals, showing global
+// calibration across all groups (or market-wide pre-kickoff lines when
+// ?source=market), week-over-week progression, factor attribution, and data
+// coverage.
 func (h *slipHandlers) evalResults(w http.ResponseWriter, r *http.Request) {
 	if _, ok := h.user(r.Context()); !ok {
 		h.redirect(w, r, "/login")
@@ -238,8 +241,7 @@ func (h *slipHandlers) evalResults(w http.ResponseWriter, r *http.Request) {
 	}
 
 	backURL := safeReturnPath(r.URL.Query().Get("from"))
-	page := h.page(r, "Grading Results")
-	page.Tab = ""
+	page := h.pageWithTab(r, "Grading Results", TabDocs)
 	isMarket := source == eval.ModeMarket
 	scopeLabel := "All groups"
 	if isMarket {
@@ -250,6 +252,7 @@ func (h *slipHandlers) evalResults(w http.ResponseWriter, r *http.Request) {
 		h.renderPage(w, "analyzer-results", EvalResultsPage{
 			Page:        page,
 			BackURL:     backURL,
+			Nav:         docsNav("evals", backURL),
 			GuideURL:    buildGuideURL(backURL),
 			ScopeLabel:  scopeLabel,
 			Source:      string(source),
@@ -480,6 +483,7 @@ func buildEvalResultsPage(
 	return EvalResultsPage{
 		Page:              page,
 		BackURL:           backURL,
+		Nav:               docsNav("evals", backURL),
 		GuideURL:          buildGuideURL(backURL),
 		ScopeLabel:        scopeLabel,
 		Source:            sourceStr,

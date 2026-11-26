@@ -75,6 +75,7 @@ type AnalyzerLegView struct {
 type AnalyzerGuidePage struct {
 	Page
 	BackURL      string
+	Nav          []DocsNavView
 	EngineName   string
 	V2Active     bool
 	Pillars      []GuidePillarView
@@ -121,8 +122,8 @@ type GuideRuleView struct {
 	Example       string
 }
 
-// analyzerGuide serves GET /analyzer/guide, rendering the live analyzer rules
-// and A-F grading rubric.
+// analyzerGuide serves GET /analyzer/guide and GET /docs/grading, rendering the
+// live analyzer rules and A-F grading rubric.
 func (h *slipHandlers) analyzerGuide(w http.ResponseWriter, r *http.Request) {
 	backURL := safeReturnPath(r.URL.Query().Get("from"))
 	rubric := analyzer.GradeRubric()
@@ -169,11 +170,11 @@ func (h *slipHandlers) analyzerGuide(w http.ResponseWriter, r *http.Request) {
 		engineName = engine.Name()
 	}
 
-	page := h.page(r, "Grading & Analyzer Guide")
-	page.Tab = ""
+	page := h.pageWithTab(r, "Grading & Analyzer Guide", TabDocs)
 	h.renderPage(w, "analyzer-guide", AnalyzerGuidePage{
 		Page:         page,
 		BackURL:      backURL,
+		Nav:          docsNav("grading", backURL),
 		EngineName:   engineName,
 		V2Active:     engineName == "v2",
 		Pillars:      guidePillars(analyzer.DefaultV2Config),

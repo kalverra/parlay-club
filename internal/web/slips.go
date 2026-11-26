@@ -73,6 +73,8 @@ func (h *slipHandlers) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /{$}", h.home)
 	mux.HandleFunc("GET /docs", h.docsHub)
 	mux.HandleFunc("GET /docs/glossary", h.docsGlossary)
+	mux.HandleFunc("GET /docs/grading", h.analyzerGuide)
+	mux.HandleFunc("GET /docs/evals", h.evalResults)
 	mux.HandleFunc("GET /analyzer/guide", h.analyzerGuide)
 	mux.HandleFunc("GET /analyzer/results", h.evalResults)
 	mux.HandleFunc("GET /record", h.recordBook)

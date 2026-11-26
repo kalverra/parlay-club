@@ -1,3 +1,13 @@
+{{define "docs-nav"}}
+<nav class="flex flex-wrap gap-2 pt-1 text-xs" aria-label="Docs sections" data-docs-nav>
+  {{range .Nav}}<a
+      href="{{.Href}}"
+      class="rounded-full border px-2.5 py-1 {{if .Current}}border-accent bg-accent font-medium text-accent-ink{{else}}border-line-strong bg-surface text-ink hover:bg-surface-2{{end}}"
+      {{if .Current}}aria-current="page"{{end}}>{{.Label}}</a
+    >{{end}}
+</nav>
+{{end}}
+
 {{define "group-list"}}
 <div
   id="group-list"

@@ -22,6 +22,8 @@
       </a>
     </div>
 
+    {{template "docs-nav" .}}
+
     {{if .Sources}}
       <div class="flex flex-wrap items-center gap-2" role="group" aria-label="Evaluation source">
         {{range .Sources}}

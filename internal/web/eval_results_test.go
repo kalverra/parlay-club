@@ -152,6 +152,51 @@ func TestEvalResultsAuthEmptyStateAndInvalidSeason(t *testing.T) {
 	assert.Contains(t, guide.Body.String(), `/analyzer/results?from=%2Fslips%2F1`)
 }
 
+// TestDocsEvalsServesResultsUnderTheDocsTab covers both URLs that land on the
+// results screen. The docs alias keeps every filter, marks the Docs tab, and
+// highlights the Eval Results switcher while forwarding a safe back link.
+func TestDocsEvalsServesResultsUnderTheDocsTab(t *testing.T) {
+	t.Parallel()
+
+	f := newEvalResultsFixture(t)
+	ctx := t.Context()
+
+	for _, path := range []string{
+		"/docs/evals?source=market&season=2026&engine=v2&from=/slips/7",
+		"/analyzer/results?source=market&season=2026&engine=v2&from=/slips/7",
+	} {
+		recorder := httptest.NewRecorder()
+		f.handler.ServeHTTP(recorder, httptest.NewRequestWithContext(ctx, http.MethodGet, path, nil))
+
+		require.Equal(t, http.StatusOK, recorder.Code, path)
+		body := recorder.Body.String()
+
+		assert.Contains(t, html.UnescapeString(body), "Market-wide · 2026 season · Engine v2", path)
+		assert.Regexp(t, `<a\s+href="/docs"\s+class="flex flex-col[^>]*aria-current="page"`, body, path)
+		assert.Contains(t, body, `aria-current="page">Eval Results</a`, path)
+		assert.Contains(t, body, `href="/slips/7"`, path)
+		assert.Contains(t, body, `href="/docs?from=%2Fslips%2F7"`, path)
+		assert.Contains(t, body, `href="/docs/glossary?from=%2Fslips%2F7"`, path)
+		assert.Contains(t, body, `href="/docs/grading?from=%2Fslips%2F7"`, path)
+	}
+
+	// The alias keeps the handler's 400 on an unreadable season.
+	bad := httptest.NewRecorder()
+	f.handler.ServeHTTP(bad, httptest.NewRequestWithContext(ctx, http.MethodGet, "/docs/evals?season=abc", nil))
+	assert.Equal(t, http.StatusBadRequest, bad.Code)
+
+	// An unsafe back link is stripped, so nothing forwards it.
+	unsafe := httptest.NewRecorder()
+	f.handler.ServeHTTP(
+		unsafe,
+		httptest.NewRequestWithContext(
+			ctx, http.MethodGet, "/docs/evals?from=https://evil.example/phish", nil),
+	)
+	require.Equal(t, http.StatusOK, unsafe.Code)
+	assert.NotContains(t, unsafe.Body.String(), "evil.example")
+	assert.NotContains(t, unsafe.Body.String(), "&larr; Back")
+}
+
 func TestEvalResultsGlobalAggregationAndFilters(t *testing.T) {
 	t.Parallel()
 

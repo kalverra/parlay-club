@@ -89,6 +89,8 @@ accept the shared invite. A forged group cookie still falls back to a real membe
 | `GET /record`             | Season Record Book for the active group (optional `?season=`)                                    |
 | `GET /docs`               | Docs hub: quick jumps, "How systems work" explainers, and common questions                       |
 | `GET /docs/glossary`      | Searchable glossary of betting and app terms (optional `?q=`)                                    |
+| `GET /docs/grading`       | Grading & Analyzer Guide inside Docs; same page as `/analyzer/guide`                             |
+| `GET /docs/evals`         | Grading Results inside Docs; same page as `/analyzer/results`                                    |
 | `GET /analyzer/guide`     | Grading & Analyzer Guide: live `A`–`F` rubric, pick-board badges, and every warning rule         |
 | `GET /analyzer/results`   | Grading Results: global or market-wide `A`–`F` calibration, rubric diffs, weekly progression, and factors |
 
@@ -386,9 +388,12 @@ and the member leaderboard (stacked cards below `sm:` and a table at `sm:+`). Se
 | Method + path            | Purpose                                                         | Response |
 | ------------------------ | --------------------------------------------------------------- | -------- |
 | `GET /analyzer/guide`    | Grading & Analyzer Guide backed by `RuleDocs()`, `DefaultV2Config`, and `GradeRubric()` | Full page; optional `?from=` back-link path. |
+| `GET /docs/grading`      | Same page served inside Docs (`page.Tab = TabDocs`)              | Full page; same `?from=` contract. |
 
-`GET /analyzer/guide` renders `web/templates/analyzer_guide.html` behind `RequireUser` and `Scope`. It displays the
-active grading engine badge (`v2`), the four v2 grading pillars and weights (`analyzer.DefaultV2Config`), uncertainty
+Both paths invoke the same handler, so an existing bookmark keeps working while the page picks up the Docs tab and the
+shared docs section switcher. `GET /analyzer/guide` renders `web/templates/analyzer_guide.html` behind `RequireUser` and
+`Scope`. It displays
+the active grading engine badge (`v2`), the four v2 grading pillars and weights (`analyzer.DefaultV2Config`), uncertainty
 badge rules, `A`–`F` letter bands and legacy v1 rubric reference (`analyzer.GradeRubric()`), pick-board badge
 descriptions, and every active warning rule (`analyzer.RuleDocs()`) grouped by category with stable anchors (`#pillars`,
 `#leg-grades`, `#slip-grade`, `#suggestions`, `#rules`, and `#rule-<id>`). It links to `/analyzer/results`
@@ -401,8 +406,10 @@ and [Analyzer rules](analyzer-rules.md).
 | Method + path            | Purpose                                                               | Response |
 | ------------------------ | --------------------------------------------------------------------- | -------- |
 | `GET /analyzer/results`  | Global or market-wide Grading Results backed by `eval.Cache` and `EvaluateAll` | Full page; invalid `?season=` or `?source=` is 400. |
+| `GET /docs/evals`        | Same page served inside Docs (`page.Tab = TabDocs`)                    | Full page; same query and status contract. |
 
-`GET /analyzer/results` renders `web/templates/analyzer_results.html` behind `RequireUser`. It reads from `eval.Cache`
+Both paths invoke the same handler. `GET /analyzer/results` renders `web/templates/analyzer_results.html` behind
+`RequireUser`. It reads from `eval.Cache`
 keyed by `(mode, 0, season)`. In `slips` mode, it aggregates settled slips across all groups and invalidates whenever
 `SetLegResult` or `AutoGradeLegs` commits a settlement change for any group. In `market` mode, it replays deduplicated
 pre-kickoff consensus lines across `FINAL` games and invalidates via `InvalidateMarket` when `syncScoreboard` records a
@@ -423,18 +430,19 @@ Query parameters:
 - `?from=`: optional safe return path validated by `safeReturnPath`, preserved on source/season/engine pills and the
   `"How grading works"` link back to `/analyzer/guide`. See [Analyzer](../concepts/analyzer.md).
 
-### Docs hub and glossary
+### Docs hub, glossary, and reference screens
 
 | Method + path        | Purpose                                                                         | Response |
 | -------------------- | ------------------------------------------------------------------------------- | -------- |
 | `GET /docs`          | Docs hub: quick jumps, seven "How systems work" explainers, and common questions | Full page; optional `?from=` back-link path. |
 | `GET /docs/glossary` | Searchable glossary of betting and app terms                                    | Full page; optional `?q=` search and `?from=` back-link path. |
+| `GET /docs/grading`  | Grading & Analyzer Guide                                                        | Full page; shared handler with `GET /analyzer/guide`. |
+| `GET /docs/evals`    | Grading Results                                                                 | Full page; shared handler with `GET /analyzer/results`. |
 
-Both routes render `web/templates/docs.html` behind `RequireUser` and `Scope`, set `page.Tab = TabDocs`, and share a
-docs section switcher (`Overview`, `Glossary`, `Grading & Rules`, `Eval Results`). The switcher forwards `?from=` to
-every destination; `Grading & Rules` points at `/analyzer/guide` and `Eval Results` at `/analyzer/results` until
-dedicated docs routes exist. An optional `?from=` renders a `"← Back"` link when it passes `safeReturnPath`, the same
-check the analyzer screens use.
+All four routes render behind `RequireUser` and `Scope`, set `page.Tab = TabDocs`, and share a docs section switcher
+(`Overview`, `Glossary`, `Grading & Rules`, `Eval Results`) rendered from the `docs-nav` partial. The switcher forwards
+`?from=` to every destination; `Grading & Rules` points at `/docs/grading` and `Eval Results` at `/docs/evals`. An
+optional `?from=` renders a `"← Back"` link when it passes `safeReturnPath`, the same check the analyzer screens use.
 
 `GET /docs` builds its content from static Go structs in `internal/web/docs.go` and reads no database. Sections carry
 stable anchors `#sys-grading`, `#sys-odds`, `#sys-badges`, `#sys-live`, `#sys-autograde`, `#sys-sources`, and

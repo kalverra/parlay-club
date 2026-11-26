@@ -162,7 +162,8 @@ func TestDocsPagesForwardSafeBackLink(t *testing.T) {
 	assert.Contains(t, body, `href="/slips/42"`)
 	assert.Contains(t, body, `href="/docs?from=%2Fslips%2F42"`)
 	assert.Contains(t, body, `href="/docs/glossary?from=%2Fslips%2F42"`)
-	assert.Contains(t, body, `href="/analyzer/guide?from=%2Fslips%2F42"`)
+	assert.Contains(t, body, `href="/docs/grading?from=%2Fslips%2F42"`)
+	assert.Contains(t, body, `href="/docs/evals?from=%2Fslips%2F42"`)
 	assert.Contains(t, body, `<input type="hidden" name="from" value="/slips/42">`)
 
 	for _, raw := range []string{"https://evil.example/phish", "//evil.example/phish", `/\evil.example`} {

@@ -16,13 +16,7 @@
         Every betting and app term in plain words. Search to narrow the list.
       {{end}}
     </p>
-    <nav class="flex flex-wrap gap-2 pt-1 text-xs" aria-label="Docs sections" data-docs-nav>
-      {{range .Nav}}<a
-          href="{{.Href}}"
-          class="rounded-full border px-2.5 py-1 {{if .Current}}border-accent bg-accent font-medium text-accent-ink{{else}}border-line-strong bg-surface text-ink hover:bg-surface-2{{end}}"
-          {{if .Current}}aria-current="page"{{end}}>{{.Label}}</a
-        >{{end}}
-    </nav>
+    {{template "docs-nav" .}}
   </div>
 
   {{if .Hub}}{{template "docs-hub" .}}{{else}}{{template "docs-glossary" .}}{{end}}

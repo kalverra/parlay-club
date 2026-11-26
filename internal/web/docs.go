@@ -115,7 +115,9 @@ func (h *slipHandlers) docsGlossary(w http.ResponseWriter, r *http.Request) {
 }
 
 // docsNav builds the docs section switcher with the current section marked and
-// the back link forwarded on every destination.
+// the back link forwarded on every destination. The grading and eval pages call
+// it too, so both the docs routes and their legacy analyzer aliases carry the
+// same switcher.
 func docsNav(current, backURL string) []DocsNavView {
 	suffix := ""
 	if backURL != "" {
@@ -125,8 +127,8 @@ func docsNav(current, backURL string) []DocsNavView {
 	return []DocsNavView{
 		{Label: "Overview", Href: "/docs" + suffix, Current: current == "overview"},
 		{Label: "Glossary", Href: "/docs/glossary" + suffix, Current: current == "glossary"},
-		{Label: "Grading & Rules", Href: "/analyzer/guide" + suffix},
-		{Label: "Eval Results", Href: "/analyzer/results" + suffix},
+		{Label: "Grading & Rules", Href: "/docs/grading" + suffix, Current: current == "grading"},
+		{Label: "Eval Results", Href: "/docs/evals" + suffix, Current: current == "evals"},
 	}
 }
 
@@ -171,7 +173,7 @@ func docsHubView() *DocsHubView {
 					"Context & Traps covers injuries, weather, key numbers, and role changes.",
 				},
 				Links: []DocsLinkView{
-					{Label: "Full grading rubric", Href: "/analyzer/guide#leg-grades"},
+					{Label: "Full grading rubric", Href: "/docs/grading#leg-grades"},
 					{Label: "What price edge means", Href: "/docs/glossary#term-price-edge"},
 				},
 			},
@@ -202,7 +204,7 @@ func docsHubView() *DocsHubView {
 					"Fits slip: the pick pairs well with a leg already on your slip.",
 				},
 				Links: []DocsLinkView{
-					{Label: "Badge definitions", Href: "/analyzer/guide#suggestions"},
+					{Label: "Badge definitions", Href: "/docs/grading#suggestions"},
 					{Label: "EPA", Href: "/docs/glossary#term-epa"},
 					{Label: "WOPR", Href: "/docs/glossary#term-wopr"},
 				},
@@ -276,7 +278,7 @@ func docsHubView() *DocsHubView {
 				Question:  "What does the high uncertainty badge mean?",
 				Answer:    "Injury news, a role change, or a wide model-vs-market gap makes the number shakier. The grader then leans harder on the live market price.",
 				LinkLabel: "Full grading rubric",
-				LinkHref:  "/analyzer/guide#pillars",
+				LinkHref:  "/docs/grading#pillars",
 			},
 			{
 				Question: "Do you place bets or hold money?",

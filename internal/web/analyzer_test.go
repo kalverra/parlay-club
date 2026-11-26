@@ -510,6 +510,60 @@ func TestAnalyzerGuideRejectsUnsafeBackURL(t *testing.T) {
 	}
 }
 
+// TestDocsGradingServesGuideUnderTheDocsTab covers both URLs that land on the
+// guide. The docs alias and the legacy analyzer path must render the same
+// rubric, mark the Docs tab, and highlight the Grading & Rules switcher while
+// forwarding a safe back link.
+func TestDocsGradingServesGuideUnderTheDocsTab(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+
+	for _, path := range []string{"/docs/grading?from=/slips/42", "/analyzer/guide?from=/slips/42"} {
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
+		fixture.handler.ServeHTTP(recorder, request)
+
+		require.Equal(t, http.StatusOK, recorder.Code, path)
+		body := recorder.Body.String()
+
+		assert.Regexp(t, `<a\s+href="/docs"\s+class="flex flex-col[^>]*aria-current="page"`, body, path)
+		assert.Contains(t, body, `aria-current="page">Grading &amp; Rules</a`, path)
+		assert.Contains(t, body, `href="/slips/42"`, path)
+		assert.Contains(t, body, `href="/docs?from=%2Fslips%2F42"`, path)
+		assert.Contains(t, body, `href="/docs/glossary?from=%2Fslips%2F42"`, path)
+		assert.Contains(t, body, `href="/docs/evals?from=%2Fslips%2F42"`, path)
+		assert.Contains(t, body, `id="leg-grades"`, path)
+		assert.Contains(t, body, `id="slip-grade"`, path)
+		for _, ruleID := range analyzer.RuleIDs() {
+			assert.Contains(t, body, fmt.Sprintf(`id="rule-%s"`, ruleID), path)
+		}
+	}
+}
+
+// TestDocsGradingStripsUnsafeBackURL keeps the docs alias on the same
+// open-redirect guard as the analyzer path.
+func TestDocsGradingStripsUnsafeBackURL(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodGet,
+		"/docs/grading?from=https://evil.example/phish",
+		nil,
+	)
+	fixture.handler.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	body := recorder.Body.String()
+	assert.NotContains(t, body, "evil.example")
+	assert.NotContains(t, body, "&larr; Back")
+	assert.NotContains(t, body, "from=", "no switcher link forwards a stripped back link")
+}
+
 func TestSlipPanelAndTrayWireNFLverseGradesAndRuleLinks(t *testing.T) {
 	t.Parallel()
 

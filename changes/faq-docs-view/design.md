@@ -177,7 +177,7 @@ Complexity: low (reuses existing `analyzerGuide` and `evalResults` handlers with
 Risk: low (existing `/analyzer/guide` and `/analyzer/results` routes stay valid; existing test suites verify backward
 compatibility)
 
-- [ ] Register `GET /docs/grading` and `GET /docs/evals` alongside `GET /analyzer/guide` and `GET /analyzer/results`,
+- [x] Register `GET /docs/grading` and `GET /docs/evals` alongside `GET /analyzer/guide` and `GET /analyzer/results`,
       set `page.Tab = TabDocs` on both, and add the shared Docs sub-navigation bar (forwarding sanitized `?from=`) to
       `web/templates/analyzer_guide.html` and `web/templates/analyzer_results.html` with tests in
       `internal/web/analyzer_test.go` and `internal/web/eval_results_test.go`.

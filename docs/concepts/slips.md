@@ -44,7 +44,7 @@ slips in the active week, one horizontal sibling pill switcher bar (`[data-sibli
 with links to each sibling slip, their status summary (`(Locked)`, `(1/2 Picks)`, `(Won)`), and `+ New slip` as a
 trailing pill. In the `export` step the export card moves above the banner, because placing the picks is the one thing
 left. `slip-wager` sits outside `slip-panel`, so live `slip-updated` refreshes do not wipe out in-progress wager inputs.
-The bottom bar keeps Groups, This week, and Record Book; the hub's one primary action is the way into picking. The hub
+The bottom bar keeps Groups, This week, Record Book, and Docs; the hub's one primary action is the way into picking. The hub
 stays one column at every width.
 
 When the slip is `OPEN` and the viewer is in the `pick` step (has remaining leg slots), `#slip-panel` renders a compact
