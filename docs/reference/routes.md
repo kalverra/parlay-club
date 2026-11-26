@@ -3,7 +3,7 @@ id: routes
 title: Routes
 type: reference
 summary: Every HTTP route the server serves, the middleware in front of them, and the status codes, HTMX headers, and SSE frames handlers return.
-tags: [routes, http, handlers, middleware, htmx, sse, props, prefill, research, schedules, wagers, record, analyzer, guide, themes]
+tags: [routes, http, handlers, middleware, htmx, sse, props, prefill, research, schedules, wagers, record, analyzer, guide, docs, glossary, themes]
 ---
 
 # Routes
@@ -87,11 +87,14 @@ accept the shared invite. A forged group cookie still falls back to a real membe
 | `GET /games`              | 303 to the active group's week; the pick board owns the week                                     |
 | `GET /research`           | Research page: week games, player search, injury reports, and last-5 hit bars                     |
 | `GET /record`             | Season Record Book for the active group (optional `?season=`)                                    |
+| `GET /docs`               | Docs hub: quick jumps, "How systems work" explainers, and common questions                       |
+| `GET /docs/glossary`      | Searchable glossary of betting and app terms (optional `?q=`)                                    |
 | `GET /analyzer/guide`     | Grading & Analyzer Guide: live `A`–`F` rubric, pick-board badges, and every warning rule         |
 | `GET /analyzer/results`   | Grading Results: global or market-wide `A`–`F` calibration, rubric diffs, weekly progression, and factors |
 
-The bottom bar has three destinations: Groups (`/`), This week (`/groups/{active}/week`), and Record Book. Research
-keeps a full page but leaves the bar; the hub links to the pick board, and pick rows link to Research.
+The bottom bar has four destinations: Groups (`/`), This week (`/groups/{active}/week`), Record Book (`/record`), and
+Docs (`/docs`). Research keeps a full page but leaves the bar; the hub links to the pick board, and pick rows link to
+Research.
 
 `GET /{$}` lists every group oldest first and carries `data-refresh-on-visible`, so the browser refetches the list when
 the tab becomes visible instead of holding a stream. A person in one group gets a 303 to `/groups/{id}/week`.
@@ -419,6 +422,29 @@ Query parameters:
   Legacy `?rubric=` is still accepted as a fallback alias when `?engine=` is omitted.
 - `?from=`: optional safe return path validated by `safeReturnPath`, preserved on source/season/engine pills and the
   `"How grading works"` link back to `/analyzer/guide`. See [Analyzer](../concepts/analyzer.md).
+
+### Docs hub and glossary
+
+| Method + path        | Purpose                                                                         | Response |
+| -------------------- | ------------------------------------------------------------------------------- | -------- |
+| `GET /docs`          | Docs hub: quick jumps, seven "How systems work" explainers, and common questions | Full page; optional `?from=` back-link path. |
+| `GET /docs/glossary` | Searchable glossary of betting and app terms                                    | Full page; optional `?q=` search and `?from=` back-link path. |
+
+Both routes render `web/templates/docs.html` behind `RequireUser` and `Scope`, set `page.Tab = TabDocs`, and share a
+docs section switcher (`Overview`, `Glossary`, `Grading & Rules`, `Eval Results`). The switcher forwards `?from=` to
+every destination; `Grading & Rules` points at `/analyzer/guide` and `Eval Results` at `/analyzer/results` until
+dedicated docs routes exist. An optional `?from=` renders a `"← Back"` link when it passes `safeReturnPath`, the same
+check the analyzer screens use.
+
+`GET /docs` builds its content from static Go structs in `internal/web/docs.go` and reads no database. Sections carry
+stable anchors `#sys-grading`, `#sys-odds`, `#sys-badges`, `#sys-live`, `#sys-autograde`, `#sys-sources`, and
+`#sys-export`; other screens deep-link to them, so the IDs stay fixed.
+
+`GET /docs/glossary` filters a static `[]GlossaryEntry` slice in memory. The query matches a term's name, category,
+summary, or example, ignoring case, after whitespace is collapsed. Each entry renders at `#term-<slug>`, such as
+`#term-implied-prob` or `#term-epa`. While filtering, the page shows "N of M terms match" and an empty state when nothing
+matches. Filtering runs no database query and fetches nothing; the search form resubmits `GET /docs/glossary` and carries
+`from` through a hidden field.
 
 ### Profile
 

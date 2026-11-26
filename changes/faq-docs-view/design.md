@@ -169,7 +169,7 @@ tests)
       stable `#sys-*` anchors) and `GET /docs/glossary` (structured glossary with `#term-*` anchors and `?q=`
       filtering), wired into `internal/web/render.go` and `internal/web/slips.go` with handler and anchor-uniqueness
       tests.
-- [ ] Docs: document the new `/docs` and `/docs/glossary` routes in `docs/reference/routes.md`.
+- [x] Docs: document the new `/docs` and `/docs/glossary` routes in `docs/reference/routes.md`.
 
 ### Phase 2: Integrate Grading Guide and Eval Results into Docs
 
