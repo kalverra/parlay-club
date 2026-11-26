@@ -1,58 +1,43 @@
 {{define "content"}}
 <section class="space-y-4">
-  <div class="flex items-center justify-between">
-    <h1 class="text-xl font-semibold">Research</h1>
+  <div class="flex items-start justify-between gap-3">
+    <div>
+      <h1 class="text-xl font-semibold">Research</h1>
+      <p class="mt-0.5 text-sm text-ink-muted">
+        Find a leg across every cached line this week.
+      </p>
+    </div>
     {{if .WeekLabel}}
-      <span class="text-xs font-medium text-page-muted">{{.WeekLabel}}</span>
+      <span class="shrink-0 text-xs font-medium text-page-muted">{{.WeekLabel}}</span>
     {{end}}
   </div>
 
-  {{if or .Games .Players}}
-    <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-      <!-- Game selector -->
-      <div>
-        <label for="research-game" class="block text-xs font-medium text-page-muted mb-1">Game</label>
-        <select
-          id="research-game"
-          class="w-full rounded-lg border border-line-strong bg-surface px-3 py-2 text-sm text-ink focus:border-accent focus:outline-none"
-          onchange="if(this.value){window.location.href='/research?game_id='+encodeURIComponent(this.value)}"
-        >
-          <option value="">Select a game...</option>
-          {{range .Games}}
-            <option value="{{.ID}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>
-          {{end}}
-        </select>
-      </div>
+  {{template "research-explore" .Explore}}
 
-      <!-- Player selector -->
-      <div>
-        <label for="research-player" class="block text-xs font-medium text-page-muted mb-1">Player</label>
-        <select
-          id="research-player"
-          class="w-full rounded-lg border border-line-strong bg-surface px-3 py-2 text-sm text-ink focus:border-accent focus:outline-none"
-          onchange="if(this.value){window.location.href='/research?player_id='+encodeURIComponent(this.value)}"
+  {{if .GameResearch}}
+    <div id="research-panel" class="space-y-3">
+      <div class="flex items-center justify-between gap-2">
+        <p class="text-[11px] font-semibold uppercase tracking-wide text-ink-muted">Game sheet</p>
+        <a
+          href="{{.Explore.BackHref}}"
+          class="text-xs font-medium text-ink-muted underline hover:text-ink"
+          >&larr; All bets</a
         >
-          <option value="">Select a player...</option>
-          {{range .Players}}
-            <option value="{{.ID}}"{{if .Selected}} selected{{end}}>
-              {{.Name}} ({{.Team}}{{if .Position}} - {{.Position}}{{end}})
-            </option>
-          {{end}}
-        </select>
       </div>
+      {{template "research-game" .GameResearch}}
+    </div>
+  {{else if .PlayerResearch}}
+    <div id="research-panel" class="space-y-3">
+      <div class="flex items-center justify-between gap-2">
+        <p class="text-[11px] font-semibold uppercase tracking-wide text-ink-muted">Player sheet</p>
+        <a
+          href="{{.Explore.BackHref}}"
+          class="text-xs font-medium text-ink-muted underline hover:text-ink"
+          >&larr; All bets</a
+        >
+      </div>
+      {{template "research-player" .PlayerResearch}}
     </div>
   {{end}}
-
-  <div id="research-panel">
-    {{if .GameResearch}}
-      {{template "research-game" .GameResearch}}
-    {{else if .PlayerResearch}}
-      {{template "research-player" .PlayerResearch}}
-    {{else}}
-      <p class="ui-card border-dashed p-4 text-sm text-ink-muted">
-        Player and game research shows up here.
-      </p>
-    {{end}}
-  </div>
 </section>
 {{end}}

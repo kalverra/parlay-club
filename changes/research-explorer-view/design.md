@@ -106,7 +106,7 @@ flowchart TD
   Build --> Explore["board.Explore (ScoreLeg + Filter + Facets + Sort)"]
   Explore --> Targeted["Mode 1: Targeted Search (Game / Player / Query)"]
   Explore --> Open["Mode 2: Open Browse (Type / Grade / Signal / Sort)"]
-  Targeted --> Cards["Candidate Bet Cards (#research-results)"]
+  Targeted --> Cards["Candidate Bet Cards (#research-explore)"]
   Open --> Cards
   Cards -->|tap bet| BetView["GET /research/bet (Per-Bet Research)"]
   BetView --> PlayerRes["PlayerResearchView (market + line scoped)"]
@@ -127,8 +127,9 @@ Redesign `web/templates/research.html` around the two user workflows while prese
   `Passing`, `Rushing`, `Receiving`, `TDs`, `Kicking`, `Team totals`), **Grade** (`All`, `A`, `A–B`, `C+`), **Signals**
   (`Smash matchup`, `High volume`, `Role bump`), and **Sort** (`Best grade`, `Matchup`, `Odds`, `Line`, `Kickoff`,
   `Player`).
-- **HTMX partial swap:** Filter, search, and sort changes call `GET /research/explore?...`, swap `#research-results`,
-  and set `Hx-Push-Url` to `/research?...` so filters survive refreshes and shared links.
+- **HTMX partial swap:** Filter, search, and sort changes call `GET /research/explore?...`, swap `#research-explore`
+  (the search form, chip bars, and cards together), and set `Hx-Push-Url` to `/research?...` so filters survive
+  refreshes and shared links.
 - **Candidate cards:** Each card shows the player headshot or team logo, selection text, odds + implied %, grade badge
   with top reason, signal pills, game matchup/kickoff, and a primary tap target to open **Per-Bet Research**
   (`/research/bet?...`).
@@ -243,7 +244,7 @@ enforce zero paid API calls on browse via automated tests)
 - [x] Add `TabResearch` (`Research`, `/research`) to `internal/web/page.go` (using `grid-flow-col auto-cols-fr` in
       `web/templates/layout.html`) and set `page.Tab = TabResearch` in `internal/web/research.go`, updating nav/layout
       tests.
-- [ ] Redesign `GET /research` and add `GET /research/explore` (HTMX partial + `Hx-Push-Url`) in
+- [x] Redesign `GET /research` and add `GET /research/explore` (HTMX partial + `Hx-Push-Url`) in
       `internal/web/research.go`, `web/templates/research.html`, and `web/templates/partials.html` to support targeted
       game/player search and open-exploration filter/sort chips over cached data (plus an explicit
       `POST /research/games/{id}/props` button when a targeted game has no props yet), preserving existing `?game_id=`,

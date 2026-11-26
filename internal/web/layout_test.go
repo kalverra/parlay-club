@@ -208,7 +208,7 @@ func TestPlaceholderPages(t *testing.T) {
 		message string
 	}{
 		{"slip", "slip", webui.TabWeek, "Slip", "Slip contents show up here once the season starts."},
-		{"research", "research", "", "Research", "Player and game research shows up here."},
+		{"research", "research", "", "Research", "Find a leg across every cached line this week."},
 		{"record", "record", webui.TabRecord, "Record Book", "Join or create a group to see its Record Book."},
 	}
 

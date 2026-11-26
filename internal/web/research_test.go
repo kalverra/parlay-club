@@ -111,7 +111,9 @@ func TestResearchPage(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rec.Code)
 	body := rec.Body.String()
 	assert.Contains(t, body, "Research")
-	assert.Contains(t, body, "Player and game research shows up here.")
+	assert.Contains(t, body, "Find a leg across every cached line this week.")
+	assert.Contains(t, body, "Bet type")
+	assert.Contains(t, body, "Best grade")
 	assert.Regexp(
 		t,
 		`<a\s+href="/research"\s+class="flex flex-col[^>]*aria-current="page"`,
@@ -120,6 +122,9 @@ func TestResearchPage(t *testing.T) {
 	)
 	assert.Contains(t, body, game.HomeTeam)
 	assert.Contains(t, body, "Josh Allen")
+	assert.Empty(t, refresher.gameResearchSynced)
+	assert.Empty(t, refresher.playerResearchSynced)
+	assert.Empty(t, refresher.propsSynced)
 
 	// 2. GET /research?game_id={id} pre-loads game research
 	reqGame := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/research?game_id="+game.ID, nil)
@@ -130,7 +135,7 @@ func TestResearchPage(t *testing.T) {
 	assert.Contains(t, bodyGame, game.AwayTeam+" @ "+game.HomeTeam)
 	assert.Contains(t, bodyGame, "Key Injuries")
 	assert.Contains(t, bodyGame, "Player Matches")
-	assert.Contains(t, refresher.gameResearchSynced, game.ID)
+	assert.Empty(t, refresher.gameResearchSynced, "game sheets read cached research only")
 
 	// 3. GET /research?player_id={espnID} pre-loads player research
 	require.NoError(t, fixture.store.UpsertPlayerGameLog(t.Context(), db.PlayerGameLog{
@@ -149,7 +154,7 @@ func TestResearchPage(t *testing.T) {
 	assert.Contains(t, bodyPlayer, "8 GP")
 	assert.Contains(t, bodyPlayer, "L5 Median")
 	assert.Contains(t, bodyPlayer, "Season Mean")
-	assert.Contains(t, refresher.playerResearchSynced, "3918298")
+	assert.Empty(t, refresher.playerResearchSynced, "player sheets read cached research only")
 
 	// 4. GET /research?player=Josh+Allen resolves athlete ID
 	reqSearch := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/research?player=Josh+Allen", nil)
@@ -1310,4 +1315,247 @@ func TestResearchPlayerRichChartsAndMatchupContext(t *testing.T) {
 	assert.Contains(t, body, "CIN · W1")
 	assert.Contains(t, body, "G. Wilson")
 	assert.Contains(t, body, "NYJ · W2")
+}
+
+// seedResearchExplorer writes one upcoming game, a rostered player, and a mix
+// of game and prop odds the explorer can read from cache.
+func seedResearchExplorer(t *testing.T, fixture *slipFixture, game db.Game) {
+	t.Helper()
+
+	now := time.Now().UTC()
+	require.NoError(t, fixture.store.UpsertRosterPlayers(t.Context(), []db.RosterPlayer{
+		{
+			AthleteID:  "3918298",
+			Team:       "BUF",
+			ESPNTeamID: "2",
+			FullName:   "Josh Allen",
+			Position:   "QB",
+			UpdatedAt:  now,
+		},
+	}))
+	_, err := fixture.store.UpsertOdds(t.Context(), []db.Odds{
+		{
+			GameID:     game.ID,
+			Book:       "draftkings",
+			MarketType: "SPREAD",
+			Team:       "BUF",
+			Side:       "TEAM",
+			Line:       new(-3.5),
+			Price:      -110,
+			FetchedAt:  now,
+		},
+		{
+			GameID:     game.ID,
+			Book:       "draftkings",
+			MarketType: "PASS_YDS",
+			Team:       "BUF",
+			PlayerName: "Josh Allen",
+			Side:       "OVER",
+			Line:       new(265.5),
+			Price:      -110,
+			FetchedAt:  now,
+		},
+		{
+			GameID:     game.ID,
+			Book:       "draftkings",
+			MarketType: "RUSH_YDS",
+			Team:       "BUF",
+			PlayerName: "Josh Allen",
+			Side:       "OVER",
+			Line:       new(42.5),
+			Price:      +120,
+			FetchedAt:  now,
+		},
+	})
+	require.NoError(t, err)
+}
+
+func TestResearchExplorerBrowsesCachedBetsWithoutRefresh(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	game := addGame(t, fixture, gameKickoff())
+	seedResearchExplorer(t, fixture, game)
+	refresher := &researchTestRefresher{}
+	handler := researchHandlerWithRefresher(t, fixture, fixture.user, refresher)
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/research", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	body := rec.Body.String()
+	assert.Contains(t, body, "Find a leg across every cached line this week.")
+	assert.Contains(t, body, "Bet type")
+	assert.Contains(t, body, "Best grade")
+	assert.Contains(t, body, "3 bets match")
+	assert.Contains(t, body, "MIA @ BUF")
+	assert.Contains(t, body, "Josh Allen Over 265.5 Pass Yds")
+	assert.Contains(t, body, "Josh Allen Over 42.5 Rush Yds")
+
+	assert.Empty(t, refresher.gameResearchSynced, "browsing must not sync game research")
+	assert.Empty(t, refresher.playerResearchSynced, "browsing must not sync player research")
+	assert.Empty(t, refresher.propsSynced, "browsing must not fetch props")
+}
+
+func TestResearchExploreFiltersSortsAndPushesURL(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	game := addGame(t, fixture, gameKickoff())
+	seedResearchExplorer(t, fixture, game)
+	refresher := &researchTestRefresher{}
+	handler := researchHandlerWithRefresher(t, fixture, fixture.user, refresher)
+
+	// Passing only, sorted by odds. The partial swaps in place and pushes the
+	// matching full-page URL.
+	req := httptest.NewRequestWithContext(
+		t.Context(), http.MethodGet, "/research/explore?cat=passing&sort=odds", nil,
+	)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "/research?cat=passing&sort=odds", rec.Header().Get("Hx-Push-Url"))
+
+	body := rec.Body.String()
+	assert.NotContains(t, body, "<!doctype html>")
+	assert.Contains(t, body, "Josh Allen Over 265.5 Pass Yds")
+	assert.NotContains(t, body, "Josh Allen Over 42.5 Rush Yds", "the bet-type chip filters rushing out")
+	assert.Contains(t, body, ">Passing<span", "the Passing chip is current")
+
+	// Odds sort puts the shorter price first.
+	reqOdds := httptest.NewRequestWithContext(
+		t.Context(), http.MethodGet, "/research/explore?q=allen&sort=odds", nil,
+	)
+	recOdds := httptest.NewRecorder()
+	handler.ServeHTTP(recOdds, reqOdds)
+	require.Equal(t, http.StatusOK, recOdds.Code)
+	oddsBody := recOdds.Body.String()
+	passAt := strings.Index(oddsBody, "Josh Allen Over 265.5 Pass Yds")
+	rushAt := strings.Index(oddsBody, "Josh Allen Over 42.5 Rush Yds")
+	require.Positive(t, passAt)
+	require.Positive(t, rushAt)
+	assert.Less(t, passAt, rushAt, "-110 sorts before +120")
+
+	// A search with no match gets a friendly empty state.
+	reqEmpty := httptest.NewRequestWithContext(
+		t.Context(), http.MethodGet, "/research/explore?q=nobody", nil,
+	)
+	recEmpty := httptest.NewRecorder()
+	handler.ServeHTTP(recEmpty, reqEmpty)
+	require.Equal(t, http.StatusOK, recEmpty.Code)
+	assert.Contains(t, recEmpty.Body.String(), "Nothing matches those filters.")
+
+	// Targeting a game through the explorer stays on cached data.
+	reqGame := httptest.NewRequestWithContext(
+		t.Context(), http.MethodGet, "/research/explore?game_id="+game.ID, nil,
+	)
+	recGame := httptest.NewRecorder()
+	handler.ServeHTTP(recGame, reqGame)
+	require.Equal(t, http.StatusOK, recGame.Code)
+	assert.Equal(t, "/research?game_id="+game.ID, recGame.Header().Get("Hx-Push-Url"))
+
+	assert.Empty(t, refresher.gameResearchSynced, "exploring must not sync game research")
+	assert.Empty(t, refresher.playerResearchSynced, "exploring must not sync player research")
+	assert.Empty(t, refresher.propsSynced, "exploring must not fetch props")
+}
+
+func TestResearchTargetedGameOffersPropsButton(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	game := addGame(t, fixture, gameKickoff())
+	now := time.Now().UTC()
+	_, err := fixture.store.UpsertOdds(t.Context(), []db.Odds{
+		{
+			GameID:     game.ID,
+			Book:       "draftkings",
+			MarketType: "SPREAD",
+			Team:       "BUF",
+			Side:       "TEAM",
+			Line:       new(-3.5),
+			Price:      -110,
+			FetchedAt:  now,
+		},
+		{
+			GameID:     game.ID,
+			Book:       "draftkings",
+			MarketType: "TOTAL",
+			Side:       "OVER",
+			Line:       new(47.5),
+			Price:      -110,
+			FetchedAt:  now,
+		},
+	})
+	require.NoError(t, err)
+
+	refresher := &researchTestRefresher{}
+	handler := researchHandlerWithRefresher(t, fixture, fixture.user, refresher)
+
+	// A targeted game with lines but no props offers the explicit load button.
+	req := httptest.NewRequestWithContext(
+		t.Context(), http.MethodGet, "/research?game_id="+game.ID, nil,
+	)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	body := rec.Body.String()
+	assert.Contains(t, body, "Props for MIA @ BUF aren&rsquo;t loaded yet.")
+	assert.Contains(t, body, "Load props")
+	assert.Contains(t, body, "Key Injuries", "the targeted game sheet still renders")
+
+	// The button is the one path that fetches props.
+	form := url.Values{"game_id": {game.ID}}
+	reqProps := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodPost,
+		"/research/games/"+game.ID+"/props",
+		strings.NewReader(form.Encode()),
+	)
+	reqProps.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	reqProps.Header.Set("Hx-Request", "true")
+	recProps := httptest.NewRecorder()
+	handler.ServeHTTP(recProps, reqProps)
+	require.Equal(t, http.StatusOK, recProps.Code)
+	assert.Equal(t, []string{game.ID}, refresher.propsSynced)
+	assert.NotContains(t, recProps.Body.String(), "<!doctype html>")
+
+	// Without HTMX the same button redirects back to the full page.
+	reqPlain := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodPost,
+		"/research/games/"+game.ID+"/props",
+		strings.NewReader(form.Encode()),
+	)
+	reqPlain.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	recPlain := httptest.NewRecorder()
+	handler.ServeHTTP(recPlain, reqPlain)
+	assert.Equal(t, http.StatusSeeOther, recPlain.Code)
+	assert.Equal(t, "/research?game_id="+game.ID, recPlain.Header().Get("Location"))
+
+	// Once cached props exist, the button drops away.
+	_, err = fixture.store.UpsertOdds(t.Context(), []db.Odds{
+		{
+			GameID:     game.ID,
+			Book:       "draftkings",
+			MarketType: "PASS_YDS",
+			Team:       "BUF",
+			PlayerName: "Josh Allen",
+			Side:       "OVER",
+			Line:       new(265.5),
+			Price:      -110,
+			FetchedAt:  now,
+		},
+	})
+	require.NoError(t, err)
+
+	reqWithProps := httptest.NewRequestWithContext(
+		t.Context(), http.MethodGet, "/research?game_id="+game.ID, nil,
+	)
+	recWithProps := httptest.NewRecorder()
+	handler.ServeHTTP(recWithProps, reqWithProps)
+	require.Equal(t, http.StatusOK, recWithProps.Code)
+	withPropsBody := recWithProps.Body.String()
+	assert.NotContains(t, withPropsBody, "Load props")
+	assert.Contains(t, withPropsBody, "Josh Allen Over 265.5 Pass Yds")
 }

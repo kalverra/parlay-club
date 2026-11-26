@@ -11,9 +11,11 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/kalverra/parlay-club/internal/analyzer"
+	"github.com/kalverra/parlay-club/internal/board"
 	"github.com/kalverra/parlay-club/internal/db"
 	"github.com/kalverra/parlay-club/internal/ingest/espn"
 )
@@ -26,21 +28,111 @@ type researchHandlers struct {
 // Routes mounts the Research tab and endpoints.
 func (h *researchHandlers) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /research", h.research)
+	mux.HandleFunc("GET /research/explore", h.researchExplore)
 	mux.HandleFunc("GET /research/games/{id}", h.researchGame)
+	mux.HandleFunc("POST /research/games/{id}/props", h.researchGameProps)
 	mux.HandleFunc("GET /research/players/{espnID}", h.researchPlayer)
 	mux.HandleFunc("POST /research/matches", h.saveMatch)
 }
 
-// ResearchPage is the full Research tab.
+// ResearchPage is the full Research tab: the explorer plus, for a targeted
+// game or player, the deeper sheet.
 type ResearchPage struct {
 	Page
-	WeekLabel        string
-	Games            []ResearchGameOption
-	Players          []ResearchPlayerOption
-	SelectedGameID   string
-	SelectedPlayerID string
-	GameResearch     *GameResearchView
-	PlayerResearch   *PlayerResearchView
+	Explore        ResearchExploreView
+	GameResearch   *GameResearchView
+	PlayerResearch *PlayerResearchView
+}
+
+// ResearchExploreView is the #research-explore partial: the targeted search
+// form, the open-browse chip bars, and the candidate bet cards.
+type ResearchExploreView struct {
+	WeekLabel       string
+	Search          string
+	GameID          string
+	PlayerID        string
+	Category        string
+	Grade           string
+	Signal          string
+	Sort            string
+	Limit           int
+	Games           []ResearchGameOption
+	Players         []ResearchPlayerOption
+	CategoryChips   []ResearchChip
+	GradeChips      []ResearchChip
+	SignalChips     []ResearchChip
+	SortChips       []ResearchChip
+	Cards           []ResearchCardView
+	TotalMatched    int
+	HasMore         bool
+	MoreHref        string
+	MorePushURL     string
+	GameSheetHref   string
+	PlayerSheetHref string
+	BackHref        string
+	PropsGameID     string
+	PropsMatchup    string
+	GameNoProps     bool
+	NoGames         bool
+	NoLines         bool
+	AllStarted      bool
+	Empty           bool
+}
+
+// ResearchChip is one filter or sort link in the explorer.
+type ResearchChip struct {
+	Label   string
+	Count   int
+	Active  bool
+	Href    string
+	PushURL string
+}
+
+// ResearchCardView is one candidate bet card. The identity fields after Market
+// are what a per-bet research link needs, so the next phase can key on the same
+// selection without re-reading the row.
+type ResearchCardView struct {
+	GameID          string
+	Market          string
+	MarketType      string
+	Side            string
+	Team            string
+	Line            string
+	Selection       string
+	PlayerName      string
+	PlayerID        string
+	Position        string
+	HeadshotURL     string
+	Initials        string
+	TeamLogo        string
+	AwayLogo        string
+	HomeLogo        string
+	Matchup         string
+	KickoffISO      string
+	KickoffFallback string
+	Odds            string
+	OddsValue       int
+	Implied         string
+	GradeLetter     string
+	GradeScore      int
+	GradeClass      string
+	Reason          string
+	Badge           string
+	GameSheetHref   string
+	PlayerSheetHref string
+}
+
+// researchQuery is one explorer request. GameID and PlayerID target the slate;
+// the rest are the open-browse chips.
+type researchQuery struct {
+	Q        string
+	GameID   string
+	PlayerID string
+	Category board.Category
+	Grade    string
+	Signal   string
+	Sort     board.ExploreSort
+	Limit    int
 }
 
 // ResearchGameOption is one game in the selector.
@@ -199,71 +291,22 @@ type MarketOptionView struct {
 	Href   string
 }
 
-// research renders the full research page or HTMX partials.
+// research renders the full research page or an HTMX sheet partial.
 func (h *researchHandlers) research(w http.ResponseWriter, r *http.Request) {
-	page := ResearchPage{Page: h.page(r)}
+	query := parseResearchQuery(r)
+	playerName := strings.TrimSpace(r.URL.Query().Get("player"))
+	explore := h.buildExplore(r.Context(), query, playerName)
+
+	page := ResearchPage{Page: h.page(r), Explore: explore}
+	page.WeekLabel = explore.WeekLabel
 
 	if h.deps.Store == nil {
 		h.render(w, page)
 		return
 	}
 
-	week, err := h.deps.Store.LatestWeek(r.Context())
-	if err == nil {
-		page.WeekLabel = weekLabel(week)
-		games, err := h.deps.Store.GamesForWeek(r.Context(), week.ID)
-		if err == nil {
-			teams := make([]string, 0, len(games)*2)
-			for _, g := range games {
-				label := fmt.Sprintf("%s @ %s", g.AwayTeam, g.HomeTeam)
-				if g.AwayTeam == "" || g.HomeTeam == "" {
-					label = g.ID
-				}
-				page.Games = append(page.Games, ResearchGameOption{
-					ID:    g.ID,
-					Label: label,
-				})
-				if g.HomeTeam != "" {
-					teams = append(teams, g.HomeTeam)
-				}
-				if g.AwayTeam != "" {
-					teams = append(teams, g.AwayTeam)
-				}
-			}
-
-			if len(teams) > 0 {
-				rosterPlayers, err := h.deps.Store.RosterForTeams(r.Context(), teams)
-				if err == nil {
-					for _, p := range rosterPlayers {
-						page.Players = append(page.Players, ResearchPlayerOption{
-							ID:       p.AthleteID,
-							Name:     p.FullName,
-							Team:     p.Team,
-							Position: p.Position,
-						})
-					}
-					slices.SortFunc(page.Players, func(a, b ResearchPlayerOption) int {
-						return strings.Compare(a.Name, b.Name)
-					})
-				}
-			}
-		}
-	}
-
-	gameID := strings.TrimSpace(r.URL.Query().Get("game_id"))
-	playerID := strings.TrimSpace(r.URL.Query().Get("player_id"))
-	if playerID == "" {
-		if playerName := strings.TrimSpace(r.URL.Query().Get("player")); playerName != "" {
-			norm := db.NormalizePlayerName(playerName)
-			for _, p := range page.Players {
-				if db.NormalizePlayerName(p.Name) == norm {
-					playerID = p.ID
-					break
-				}
-			}
-		}
-	}
-
+	gameID := explore.GameID
+	playerID := explore.PlayerID
 	legIDStr := strings.TrimSpace(r.URL.Query().Get("leg_id"))
 	market := strings.TrimSpace(r.URL.Query().Get("market"))
 	lineStr := strings.TrimSpace(r.URL.Query().Get("line"))
@@ -278,12 +321,6 @@ func (h *researchHandlers) research(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			page.PlayerResearch = view
-			page.SelectedPlayerID = playerID
-			for i := range page.Players {
-				if page.Players[i].ID == playerID {
-					page.Players[i].Selected = true
-				}
-			}
 		}
 	} else if gameID != "" {
 		view, err := h.loadGameResearch(r.Context(), gameID)
@@ -293,16 +330,56 @@ func (h *researchHandlers) research(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			page.GameResearch = view
-			page.SelectedGameID = gameID
-			for i := range page.Games {
-				if page.Games[i].ID == gameID {
-					page.Games[i].Selected = true
-				}
-			}
 		}
 	}
 
 	h.render(w, page)
+}
+
+// researchExplore returns the explorer partial for HTMX searches, chip
+// changes, and sorts, and pushes the matching full-page URL into the address
+// bar so the view survives a refresh or a shared link.
+func (h *researchHandlers) researchExplore(w http.ResponseWriter, r *http.Request) {
+	query := parseResearchQuery(r)
+	playerName := strings.TrimSpace(r.URL.Query().Get("player"))
+	explore := h.buildExplore(r.Context(), query, playerName)
+	w.Header().Set("Hx-Push-Url", researchPushURL(queryFromExplore(explore)))
+	h.renderPartial(w, "research-explore", explore)
+}
+
+// researchGameProps loads props for one targeted game on an explicit tap, then
+// returns the explorer so any props that landed show up in place.
+func (h *researchHandlers) researchGameProps(w http.ResponseWriter, r *http.Request) {
+	gameID := r.PathValue("id")
+	if gameID == "" || h.deps.Store == nil {
+		http.NotFound(w, r)
+		return
+	}
+	if _, err := h.deps.Store.GameByID(r.Context(), gameID); errors.Is(err, db.ErrGameNotFound) {
+		http.NotFound(w, r)
+		return
+	} else if err != nil {
+		h.deps.Logger.Error().Err(err).Str("game_id", gameID).Msg("load game for props")
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+
+	if h.deps.Refresh != nil {
+		if err := h.deps.Refresh.SyncGameProps(r.Context(), gameID); err != nil {
+			h.deps.Logger.Warn().Err(err).Str("game_id", gameID).Msg("sync game props from research")
+		}
+	}
+
+	if r.Header.Get("Hx-Request") == "" {
+		http.Redirect(w, r, "/research?game_id="+url.QueryEscape(gameID), http.StatusSeeOther)
+		return
+	}
+
+	query := parseResearchQuery(r)
+	query.GameID = gameID
+	explore := h.buildExplore(r.Context(), query, "")
+	w.Header().Set("Hx-Push-Url", researchPushURL(queryFromExplore(explore)))
+	h.renderPartial(w, "research-explore", explore)
 }
 
 // researchGame serves the game research partial.
@@ -353,12 +430,654 @@ func (h *researchHandlers) researchPlayer(w http.ResponseWriter, r *http.Request
 	h.renderPartial(w, "research-player", view)
 }
 
+// parseResearchQuery reads the explorer's query from the URL or a submitted form.
+func parseResearchQuery(r *http.Request) researchQuery {
+	if r.Method == http.MethodPost && r.PostForm == nil {
+		_ = r.ParseForm()
+	}
+	value := func(key string) string {
+		if raw := r.URL.Query().Get(key); raw != "" {
+			return raw
+		}
+		if r.PostForm != nil {
+			return r.PostForm.Get(key)
+		}
+		return ""
+	}
+	q := researchQuery{
+		Q:        strings.TrimSpace(value("q")),
+		GameID:   strings.TrimSpace(value("game_id")),
+		PlayerID: strings.TrimSpace(value("player_id")),
+		Category: board.Category(strings.TrimSpace(value("cat"))),
+		Grade:    normalizeResearchGrade(value("grade")),
+		Signal:   normalizeResearchSignal(value("signal")),
+		Sort:     board.ExploreSort(strings.TrimSpace(value("sort"))),
+		Limit:    intFromString(value("limit")),
+	}
+	if !slices.Contains(board.Categories, q.Category) {
+		q.Category = ""
+	}
+	if !slices.Contains(board.ExploreSorts, q.Sort) {
+		q.Sort = ""
+	}
+	if q.Limit < 0 {
+		q.Limit = 0
+	}
+	return q
+}
+
+// normalizeResearchGrade folds a grade chip value to its band. An unknown
+// value reads as no grade filter.
+func normalizeResearchGrade(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "a":
+		return "a"
+	case "ab", "a-b", "a–b":
+		return "ab"
+	case "c", "c+", "cplus":
+		return "c"
+	default:
+		return ""
+	}
+}
+
+// researchGradeLetters expands a grade chip band to the letters it keeps.
+func researchGradeLetters(value string) []string {
+	switch normalizeResearchGrade(value) {
+	case "a":
+		return []string{"A"}
+	case "ab":
+		return []string{"A", "B"}
+	case "c":
+		return []string{"A", "B", "C"}
+	default:
+		return nil
+	}
+}
+
+// normalizeResearchSignal folds a signal chip value to its token. An unknown
+// value reads as no signal filter.
+func normalizeResearchSignal(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case board.SignalSmash, "smash matchup":
+		return board.SignalSmash
+	case board.SignalVolume, "high volume":
+		return board.SignalVolume
+	case board.SignalRoleBump, "role bump":
+		return board.SignalRoleBump
+	case board.SignalFitsSlip, "fits slip":
+		return board.SignalFitsSlip
+	default:
+		return ""
+	}
+}
+
+// researchURL builds one explorer URL. The path selects the partial or the full
+// page; every filter that is set rides along.
+func researchURL(path string, q researchQuery) string {
+	values := url.Values{}
+	if q.Q != "" {
+		values.Set("q", q.Q)
+	}
+	if q.GameID != "" {
+		values.Set("game_id", q.GameID)
+	}
+	if q.PlayerID != "" {
+		values.Set("player_id", q.PlayerID)
+	}
+	if q.Category != "" {
+		values.Set("cat", string(q.Category))
+	}
+	if q.Grade != "" {
+		values.Set("grade", q.Grade)
+	}
+	if q.Signal != "" {
+		values.Set("signal", q.Signal)
+	}
+	if q.Sort != "" {
+		values.Set("sort", string(q.Sort))
+	}
+	if q.Limit > 0 {
+		values.Set("limit", strconv.Itoa(q.Limit))
+	}
+	if encoded := values.Encode(); encoded != "" {
+		return path + "?" + encoded
+	}
+	return path
+}
+
+// researchPushURL is the full page URL the explorer pushes into the address bar.
+func researchPushURL(q researchQuery) string {
+	return researchURL("/research", q)
+}
+
+// researchExploreURL is the HTMX partial URL for one query.
+func researchExploreURL(q researchQuery) string {
+	return researchURL("/research/explore", q)
+}
+
+// queryFromExplore returns the request a rendered explorer stands for, using
+// the resolved game and player targets. The default page size stays out of the
+// URL so shared links read cleanly.
+func queryFromExplore(view ResearchExploreView) researchQuery {
+	limit := view.Limit
+	if limit <= 50 {
+		limit = 0
+	}
+	return researchQuery{
+		Q:        view.Search,
+		GameID:   view.GameID,
+		PlayerID: view.PlayerID,
+		Category: board.Category(view.Category),
+		Grade:    view.Grade,
+		Signal:   view.Signal,
+		Sort:     board.ExploreSort(view.Sort),
+		Limit:    limit,
+	}
+}
+
+// buildExplore loads one week of cached games, odds, and roster, scores the
+// slate, and shapes the explorer partial. It never syncs anything, so browsing,
+// searching, filtering, and sorting make zero paid API calls.
+func (h *researchHandlers) buildExplore(
+	ctx context.Context,
+	q researchQuery,
+	playerName string,
+) ResearchExploreView {
+	view := ResearchExploreView{
+		Search:   q.Q,
+		GameID:   q.GameID,
+		PlayerID: q.PlayerID,
+		Category: string(q.Category),
+		Grade:    q.Grade,
+		Signal:   q.Signal,
+		Sort:     string(q.Sort),
+		Limit:    q.Limit,
+	}
+	if view.Limit <= 0 {
+		view.Limit = 50
+	}
+	result := board.Explore(nil, nil, nil, board.ExploreQuery{})
+
+	if h.deps.Store == nil {
+		finishResearchExplore(&view, result)
+		return view
+	}
+
+	week, err := h.deps.Store.LatestWeek(ctx)
+	if err != nil {
+		view.NoGames = true
+		finishResearchExplore(&view, result)
+		return view
+	}
+	view.WeekLabel = weekLabel(week)
+
+	games, err := h.deps.Store.GamesForWeek(ctx, week.ID)
+	if err != nil {
+		view.NoGames = true
+		finishResearchExplore(&view, result)
+		return view
+	}
+	view.Games = researchGameOptions(games, view.GameID)
+	view.NoGames = len(games) == 0
+
+	teams := weekTeams(games)
+	roster, _ := h.deps.Store.RosterForTeams(ctx, teams)
+	view.Players = researchPlayerOptions(roster)
+
+	if view.PlayerID == "" && playerName != "" {
+		norm := db.NormalizePlayerName(playerName)
+		for _, player := range view.Players {
+			if db.NormalizePlayerName(player.Name) == norm {
+				view.PlayerID = player.ID
+				break
+			}
+		}
+		if view.PlayerID == "" && view.Search == "" {
+			view.Search = playerName
+		}
+	}
+	markResearchSelection(&view)
+
+	now := h.deps.now()
+	_, homeBook := h.researchViewer(ctx)
+	odds, err := h.deps.Store.OddsForWeek(ctx, week.ID)
+	if err != nil {
+		view.NoLines = !view.NoGames
+		finishResearchExplore(&view, result)
+		return view
+	}
+
+	rows := board.Build(games, odds, roster, homeBook, nil, now)
+	signals := h.researchSignals(ctx, week.ID, now, games, roster, rows)
+	boardGames, boardStats := h.loadResearchBoardSignals(ctx, week.ID, now, games, rows)
+
+	result = board.Explore(rows, boardGames, boardStats, board.ExploreQuery{
+		Q:        view.Search,
+		GameID:   view.GameID,
+		PlayerID: view.PlayerID,
+		Category: board.Category(view.Category),
+		Grades:   researchGradeLetters(view.Grade),
+		Signal:   view.Signal,
+		Sort:     board.ExploreSort(view.Sort),
+		Limit:    q.Limit,
+		Signals:  signals,
+	})
+
+	view.Cards = researchCards(games, result.Rows)
+	view.TotalMatched = result.TotalMatched
+	view.HasMore = result.HasMore
+	view.AllStarted = !view.NoGames && board.StartedCount(games, now) == len(games)
+	view.NoLines = !view.NoGames && !view.AllStarted && len(rows) == 0
+	view.Empty = len(result.Rows) == 0 && !view.NoGames && !view.NoLines && !view.AllStarted
+
+	if result.HasMore {
+		next := queryFromExplore(view)
+		next.Limit = view.Limit + 50
+		view.MoreHref = researchExploreURL(next)
+		view.MorePushURL = researchPushURL(next)
+	}
+	finishResearchExploreTargets(&view, games, rows)
+	finishResearchExplore(&view, result)
+	return view
+}
+
+// researchGameOptions lists the week's games for the targeted picker.
+func researchGameOptions(games []db.Game, selectedID string) []ResearchGameOption {
+	options := make([]ResearchGameOption, 0, len(games))
+	for _, game := range games {
+		label := fmt.Sprintf("%s @ %s", game.AwayTeam, game.HomeTeam)
+		if game.AwayTeam == "" || game.HomeTeam == "" {
+			label = game.ID
+		}
+		options = append(options, ResearchGameOption{
+			ID:       game.ID,
+			Label:    label,
+			Selected: game.ID == selectedID,
+		})
+	}
+	return options
+}
+
+// researchPlayerOptions lists the week's rostered athletes for the targeted
+// picker, sorted by name.
+func researchPlayerOptions(roster []db.RosterPlayer) []ResearchPlayerOption {
+	options := make([]ResearchPlayerOption, 0, len(roster))
+	for _, player := range roster {
+		options = append(options, ResearchPlayerOption{
+			ID:       player.AthleteID,
+			Name:     player.FullName,
+			Team:     player.Team,
+			Position: player.Position,
+		})
+	}
+	slices.SortFunc(options, func(a, b ResearchPlayerOption) int {
+		return strings.Compare(a.Name, b.Name)
+	})
+	return options
+}
+
+// markResearchSelection marks the resolved game and player in the pickers.
+func markResearchSelection(view *ResearchExploreView) {
+	for i := range view.Games {
+		view.Games[i].Selected = view.Games[i].ID == view.GameID
+	}
+	for i := range view.Players {
+		view.Players[i].Selected = view.Players[i].ID == view.PlayerID
+	}
+}
+
+// researchViewer returns the signed-in person and their home book.
+func (h *researchHandlers) researchViewer(ctx context.Context) (db.User, string) {
+	if h.deps.UserFrom == nil {
+		return db.User{}, ""
+	}
+	user, ok := h.deps.UserFrom(ctx)
+	if !ok {
+		return db.User{}, ""
+	}
+	homeBook := ""
+	if user.HomeBook != nil {
+		homeBook = *user.HomeBook
+	}
+	return user, homeBook
+}
+
+// loadResearchBoardSignals loads the nfelo, EPA, and player-stat context the
+// analyzer scores rows with.
+func (h *researchHandlers) loadResearchBoardSignals(
+	ctx context.Context,
+	weekID int64,
+	now time.Time,
+	games []db.Game,
+	rows []board.Row,
+) (map[string]analyzer.Game, map[string]analyzer.PlayerStats) {
+	playerIDs := make([]string, 0, len(rows))
+	for _, row := range rows {
+		if row.PlayerID != "" {
+			playerIDs = append(playerIDs, row.PlayerID)
+		}
+	}
+	return analyzer.LoadBoardSignals(ctx, h.deps.Store, now, weekID, games, playerIDs)
+}
+
+// researchSignals loads the badges a row can earn: nflverse team EPA, player
+// usage, game injuries, and the viewer's legs on open slips.
+func (h *researchHandlers) researchSignals(
+	ctx context.Context,
+	weekID int64,
+	now time.Time,
+	games []db.Game,
+	roster []db.RosterPlayer,
+	rows []board.Row,
+) board.BoardSignals {
+	playerIDs := make([]string, 0, len(rows))
+	for _, row := range rows {
+		if row.PlayerID != "" {
+			playerIDs = append(playerIDs, row.PlayerID)
+		}
+	}
+	teamEPA, playerUsage := analyzer.LoadGameSignals(ctx, h.deps.Store, now, weekID, playerIDs)
+	injuries := make(map[string][]espn.Injury)
+	for _, game := range games {
+		for team, teamInjuries := range analyzer.MergeGameInjuries(game, roster) {
+			injuries[team] = append(injuries[team], teamInjuries...)
+		}
+	}
+	return board.BoardSignals{
+		TeamEPA:     teamEPA,
+		PlayerUsage: playerUsage,
+		Injuries:    injuries,
+		SlipLegs:    h.researchSlipLegs(ctx, weekID),
+	}
+}
+
+// researchSlipLegs collects the viewer's legs on open slips for this week, so
+// the explorer can mark legs that fit what they are already building.
+func (h *researchHandlers) researchSlipLegs(ctx context.Context, weekID int64) []analyzer.Leg {
+	if h.deps.GroupFrom == nil || h.deps.UserFrom == nil {
+		return nil
+	}
+	group, ok := h.deps.GroupFrom(ctx)
+	if !ok {
+		return nil
+	}
+	user, ok := h.deps.UserFrom(ctx)
+	if !ok {
+		return nil
+	}
+	weekSlips, err := h.deps.Store.SlipsForWeek(ctx, group.ID, weekID)
+	if err != nil {
+		return nil
+	}
+	var legs []analyzer.Leg
+	for _, slip := range weekSlips {
+		if slip.Status != db.SlipOpen {
+			continue
+		}
+		slipLegs, err := h.deps.Store.LegsForSlip(ctx, slip.ID)
+		if err != nil {
+			continue
+		}
+		for _, leg := range slipLegs {
+			if leg.UserID != user.ID {
+				continue
+			}
+			legs = append(legs, analyzer.LegFromDB(leg, ""))
+		}
+	}
+	return legs
+}
+
+// researchCards maps one explorer page to the candidate cards.
+func researchCards(games []db.Game, rows []board.ScoredRow) []ResearchCardView {
+	byID := make(map[string]db.Game, len(games))
+	for _, game := range games {
+		byID[game.ID] = game
+	}
+	cards := make([]ResearchCardView, 0, len(rows))
+	for _, scored := range rows {
+		row := scored.Row
+		game := byID[row.GameID]
+		card := ResearchCardView{
+			GameID:          row.GameID,
+			Market:          researchMarketLabel(row.Market),
+			MarketType:      row.Market,
+			Side:            row.Side,
+			Team:            row.Team,
+			Line:            researchLineText(row.Line),
+			Selection:       row.Text,
+			PlayerName:      row.PlayerName,
+			PlayerID:        row.PlayerID,
+			Position:        row.Position,
+			HeadshotURL:     row.HeadshotURL,
+			Initials:        Initials(row.PlayerName),
+			Matchup:         game.AwayTeam + " @ " + game.HomeTeam,
+			KickoffISO:      kickoffISO(row.Kickoff),
+			KickoffFallback: kickoffFallback(row.Kickoff),
+			Odds:            formatOdds(row.Odds),
+			OddsValue:       row.Odds,
+			GradeLetter:     scored.Grade.Letter,
+			GradeScore:      scored.Grade.Score,
+			GradeClass:      gradeClass(scored.Grade.Letter),
+			Reason:          scored.Reason,
+			Badge:           row.Badge,
+			GameSheetHref:   "/research?game_id=" + url.QueryEscape(row.GameID),
+			AwayLogo:        db.StringValue(game.AwayLogo),
+			HomeLogo:        db.StringValue(game.HomeLogo),
+		}
+		if row.Odds == 0 {
+			card.Odds = "—"
+		}
+		if scored.ImpliedPct > 0 {
+			card.Implied = fmt.Sprintf("%d%%", scored.ImpliedPct)
+		}
+		if card.Matchup == " @ " {
+			card.Matchup = game.ID
+		}
+		if row.PlayerID != "" {
+			card.PlayerSheetHref = "/research?player_id=" + url.QueryEscape(row.PlayerID)
+		}
+		switch row.Team {
+		case game.AwayTeam:
+			card.TeamLogo = card.AwayLogo
+		case game.HomeTeam:
+			card.TeamLogo = card.HomeLogo
+		}
+		cards = append(cards, card)
+	}
+	return cards
+}
+
+// researchMarketLabel names a row's market on its card.
+func researchMarketLabel(market string) string {
+	switch market {
+	case "SPREAD":
+		return "Spread"
+	case "ML":
+		return "Moneyline"
+	case "TOTAL":
+		return "Total"
+	case "TEAM_TOTAL":
+		return "Team total"
+	default:
+		if label := db.MarketLabel(market); label != "" {
+			return label
+		}
+		return market
+	}
+}
+
+// researchLineText prints a row's line for a per-bet link.
+func researchLineText(line *float64) string {
+	if line == nil {
+		return ""
+	}
+	return formatNumber(*line)
+}
+
+// finishResearchExploreTargets records the sheet links and the explicit props
+// button a targeted game may need.
+func finishResearchExploreTargets(
+	view *ResearchExploreView,
+	games []db.Game,
+	rows []board.Row,
+) {
+	current := queryFromExplore(*view)
+	current.Limit = 0
+	if view.GameID != "" {
+		view.GameSheetHref = researchPushURL(current)
+	}
+	if view.PlayerID != "" {
+		view.PlayerSheetHref = researchPushURL(current)
+	}
+	back := current
+	back.GameID = ""
+	back.PlayerID = ""
+	back.Limit = 0
+	view.BackHref = researchPushURL(back)
+
+	if view.GameID == "" {
+		return
+	}
+	for _, game := range games {
+		if game.ID == view.GameID {
+			view.PropsMatchup = game.AwayTeam + " @ " + game.HomeTeam
+			if view.PropsMatchup == " @ " {
+				view.PropsMatchup = game.ID
+			}
+			break
+		}
+	}
+	view.PropsGameID = view.GameID
+	hasLines := false
+	hasProps := false
+	for _, row := range rows {
+		if row.GameID != view.GameID {
+			continue
+		}
+		hasLines = true
+		if row.Category != board.CategoryLines {
+			hasProps = true
+			break
+		}
+	}
+	view.GameNoProps = hasLines && !hasProps
+}
+
+// finishResearchExplore fills the chip bars and pagination links from one
+// result and the resolved query.
+func finishResearchExplore(view *ResearchExploreView, result board.ExploreResult) {
+	current := queryFromExplore(*view)
+	current.Limit = 0
+	view.CategoryChips = researchCategoryChips(current, result)
+	view.GradeChips = researchGradeChips(current, result)
+	view.SignalChips = researchSignalChips(current, result)
+	view.SortChips = researchSortChips(current)
+}
+
+// researchCategoryChips builds the bet-type chips with their counts.
+func researchCategoryChips(q researchQuery, result board.ExploreResult) []ResearchChip {
+	chips := make([]ResearchChip, 0, len(board.Categories)+1)
+	all := 0
+	for _, count := range result.CategoryCounts {
+		all += count
+	}
+	next := q
+	next.Category = ""
+	chips = append(chips, researchChip(next, "All", all, q.Category == ""))
+	for _, category := range board.Categories {
+		next := q
+		next.Category = category
+		chips = append(
+			chips,
+			researchChip(next, category.Label(), result.CategoryCounts[category], q.Category == category),
+		)
+	}
+	return chips
+}
+
+// researchChip fills one chip's links from the query it asks for.
+func researchChip(next researchQuery, label string, count int, active bool) ResearchChip {
+	next.Limit = 0
+	return ResearchChip{
+		Label:   label,
+		Count:   count,
+		Active:  active,
+		Href:    researchExploreURL(next),
+		PushURL: researchPushURL(next),
+	}
+}
+
+// researchGradeChips builds the grade-band chips with their counts.
+func researchGradeChips(q researchQuery, result board.ExploreResult) []ResearchChip {
+	all := 0
+	for _, count := range result.GradeCounts {
+		all += count
+	}
+	bands := []struct {
+		value string
+		label string
+	}{
+		{"", "All"},
+		{"a", "A"},
+		{"ab", "A–B"},
+		{"c", "C+"},
+	}
+	chips := make([]ResearchChip, 0, len(bands))
+	for _, band := range bands {
+		count := 0
+		if band.value == "" {
+			count = all
+		} else {
+			for _, letter := range researchGradeLetters(band.value) {
+				count += result.GradeCounts[letter]
+			}
+		}
+		next := q
+		next.Grade = band.value
+		chips = append(chips, researchChip(next, band.label, count, q.Grade == band.value))
+	}
+	return chips
+}
+
+// researchSignalChips builds the signal chips with their counts.
+func researchSignalChips(q researchQuery, result board.ExploreResult) []ResearchChip {
+	chips := make([]ResearchChip, 0, len(board.ExploreSignals)+1)
+	next := q
+	next.Signal = ""
+	chips = append(chips, researchChip(next, "Any signal", 0, q.Signal == ""))
+	for _, signal := range board.ExploreSignals {
+		next := q
+		next.Signal = signal
+		chips = append(
+			chips,
+			researchChip(next, board.SignalLabel(signal), result.SignalCounts[signal], q.Signal == signal),
+		)
+	}
+	return chips
+}
+
+// researchSortChips builds the sort links. An empty sort is the default grade
+// sort, so Best grade stays current until another chip is picked.
+func researchSortChips(q researchQuery) []ResearchChip {
+	chips := make([]ResearchChip, 0, len(board.ExploreSorts))
+	for _, sort := range board.ExploreSorts {
+		next := q
+		next.Sort = sort
+		active := q.Sort == sort || (q.Sort == "" && sort == board.ExploreSortGrade)
+		chips = append(chips, researchChip(next, sort.Label(), 0, active))
+	}
+	return chips
+}
+
 // saveMatch saves a manual player match fix.
 func (h *researchHandlers) saveMatch(w http.ResponseWriter, r *http.Request) {
 	if h.deps.Store == nil {
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
+
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "invalid form", http.StatusBadRequest)
 		return
@@ -398,14 +1117,8 @@ func (h *researchHandlers) saveMatch(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/research", http.StatusSeeOther)
 }
 
-// loadGameResearch builds the GameResearchView for one game.
+// loadGameResearch builds the GameResearchView for one game from cached data.
 func (h *researchHandlers) loadGameResearch(ctx context.Context, gameID string) (*GameResearchView, error) {
-	if h.deps.Refresh != nil {
-		if err := h.deps.Refresh.SyncGameResearch(ctx, gameID); err != nil {
-			h.deps.Logger.Warn().Err(err).Str("game_id", gameID).Msg("sync game research")
-		}
-	}
-
 	game, err := h.deps.Store.GameByID(ctx, gameID)
 	if err != nil {
 		return nil, err
@@ -511,17 +1224,12 @@ func (h *researchHandlers) loadGameResearch(ctx context.Context, gameID string) 
 	return view, nil
 }
 
-// loadPlayerResearch builds the PlayerResearchView for one athlete.
+// loadPlayerResearch builds the PlayerResearchView for one athlete from cached
+// data.
 func (h *researchHandlers) loadPlayerResearch(
 	ctx context.Context,
 	athleteID, legIDStr, marketParam, lineParam string,
 ) (*PlayerResearchView, error) {
-	if h.deps.Refresh != nil {
-		if err := h.deps.Refresh.SyncPlayerResearch(ctx, athleteID); err != nil {
-			h.deps.Logger.Warn().Err(err).Str("athlete_id", athleteID).Msg("sync player research")
-		}
-	}
-
 	player, playerErr := h.deps.Store.RosterPlayerByID(ctx, athleteID)
 	gamelog, logErr := h.deps.Store.PlayerGameLog(ctx, athleteID)
 
