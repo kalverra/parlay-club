@@ -1,6 +1,7 @@
 package push
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -50,7 +51,9 @@ func (s *Service) SendToUsers(ctx context.Context, userIDs []int64, m Message) {
 
 	var wg sync.WaitGroup
 	for _, sub := range subs {
-		wg.Go(func() { s.send(ctx, sub, payload, m) })
+		// webpush-go grows its buffer from the caller's slice, so each send
+		// needs its own copy or concurrent sends race on the payload.
+		wg.Go(func() { s.send(ctx, sub, bytes.Clone(payload), m) })
 	}
 	wg.Wait()
 }

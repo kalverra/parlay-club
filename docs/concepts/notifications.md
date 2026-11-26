@@ -3,7 +3,7 @@ id: notifications
 title: Notifications
 type: concept
 summary: How the app installs to a phone or desktop home screen, turns on per-device Web Push from the profile page, stores subscriptions, and sends through VAPID.
-tags: [pwa, install, manifest, service-worker, icons, ios, safe-area, notifications, web-push, vapid, push-subscriptions]
+tags: [pwa, install, manifest, service-worker, icons, ios, safe-area, notifications, web-push, vapid, push-subscriptions, slip-events]
 ---
 
 # Notifications
@@ -154,11 +154,37 @@ is kept: a missed nudge is better than a request that waits on a push service.
 
 Sends run inside the request that caused them, before the handler answers. Cloud Run bills CPU by request, so work
 started after the response can stall until the next request. The send uses `context.WithoutCancel` with its own timeout,
-so the work survives a client disconnect. Today the only caller is Send test, which sends "Notifications are on for this
-device." to the caller's own devices. Slip events and kickoff reminders arrive later in this change.
+so the work survives a client disconnect. Send test sends "Notifications are on for this device." to the caller's own
+devices. Slip events send the same way, described below. Kickoff reminders arrive later in this change.
 
 The `push_log` table exists for dedupe: a sender reserves a row before it sends, so a retried event never sends twice.
-Nothing writes it yet; slip grades and reminders use it in later phases.
+Slip grades use it now, one slip-wide row per grade, and reminders will use it later.
+
+## Slip events
+
+`slips.Service` raises one event after a transaction commits, through a small `Notifier` seam. The seam knows nothing
+about push: it carries the kind, the slip, the actor, the number of legs added, and the one pick when only one was
+added. `internal/push` implements it and decides who hears about the change.
+
+| Event         | Raised when                                                     | Goes to               | Body                                                   |
+| ------------- | --------------------------------------------------------------- | --------------------- | ------------------------------------------------------ |
+| `legs_added`  | `AddLeg`, or an `AddLegs` that inserted at least one leg         | members but the actor | "{name} added Bills -3.5" or "{name} added 3 legs"    |
+| `slip_locked` | `LockIn` moves the slip to `LOCKED`                              | members but the actor | "Everyone's locked in. Time to place it."              |
+| `slip_graded` | `SetLegResult` or `AutoGradeLegs` moves the slip to `GRADED`     | every member          | "{slip} cashed!", "{slip} came up short.", or "{slip} pushed. Stakes back." |
+
+- Every title is the slip's name, every tap opens `/slips/{id}`, and every tag is `slip-{id}`, so a burst of leg adds
+  collapses to the newest one on the device.
+- Recipients are always members of the slip, so a message never shows one group's picks to an outsider. The send drops
+  inactive people.
+- A grade reserves its `push_log` row before sending. A later manual correction re-grades the slip without a second
+  push. An unlock and re-lock does send `slip_locked` again: it is rare and still true news.
+- Nothing sends when the transaction rolls back. A no-op, such as an `AddLegs` that only repeats existing picks or a
+  lock in by someone who is not the last, raises nothing.
+- `AutoGradeLegs` runs inside a page load's refresh pass, so its grade push shares that pass's CPU. A slip can cash
+  before anyone opens the app, and the push follows the next visit.
+
+`cmd/server` passes an untyped `nil` notifier when push is off, never a nil `*push.Service`, because a typed nil inside
+an interface is not `== nil`.
 
 ## iPhone layout
 
@@ -179,7 +205,9 @@ Push route tests cover auth, the HTMX CSRF header, reassigning an endpoint, the 
 the expired-session redirect, and the VAPID-off 404. The handler tests also check that `/me` renders the card when push
 is on. `internal/push` tests point a stand-in server at the service and check one request per subscription, the TTL,
 Topic, and Urgency headers, the 3 second cap, a 410 pruning the row while a 500 keeps it, and inactive users getting
-nothing.
+nothing. Notify tests cover each event: the actor is left out, an outsider gets nothing, a grade reaches every member
+once across two passes, and the message text matches the table above. A recording notifier in `internal/slips` checks
+that each mutation raises its event only after the commit, and that a rolled-back transaction or a no-op raises nothing.
 
 Real-phone behavior stays manual: the permission prompt inside the tap, the iOS install flow, and a dropped subscription
 showing Off.

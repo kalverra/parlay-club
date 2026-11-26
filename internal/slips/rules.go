@@ -51,13 +51,45 @@ type Publisher interface {
 	Publish(topic string)
 }
 
+// EventKind names a slip change worth telling people about.
+type EventKind string
+
+// The events a Notifier can receive.
+const (
+	// EventLegsAdded fires after AddLeg or AddLegs inserted at least one leg.
+	EventLegsAdded EventKind = "legs_added"
+	// EventSlipLocked fires when the final member locks in and the slip
+	// becomes LOCKED.
+	EventSlipLocked EventKind = "slip_locked"
+	// EventSlipGraded fires when a manual or automatic grade moves the slip
+	// to GRADED.
+	EventSlipGraded EventKind = "slip_graded"
+)
+
+// Event is one slip change, raised after its transaction commits. It carries
+// no message text: the notifier decides who hears about it and what to say.
+type Event struct {
+	Kind      EventKind
+	SlipID    int64
+	ActorID   int64  // 0 for the automatic grader
+	Count     int    // legs added
+	Selection string // the leg, when Count == 1
+}
+
+// Notifier hears about slip changes after they commit. It runs inside the
+// request that caused the change, so a send finishes while CPU is available.
+type Notifier interface {
+	Notify(ctx context.Context, e Event)
+}
+
 // Service enforces docs/concepts/slips.md "Editing and locking". Every mutation
 // checks the rules, writes the change and one activity entry in a transaction,
-// updates the slip's status, then publishes slip:{id}. now is injected so the
-// kickoff and locking rules stay testable.
+// updates the slip's status, then publishes slip:{id} and raises an Event. now
+// is injected so the kickoff and locking rules stay testable.
 type Service struct {
 	store         *db.Store
 	publish       Publisher
+	notifier      Notifier
 	now           func() time.Time
 	onGradeChange func(groupID int64)
 }
@@ -69,6 +101,13 @@ func New(store *db.Store, publish Publisher, now func() time.Time) *Service {
 		now = time.Now
 	}
 	return &Service{store: store, publish: publish, now: now}
+}
+
+// SetNotifier registers the notifier that hears about event-worthy changes. A
+// nil notifier disables events. Callers must pass an untyped nil when push is
+// off: a typed nil pointer inside the interface is not nil.
+func (s *Service) SetNotifier(notifier Notifier) {
+	s.notifier = notifier
 }
 
 // SetOnGradeChange registers a callback invoked after a transaction commits
@@ -279,6 +318,13 @@ func (s *Service) AddLeg(ctx context.Context, actorID int64, leg db.Leg) (db.Leg
 		return db.Leg{}, fmt.Errorf("add leg to slip %d: %w", leg.SlipID, err)
 	}
 	s.notify(leg.SlipID)
+	s.notifyEvent(ctx, Event{
+		Kind:      EventLegsAdded,
+		SlipID:    leg.SlipID,
+		ActorID:   actorID,
+		Count:     1,
+		Selection: created.Selection,
+	})
 	return created, nil
 }
 
@@ -358,6 +404,16 @@ func (s *Service) AddLegs(
 	}
 	if len(created) > 0 {
 		s.notify(slipID)
+		event := Event{
+			Kind:    EventLegsAdded,
+			SlipID:  slipID,
+			ActorID: actorID,
+			Count:   len(created),
+		}
+		if len(created) == 1 {
+			event.Selection = created[0].Selection
+		}
+		s.notifyEvent(ctx, event)
 	}
 	return created, nil
 }
@@ -389,9 +445,10 @@ func (s *Service) SetLegResult(
 	result parlay.Result,
 ) (db.Slip, error) {
 	var (
-		updated db.Slip
-		slipID  int64
-		changed bool
+		updated   db.Slip
+		slipID    int64
+		changed   bool
+		gradedNow bool
 	)
 	err := s.store.Tx(ctx, func(tx *db.Store) error {
 		leg, err := tx.LegByID(ctx, legID)
@@ -425,6 +482,7 @@ func (s *Service) SetLegResult(
 		if err := tx.SetSlipGrade(ctx, slipID, slipResult, status); err != nil {
 			return err
 		}
+		gradedNow = slip.Status != db.SlipGraded && status == db.SlipGraded
 		updated, err = tx.SlipByID(ctx, slipID)
 		changed = true
 		return err
@@ -434,6 +492,9 @@ func (s *Service) SetLegResult(
 	}
 	if changed {
 		s.notify(slipID)
+		if gradedNow {
+			s.notifyEvent(ctx, Event{Kind: EventSlipGraded, SlipID: slipID, ActorID: actorID})
+		}
 		if s.onGradeChange != nil {
 			s.onGradeChange(updated.GroupID)
 		}
@@ -467,9 +528,10 @@ func (s *Service) AutoGradeLegs(ctx context.Context, grades []AutoGrade) error {
 	}
 
 	var (
-		slipOrder  []int64
-		groupIDs   []int64
-		seenGroups = make(map[int64]struct{})
+		slipOrder   []int64
+		gradedSlips []int64
+		groupIDs    []int64
+		seenGroups  = make(map[int64]struct{})
 	)
 	err := s.store.Tx(ctx, func(tx *db.Store) error {
 		slipChanges := make(map[int64][]string)
@@ -522,6 +584,9 @@ func (s *Service) AutoGradeLegs(ctx context.Context, grades []AutoGrade) error {
 			if err := tx.SetSlipGrade(ctx, slipID, slipResult, status); err != nil {
 				return err
 			}
+			if slip.Status != db.SlipGraded && status == db.SlipGraded {
+				gradedSlips = append(gradedSlips, slipID)
+			}
 
 			changes := slipChanges[slipID]
 			message := "Auto-graded " + changes[0]
@@ -540,6 +605,9 @@ func (s *Service) AutoGradeLegs(ctx context.Context, grades []AutoGrade) error {
 
 	for _, slipID := range slipOrder {
 		s.notify(slipID)
+	}
+	for _, slipID := range gradedSlips {
+		s.notifyEvent(ctx, Event{Kind: EventSlipGraded, SlipID: slipID})
 	}
 	if s.onGradeChange != nil {
 		for _, groupID := range groupIDs {
@@ -744,6 +812,7 @@ func (s *Service) DeleteLeg(ctx context.Context, actorID, legID int64) error {
 func (s *Service) LockIn(ctx context.Context, actorID, slipID int64) error {
 	now := s.now()
 	changed := false
+	lockedNow := false
 	err := s.store.Tx(ctx, func(tx *db.Store) error {
 		slip, actor, members, err := loadSlip(ctx, tx, slipID, actorID)
 		if err != nil {
@@ -784,6 +853,7 @@ func (s *Service) LockIn(ctx context.Context, actorID, slipID int64) error {
 			if err := tx.SetSlipStatus(ctx, slipID, db.SlipLocked); err != nil {
 				return err
 			}
+			lockedNow = true
 		}
 		changed = true
 		return nil
@@ -793,6 +863,9 @@ func (s *Service) LockIn(ctx context.Context, actorID, slipID int64) error {
 	}
 	if changed {
 		s.notify(slipID)
+	}
+	if lockedNow {
+		s.notifyEvent(ctx, Event{Kind: EventSlipLocked, SlipID: slipID, ActorID: actorID})
 	}
 	return nil
 }
@@ -980,4 +1053,13 @@ func (s *Service) notify(slipID int64) {
 		return
 	}
 	s.publish.Publish(fmt.Sprintf("slip:%d", slipID))
+}
+
+// notifyEvent hands one committed change to the notifier. A nil notifier
+// skips it.
+func (s *Service) notifyEvent(ctx context.Context, e Event) {
+	if s.notifier == nil {
+		return
+	}
+	s.notifier.Notify(ctx, e)
 }

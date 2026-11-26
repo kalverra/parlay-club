@@ -24,6 +24,7 @@ type pushRecorder struct {
 
 type recordedRequest struct {
 	Method string
+	Path   string
 	Header http.Header
 	Body   []byte
 }
@@ -41,6 +42,7 @@ func recordPushRequests(statuses map[string]int) (*pushRecorder, http.Handler) {
 		recorder.mu.Lock()
 		recorder.requests = append(recorder.requests, recordedRequest{
 			Method: r.Method,
+			Path:   r.URL.Path,
 			Header: r.Header.Clone(),
 			Body:   body,
 		})

@@ -555,7 +555,7 @@ status-transition detection)
 Risk: medium (wrong transition detection sends wrong or duplicate pushes; covered by recording-notifier tests, but real
 delivery is manual)
 
-- [ ] Add the `slips.Notifier` seam and `Event`. Raise `legs_added` from `AddLeg` and `AddLegs`, `slip_locked` from the
+- [x] Add the `slips.Notifier` seam and `Event`. Raise `legs_added` from `AddLeg` and `AddLegs`, `slip_locked` from the
       final `LockIn`, and `slip_graded` from `SetLegResult` and `AutoGradeLegs`, each only after commit. Implement
       `Notify` in `internal/push`: recipients, message text in the app's voice, tag and URL, and graded dedupe through
       `push_log`. Wire it in `cmd/server`, as an untyped nil when push is off. Filter recipients to active users. Test

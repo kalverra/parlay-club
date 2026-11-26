@@ -162,6 +162,14 @@ func run() error {
 		Public:  cfg.VAPIDPublicKey,
 		Private: cfg.VAPIDPrivateKey,
 	}, push.Options{Subject: cfg.BaseURL})
+	// Events send inside the request that caused them, because Cloud Run
+	// throttles CPU after the response. An off server passes an untyped nil:
+	// a typed nil pointer inside the Notifier interface is not nil.
+	if pushService.Enabled() {
+		slipService.SetNotifier(pushService)
+	} else {
+		slipService.SetNotifier(nil)
+	}
 	bugService := bugs.NewService(bugs.Deps{
 		Store:       store,
 		Repo:        cfg.GitHubRepo,

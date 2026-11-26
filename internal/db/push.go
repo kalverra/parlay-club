@@ -23,6 +23,16 @@ type PushSubscription struct {
 // matching scanPushSubscription order.
 const pushSubscriptionColumns = `id, user_id, endpoint, p256dh, auth, created_at`
 
+// push_log kinds. A row is reserved before its send, so a retry can never
+// repeat one.
+const (
+	// PushLogGraded dedupes a slip's grade notification. It is slip-wide, so
+	// user_id is 0.
+	PushLogGraded = "graded"
+	// PushLogReminder dedupes one person's kickoff reminder for a slip.
+	PushLogReminder = "reminder"
+)
+
 // SavePushSubscription writes sub, replacing the row with the same endpoint.
 // An endpoint that already exists is reassigned to sub.UserID, so the last
 // person to subscribe on a shared device owns it. When the user then has more
@@ -122,6 +132,26 @@ func (s *Store) PushSubscriptionsForUsers(
 		return nil, fmt.Errorf("list push subscriptions for users: %w", err)
 	}
 	return scanPushSubscriptions(rows)
+}
+
+// ReservePushLog inserts a dedupe row and reports whether it was new. A sender
+// reserves before it sends and sends only when this reports true, so a retried
+// or repeated event never doubles a push. A failed send is not retried.
+//
+// key carries a per-kind discriminator such as a kickoff time. An empty key is
+// the normal value for a once-per-slip send.
+func (s *Store) ReservePushLog(ctx context.Context, kind string, slipID, userID int64, key string) (bool, error) {
+	result, err := s.conn().ExecContext(ctx, `
+		INSERT OR IGNORE INTO push_log (kind, slip_id, user_id, "key")
+		VALUES (?, ?, ?, ?)`, kind, slipID, userID, key)
+	if err != nil {
+		return false, fmt.Errorf("reserve push log %s for slip %d: %w", kind, slipID, err)
+	}
+	inserted, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("reserve push log %s for slip %d: %w", kind, slipID, err)
+	}
+	return inserted > 0, nil
 }
 
 // scanPushSubscriptions reads every row the push subscription queries select.

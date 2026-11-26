@@ -504,6 +504,10 @@ locking stay testable.
 9. Every mutation writes one activity entry and publishes `slip:{id}` after it commits. An add reads "Adam added BUF
    ML", a lock in reads "Sam locked in", and a no-op writes nothing. Voting is the one exception: a vote publishes a
    change but writes no activity entry, so a feed full of thumbs would not bury the picks.
+10. The same committed change may raise one `slips.Event` through the optional `Notifier` seam: `legs_added` from
+    `AddLeg` or `AddLegs`, `slip_locked` when the final lock in moves the slip to `LOCKED`, and `slip_graded` when a
+    manual or automatic grade moves it to `GRADED`. The seam knows nothing about push; `internal/push` implements it.
+    See [Notifications](notifications.md#slip-events) for the messages and recipients.
 
 The service returns typed errors so handlers can answer with a 422 and a short message.
 
