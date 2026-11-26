@@ -558,6 +558,72 @@ func TestLoadPlayerResearchSignals(t *testing.T) {
 	assert.Nil(t, stale.OppDefenseL5)
 }
 
+func TestBuildOppDefenseLast5ComparableWRRolesAndRematch(t *testing.T) {
+	t.Parallel()
+
+	// League-wide WR rows establish depth chart roles:
+	// DAL: CeeDee Lamb (WR1), Ryan Flournoy (WR2)
+	// NYG: Malik Nabers (WR1), Darnell Mooney (WR2)
+	// WAS: Terry McLaurin (WR1), Noah Brown (WR2)
+	leagueRows := []db.NFLversePlayerWeek{
+		// Week 1: DAL vs PHI (rematch earlier in season)
+		{
+			ESPNID: "ceedee", Season: 2026, SeasonType: 2, WeekNum: 1,
+			Team: "DAL", Opponent: "PHI", PlayerName: "CeeDee Lamb", Position: "WR",
+			OffensePct: 0.92, TargetShare: 0.30, WOPR: 0.72, RecYds: 118,
+		},
+		{
+			ESPNID: "flournoy", Season: 2026, SeasonType: 2, WeekNum: 1,
+			Team: "DAL", Opponent: "PHI", PlayerName: "Ryan Flournoy", Position: "WR",
+			OffensePct: 0.68, TargetShare: 0.14, WOPR: 0.32, RecYds: 41,
+		},
+		// Week 2: NYG vs PHI
+		{
+			ESPNID: "nabers", Season: 2026, SeasonType: 2, WeekNum: 2,
+			Team: "NYG", Opponent: "PHI", PlayerName: "Malik Nabers", Position: "WR",
+			OffensePct: 0.90, TargetShare: 0.29, WOPR: 0.70, RecYds: 96,
+		},
+		{
+			ESPNID: "mooney", Season: 2026, SeasonType: 2, WeekNum: 2,
+			Team: "NYG", Opponent: "PHI", PlayerName: "Darnell Mooney", Position: "WR",
+			OffensePct: 0.64, TargetShare: 0.15, WOPR: 0.34, RecYds: 54,
+		},
+		// Week 3: WAS vs PHI
+		{
+			ESPNID: "mclaurin", Season: 2026, SeasonType: 2, WeekNum: 3,
+			Team: "WAS", Opponent: "PHI", PlayerName: "Terry McLaurin", Position: "WR",
+			OffensePct: 0.88, TargetShare: 0.27, WOPR: 0.65, RecYds: 88,
+		},
+		{
+			ESPNID: "nbrown", Season: 2026, SeasonType: 2, WeekNum: 3,
+			Team: "WAS", Opponent: "PHI", PlayerName: "Noah Brown", Position: "WR",
+			OffensePct: 0.62, TargetShare: 0.13, WOPR: 0.30, RecYds: 37,
+		},
+	}
+
+	// Ryan Flournoy (WR2) compares against himself in the DAL-vs-PHI rematch
+	// and against opposing WR2s (Mooney, Brown) — never WR1s like CeeDee Lamb.
+	flournoyComps, flournoyRole := analyzer.BuildOppDefenseLast5Comparable(
+		leagueRows, leagueRows, "flournoy", "WR", "REC_YDS",
+	)
+	assert.Equal(t, "WR2", flournoyRole)
+	require.Len(t, flournoyComps, 3)
+	assert.Equal(t, "Ryan Flournoy", flournoyComps[0].PlayerName)
+	assert.InDelta(t, 41.0, flournoyComps[0].Value, 1e-9)
+	assert.Equal(t, "Darnell Mooney", flournoyComps[1].PlayerName)
+	assert.Equal(t, "Noah Brown", flournoyComps[2].PlayerName)
+
+	// CeeDee Lamb (WR1) compares against opposing WR1s (and himself in Week 1).
+	lambComps, lambRole := analyzer.BuildOppDefenseLast5Comparable(
+		leagueRows, leagueRows, "ceedee", "WR", "REC_YDS",
+	)
+	assert.Equal(t, "WR1", lambRole)
+	require.Len(t, lambComps, 3)
+	assert.Equal(t, "CeeDee Lamb", lambComps[0].PlayerName)
+	assert.Equal(t, "Malik Nabers", lambComps[1].PlayerName)
+	assert.Equal(t, "Terry McLaurin", lambComps[2].PlayerName)
+}
+
 func TestBuildPositionDefenseRanks(t *testing.T) {
 	t.Parallel()
 

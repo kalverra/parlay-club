@@ -2159,15 +2159,17 @@ func (h *researchHandlers) loadGameResearch(ctx context.Context, gameID string) 
 }
 
 // loadPlayerResearch builds the PlayerResearchView for one athlete from cached
-// data.
+// data, falling back to cached nflverse weekly stats when ESPN game logs are
+// missing or lack the active market.
 func (h *researchHandlers) loadPlayerResearch(
 	ctx context.Context,
 	athleteID, legIDStr, marketParam, lineParam string,
 ) (*PlayerResearchView, error) {
 	player, playerErr := h.deps.Store.RosterPlayerByID(ctx, athleteID)
 	gamelog, logErr := h.deps.Store.PlayerGameLog(ctx, athleteID)
+	pWeeks := h.loadNFLversePlayerWeeks(ctx, athleteID)
 
-	if playerErr != nil && logErr != nil {
+	if playerErr != nil && logErr != nil && len(pWeeks) == 0 {
 		return nil, db.ErrPlayerNotFound
 	}
 
@@ -2178,6 +2180,17 @@ func (h *researchHandlers) loadPlayerResearch(
 		Position:     player.Position,
 		HeadshotURL:  player.HeadshotURL,
 		InjuryStatus: strings.TrimSpace(player.InjuryStatus),
+	}
+	if len(pWeeks) > 0 {
+		if view.Name == "" {
+			view.Name = pWeeks[0].PlayerName
+		}
+		if view.Team == "" {
+			view.Team = pWeeks[0].Team
+		}
+		if view.Position == "" {
+			view.Position = pWeeks[0].Position
+		}
 	}
 	if view.Name == "" {
 		view.Name = "Athlete #" + athleteID
@@ -2202,8 +2215,32 @@ func (h *researchHandlers) loadPlayerResearch(
 		}
 	}
 
+	nflvMarkets, nflvEntries := buildNFLverseResearchGameLog(pWeeks, view.Position)
+	if len(markets) == 0 && len(nflvMarkets) > 0 {
+		markets = nflvMarkets
+		entries = nflvEntries
+		if view.GamesPlayed == 0 {
+			view.GamesPlayed = len(pWeeks)
+		}
+	}
+
+	optionMarkets := markets
+	if len(nflvMarkets) > 0 {
+		optionMarkets = make(map[string][]float64, len(markets)+len(nflvMarkets))
+		for k, v := range nflvMarkets {
+			if len(v) > 0 {
+				optionMarkets[k] = v
+			}
+		}
+		for k, v := range markets {
+			if len(v) > 0 {
+				optionMarkets[k] = v
+			}
+		}
+	}
+
 	activeMarket, comparisonLine := h.resolveMarketAndLine(
-		ctx, athleteID, player, markets, legIDStr, marketParam, lineParam,
+		ctx, athleteID, player, view.Position, optionMarkets, legIDStr, marketParam, lineParam,
 	)
 
 	view.ActiveMarket = activeMarket
@@ -2217,17 +2254,119 @@ func (h *researchHandlers) loadPlayerResearch(
 		view.LineStr = formatNumber(*comparisonLine)
 	}
 
-	view.AvailableMarkets = buildMarketOptions(athleteID, markets, activeMarket)
+	view.AvailableMarkets = buildMarketOptions(athleteID, optionMarkets, activeMarket)
 
 	h.populateMatchupContext(ctx, view, logos)
 	sig := h.populateNFLverseResearch(ctx, view, activeMarket, comparisonLine)
 
-	games := markets[activeMarket]
-	if len(games) > 0 {
-		buildPlayerChart(view, games, entries, comparisonLine, sig)
+	chartGames := markets[activeMarket]
+	chartEntries := entries
+	if len(chartGames) == 0 && len(nflvMarkets[activeMarket]) > 0 {
+		chartGames = nflvMarkets[activeMarket]
+		chartEntries = nflvEntries
+		if view.GamesPlayed == 0 {
+			view.GamesPlayed = len(pWeeks)
+		}
+	}
+	if len(chartGames) > 0 {
+		buildPlayerChart(view, chartGames, chartEntries, comparisonLine, sig)
 	}
 
 	return view, nil
+}
+
+func (h *researchHandlers) loadNFLversePlayerWeeks(ctx context.Context, athleteID string) []db.NFLversePlayerWeek {
+	if athleteID == "" || h.deps.Store == nil {
+		return nil
+	}
+	week, err := h.deps.Store.LatestWeek(ctx)
+	if err != nil {
+		return nil
+	}
+	seasonTypes := analyzer.NFLverseSeasonTypes(week.SeasonType)
+	rows, err := h.deps.Store.NFLversePlayerWeeksForPlayerTypes(ctx, athleteID, week.Season, seasonTypes...)
+	if err != nil || len(rows) == 0 {
+		return nil
+	}
+	return rows
+}
+
+func buildNFLverseResearchGameLog(
+	rows []db.NFLversePlayerWeek,
+	position string,
+) (map[string][]float64, []espn.GameLogEntry) {
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	normPos := db.NormalizePosition(position)
+	if normPos == "" {
+		normPos = db.NormalizePosition(rows[0].Position)
+	}
+
+	n := len(rows)
+	all := map[string][]float64{
+		"PASS_YDS":   make([]float64, 0, n),
+		"PASS_TDS":   make([]float64, 0, n),
+		"RUSH_YDS":   make([]float64, 0, n),
+		"RUSH_ATT":   make([]float64, 0, n),
+		"REC_YDS":    make([]float64, 0, n),
+		"RECEPTIONS": make([]float64, 0, n),
+		"ANYTIME_TD": make([]float64, 0, n),
+		"KICKER_PTS": make([]float64, 0, n),
+	}
+	entries := make([]espn.GameLogEntry, 0, n)
+	hasNonZero := make(map[string]bool, len(all))
+	for _, r := range rows {
+		vals := map[string]float64{
+			"PASS_YDS":   float64(r.PassYds),
+			"PASS_TDS":   float64(r.PassTDs),
+			"RUSH_YDS":   float64(r.RushYds),
+			"RUSH_ATT":   float64(r.Carries),
+			"REC_YDS":    float64(r.RecYds),
+			"RECEPTIONS": float64(r.Receptions),
+			"ANYTIME_TD": float64(r.RushTDs + r.RecTDs),
+			"KICKER_PTS": float64(r.KickerPts),
+		}
+		for m, v := range vals {
+			all[m] = append(all[m], v)
+			if v != 0 {
+				hasNonZero[m] = true
+			}
+		}
+		entries = append(entries, espn.GameLogEntry{
+			Week:     r.WeekNum,
+			Opponent: r.Opponent,
+		})
+	}
+
+	markets := make(map[string][]float64, len(all))
+	for _, m := range positionPrimaryMarkets(normPos) {
+		markets[m] = all[m]
+	}
+	for m, vals := range all {
+		if hasNonZero[m] {
+			markets[m] = vals
+		}
+	}
+	if len(markets) == 0 {
+		markets = all
+	}
+	return markets, entries
+}
+
+func positionPrimaryMarkets(normPos string) []string {
+	switch normPos {
+	case "QB":
+		return []string{"PASS_YDS", "PASS_TDS", "RUSH_YDS", "RUSH_ATT", "ANYTIME_TD"}
+	case "RB":
+		return []string{"RUSH_YDS", "RUSH_ATT", "REC_YDS", "RECEPTIONS", "ANYTIME_TD"}
+	case "WR", "TE":
+		return []string{"REC_YDS", "RECEPTIONS", "ANYTIME_TD"}
+	case "K":
+		return []string{"KICKER_PTS"}
+	default:
+		return nil
+	}
 }
 
 // populateMatchupContext loads this week's opponent, cached spread/total, and
@@ -2328,11 +2467,15 @@ func (h *researchHandlers) populateNFLverseResearch(
 	view.UsageTiles = buildUsageTiles(view.Position, sig, oppDefLabel, oppDefRank)
 
 	normPos := db.NormalizePosition(view.Position)
-	if sig.Opponent != "" && normPos != "" && view.ActiveMarketName != "" {
+	oppRoleLabel := sig.OppRoleLabel
+	if oppRoleLabel == "" {
+		oppRoleLabel = normPos
+	}
+	if sig.Opponent != "" && oppRoleLabel != "" && view.ActiveMarketName != "" {
 		view.OppDefenseTitle = fmt.Sprintf(
 			"%s Defense · Last 5 vs %s · %s",
 			sig.Opponent,
-			normPos,
+			oppRoleLabel,
 			view.ActiveMarketName,
 		)
 	}
@@ -2354,6 +2497,7 @@ func (h *researchHandlers) resolveMarketAndLine(
 	ctx context.Context,
 	athleteID string,
 	player db.RosterPlayer,
+	position string,
 	markets map[string][]float64,
 	legIDStr, marketParam, lineParam string,
 ) (string, *float64) {
@@ -2392,7 +2536,7 @@ func (h *researchHandlers) resolveMarketAndLine(
 	}
 
 	if activeMarket == "" && len(markets) > 0 {
-		activeMarket = defaultResearchMarket(markets)
+		activeMarket = defaultResearchMarket(position, markets)
 	}
 
 	if comparisonLine == nil && legLine != nil && (legMarket == "" || legMarket == activeMarket) {
@@ -2411,7 +2555,12 @@ func (h *researchHandlers) resolveMarketAndLine(
 	return activeMarket, comparisonLine
 }
 
-func defaultResearchMarket(markets map[string][]float64) string {
+func defaultResearchMarket(position string, markets map[string][]float64) string {
+	for _, m := range positionPrimaryMarkets(db.NormalizePosition(position)) {
+		if len(markets[m]) > 0 {
+			return m
+		}
+	}
 	standardOrder := []string{
 		"PASS_YDS", "RUSH_YDS", "REC_YDS", "RECEPTIONS",
 		"PASS_TDS", "RUSH_ATT", "ANYTIME_TD", "KICKER_PTS",

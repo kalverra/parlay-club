@@ -849,6 +849,7 @@ type PlayerResearchSignals struct {
 	PosDefRanks       map[string]int
 	OppOverallDefRank int
 	OppPosDefRank     int
+	OppRoleLabel      string
 	OppDefenseL5      []OppDefenseGame
 }
 
@@ -1387,6 +1388,276 @@ func BuildOppDefenseLast5(rows []db.NFLversePlayerWeek, market string) []OppDefe
 	return out
 }
 
+// BuildOppDefenseLast5Comparable groups opposing player-week rows by
+// (season_type, week_num) and selects the most comparable opposing player per
+// game for targetAthleteID (preferring the same player in a rematch, then the
+// same depth-chart role tier such as WR1/WR2/WR3+ or RB1/RB2/RB3+, then closest
+// trailing usage profile). When no target role profile can be derived, it falls
+// back to BuildOppDefenseLast5.
+func BuildOppDefenseLast5Comparable(
+	oppRows []db.NFLversePlayerWeek,
+	leaguePosRows []db.NFLversePlayerWeek,
+	targetAthleteID, position, market string,
+) ([]OppDefenseGame, string) {
+	if len(oppRows) == 0 {
+		return nil, ""
+	}
+	normPos := db.NormalizePosition(position)
+	if normPos == "" {
+		normPos = db.NormalizePosition(oppRows[0].Position)
+	}
+	resolvedMarket := strings.ToUpper(strings.TrimSpace(market))
+	if resolvedMarket == "" {
+		resolvedMarket = defaultMarketForPosition(normPos)
+	}
+	if _, ok := marketStatValue(db.NFLversePlayerWeek{}, resolvedMarket); !ok {
+		return nil, ""
+	}
+
+	if normPos != "WR" && normPos != "RB" && normPos != "TE" {
+		return BuildOppDefenseLast5(oppRows, resolvedMarket), ""
+	}
+
+	profileSource := leaguePosRows
+	if len(profileSource) == 0 {
+		profileSource = oppRows
+	}
+	tiers, profiles := buildPlayerDepthTiers(profileSource, normPos)
+	targetTier, hasTarget := tiers[targetAthleteID]
+	targetProf := profiles[targetAthleteID]
+	if !hasTarget {
+		return BuildOppDefenseLast5(oppRows, resolvedMarket), ""
+	}
+
+	type weekKey struct {
+		seasonType int
+		weekNum    int
+	}
+	type candidate struct {
+		row  db.NFLversePlayerWeek
+		val  float64
+		tier int
+		prof PlayerRoleProfile
+	}
+	bestByWeek := make(map[weekKey]candidate)
+	for _, row := range oppRows {
+		val, ok := marketStatValue(row, resolvedMarket)
+		if !ok {
+			continue
+		}
+		candTier := tiers[row.ESPNID]
+		if candTier == 0 {
+			candTier = maxDepthTier(normPos)
+		}
+		cand := candidate{
+			row:  row,
+			val:  val,
+			tier: candTier,
+			prof: profiles[row.ESPNID],
+		}
+		key := weekKey{seasonType: row.SeasonType, weekNum: row.WeekNum}
+		cur, exists := bestByWeek[key]
+		if !exists || oppComparableBetter(
+			cand.row, cand.val, cand.tier, cand.prof,
+			cur.row, cur.val, cur.tier, cur.prof,
+			targetAthleteID, targetTier, targetProf, normPos,
+		) {
+			bestByWeek[key] = cand
+		}
+	}
+	if len(bestByWeek) == 0 {
+		return nil, ""
+	}
+
+	out := make([]OppDefenseGame, 0, len(bestByWeek))
+	for _, best := range bestByWeek {
+		out = append(out, OppDefenseGame{
+			SeasonType: best.row.SeasonType,
+			WeekNum:    best.row.WeekNum,
+			PlayerName: best.row.PlayerName,
+			Team:       best.row.Team,
+			Value:      best.val,
+		})
+	}
+	slices.SortFunc(out, func(a, b OppDefenseGame) int {
+		if a.SeasonType != b.SeasonType {
+			return cmp.Compare(a.SeasonType, b.SeasonType)
+		}
+		return cmp.Compare(a.WeekNum, b.WeekNum)
+	})
+	if len(out) > 5 {
+		out = out[len(out)-5:]
+	}
+	return out, depthTierLabel(normPos, targetTier)
+}
+
+func maxDepthTier(normPos string) int {
+	switch normPos {
+	case "WR", "RB":
+		return 3
+	case "TE":
+		return 2
+	default:
+		return 1
+	}
+}
+
+func depthTierLabel(normPos string, tier int) string {
+	switch normPos {
+	case "WR":
+		switch tier {
+		case 1:
+			return "WR1"
+		case 2:
+			return "WR2"
+		default:
+			return "WR3+"
+		}
+	case "RB":
+		switch tier {
+		case 1:
+			return "RB1"
+		case 2:
+			return "RB2"
+		default:
+			return "RB3+"
+		}
+	case "TE":
+		if tier == 1 {
+			return "TE1"
+		}
+		return "TE2+"
+	default:
+		return ""
+	}
+}
+
+func buildPlayerDepthTiers(
+	rows []db.NFLversePlayerWeek,
+	normPos string,
+) (map[string]int, map[string]PlayerRoleProfile) {
+	byPlayer := groupNFLverseRowsByPlayer(rows)
+	if len(byPlayer) == 0 {
+		return nil, nil
+	}
+
+	profiles := make(map[string]PlayerRoleProfile, len(byPlayer))
+	byTeam := make(map[string][]PlayerRoleProfile)
+
+	for espnID, pRows := range byPlayer {
+		ordered := sortPlayerWeeksDesc(pRows)
+		pos := latestNormalizedPosition(ordered)
+		if pos != normPos {
+			continue
+		}
+		ewma := BuildPlayerEWMAUsage(ordered)
+		team := latestNonEmptyTeam(ordered)
+		prof := PlayerRoleProfile{
+			ESPNID:   espnID,
+			Team:     team,
+			Position: pos,
+			EWMA:     ewma,
+		}
+		profiles[espnID] = prof
+		if team != "" && ewma != nil {
+			byTeam[team] = append(byTeam[team], prof)
+		}
+	}
+
+	capTier := maxDepthTier(normPos)
+	tiers := make(map[string]int, len(profiles))
+	for _, group := range byTeam {
+		switch normPos {
+		case "RB":
+			sortRBsDesc(group)
+		default:
+			sortPassCatchersDesc(group)
+		}
+		for i, p := range group {
+			tier := min(i+1, capTier)
+			tiers[p.ESPNID] = tier
+		}
+	}
+	return tiers, profiles
+}
+
+func oppComparableBetter(
+	a db.NFLversePlayerWeek, aVal float64, aTier int, aProf PlayerRoleProfile,
+	b db.NFLversePlayerWeek, bVal float64, bTier int, bProf PlayerRoleProfile,
+	targetID string, targetTier int, targetProf PlayerRoleProfile, normPos string,
+) bool {
+	if targetID != "" {
+		aSelf := a.ESPNID == targetID
+		bSelf := b.ESPNID == targetID
+		if aSelf != bSelf {
+			return aSelf
+		}
+	}
+
+	aTierDist := absInt(aTier - targetTier)
+	bTierDist := absInt(bTier - targetTier)
+	if aTierDist != bTierDist {
+		return aTierDist < bTierDist
+	}
+
+	aDist := oppUsageDistance(a, aProf, targetProf, normPos)
+	bDist := oppUsageDistance(b, bProf, targetProf, normPos)
+	if math.Abs(aDist-bDist) > 1e-6 {
+		return aDist < bDist
+	}
+
+	if a.OffensePct != b.OffensePct {
+		return a.OffensePct > b.OffensePct
+	}
+	if a.OffenseSnaps != b.OffenseSnaps {
+		return a.OffenseSnaps > b.OffenseSnaps
+	}
+	if aVal != bVal {
+		return aVal > bVal
+	}
+	if a.PlayerName != b.PlayerName {
+		return a.PlayerName < b.PlayerName
+	}
+	return a.ESPNID < b.ESPNID
+}
+
+func oppUsageDistance(
+	row db.NFLversePlayerWeek,
+	candProf, targetProf PlayerRoleProfile,
+	normPos string,
+) float64 {
+	if targetProf.EWMA == nil {
+		return 0
+	}
+	var candSnap, candTargetShare, candCarries float64
+	if candProf.EWMA != nil {
+		candSnap = candProf.EWMA.OffensePct
+		candTargetShare = candProf.EWMA.TargetShare
+		candCarries = candProf.EWMA.Carries
+	} else {
+		candSnap = row.OffensePct
+		candTargetShare = row.TargetShare
+		candCarries = float64(row.Carries)
+	}
+	switch normPos {
+	case "RB":
+		carryDiff := math.Abs(candCarries-targetProf.EWMA.Carries) / 20.0
+		snapDiff := math.Abs(candSnap - targetProf.EWMA.OffensePct)
+		return carryDiff*2.0 + snapDiff
+	default:
+		tsDiff := math.Abs(candTargetShare - targetProf.EWMA.TargetShare)
+		snapDiff := math.Abs(candSnap - targetProf.EWMA.OffensePct)
+		return tsDiff*3.0 + snapDiff
+	}
+}
+
+func absInt(v int) int {
+	if v < 0 {
+		return -v
+	}
+	return v
+}
+
 func oppCandidateBetter(a db.NFLversePlayerWeek, aVal float64, b db.NFLversePlayerWeek, bVal float64) bool {
 	if aVal != bVal {
 		return aVal > bVal
@@ -1486,10 +1757,12 @@ func LoadPlayerResearchSignals(
 	}
 
 	market := resolveResearchMarket(normPos, activeMarket)
+	var posWeeks []db.NFLversePlayerWeek
 	if normPos != "" && market != "" {
-		if posWeeks, err := store.NFLversePlayerWeeksForPositionTypes(
+		if loaded, err := store.NFLversePlayerWeeksForPositionTypes(
 			ctx, normPos, week.Season, seasonTypes...,
-		); err == nil && len(posWeeks) > 0 {
+		); err == nil && len(loaded) > 0 {
+			posWeeks = loaded
 			res.PosDefRanks = BuildPositionDefenseRanks(posWeeks, normPos, market)
 		}
 	}
@@ -1536,7 +1809,9 @@ func LoadPlayerResearchSignals(
 		if oppWeeks, err := store.NFLversePlayerWeeksAgainstOpponent(
 			ctx, opp, normPos, week.Season, seasonTypes...,
 		); err == nil && len(oppWeeks) > 0 {
-			res.OppDefenseL5 = BuildOppDefenseLast5(oppWeeks, market)
+			res.OppDefenseL5, res.OppRoleLabel = BuildOppDefenseLast5Comparable(
+				oppWeeks, posWeeks, athleteID, normPos, market,
+			)
 		}
 	}
 	return res

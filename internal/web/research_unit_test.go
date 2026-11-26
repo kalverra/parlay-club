@@ -201,7 +201,7 @@ func TestBuildPlayerResearchViewDetails(t *testing.T) {
 	assert.Equal(t, "Def #2", view.PlayerChart.Bars[4].OverallDef.Label)
 
 	// Opposing defense L5 chart.
-	assert.Equal(t, "BAL Defense · Last 5 vs WR · Rec Yds", view.OppDefenseTitle)
+	assert.Equal(t, "BAL Defense · Last 5 vs WR1 · Rec Yds", view.OppDefenseTitle)
 	require.NotNil(t, view.OppOverallBadge)
 	assert.Equal(t, 1, view.OppOverallBadge.Rank)
 	require.NotNil(t, view.OppDefenseChart)

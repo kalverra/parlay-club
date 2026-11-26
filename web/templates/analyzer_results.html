@@ -57,6 +57,30 @@
     {{end}}
   </div>
 
+  <section class="ui-card space-y-4 p-4" data-eval-intro>
+    <div class="space-y-1.5">
+      <h2 class="text-base font-semibold text-ink">How Grading Works</h2>
+      <p class="text-sm text-ink-muted">
+        Before kickoff, we combine recent player stats, matchup strength, injuries, weather, and sharp sportsbook odds to estimate how likely each bet is to win and whether the payout is fair. We replay every bet using only pre-kickoff data so you can see how well the grades actually hold up.
+      </p>
+    </div>
+
+    <div class="space-y-2">
+      <h3 class="text-xs font-semibold uppercase tracking-wide text-ink-muted">What Each Grade Means</h3>
+      <div class="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-5">
+        {{range .Overview.GradeGuide}}
+          <div class="rounded-lg border border-line bg-surface-2 p-2.5 space-y-1">
+            <div class="flex items-center gap-2">
+              <span class="rounded-full border px-2 py-0.5 text-xs font-semibold {{.Class}}">{{.Band}}</span>
+              <span class="text-xs font-semibold text-ink">{{.Title}}</span>
+            </div>
+            <p class="text-[11px] leading-snug text-ink-muted">{{.PlainMeaning}}</p>
+          </div>
+        {{end}}
+      </div>
+    </div>
+  </section>
+
   {{if not .HasData}}
     <p class="ui-card border-dashed p-4 text-sm text-ink-muted">
       {{if .IsMarket}}
@@ -66,6 +90,142 @@
       {{end}}
     </p>
   {{else}}
+    <section class="ui-card space-y-5 p-4" data-eval-summary>
+      <div class="space-y-2">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <h2 class="text-base font-semibold text-ink">How Good Are Our Grades Overall?</h2>
+          {{if .Overview.VerdictBadge}}
+            <span class="rounded-full border px-2.5 py-0.5 text-xs font-medium {{if .Overview.VerdictPositive}}border-positive bg-positive-soft text-positive-ink{{else}}border-line-strong bg-surface-2 text-ink-muted{{end}}">
+              {{.Overview.VerdictBadge}}
+            </span>
+          {{end}}
+        </div>
+        <p class="text-sm font-semibold text-ink">{{.Overview.Headline}}</p>
+        <p class="text-sm text-ink-muted">{{.Overview.Summary}}</p>
+        {{if .Overview.MarketNote}}
+          <p class="text-xs text-ink-muted">{{.Overview.MarketNote}}</p>
+        {{end}}
+      </div>
+
+      {{if .Overview.HasTopBottom}}
+        <div class="rounded-lg border border-line bg-surface-2 p-3 space-y-3" data-eval-visual="top-vs-bottom">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <h3 class="text-xs font-semibold uppercase tracking-wide text-ink-muted">Top Grades vs. Bottom Grades</h3>
+            <span class="font-mono text-[11px] tabular-nums text-ink-subtle">{{.Overview.TotalDecided}} settled bets</span>
+          </div>
+
+          <div class="space-y-2.5">
+            <div class="space-y-1">
+              <div class="flex items-center justify-between gap-2 text-xs">
+                <span class="font-semibold text-ink">A &amp; B picks <span class="font-mono font-normal text-ink-muted">({{.Overview.TopRecord}})</span></span>
+                <span class="font-mono font-semibold tabular-nums text-ink">
+                  {{.Overview.TopHitPct}}
+                  {{if .Overview.TopLift}}
+                    <span class="ml-1 text-[11px] {{if .Overview.TopLiftPositive}}text-positive-ink{{else if .Overview.TopLiftNegative}}text-danger-ink{{else}}text-ink-muted{{end}}">{{.Overview.TopLift}}</span>
+                  {{end}}
+                </span>
+              </div>
+              <div class="h-3 w-full overflow-hidden rounded-full bg-surface">
+                <div class="h-full rounded-full bg-positive" style="width: {{.Overview.TopWidthPct}}%;"></div>
+              </div>
+            </div>
+
+            <div class="space-y-1">
+              <div class="flex items-center justify-between gap-2 text-xs">
+                <span class="font-semibold text-ink">D &amp; F picks <span class="font-mono font-normal text-ink-muted">({{.Overview.BottomRecord}})</span></span>
+                <span class="font-mono font-semibold tabular-nums text-ink">
+                  {{.Overview.BottomHitPct}}
+                  {{if .Overview.BottomLift}}
+                    <span class="ml-1 text-[11px] {{if .Overview.BottomLiftPositive}}text-positive-ink{{else if .Overview.BottomLiftNegative}}text-danger-ink{{else}}text-ink-muted{{end}}">{{.Overview.BottomLift}}</span>
+                  {{end}}
+                </span>
+              </div>
+              <div class="h-3 w-full overflow-hidden rounded-full bg-surface">
+                <div class="h-full rounded-full bg-danger" style="width: {{.Overview.BottomWidthPct}}%;"></div>
+              </div>
+            </div>
+          </div>
+
+          {{if .Overview.HitGapLabel}}
+            <p class="text-xs text-ink-muted">{{.Overview.HitGapLabel}}</p>
+          {{end}}
+        </div>
+      {{end}}
+
+      <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        {{if .Overview.GradeBars}}
+          <div class="rounded-lg border border-line bg-surface-2 p-3 space-y-3" data-eval-visual="grade-bars">
+            <div class="space-y-0.5">
+              <h3 class="text-xs font-semibold uppercase tracking-wide text-ink-muted">Win Rate by Grade (A&ndash;F)</h3>
+              <p class="text-[11px] text-ink-subtle">Bar shows actual win rate. Dark marker shows what sportsbook odds expected.</p>
+            </div>
+            <div class="space-y-2.5">
+              {{range .Overview.GradeBars}}
+                <div class="space-y-1">
+                  <div class="flex items-center justify-between gap-2 text-xs">
+                    <div class="flex items-center gap-2">
+                      <span class="rounded-full border px-2 py-0.5 text-[11px] font-semibold {{.Class}}">{{.Band}}</span>
+                      <span class="font-mono text-[11px] tabular-nums text-ink-subtle">{{.Decided}} bets</span>
+                    </div>
+                    <div class="flex items-center gap-2 font-mono text-xs tabular-nums">
+                      <span class="font-semibold text-ink">{{.HitPct}}</span>
+                      {{if .HasImplied}}
+                        <span class="text-[11px] {{if .LiftPositive}}text-positive-ink{{else if .LiftNegative}}text-danger-ink{{else}}text-ink-muted{{end}}">({{.Lift}})</span>
+                      {{end}}
+                    </div>
+                  </div>
+                  <div class="relative h-2.5 w-full rounded-full bg-surface">
+                    <div class="h-full rounded-full {{.BarClass}}" style="width: {{.HitWidthPct}}%;"></div>
+                    {{if .HasImplied}}
+                      <div
+                        class="pointer-events-none absolute -top-0.5 -bottom-0.5 w-0.5 bg-ink"
+                        style="left: {{.ImpliedLeftPct}}%;"
+                        title="Sportsbook expected {{.ImpliedPct}}"
+                      ></div>
+                    {{end}}
+                  </div>
+                </div>
+              {{end}}
+            </div>
+          </div>
+        {{end}}
+
+        {{if .Overview.HasCalibrationChart}}
+          <div class="rounded-lg border border-line bg-surface-2 p-3 space-y-2" data-eval-visual="calibration-chart">
+            <div class="space-y-0.5">
+              <h3 class="text-xs font-semibold uppercase tracking-wide text-ink-muted">Predicted vs. Actual Win Rate</h3>
+              <p class="text-[11px] text-ink-subtle">Dots near the dashed line mean our win chances match real outcomes.</p>
+            </div>
+            <svg viewBox="0 0 260 170" class="w-full max-w-sm mx-auto text-ink" role="img" aria-label="Predicted versus actual win rate calibration chart">
+              <line x1="36" y1="16" x2="36" y2="142" stroke="currentColor" stroke-opacity="0.25" stroke-width="1" />
+              <line x1="36" y1="142" x2="244" y2="142" stroke="currentColor" stroke-opacity="0.25" stroke-width="1" />
+              <line x1="36" y1="79" x2="244" y2="79" stroke="currentColor" stroke-opacity="0.1" stroke-width="1" />
+              <line x1="140" y1="16" x2="140" y2="142" stroke="currentColor" stroke-opacity="0.1" stroke-width="1" />
+              <line x1="36" y1="142" x2="244" y2="16" stroke="currentColor" stroke-opacity="0.35" stroke-width="1.2" stroke-dasharray="4 3" />
+              <polyline fill="none" stroke="currentColor" stroke-opacity="0.55" stroke-width="1.5" points="{{.Overview.CalibrationPath}}" />
+              {{range .Overview.CalibrationPoints}}
+                <circle cx="{{.X}}" cy="{{.Y}}" r="{{.Radius}}" fill="currentColor" fill-opacity="0.85">
+                  <title>{{.Label}} ({{.Count}} bets): Predicted {{.PredPct}}, Actual {{.ActualPct}} ({{.GapText}})</title>
+                </circle>
+              {{end}}
+              <text x="32" y="145" text-anchor="end" font-size="9" fill="currentColor" fill-opacity="0.6">0%</text>
+              <text x="32" y="82" text-anchor="end" font-size="9" fill="currentColor" fill-opacity="0.6">50%</text>
+              <text x="32" y="20" text-anchor="end" font-size="9" fill="currentColor" fill-opacity="0.6">100%</text>
+              <text x="36" y="156" text-anchor="middle" font-size="9" fill="currentColor" fill-opacity="0.6">0%</text>
+              <text x="140" y="156" text-anchor="middle" font-size="9" fill="currentColor" fill-opacity="0.6">50%</text>
+              <text x="244" y="156" text-anchor="middle" font-size="9" fill="currentColor" fill-opacity="0.6">100%</text>
+              <text x="140" y="167" text-anchor="middle" font-size="9" fill="currentColor" fill-opacity="0.55">Predicted win chance</text>
+            </svg>
+          </div>
+        {{end}}
+      </div>
+    </section>
+
+    <div class="space-y-1 pt-2">
+      <h2 class="text-sm font-semibold uppercase tracking-wide text-page-muted">Detailed Stats &amp; Numbers</h2>
+      <p class="text-xs text-page-muted">Raw calibration metrics, grade tables, engine comparisons, weekly history, and factor attribution.</p>
+    </div>
+
     <section class="ui-card space-y-4 p-4">
       <div class="flex flex-wrap items-center justify-between gap-2">
         <h2 class="text-base font-semibold text-ink">Probability Calibration ({{.SelectedEngine}})</h2>

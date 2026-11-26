@@ -108,7 +108,7 @@ func TestEvalResultsAuthEmptyStateAndInvalidSeason(t *testing.T) {
 	assert.Equal(t, http.StatusSeeOther, unauth.Code)
 	assert.Equal(t, "/login", unauth.Header().Get("Location"))
 
-	// Authenticated empty state.
+	// Authenticated empty state defaults to Market-wide and shows layman explanation.
 	f.signedIn = true
 	rec := httptest.NewRecorder()
 	f.handler.ServeHTTP(
@@ -118,8 +118,10 @@ func TestEvalResultsAuthEmptyStateAndInvalidSeason(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 	body := html.UnescapeString(rec.Body.String())
 	assert.Contains(t, body, "Grading Results")
-	assert.Contains(t, body, "All groups")
-	assert.Contains(t, body, "No settled slips yet for All seasons.")
+	assert.Contains(t, body, "Market-wide")
+	assert.Contains(t, body, "How Grading Works")
+	assert.Contains(t, body, "What Each Grade Means")
+	assert.Contains(t, body, "No graded market-wide legs yet for All seasons.")
 	assert.Contains(t, body, `href="/slips/1"`)
 	assert.Contains(t, body, `href="/docs/grading?from=%2Fslips%2F1"`)
 
@@ -294,9 +296,12 @@ func TestEvalResultsGlobalAggregationAndFilters(t *testing.T) {
 	}
 	require.NoError(t, f.store.SetSlipGrade(ctx, otherSlip.ID, parlay.Lost, db.SlipGraded))
 
-	// Default picks latest graded season (2026) and aggregates across all groups (1 WON + 3 LOST = 1-3-0).
+	// ?source=slips picks latest graded season (2026) and aggregates across all groups (1 WON + 3 LOST = 1-3-0).
 	recDefault := httptest.NewRecorder()
-	f.handler.ServeHTTP(recDefault, httptest.NewRequestWithContext(ctx, http.MethodGet, "/analyzer/results", nil))
+	f.handler.ServeHTTP(
+		recDefault,
+		httptest.NewRequestWithContext(ctx, http.MethodGet, "/analyzer/results?source=slips", nil),
+	)
 	require.Equal(t, http.StatusOK, recDefault.Code)
 	bodyDefault := html.UnescapeString(recDefault.Body.String())
 	assert.Contains(t, bodyDefault, "All groups · 2026 season")
@@ -304,11 +309,16 @@ func TestEvalResultsGlobalAggregationAndFilters(t *testing.T) {
 	assert.Contains(t, bodyDefault, "2026 REG Wk 1")
 	assert.NotContains(t, bodyDefault, "2025 REG Wk 1")
 
-	// ?season=2025 filters to 2025.
+	// ?source=slips&season=2025 filters to 2025.
 	rec2025 := httptest.NewRecorder()
 	f.handler.ServeHTTP(
 		rec2025,
-		httptest.NewRequestWithContext(ctx, http.MethodGet, "/analyzer/results?season=2025&rubric=v1", nil),
+		httptest.NewRequestWithContext(
+			ctx,
+			http.MethodGet,
+			"/analyzer/results?source=slips&season=2025&rubric=v1",
+			nil,
+		),
 	)
 	require.Equal(t, http.StatusOK, rec2025.Code)
 	body2025 := html.UnescapeString(rec2025.Body.String())
@@ -317,11 +327,11 @@ func TestEvalResultsGlobalAggregationAndFilters(t *testing.T) {
 	assert.Contains(t, body2025, "2025 REG Wk 1")
 	assert.Contains(t, body2025, "2025 REG Wk 2")
 
-	// ?season=all combines 2025 and 2026 across all groups (2-4-0).
+	// ?source=slips&season=all combines 2025 and 2026 across all groups (2-4-0).
 	recAll := httptest.NewRecorder()
 	f.handler.ServeHTTP(
 		recAll,
-		httptest.NewRequestWithContext(ctx, http.MethodGet, "/analyzer/results?season=all", nil),
+		httptest.NewRequestWithContext(ctx, http.MethodGet, "/analyzer/results?source=slips&season=all", nil),
 	)
 	require.Equal(t, http.StatusOK, recAll.Code)
 	bodyAll := html.UnescapeString(recAll.Body.String())
@@ -356,7 +366,10 @@ func TestEvalResultsCacheInvalidatesAfterSettlement(t *testing.T) {
 
 	// First request computes and caches 1-0-0.
 	rec1 := httptest.NewRecorder()
-	f.handler.ServeHTTP(rec1, httptest.NewRequestWithContext(ctx, http.MethodGet, "/analyzer/results?season=2026", nil))
+	f.handler.ServeHTTP(
+		rec1,
+		httptest.NewRequestWithContext(ctx, http.MethodGet, "/analyzer/results?source=slips&season=2026", nil),
+	)
 	require.Equal(t, http.StatusOK, rec1.Code)
 	assert.Contains(t, rec1.Body.String(), "1-0-0")
 
@@ -376,7 +389,10 @@ func TestEvalResultsCacheInvalidatesAfterSettlement(t *testing.T) {
 
 	// Subsequent request must see the updated 0-1-0 outcome, not the stale 1-0-0 cache.
 	rec2 := httptest.NewRecorder()
-	f.handler.ServeHTTP(rec2, httptest.NewRequestWithContext(ctx, http.MethodGet, "/analyzer/results?season=2026", nil))
+	f.handler.ServeHTTP(
+		rec2,
+		httptest.NewRequestWithContext(ctx, http.MethodGet, "/analyzer/results?source=slips&season=2026", nil),
+	)
 	require.Equal(t, http.StatusOK, rec2.Code)
 	body2 := rec2.Body.String()
 	assert.Contains(t, body2, "0-1-0")
@@ -428,7 +444,10 @@ func TestEvalResultsDefaultsNilEvalCache(t *testing.T) {
 	require.NoError(t, f.store.SetSlipGrade(ctx, slip.ID, parlay.Won, db.SlipGraded))
 
 	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequestWithContext(ctx, http.MethodGet, "/analyzer/results?season=2026", nil))
+	handler.ServeHTTP(
+		rec,
+		httptest.NewRequestWithContext(ctx, http.MethodGet, "/analyzer/results?source=slips&season=2026", nil),
+	)
 	require.Equal(t, http.StatusOK, rec.Code)
 	assert.Contains(t, rec.Body.String(), "1-0-0")
 }
@@ -482,7 +501,10 @@ func TestEvalResultsSlipFactors(t *testing.T) {
 	require.NoError(t, f.store.SetSlipGrade(ctx, slip.ID, parlay.Won, db.SlipGraded))
 
 	rec := httptest.NewRecorder()
-	f.handler.ServeHTTP(rec, httptest.NewRequestWithContext(ctx, http.MethodGet, "/analyzer/results?season=2026", nil))
+	f.handler.ServeHTTP(
+		rec,
+		httptest.NewRequestWithContext(ctx, http.MethodGet, "/analyzer/results?source=slips&season=2026", nil),
+	)
 	require.Equal(t, http.StatusOK, rec.Code)
 
 	body := html.UnescapeString(rec.Body.String())
@@ -878,11 +900,11 @@ func TestEvalResultsEngineSelectionAndCalibration(t *testing.T) {
 	require.NoError(t, f.store.SetLegResult(ctx, leg2.ID, parlay.Won, f.user.Name))
 	require.NoError(t, f.store.SetSlipGrade(ctx, slip.ID, parlay.Won, db.SlipGraded))
 
-	// Default view selects active engine (v2) and shows v1 vs. v2 switcher and comparison.
+	// Default engine on user slips selects active engine (v2) and shows v1 vs. v2 switcher and comparison.
 	recDefault := httptest.NewRecorder()
 	f.handler.ServeHTTP(
 		recDefault,
-		httptest.NewRequestWithContext(ctx, http.MethodGet, "/analyzer/results?season=2026", nil),
+		httptest.NewRequestWithContext(ctx, http.MethodGet, "/analyzer/results?source=slips&season=2026", nil),
 	)
 	require.Equal(t, http.StatusOK, recDefault.Code)
 	bodyDefault := html.UnescapeString(recDefault.Body.String())
@@ -899,7 +921,12 @@ func TestEvalResultsEngineSelectionAndCalibration(t *testing.T) {
 	recV1 := httptest.NewRecorder()
 	f.handler.ServeHTTP(
 		recV1,
-		httptest.NewRequestWithContext(ctx, http.MethodGet, "/analyzer/results?season=2026&engine=v1", nil),
+		httptest.NewRequestWithContext(
+			ctx,
+			http.MethodGet,
+			"/analyzer/results?source=slips&season=2026&engine=v1",
+			nil,
+		),
 	)
 	require.Equal(t, http.StatusOK, recV1.Code)
 	bodyV1 := html.UnescapeString(recV1.Body.String())
@@ -912,7 +939,12 @@ func TestEvalResultsEngineSelectionAndCalibration(t *testing.T) {
 	recV2 := httptest.NewRecorder()
 	f.handler.ServeHTTP(
 		recV2,
-		httptest.NewRequestWithContext(ctx, http.MethodGet, "/analyzer/results?season=2026&engine=v2", nil),
+		httptest.NewRequestWithContext(
+			ctx,
+			http.MethodGet,
+			"/analyzer/results?source=slips&season=2026&engine=v2",
+			nil,
+		),
 	)
 	require.Equal(t, http.StatusOK, recV2.Code)
 	bodyV2 := html.UnescapeString(recV2.Body.String())
@@ -938,25 +970,40 @@ func TestEvalResultsEngineSelectionAndCalibration(t *testing.T) {
 	recLegacy := httptest.NewRecorder()
 	f.handler.ServeHTTP(
 		recLegacy,
-		httptest.NewRequestWithContext(ctx, http.MethodGet, "/analyzer/results?season=2026&rubric=v2", nil),
+		httptest.NewRequestWithContext(
+			ctx,
+			http.MethodGet,
+			"/analyzer/results?source=slips&season=2026&rubric=v2",
+			nil,
+		),
 	)
 	require.Equal(t, http.StatusOK, recLegacy.Code)
 	assert.Contains(t, html.UnescapeString(recLegacy.Body.String()), "Probability Calibration (v2)")
 
-	// Market mode with ?engine=v2 renders reliability table and hides SGP Correlation Lift.
+	// Market mode (the default when ?source is omitted) renders layman intro + visuals before raw stats.
 	recMktV2 := httptest.NewRecorder()
 	f.handler.ServeHTTP(
 		recMktV2,
 		httptest.NewRequestWithContext(
 			ctx,
 			http.MethodGet,
-			"/analyzer/results?source=market&season=2026&engine=v2",
+			"/analyzer/results?season=2026&engine=v2",
 			nil,
 		),
 	)
 	require.Equal(t, http.StatusOK, recMktV2.Code)
 	bodyMktV2 := html.UnescapeString(recMktV2.Body.String())
 	assert.Contains(t, bodyMktV2, "Market-wide · 2026 season · Engine v2")
+	assert.Contains(t, bodyMktV2, "How Grading Works")
+	assert.Contains(t, bodyMktV2, "How Good Are Our Grades Overall?")
+	assert.Contains(t, bodyMktV2, `data-eval-visual="grade-bars"`)
+	assert.Contains(t, bodyMktV2, "Detailed Stats & Numbers")
+	assert.Less(t, strings.Index(bodyMktV2, "How Grading Works"), strings.Index(bodyMktV2, "Detailed Stats & Numbers"))
+	assert.Less(
+		t,
+		strings.Index(bodyMktV2, "How Good Are Our Grades Overall?"),
+		strings.Index(bodyMktV2, "Probability Calibration (v2)"),
+	)
 	assert.Contains(t, bodyMktV2, "Probability Calibration (v2)")
 	assert.Contains(t, bodyMktV2, "Reliability Table (10% Bins)")
 	assert.NotContains(t, bodyMktV2, "SGP Correlation Lift")

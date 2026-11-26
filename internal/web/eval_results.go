@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"fmt"
+	"math"
 	"net/http"
 	"net/url"
 	"slices"
@@ -31,6 +32,7 @@ type EvalResultsPage struct {
 	SelectedEngine    string
 	Engines           []EvalEngineOption
 	ShowEngineDiffs   bool
+	Overview          EvalOverviewView
 	EngineComparisons []EvalEngineComparisonView
 	Calibration       EvalCalibrationView
 	Monotonic         bool
@@ -42,6 +44,74 @@ type EvalResultsPage struct {
 	Factors           []EvalFactorView
 	SlipFactors       []EvalFactorView
 	Coverage          EvalCoverageView
+}
+
+// EvalOverviewView holds the plain-language explanation, overall verdict, and
+// visual summaries shown above the raw statistical tables.
+type EvalOverviewView struct {
+	TotalDecided        int
+	Headline            string
+	Summary             string
+	VerdictBadge        string
+	VerdictPositive     bool
+	MarketNote          string
+	GradeGuide          []EvalGradeGuideItem
+	HasTopBottom        bool
+	TopHitPct           string
+	TopWidthPct         int
+	TopRecord           string
+	TopLift             string
+	TopLiftPositive     bool
+	TopLiftNegative     bool
+	BottomHitPct        string
+	BottomWidthPct      int
+	BottomRecord        string
+	BottomLift          string
+	BottomLiftPositive  bool
+	BottomLiftNegative  bool
+	HitGapLabel         string
+	GradeBars           []EvalGradeBarView
+	HasCalibrationChart bool
+	CalibrationPoints   []EvalCalibrationPointView
+	CalibrationPath     string
+}
+
+// EvalGradeGuideItem explains one letter grade in plain language.
+type EvalGradeGuideItem struct {
+	Band         string
+	Class        string
+	Title        string
+	PlainMeaning string
+}
+
+// EvalGradeBarView renders one A–F horizontal bar comparing actual hit rate
+// against sportsbook implied probability.
+type EvalGradeBarView struct {
+	Band           string
+	Class          string
+	Decided        int
+	HitPct         string
+	HitWidthPct    int
+	HasImplied     bool
+	ImpliedPct     string
+	ImpliedLeftPct int
+	Lift           string
+	LiftPositive   bool
+	LiftNegative   bool
+	BarClass       string
+}
+
+// EvalCalibrationPointView plots one populated reliability bin on the
+// predicted-vs-actual SVG calibration chart.
+type EvalCalibrationPointView struct {
+	Label     string
+	Count     int
+	PredPct   string
+	ActualPct string
+	GapText   string
+	X         int
+	Y         int
+	Radius    int
 }
 
 // EvalSourceOption is one pill in the source switcher (User slips vs. Market-wide).
@@ -258,6 +328,7 @@ func (h *slipHandlers) evalResults(w http.ResponseWriter, r *http.Request) {
 			SlipsURL:    buildResultsURL(string(eval.ModeSlips), "all", "", backURL),
 			Sources:     buildEvalSources(source, "all", "", backURL),
 			SeasonLabel: "All seasons",
+			Overview:    EvalOverviewView{GradeGuide: evalGradeGuide()},
 		})
 		return
 	}
@@ -339,10 +410,10 @@ func mergeEvalSeasons(primary, secondary []int) []int {
 func parseEvalSource(w http.ResponseWriter, r *http.Request) (eval.ReplayMode, bool) {
 	raw := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("source")))
 	switch raw {
-	case "", string(eval.ModeSlips):
-		return eval.ModeSlips, true
-	case string(eval.ModeMarket):
+	case "", string(eval.ModeMarket):
 		return eval.ModeMarket, true
+	case string(eval.ModeSlips):
+		return eval.ModeSlips, true
 	default:
 		http.Error(w, "invalid source", http.StatusBadRequest)
 		return "", false
@@ -477,6 +548,7 @@ func buildEvalResultsPage(
 	}
 
 	hasData := suite.Coverage.TotalLegs > 0 || len(report.Weekly) > 0
+	calView := buildEvalCalibration(report.Calibration)
 
 	return EvalResultsPage{
 		Page:              page,
@@ -494,8 +566,9 @@ func buildEvalResultsPage(
 		SelectedEngine:    report.RubricName,
 		Engines:           engines,
 		ShowEngineDiffs:   len(suite.Diffs) > 0,
+		Overview:          buildEvalOverview(report, calView),
 		EngineComparisons: buildEvalEngineComparisons(suite, report.RubricName, sourceStr, seasonParam, backURL),
-		Calibration:       buildEvalCalibration(report.Calibration),
+		Calibration:       calView,
 		Monotonic:         report.LegMonotonic,
 		MonotonicStatus:   monotonicStatus,
 		LegBands:          legBands,
@@ -520,18 +593,255 @@ func buildEvalResultsPage(
 func buildEvalSources(current eval.ReplayMode, season, engine, backURL string) []EvalSourceOption {
 	return []EvalSourceOption{
 		{
-			Label:   "User slips",
-			Value:   string(eval.ModeSlips),
-			Current: current != eval.ModeMarket,
-			URL:     buildResultsURL(string(eval.ModeSlips), season, engine, backURL),
-		},
-		{
 			Label:   "Market-wide",
 			Value:   string(eval.ModeMarket),
 			Current: current == eval.ModeMarket,
 			URL:     buildResultsURL(string(eval.ModeMarket), season, engine, backURL),
 		},
+		{
+			Label:   "User slips",
+			Value:   string(eval.ModeSlips),
+			Current: current != eval.ModeMarket,
+			URL:     buildResultsURL(string(eval.ModeSlips), season, engine, backURL),
+		},
 	}
+}
+
+func evalGradeGuide() []EvalGradeGuideItem {
+	return []EvalGradeGuideItem{
+		{
+			Band:         "A",
+			Class:        gradeClass("A"),
+			Title:        "Strong edge",
+			PlainMeaning: "Our numbers like this bet noticeably more than the sportsbook odds suggest.",
+		},
+		{
+			Band:         "B",
+			Class:        gradeClass("B"),
+			Title:        "Good value",
+			PlainMeaning: "Solid matchup or fair price edge worth a look.",
+		},
+		{
+			Band:         "C",
+			Class:        gradeClass("C"),
+			Title:        "Fair price",
+			PlainMeaning: "About what you would expect for the odds. Nothing wrong with it, just no clear edge.",
+		},
+		{
+			Band:         "D",
+			Class:        gradeClass("D"),
+			Title:        "Uphill battle",
+			PlainMeaning: "The price is steep or the matchup works against it.",
+		},
+		{
+			Band:         "F",
+			Class:        gradeClass("F"),
+			Title:        "Heavy tax",
+			PlainMeaning: "Tough spot or poor payout for the risk. Every pick stays allowed—just a heads-up.",
+		},
+	}
+}
+
+func buildEvalOverview(report eval.Report, cal EvalCalibrationView) EvalOverviewView {
+	ov := EvalOverviewView{
+		GradeGuide: evalGradeGuide(),
+	}
+
+	var topWins, topLosses, topDecided int
+	var topImpliedSum float64
+	var botWins, botLosses, botDecided int
+	var botImpliedSum float64
+
+	for _, b := range report.LegBands {
+		if b.Band == "ungraded" {
+			continue
+		}
+		ov.TotalDecided += b.Decided
+		switch b.Band {
+		case "A", "B":
+			topWins += b.Wins
+			topLosses += b.Losses
+			topDecided += b.Decided
+			topImpliedSum += b.AvgImpliedProb * float64(b.Decided)
+		case "D", "F":
+			botWins += b.Wins
+			botLosses += b.Losses
+			botDecided += b.Decided
+			botImpliedSum += b.AvgImpliedProb * float64(b.Decided)
+		}
+
+		if b.Decided == 0 {
+			continue
+		}
+		hitPctVal := b.WinRate * 100
+		bar := EvalGradeBarView{
+			Band:         b.Band,
+			Class:        gradeClass(b.Band),
+			Decided:      b.Decided,
+			HitPct:       fmt.Sprintf("%.1f%%", hitPctVal),
+			HitWidthPct:  max(2, min(100, int(math.Round(hitPctVal)))),
+			Lift:         "–",
+			LiftPositive: b.AvgImpliedProb > 0 && b.Lift > 0.0005,
+			LiftNegative: b.AvgImpliedProb > 0 && b.Lift < -0.0005,
+			BarClass:     evalGradeBarClass(b.Band),
+		}
+		if b.AvgImpliedProb > 0 {
+			impPctVal := b.AvgImpliedProb * 100
+			bar.HasImplied = true
+			bar.ImpliedPct = fmt.Sprintf("%.1f%%", impPctVal)
+			bar.ImpliedLeftPct = max(2, min(98, int(math.Round(impPctVal))))
+			bar.Lift = fmt.Sprintf("%+.1f%%", b.Lift*100)
+		}
+		ov.GradeBars = append(ov.GradeBars, bar)
+	}
+
+	if topDecided > 0 && botDecided > 0 {
+		ov.HasTopBottom = true
+		topRate := float64(topWins) / float64(topDecided)
+		botRate := float64(botWins) / float64(botDecided)
+		ov.TopHitPct = fmt.Sprintf("%.1f%%", topRate*100)
+		ov.TopWidthPct = max(2, min(100, int(math.Round(topRate*100))))
+		ov.TopRecord = fmt.Sprintf("%d-%d", topWins, topLosses)
+		ov.BottomHitPct = fmt.Sprintf("%.1f%%", botRate*100)
+		ov.BottomWidthPct = max(2, min(100, int(math.Round(botRate*100))))
+		ov.BottomRecord = fmt.Sprintf("%d-%d", botWins, botLosses)
+
+		if topImpliedSum > 0 {
+			topLift := topRate - (topImpliedSum / float64(topDecided))
+			ov.TopLift = fmt.Sprintf("%+.1f%% vs odds", topLift*100)
+			ov.TopLiftPositive = topLift > 0.0005
+			ov.TopLiftNegative = topLift < -0.0005
+		}
+		if botImpliedSum > 0 {
+			botLift := botRate - (botImpliedSum / float64(botDecided))
+			ov.BottomLift = fmt.Sprintf("%+.1f%% vs odds", botLift*100)
+			ov.BottomLiftPositive = botLift > 0.0005
+			ov.BottomLiftNegative = botLift < -0.0005
+		}
+		gapPP := (topRate - botRate) * 100
+		switch {
+		case gapPP >= 0.05:
+			ov.HitGapLabel = fmt.Sprintf("A & B bets win %.1f percentage points more often than D & F bets.", gapPP)
+		case gapPP <= -0.05:
+			ov.HitGapLabel = fmt.Sprintf("D & F bets are %.1f percentage points ahead of A & B in this sample.", -gapPP)
+		default:
+			ov.HitGapLabel = "A & B and D & F bets are winning at nearly the same rate in this sample."
+		}
+	}
+
+	switch {
+	case ov.TotalDecided < 20:
+		ov.VerdictBadge = "Early sample"
+		ov.Headline = "Still building a track record"
+		ov.Summary = fmt.Sprintf(
+			"We have graded %d settled bets in this view so far. Once more games settle, the gap between A/B and D/F grades becomes much clearer.",
+			ov.TotalDecided,
+		)
+	case report.LegMonotonic:
+		ov.VerdictBadge = "Grades separate winners"
+		ov.VerdictPositive = true
+		ov.Headline = "Higher grades are winning more often"
+		if ov.HasTopBottom {
+			ov.Summary = fmt.Sprintf(
+				"Across %d settled bets, A and B picks hit %s of the time compared to %s for D and F picks.",
+				ov.TotalDecided, ov.TopHitPct, ov.BottomHitPct,
+			)
+		} else {
+			ov.Summary = fmt.Sprintf(
+				"Across %d settled bets, our top-graded picks are outperforming lower grades.",
+				ov.TotalDecided,
+			)
+		}
+	default:
+		ov.VerdictBadge = "Mixed separation"
+		ov.Headline = "Grades are close across tiers in this sample"
+		if ov.HasTopBottom {
+			ov.Summary = fmt.Sprintf(
+				"Across %d settled bets, A and B picks hit %s while D and F picks hit %s. Sportsbook lines are tough to beat, so small edges take volume to show up.",
+				ov.TotalDecided,
+				ov.TopHitPct,
+				ov.BottomHitPct,
+			)
+		} else {
+			ov.Summary = fmt.Sprintf(
+				"Across %d settled bets, lower grades are keeping pace with A-grade bets in this sample.",
+				ov.TotalDecided,
+			)
+		}
+	}
+
+	if cal.HasModelProbs && cal.HasMarket {
+		switch {
+		case cal.BeatsMarketLL && cal.BeatsMarketBrier:
+			ov.MarketNote = "Our win-chance estimates are slightly sharper than sportsbook odds overall."
+		case cal.BeatsMarketLL || cal.BeatsMarketBrier:
+			ov.MarketNote = "Our win-chance estimates are right in line with sportsbook odds."
+		default:
+			ov.MarketNote = "Sportsbook odds are slightly sharper on raw probability, so treat grades as a tiebreaker rather than a guarantee."
+		}
+	}
+
+	ov.CalibrationPoints, ov.CalibrationPath = buildEvalCalibrationChart(report.Calibration.Reliability)
+	ov.HasCalibrationChart = len(ov.CalibrationPoints) >= 2
+	return ov
+}
+
+func evalGradeBarClass(band string) string {
+	switch band {
+	case "A", "B":
+		return "bg-positive"
+	case "C":
+		return "bg-accent"
+	case "D":
+		return "bg-warning"
+	case "F":
+		return "bg-danger"
+	default:
+		return "bg-ink-subtle"
+	}
+}
+
+func buildEvalCalibrationChart(bins []eval.ReliabilityBin) ([]EvalCalibrationPointView, string) {
+	// Plot area inside viewBox 0 0 260 170: x in [36..244], y in [142..16].
+	const (
+		plotLeft   = 36.0
+		plotWidth  = 208.0
+		plotBottom = 142.0
+		plotHeight = 126.0
+	)
+	maxCount := 1
+	for _, b := range bins {
+		if b.Count > maxCount {
+			maxCount = b.Count
+		}
+	}
+
+	points := make([]EvalCalibrationPointView, 0, len(bins))
+	pathParts := make([]string, 0, len(bins))
+	for _, b := range bins {
+		if b.Count <= 0 {
+			continue
+		}
+		x := int(math.Round(plotLeft + b.MeanPredProb*plotWidth))
+		y := int(math.Round(plotBottom - b.EmpiricalHit*plotHeight))
+		radius := 4
+		if maxCount > 1 {
+			ratio := float64(b.Count) / float64(maxCount)
+			radius = 3 + int(math.Round(ratio*4))
+		}
+		points = append(points, EvalCalibrationPointView{
+			Label:     fmt.Sprintf("%.0f–%.0f%%", b.BinLow*100, b.BinHigh*100),
+			Count:     b.Count,
+			PredPct:   fmt.Sprintf("%.1f%%", b.MeanPredProb*100),
+			ActualPct: fmt.Sprintf("%.1f%%", b.EmpiricalHit*100),
+			GapText:   fmt.Sprintf("%+.1f pp", (b.EmpiricalHit-b.MeanPredProb)*100),
+			X:         x,
+			Y:         y,
+			Radius:    radius,
+		})
+		pathParts = append(pathParts, fmt.Sprintf("%d,%d", x, y))
+	}
+	return points, strings.Join(pathParts, " ")
 }
 
 func buildResultsURL(source, season, engine, backURL string) string {

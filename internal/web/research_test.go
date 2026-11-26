@@ -1294,13 +1294,108 @@ func TestResearchPlayerRichChartsAndMatchupContext(t *testing.T) {
 	assert.Contains(t, body, "badge-lost")
 
 	// Opposing defense L5 chart.
-	assert.Contains(t, body, "MIA Defense · Last 5 vs WR · Rec Yds")
+	assert.Contains(t, body, "MIA Defense · Last 5 vs WR1 · Rec Yds")
 	assert.Contains(t, body, "Def #3")
 	assert.Contains(t, body, "vs WR #2")
 	assert.Contains(t, body, "J. Chase")
 	assert.Contains(t, body, "CIN · W1")
 	assert.Contains(t, body, "G. Wilson")
 	assert.Contains(t, body, "NYJ · W2")
+}
+
+func TestResearchPlayerNFLverseFallbackForWR(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	handler := researchHandlerWithRefresher(t, fixture, fixture.user, &researchTestRefresher{})
+	ctx := t.Context()
+	now := time.Now().UTC()
+
+	week, err := fixture.store.UpsertWeek(ctx, 2026, 2, 10)
+	require.NoError(t, err)
+	_, err = fixture.store.UpsertGame(ctx, db.Game{
+		ID:       "401999101",
+		WeekID:   week.ID,
+		HomeTeam: "PHI",
+		AwayTeam: "DAL",
+		HomeName: "Philadelphia Eagles",
+		AwayName: "Dallas Cowboys",
+		Kickoff:  now.Add(48 * time.Hour),
+		Status:   db.GameScheduled,
+	})
+	require.NoError(t, err)
+	require.NoError(t, fixture.store.UpsertRosterPlayers(ctx, []db.RosterPlayer{
+		{
+			AthleteID: "5083754",
+			Team:      "DAL",
+			FullName:  "Ryan Flournoy",
+			Position:  "WR",
+			UpdatedAt: now,
+		},
+	}))
+	_, err = fixture.store.UpsertOdds(ctx, []db.Odds{
+		{
+			GameID:     "401999101",
+			Book:       "draftkings",
+			MarketType: "REC_YDS",
+			Team:       "DAL",
+			PlayerName: "Ryan Flournoy",
+			Side:       "OVER",
+			Line:       new(32.5),
+			Price:      -110,
+			FetchedAt:  now,
+		},
+	})
+	require.NoError(t, err)
+	// Intentionally no player_gamelogs row — only nflverse_player_weeks.
+	_, err = fixture.store.UpsertNFLversePlayerWeeks(ctx, []db.NFLversePlayerWeek{
+		{
+			ESPNID:     "5083754",
+			Season:     2026,
+			SeasonType: 2,
+			WeekNum:    9,
+			Team:       "DAL",
+			Opponent:   "IND",
+			PlayerName: "Ryan Flournoy",
+			Position:   "WR",
+			RecYds:     53,
+			Receptions: 4,
+			OffensePct: 0.72,
+			UpdatedAt:  now,
+		},
+		{
+			ESPNID:     "5083754",
+			Season:     2026,
+			SeasonType: 2,
+			WeekNum:    8,
+			Team:       "DAL",
+			Opponent:   "NYG",
+			PlayerName: "Ryan Flournoy",
+			Position:   "WR",
+			RecYds:     28,
+			Receptions: 2,
+			OffensePct: 0.65,
+			UpdatedAt:  now,
+		},
+	})
+	require.NoError(t, err)
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(
+		rec,
+		httptest.NewRequestWithContext(ctx, http.MethodGet, "/research/players/5083754", nil),
+	)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	body := rec.Body.String()
+	assert.Contains(t, body, "Ryan Flournoy")
+	assert.Contains(t, body, "Last 5 Games · Rec Yds")
+	assert.NotContains(t, body, "No game log stats available for this market.")
+	assert.Contains(t, body, "53")
+	assert.Contains(t, body, "28")
+	assert.Contains(t, body, "IND")
+	assert.Contains(t, body, "NYG")
+	assert.Contains(t, body, "2 GP")
 }
 
 // seedResearchExplorer writes one upcoming game, a rostered player, and a mix
