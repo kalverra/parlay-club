@@ -5,9 +5,9 @@ type: concept
 summary: How a group builds and tracks shared parlays from the slate, covering slate scopes, deadlines, the hub, live progress, A-grade highlights, the pick board, votes, wagers, grading, and editing rules.
 tags: [slips, weeks, legs, members, locking, grading, results, activity, groups, games, quick-add, nfelo, props, autocomplete, research, next-step, hub, pick-board, slate, drilldown, tabs, search, dock, tray, votes, voting, wagers, slate-scopes, deadlines, multi-slip, highlights, live-progress, docs, help-bubbles]
 budget:
-  max_lines: 575
+  max_lines: 585
   max_spans_per_100_lines: 105
-  reason: Covers the full slip lifecycle, pick board, highlights, voting, research, grading, wagers, and multi-slip rules in one concept doc.
+  reason: Covers the full slip lifecycle, pick board, highlights, voting, research, grading, wagers, multi-slip rules, and the post-commit live and push seams in one concept doc.
 ---
 
 # Slips
@@ -485,6 +485,14 @@ The rules live in `slips.Service` (`internal/slips`). Each method checks them, w
 transaction, updates the slip's status, then publishes `slip:{id}`. The clock is injected through `now`, so kickoff and
 locking stay testable.
 
+The service holds two optional seams, both called only after the commit. `Publisher` is one method, `Publish(topic string)`,
+and `*live.Hub` satisfies it; [Live updates](live-updates.md) covers the topics. `Notifier` is one method,
+`Notify(ctx, Event)`, and `*push.Service` satisfies it when push is on. An `Event` carries the kind, the slip, the actor
+(`0` for the auto grader), the number of legs added, and the one pick when only one was added, but no message text, so
+[Notifications](notifications.md#slip-events) owns the words and the recipients. It raises `legs_added` from `AddLeg` or
+`AddLegs`, `slip_locked` from the lock in that moves the slip to `LOCKED`, and `slip_graded` from the grade that moves it
+to `GRADED`. A rolled-back transaction raises nothing.
+
 1. Only slip members can add legs. A member can edit or delete only their own legs. A non-member gets `ErrNotMember`,
    and someone else's leg gets `ErrNotOwner`.
 2. A member can have at most `legs_per_member` legs. Adding past the limit returns `ErrLegLimit`.
@@ -504,10 +512,6 @@ locking stay testable.
 9. Every mutation writes one activity entry and publishes `slip:{id}` after it commits. An add reads "Adam added BUF
    ML", a lock in reads "Sam locked in", and a no-op writes nothing. Voting is the one exception: a vote publishes a
    change but writes no activity entry, so a feed full of thumbs would not bury the picks.
-10. The same committed change may raise one `slips.Event` through the optional `Notifier` seam: `legs_added` from
-    `AddLeg` or `AddLegs`, `slip_locked` when the final lock in moves the slip to `LOCKED`, and `slip_graded` when a
-    manual or automatic grade moves it to `GRADED`. The seam knows nothing about push; `internal/push` implements it.
-    See [Notifications](notifications.md#slip-events) for the messages and recipients.
 
 The service returns typed errors so handlers can answer with a 422 and a short message.
 

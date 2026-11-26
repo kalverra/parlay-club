@@ -2,7 +2,7 @@
 id: notifications
 title: Notifications
 type: concept
-summary: How the app installs to a phone or desktop home screen, turns on per-device Web Push from the profile page, stores subscriptions, and sends through VAPID.
+summary: How the app installs to a phone or desktop home screen, turns on per-device Web Push from the profile page, stores subscriptions, and sends test messages and slip events through VAPID.
 tags: [pwa, install, manifest, service-worker, icons, ios, safe-area, notifications, web-push, vapid, push-subscriptions, slip-events]
 ---
 
@@ -155,16 +155,17 @@ is kept: a missed nudge is better than a request that waits on a push service.
 Sends run inside the request that caused them, before the handler answers. Cloud Run bills CPU by request, so work
 started after the response can stall until the next request. The send uses `context.WithoutCancel` with its own timeout,
 so the work survives a client disconnect. Send test sends "Notifications are on for this device." to the caller's own
-devices. Slip events send the same way, described below. Kickoff reminders arrive later in this change.
+devices. Slip events send the same way, described below.
 
 The `push_log` table exists for dedupe: a sender reserves a row before it sends, so a retried event never sends twice.
-Slip grades use it now, one slip-wide row per grade, and reminders will use it later.
+Slip grades use it, one slip-wide row per grade.
 
 ## Slip events
 
-`slips.Service` raises one event after a transaction commits, through a small `Notifier` seam. The seam knows nothing
-about push: it carries the kind, the slip, the actor, the number of legs added, and the one pick when only one was
-added. `internal/push` implements it and decides who hears about the change.
+`slips.Service` raises one event after a transaction commits, through a small `Notifier` seam. It sits beside the
+`Publisher` seam that drives live updates ([Slips](slips.md#editing-and-locking)), and `cmd/server` registers it with
+`SetNotifier`. The seam knows nothing about push: it carries the kind, the slip, the actor, the number of legs added, and
+the one pick when only one was added. `internal/push` implements it and decides who hears about the change.
 
 | Event         | Raised when                                                     | Goes to               | Body                                                   |
 | ------------- | --------------------------------------------------------------- | --------------------- | ------------------------------------------------------ |

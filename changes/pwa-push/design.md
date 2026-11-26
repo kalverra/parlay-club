@@ -560,7 +560,7 @@ delivery is manual)
       `Notify` in `internal/push`: recipients, message text in the app's voice, tag and URL, and graded dedupe through
       `push_log`. Wire it in `cmd/server`, as an untyped nil when push is off. Filter recipients to active users. Test
       with a recording notifier and push service tests.
-- [ ] Docs: add the events table to `docs/concepts/notifications.md` and the Notifier seam beside `Publisher` in
+- [x] Docs: add the events table to `docs/concepts/notifications.md` and the Notifier seam beside `Publisher` in
       `docs/concepts/slips.md`.
 
 ### Phase 4: Kickoff reminders
