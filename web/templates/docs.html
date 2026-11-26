@@ -1,0 +1,142 @@
+{{define "content"}}
+<section class="space-y-6 pb-8">
+  <div class="space-y-2">
+    {{if .BackURL}}
+      <a href="{{.BackURL}}" class="inline-flex items-center gap-1 text-xs font-medium text-page-muted hover:text-page-ink hover:underline">
+        &larr; Back
+      </a>
+    {{end}}
+    <div class="flex flex-wrap items-center justify-between gap-2">
+      <h1 class="text-xl font-semibold">{{if .Hub}}Docs{{else}}Glossary{{end}}</h1>
+    </div>
+    <p class="text-sm text-page-muted">
+      {{if .Hub}}
+        How the app works, in plain words, plus the questions people ask most.
+      {{else}}
+        Every betting and app term in plain words. Search to narrow the list.
+      {{end}}
+    </p>
+    <nav class="flex flex-wrap gap-2 pt-1 text-xs" aria-label="Docs sections" data-docs-nav>
+      {{range .Nav}}<a
+          href="{{.Href}}"
+          class="rounded-full border px-2.5 py-1 {{if .Current}}border-accent bg-accent font-medium text-accent-ink{{else}}border-line-strong bg-surface text-ink hover:bg-surface-2{{end}}"
+          {{if .Current}}aria-current="page"{{end}}>{{.Label}}</a
+        >{{end}}
+    </nav>
+  </div>
+
+  {{if .Hub}}{{template "docs-hub" .}}{{else}}{{template "docs-glossary" .}}{{end}}
+</section>
+{{end}}
+
+{{define "docs-hub"}}
+<section class="grid grid-cols-2 gap-2.5" aria-label="Quick jumps">
+  {{range .Hub.QuickJumps}}<a
+      href="{{.Href}}"
+      class="ui-card p-3 transition-colors hover:border-line-strong"
+    >
+      <p class="text-sm font-semibold text-ink">{{.Label}}</p>
+      <p class="mt-1 text-xs text-ink-muted">{{.Summary}}</p>
+    </a>{{end}}
+</section>
+
+<section class="space-y-3">
+  <h2 class="text-base font-semibold">How systems work</h2>
+  {{range .Hub.Sections}}
+    <article id="sys-{{.ID}}" class="ui-card scroll-mt-16 space-y-2 p-4">
+      <h3 class="text-sm font-semibold text-ink">{{.Title}}</h3>
+      <p class="text-sm text-ink-muted">{{.Summary}}</p>
+      <ul class="list-disc space-y-1 pl-4 text-xs text-ink-muted">
+        {{range .Points}}<li>{{.}}</li>{{end}}
+      </ul>
+      {{if .Links}}
+        <div class="flex flex-wrap gap-2 pt-1">
+          {{range .Links}}<a
+              href="{{.Href}}"
+              class="rounded-full border border-line-strong bg-surface-2 px-2.5 py-0.5 text-[11px] font-medium text-ink hover:bg-surface"
+              >{{.Label}}</a
+            >{{end}}
+        </div>
+      {{end}}
+    </article>
+  {{end}}
+</section>
+
+<section class="space-y-3">
+  <h2 class="text-base font-semibold">Common questions</h2>
+  <div class="space-y-2">
+    {{range .Hub.FAQ}}
+      <details class="ui-card p-4" data-docs-faq>
+        <summary class="cursor-pointer text-sm font-semibold text-ink">{{.Question}}</summary>
+        <p class="mt-2 text-sm text-ink-muted">{{.Answer}}</p>
+        {{if .LinkHref}}<a
+            href="{{.LinkHref}}"
+            class="mt-1 inline-block text-xs font-medium text-ink underline"
+            >{{.LinkLabel}}</a
+          >{{end}}
+      </details>
+    {{end}}
+  </div>
+</section>
+{{end}}
+
+{{define "docs-glossary"}}
+<form
+  method="get"
+  action="/docs/glossary"
+  role="search"
+  class="ui-card flex flex-wrap items-center gap-2 p-3"
+>
+  {{if .BackURL}}<input type="hidden" name="from" value="{{.BackURL}}">{{end}}
+  <label for="docs-glossary-q" class="sr-only">Search terms</label>
+  <input
+    id="docs-glossary-q"
+    name="q"
+    type="search"
+    value="{{.Glossary.Query}}"
+    placeholder="Search terms, like epa or de-vig"
+    class="min-w-0 flex-1 rounded-lg border border-line-strong bg-surface px-3 py-2 text-sm text-ink placeholder:text-ink-subtle focus:border-accent focus:outline-none"
+    data-docs-glossary-search
+  >
+  <button
+    type="submit"
+    class="rounded-lg border border-line-strong bg-surface-2 px-3 py-2 text-sm font-medium text-ink"
+  >
+    Search
+  </button>
+  {{if .Glossary.Filtered}}<a
+      href="/docs/glossary{{if .BackURL}}?from={{.BackURL | urlquery}}{{end}}"
+      class="text-xs font-medium text-ink underline"
+      >Clear</a
+    >{{end}}
+</form>
+
+<p class="text-xs text-page-muted" data-glossary-count>
+  {{if .Glossary.Filtered}}
+    {{len .Glossary.Entries}} of {{.Glossary.Total}} terms match &ldquo;{{.Glossary.Query}}&rdquo;.
+  {{else}}
+    {{.Glossary.Total}} terms.
+  {{end}}
+</p>
+
+{{if not .Glossary.Entries}}
+  <p class="ui-card border-dashed p-4 text-sm text-ink-muted" data-glossary-empty>
+    No terms match &ldquo;{{.Glossary.Query}}&rdquo;. Try a shorter word, or clear the search.
+  </p>
+{{else}}
+  <div class="space-y-2.5" data-glossary-list>
+    {{range .Glossary.Entries}}
+      <article id="term-{{.Slug}}" class="ui-card scroll-mt-16 space-y-1.5 p-4">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <h3 class="text-sm font-semibold text-ink">{{.Term}}</h3>
+          <span class="rounded-full border border-line-strong bg-surface-2 px-2 py-0.5 text-[11px] font-medium text-ink-muted">
+            {{.Category}}
+          </span>
+        </div>
+        <p class="text-sm text-ink-muted">{{.Summary}}</p>
+        <p class="text-xs italic text-ink-subtle">{{.Example}}</p>
+      </article>
+    {{end}}
+  </div>
+{{end}}
+{{end}}

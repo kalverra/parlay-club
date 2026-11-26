@@ -25,6 +25,7 @@ var pageFiles = map[string]string{
 	"sandbox":          "templates/sandbox.html",
 	"analyzer-guide":   "templates/analyzer_guide.html",
 	"analyzer-results": "templates/analyzer_results.html",
+	"docs":             "templates/docs.html",
 }
 
 // partialsFile holds the fragments HTMX swaps into a page. Each fragment is a

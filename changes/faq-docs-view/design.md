@@ -165,7 +165,7 @@ tests)
 - [x] Add `TabDocs` (`Docs`, `/docs`) to `internal/web/page.go` and switch the bottom nav container in
       `web/templates/layout.html` from `grid-cols-3` to `grid-flow-col auto-cols-fr`, updating
       `internal/web/page_test.go` and `internal/web/layout_test.go`.
-- [ ] Implement `internal/web/docs.go` and `web/templates/docs.html` serving `GET /docs` (How Systems Work + FAQ with
+- [x] Implement `internal/web/docs.go` and `web/templates/docs.html` serving `GET /docs` (How Systems Work + FAQ with
       stable `#sys-*` anchors) and `GET /docs/glossary` (structured glossary with `#term-*` anchors and `?q=`
       filtering), wired into `internal/web/render.go` and `internal/web/slips.go` with handler and anchor-uniqueness
       tests.
