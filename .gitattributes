@@ -1,0 +1,4 @@
+# Generated model artifacts. `linguist-generated` collapses them in GitHub diffs
+# and keeps them out of review size; neither is useful to read as a patch.
+internal/modelv2/artifacts/*.json.gz linguist-generated=true
+internal/modelv2/testdata/parity_vectors.json linguist-generated=true

@@ -332,9 +332,14 @@ gates:
 
 When all gates pass, `ml/export.py` writes three files:
 
-- `internal/modelv2/artifacts/v2.json` — model bundle embedded into Go via `internal/modelv2`.
-- `internal/modelv2/testdata/parity_vectors.json` — leg and copula test vectors for Go/Python parity checks.
+- `internal/modelv2/artifacts/v2.json.gz` — model bundle embedded into Go via `internal/modelv2`. Written minified and
+  gzipped (~150 KB instead of ~3 MB) because its ~12.5k tree nodes would otherwise span 100k+ lines and add 3 MB to git
+  history on every retrain; run `gunzip -c internal/modelv2/artifacts/v2.json.gz | jq .` to read it.
+- `internal/modelv2/testdata/parity_vectors.json` — leg and copula test vectors for Go/Python parity checks. Kept
+  indented, since a change to it is meaningful.
 - `ml/reports/latest.md` — walk-forward gate metrics, pruned features, and top KS shifts.
+
+Both generated artifacts are marked `linguist-generated` in `.gitattributes`, so GitHub collapses them in diffs.
 
 ### Retraining cadence
 
@@ -361,7 +366,7 @@ When you have access to the production replica, compare v2 against archived slat
 LITESTREAM_BUCKET=<bucket> mise run eval-prod
 ```
 
-Commit `internal/modelv2/artifacts/v2.json`, `internal/modelv2/testdata/parity_vectors.json`, and `ml/reports/latest.md`
+Commit `internal/modelv2/artifacts/v2.json.gz`, `internal/modelv2/testdata/parity_vectors.json`, and `ml/reports/latest.md`
 together, and include the gate summary table from `ml/reports/latest.md` in the PR description.
 
 ## Check your work
