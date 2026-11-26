@@ -388,18 +388,20 @@ and the member leaderboard (stacked cards below `sm:` and a table at `sm:+`). Se
 | Method + path            | Purpose                                                         | Response |
 | ------------------------ | --------------------------------------------------------------- | -------- |
 | `GET /analyzer/guide`    | Grading & Analyzer Guide backed by `RuleDocs()`, `DefaultV2Config`, and `GradeRubric()` | Full page; optional `?from=` back-link path. |
-| `GET /docs/grading`      | Same page served inside Docs (`page.Tab = TabDocs`)              | Full page; same `?from=` contract. |
+| `GET /docs/grading`      | Same page served inside Docs (`page.Tab = TabDocs`)              | Full page; same anchors and `?from=` contract. |
 
-Both paths invoke the same handler, so an existing bookmark keeps working while the page picks up the Docs tab and the
-shared docs section switcher. `GET /analyzer/guide` renders `web/templates/analyzer_guide.html` behind `RequireUser` and
-`Scope`. It displays
-the active grading engine badge (`v2`), the four v2 grading pillars and weights (`analyzer.DefaultV2Config`), uncertainty
-badge rules, `A`–`F` letter bands and legacy v1 rubric reference (`analyzer.GradeRubric()`), pick-board badge
-descriptions, and every active warning rule (`analyzer.RuleDocs()`) grouped by category with stable anchors (`#pillars`,
-`#leg-grades`, `#slip-grade`, `#suggestions`, `#rules`, and `#rule-<id>`). It links to `/analyzer/results`
-("Grading results"), and an optional `?from=` query parameter renders a `"← Back"` link when it passes `safeReturnPath`
-(starts with `/` and not `//`); external or protocol-relative targets are ignored. See [Analyzer](../concepts/analyzer.md)
-and [Analyzer rules](analyzer-rules.md).
+Both paths invoke the same handler, set `page.Tab = TabDocs`, and render the same docs section switcher with
+`Grading & Rules` marked current, so an existing bookmark keeps working while the page joins the Docs section. The page
+renders `web/templates/analyzer_guide.html` behind `RequireUser` and `Scope`. It displays the active grading engine badge
+(`v2`), the four v2 grading pillars and weights (`analyzer.DefaultV2Config`), uncertainty badge rules, `A`–`F` letter
+bands and legacy v1 rubric reference (`analyzer.GradeRubric()`), pick-board badge descriptions, and every active warning
+rule (`analyzer.RuleDocs()`) grouped by category with stable anchors (`#pillars`, `#leg-grades`, `#slip-grade`,
+`#suggestions`, `#rules`, and `#rule-<id>`). Its inline "Grading results" pill links to `/analyzer/results`, while the
+docs switcher links to `/docs/evals`; both forward the back link.
+
+An optional `?from=` query parameter renders a `"← Back"` link when it passes `safeReturnPath`, which accepts only a
+relative path: one leading `/`, no `//`, no backslash or control character, and no `scheme:` before the first path
+slash. Absolute URLs are rejected. See [Analyzer](../concepts/analyzer.md) and [Analyzer rules](analyzer-rules.md).
 
 ### Analyzer results
 
@@ -408,9 +410,10 @@ and [Analyzer rules](analyzer-rules.md).
 | `GET /analyzer/results`  | Global or market-wide Grading Results backed by `eval.Cache` and `EvaluateAll` | Full page; invalid `?season=` or `?source=` is 400. |
 | `GET /docs/evals`        | Same page served inside Docs (`page.Tab = TabDocs`)                    | Full page; same query and status contract. |
 
-Both paths invoke the same handler. `GET /analyzer/results` renders `web/templates/analyzer_results.html` behind
-`RequireUser`. It reads from `eval.Cache`
-keyed by `(mode, 0, season)`. In `slips` mode, it aggregates settled slips across all groups and invalidates whenever
+Both paths invoke the same handler, set `page.Tab = TabDocs`, and render the same docs section switcher with
+`Eval Results` marked current. `GET /analyzer/results` renders `web/templates/analyzer_results.html` behind
+`RequireUser`. It reads from `eval.Cache` keyed by `(mode, 0, season)`. In `slips` mode, it aggregates settled slips
+across all groups and invalidates whenever
 `SetLegResult` or `AutoGradeLegs` commits a settlement change for any group. In `market` mode, it replays deduplicated
 pre-kickoff consensus lines across `FINAL` games and invalidates via `InvalidateMarket` when `syncScoreboard` records a
 newly `FINAL` game or `syncNFLverse` commits changes. Sandbox stage transitions or resets clear the whole cache.
@@ -427,8 +430,9 @@ Query parameters:
   `market` mode, falling back to `Seasons` or `all`. Unreadable or non-positive values return `400 Bad Request`.
 - `?engine=`: selects which registered `GradingEngine` to inspect (`v2` or `v1`, defaulting to `ActiveEngine.Name()`).
   Legacy `?rubric=` is still accepted as a fallback alias when `?engine=` is omitted.
-- `?from=`: optional safe return path validated by `safeReturnPath`, preserved on source/season/engine pills and the
-  `"How grading works"` link back to `/analyzer/guide`. See [Analyzer](../concepts/analyzer.md).
+- `?from=`: optional safe return path validated by `safeReturnPath`, preserved on source/season/engine pills, the
+  `"How grading works"` link back to `/analyzer/guide`, and the docs switcher's link to `/docs/grading`. See
+  [Analyzer](../concepts/analyzer.md).
 
 ### Docs hub, glossary, and reference screens
 
@@ -441,8 +445,10 @@ Query parameters:
 
 All four routes render behind `RequireUser` and `Scope`, set `page.Tab = TabDocs`, and share a docs section switcher
 (`Overview`, `Glossary`, `Grading & Rules`, `Eval Results`) rendered from the `docs-nav` partial. The switcher forwards
-`?from=` to every destination; `Grading & Rules` points at `/docs/grading` and `Eval Results` at `/docs/evals`. An
-optional `?from=` renders a `"← Back"` link when it passes `safeReturnPath`, the same check the analyzer screens use.
+`?from=` to every destination; `Grading & Rules` points at `/docs/grading` and `Eval Results` at `/docs/evals`. The
+`/analyzer/guide` and `/analyzer/results` aliases render the same switcher and Docs tab, with their own section marked
+current, so a bookmark from before the move matches the Docs pages exactly. An optional `?from=` renders a `"← Back"`
+link when it passes `safeReturnPath`, the same check the analyzer screens use.
 
 `GET /docs` builds its content from static Go structs in `internal/web/docs.go` and reads no database. Sections carry
 stable anchors `#sys-grading`, `#sys-odds`, `#sys-badges`, `#sys-live`, `#sys-autograde`, `#sys-sources`, and

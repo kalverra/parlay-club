@@ -181,7 +181,7 @@ compatibility)
       set `page.Tab = TabDocs` on both, and add the shared Docs sub-navigation bar (forwarding sanitized `?from=`) to
       `web/templates/analyzer_guide.html` and `web/templates/analyzer_results.html` with tests in
       `internal/web/analyzer_test.go` and `internal/web/eval_results_test.go`.
-- [ ] Docs: update `docs/reference/routes.md` for `/docs/grading` and `/docs/evals`.
+- [x] Docs: update `docs/reference/routes.md` for `/docs/grading` and `/docs/evals`.
 
 ### Phase 3: Reusable `?` help bubbles and two-step annotation popovers
 
