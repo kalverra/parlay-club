@@ -1,6 +1,6 @@
 ---
 slug: research-explorer-view
-status: designed
+status: implementing
 created: "2026-11-25"
 accepted_by:
     - Adam Hamrick

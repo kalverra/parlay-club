@@ -56,8 +56,14 @@ func (s BoardSignals) empty() bool {
 
 // rowBadges returns all matching badges for row in priority order.
 func rowBadges(game db.Game, row Row, signals BoardSignals) []string {
+	return badgesFor(game.HomeTeam, game.AwayTeam, row, signals)
+}
+
+// badgesFor returns all matching badges for row in priority order, taking the
+// home and away abbreviations so callers without a db.Game can evaluate them.
+func badgesFor(home, away string, row Row, signals BoardSignals) []string {
 	var badges []string
-	if isSmashMatchup(game, row, signals) {
+	if isSmashMatchup(home, away, row, signals) {
 		badges = append(badges, BadgeSmashMatchup)
 	}
 	if fitsSlip(row, signals.SlipLegs) {
@@ -101,7 +107,7 @@ func playerTags(game db.Game, rows []Row, signals BoardSignals) []string {
 
 // isSmashMatchup reports whether a player OVER prop has high share/carries
 // against a bottom-6 opposing defense (rank >= 27).
-func isSmashMatchup(game db.Game, row Row, signals BoardSignals) bool {
+func isSmashMatchup(home, away string, row Row, signals BoardSignals) bool {
 	if !isPlayerMarket(row.Market) || row.Side != "OVER" || row.PlayerID == "" {
 		return false
 	}
@@ -109,7 +115,7 @@ func isSmashMatchup(game db.Game, row Row, signals BoardSignals) bool {
 	if usage == nil || len(usage.Weeks) == 0 {
 		return false
 	}
-	rank := opposingDefenseRank(game, row, signals.TeamEPA)
+	rank := opposingDefenseRank(home, away, row, signals.TeamEPA)
 	if rank < bottomDefenseRankMin {
 		return false
 	}
@@ -330,7 +336,7 @@ func rowSignalScore(game db.Game, row Row, signals BoardSignals) int {
 	if slices.Contains(badges, BadgeHighVolume) {
 		score += 20
 	}
-	if rank := opposingDefenseRank(game, row, signals.TeamEPA); rank > 0 {
+	if rank := opposingDefenseRank(game.HomeTeam, game.AwayTeam, row, signals.TeamEPA); rank > 0 {
 		switch row.Side {
 		case "OVER":
 			score += rank
@@ -341,16 +347,16 @@ func rowSignalScore(game db.Game, row Row, signals BoardSignals) int {
 	return score
 }
 
-func opposingDefenseRank(game db.Game, row Row, teamEPA map[string]*analyzer.TeamDefenseProfile) int {
+func opposingDefenseRank(home, away string, row Row, teamEPA map[string]*analyzer.TeamDefenseProfile) int {
 	if len(teamEPA) == 0 || row.Team == "" {
 		return 0
 	}
 	var opponent string
 	switch row.Team {
-	case game.HomeTeam:
-		opponent = game.AwayTeam
-	case game.AwayTeam:
-		opponent = game.HomeTeam
+	case home:
+		opponent = away
+	case away:
+		opponent = home
 	default:
 		return 0
 	}

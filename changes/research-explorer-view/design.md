@@ -69,6 +69,7 @@ type ExploreQuery struct {
     Window   Window   // kickoff window
     Sort     ExploreSort
     Limit    int      // default 50 for fast phone rendering
+    Signals  BoardSignals // optional; fills in every badge a row matches
 }
 
 type ScoredRow struct {
@@ -92,12 +93,12 @@ type ExploreResult struct {
 
 1. Filters out kicked-off games (already excluded by `board.Build`) and `OTHER` markets.
 2. Scores each candidate with `analyzer.ScoreLeg(RowToAnalyzerLeg(row), games, stats)` and attaches `Reason` and
-   `ImpliedPct` (`parlay.ImpliedProbability`).
+   `ImpliedPct` (`parlay.ImpliedProb`).
 3. Applies targeted (`GameID`, `PlayerID`, `Q`) and open-exploration (`Category`, `Grades`, `Signal`, `Window`) filters
    while tallying facet counts before the corresponding facet's own filter is applied (so chip counts stay accurate when
-   toggling).
-4. Sorts deterministically with tie-breakers (`GameID`, `Market`, `PlayerName`, `Side`) and slices to `Limit` (with
-   `HasMore` for a "Show more" HTMX load).
+   toggling). Signal chips use the full badge set from `ExploreQuery.Signals`, falling back to a row's applied `Badge`.
+4. Sorts deterministically with tie-breakers (`GameID`, `Market`, `PlayerName`, `Side`, then team, line, and price) and
+   slices to `Limit` (with `HasMore` for a "Show more" HTMX load). An unknown or empty sort reads as `grade`.
 
 ```mermaid
 flowchart TD
@@ -228,7 +229,7 @@ Complexity: medium (coordinates `board.Row`, `analyzer.ScoreLeg`, multi-facet co
 multi-key sorting) Risk: low (pure functions with zero I/O or external side effects; thoroughly verifiable with unit
 tests)
 
-- [ ] Implement `ExploreQuery`, `ScoredRow`, `ExploreResult`, and `Explore` in `internal/board/explorer.go`, supporting
+- [x] Implement `ExploreQuery`, `ScoredRow`, `ExploreResult`, and `Explore` in `internal/board/explorer.go`, supporting
       targeted search (`Q`, `GameID`, `PlayerID`), open-exploration filters (`Category`, `Grades`, `Signal`, `Window`),
       facet counts, all `ExploreSort` orders, and `Limit`/`HasMore`, with comprehensive unit tests in
       `internal/board/explorer_test.go`.
