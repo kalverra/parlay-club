@@ -4,13 +4,19 @@ title: Access
 type: concept
 summary: How Google sign-in, open sign-up, and signed session and group cookies decide who is using the app and which group they see.
 tags: [auth, google, oauth, cookies, middleware, csrf, groups]
-sources: [internal/auth/cookies.go, internal/auth/handlers.go, internal/auth/middleware.go, internal/auth/signin.go, internal/auth/provider.go, internal/db/users.go, internal/groups/groups.go, internal/groups/handlers.go, internal/web/home.go, internal/sandbox/seed.go, cmd/server/main.go, cmd/server/sandbox.go, web/templates/login.html, web/templates/dev-login.html, web/templates/sandbox.html, web/templates/home.html, web/templates/avatar.html]
-last_verified: 2026-11-11
 ---
 
 # Access
 
-## Summary
+## Overview
+
+```mermaid
+flowchart LR
+  VISITOR[Signed-out visitor] -->|"GET /login"| GOOGLE[Google OAuth]
+  GOOGLE -->|"verified identity"| SIGNIN[auth.SignIn]
+  SIGNIN -->|"pc_session"| USER[RequireUser]
+  USER -->|"pc_group / Scope"| GROUP[Active group]
+```
 
 People sign in with Google. Google proves the email, and the app accepts any verified account. One signed session cookie
 keeps a browser signed in. A separate signed cookie remembers the active group. There are no passwords, no account
@@ -98,8 +104,15 @@ custom header cannot be sent cross-site without CORS, and `SameSite=Lax` covers 
 
 `RequireUser` sends an HTMX request a 200 with `HX-Redirect: /login` instead of a 302, because HTMX would swap a
 redirect's empty body into the page. `Scope` sits inside `RequireUser`, so new authenticated routes inherit the active
-group. Only health, static files, and the sign-in routes sit outside both. Auth pages send `Cache-Control: no-store`
-because they show sign-in state.
+group.
+
+Several routes sit outside both wrappers: the health and readiness probes, `/static/`, the web app manifest, the service
+worker, screenshot capability URLs, the sign-in routes, and the prefill endpoint. The manifest and the worker have to
+be readable before a person signs in, which is what lets an installed app start at the sign-in page. The prefill route
+sits on an outer mux, outside CSRF as well, and authenticates with a bearer token instead of a cookie. See
+[Notifications](notifications.md) and [Routes](../reference/routes.md#public-routes).
+
+Auth pages send `Cache-Control: no-store` because they show sign-in state.
 
 ## Avatars
 

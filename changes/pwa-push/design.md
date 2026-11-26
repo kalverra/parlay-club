@@ -520,7 +520,7 @@ Risk: medium (install and standalone layout depend on real-phone browser behavio
       listeners and no `fetch` handler) outside auth in `newMux`. Add an icon generator that writes the 180, 192, 512,
       and maskable 512 PNGs into `web/static`. Add the manifest link, `apple-touch-icon`, Apple standalone meta tags,
       and safe-area padding to `layout.html`. Register the worker from `app.js`. Add route and layout tests.
-- [ ] Docs: add `docs/concepts/notifications.md` with an "Installing the app" section. Note the public routes in
+- [x] Docs: add `docs/concepts/notifications.md` with an "Installing the app" section. Note the public routes in
       `docs/concepts/access.md`. Run `good-vibes docs lint` and `good-vibes docs index`.
 
 ### Phase 2: Push opt-in per device
