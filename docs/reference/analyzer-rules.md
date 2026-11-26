@@ -281,7 +281,7 @@ A single-leg slip mirrors that leg's score, letter, pillars, and `CalibratedProb
 
 ### Prop Distributions, Shrinkage, and Calibration (`internal/modelv2`)
 
-The embedded `v2.json` artifact (`FeatureSchemaVersion = 1`) serves seven player prop markets with flat GBDT ensembles
+The embedded `v2.json.gz` artifact (`FeatureSchemaVersion = 1`) serves seven player prop markets with flat GBDT ensembles
 predicting distribution parameters rather than point totals:
 
 | Market | Distribution family | Parameters | Survival & tail risk |
@@ -349,7 +349,7 @@ Multi-leg slips compute joint hit probability deterministically without random j
 
 ### Extensible Context & Injury Overlays (`DefaultContextOverlays`)
 
-`EvaluateOverlays` runs 12 ordered `ContextOverlay` checks on every leg without modifying or retraining `v2.json`:
+`EvaluateOverlays` runs 12 ordered `ContextOverlay` checks on every leg without modifying or retraining `v2.json.gz`:
 
 | Overlay rule | Severity | Pillar delta | Heightened uncertainty | Trigger |
 | ------------ | -------- | ------------ | ---------------------- | ------- |

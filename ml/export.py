@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime, timezone
+import gzip
 import json
 import math
 from pathlib import Path
@@ -17,7 +18,7 @@ from features import FEATURE_SCHEMA_VERSION, MARKET_SPECS
 from train import TrainingResult, run_walk_forward_training
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_ARTIFACT_OUT = REPO_ROOT / "internal" / "modelv2" / "artifacts" / "v2.json"
+DEFAULT_ARTIFACT_OUT = REPO_ROOT / "internal" / "modelv2" / "artifacts" / "v2.json.gz"
 DEFAULT_PARITY_OUT = REPO_ROOT / "internal" / "modelv2" / "testdata" / "parity_vectors.json"
 DEFAULT_REPORT_OUT = Path(__file__).resolve().parent / "reports" / "latest.md"
 
@@ -48,7 +49,7 @@ def build_artifact_bundle_dict(result: TrainingResult, version: str = "v2.1.0") 
 
 
 def validate_artifact_bundle_dict(bundle: dict[str, Any]) -> None:
-    """Validate structural, PSD, calibrator, and schema invariants before writing v2.json."""
+    """Validate structural, PSD, calibrator, and schema invariants before writing v2.json.gz."""
     if not bundle.get("version"):
         raise ValueError("version must not be empty")
     if bundle.get("feature_schema_version") != FEATURE_SCHEMA_VERSION:
@@ -363,7 +364,7 @@ def export_pipeline_outputs(
     report_path: Path = DEFAULT_REPORT_OUT,
     version: str = "v2.1.0",
 ) -> dict[str, Any]:
-    """Validate and write v2.json, parity_vectors.json, and Markdown validation report."""
+    """Validate and write v2.json.gz, parity_vectors.json, and Markdown validation report."""
     bundle = build_artifact_bundle_dict(result, version=version)
     validate_artifact_bundle_dict(bundle)
 
@@ -374,7 +375,13 @@ def export_pipeline_outputs(
     parity_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.parent.mkdir(parents=True, exist_ok=True)
 
-    artifact_path.write_text(json.dumps(bundle, indent=2, allow_nan=False) + "\n", encoding="utf-8")
+    # Minified and gzipped on purpose: the bundle is ~12.5k tree nodes, so
+    # indenting it turns a 3 MB artifact into 100k+ lines that bury a PR, and one
+    # copy is committed on every retrain. The gzip header is pinned to mtime=0 so
+    # re-exporting unchanged weights yields a stable file.
+    # Read it with `gunzip -c internal/modelv2/artifacts/v2.json.gz | jq .`.
+    payload = json.dumps(bundle, separators=(",", ":"), allow_nan=False).encode("utf-8")
+    artifact_path.write_bytes(gzip.compress(payload, compresslevel=9, mtime=0))
     parity_path.write_text(json.dumps(parity, indent=2, allow_nan=False) + "\n", encoding="utf-8")
     report_path.write_text(report, encoding="utf-8")
     return bundle

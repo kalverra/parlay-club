@@ -4,10 +4,13 @@
 package modelv2
 
 import (
+	"bytes"
+	"compress/gzip"
 	"embed"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"slices"
 	"sync"
@@ -19,8 +22,10 @@ const (
 	// this binary. Artifacts built for another schema version are rejected.
 	CurrentFeatureSchemaVersion = 1
 
-	// DefaultArtifactPath is the embedded baseline artifact path.
-	DefaultArtifactPath = "artifacts/v2.json"
+	// DefaultArtifactPath is the embedded baseline artifact path. The bundle is
+	// gzipped because its ~12.5k flat tree nodes are ~3 MB of JSON and ~170 KB
+	// compressed; one artifact version is committed per retrain.
+	DefaultArtifactPath = "artifacts/v2.json.gz"
 )
 
 // Supported distributional model families for player prop markets.
@@ -57,7 +62,7 @@ const (
 	psdEigenvalueTol = -1e-9
 )
 
-//go:embed artifacts/*.json
+//go:embed artifacts/*.json.gz
 var embeddedArtifacts embed.FS
 
 var loadDefaultOnce = sync.OnceValues(func() (*ArtifactBundle, error) {
@@ -117,18 +122,44 @@ func LoadEmbedded() (*ArtifactBundle, error) {
 	return loadDefaultOnce()
 }
 
-// LoadEmbeddedPath reads and validates a named artifact JSON file from the
-// embedded artifacts filesystem.
+// LoadEmbeddedPath reads, decompresses, and validates a named artifact file from
+// the embedded artifacts filesystem. Gzipped payloads are detected by their
+// gzip magic bytes, so a raw .json artifact still loads.
 func LoadEmbeddedPath(name string) (*ArtifactBundle, error) {
 	raw, err := embeddedArtifacts.ReadFile(name)
 	if err != nil {
 		return nil, fmt.Errorf("read embedded artifact %q: %w", name, err)
 	}
-	bundle, err := ParseArtifactBundle(raw)
+	payload, err := decompressArtifact(name, raw)
+	if err != nil {
+		return nil, err
+	}
+	bundle, err := ParseArtifactBundle(payload)
 	if err != nil {
 		return nil, fmt.Errorf("load embedded artifact %q: %w", name, err)
 	}
 	return bundle, nil
+}
+
+// gzipMagic is the two-byte header every gzip stream starts with.
+var gzipMagic = []byte{0x1f, 0x8b}
+
+// decompressArtifact gunzips an embedded artifact when the payload is gzip
+// encoded. It is a no-op for raw JSON, which keeps hand-built fixtures usable.
+func decompressArtifact(name string, raw []byte) ([]byte, error) {
+	if !bytes.HasPrefix(raw, gzipMagic) {
+		return raw, nil
+	}
+	zr, err := gzip.NewReader(bytes.NewReader(raw))
+	if err != nil {
+		return nil, fmt.Errorf("open compressed embedded artifact %q: %w", name, err)
+	}
+	defer func() { _ = zr.Close() }()
+	payload, err := io.ReadAll(zr)
+	if err != nil {
+		return nil, fmt.Errorf("decompress embedded artifact %q: %w", name, err)
+	}
+	return payload, nil
 }
 
 // ParseArtifactBundle unmarshals JSON artifact bytes and validates schema,

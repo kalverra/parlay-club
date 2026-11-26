@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gzip
 import json
 import math
 from pathlib import Path
@@ -37,7 +38,7 @@ def test_walk_forward_pipeline_and_export(
     assert val["sgp_log_loss"] < val["naive_indep_log_loss"]
     assert result.stability_mae <= 0.05
 
-    artifact_out = tmp_path / "v2.json"
+    artifact_out = tmp_path / "v2.json.gz"
     parity_out = tmp_path / "parity_vectors.json"
     report_out = tmp_path / "latest.md"
 
@@ -49,6 +50,10 @@ def test_walk_forward_pipeline_and_export(
         version="v2.0.0-test",
     )
     validate_artifact_bundle_dict(bundle)
+
+    exported = json.loads(gzip.decompress(artifact_out.read_bytes()))
+    assert exported["version"] == "v2.0.0-test"
+    assert exported["feature_schema_version"] == bundle["feature_schema_version"]
 
     parity = json.loads(parity_out.read_text(encoding="utf-8"))
     assert len(parity["leg_vectors"]) >= 100
