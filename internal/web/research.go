@@ -1093,6 +1093,7 @@ func (h *researchHandlers) page(r *http.Request) Page {
 		if user, ok := h.deps.UserFrom(r.Context()); ok {
 			view := NewUser(user)
 			p.User = &view
+			p.Theme = ThemeForRequest(r, user.Name).ID
 		}
 	}
 	if h.deps.GroupsFrom != nil {

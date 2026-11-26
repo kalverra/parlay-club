@@ -405,16 +405,16 @@ same page as an alias. Invalid `?season=` or `?source=` answers `400 Bad Request
 `web/templates/analyzer_results.html` and reads from `eval.Cache` keyed by `(mode, 0, season)`. In `slips` mode, it
 aggregates settled slips across all groups and invalidates whenever `SetLegResult` or `AutoGradeLegs` commits a
 settlement change for any group. In `market` mode, it replays deduplicated pre-kickoff consensus lines across `FINAL`
-games and invalidates via `InvalidateMarket` when `syncScoreboard` records a newly `FINAL` game or `syncNFLverse` commits
-changes. Sandbox stage transitions or resets clear the whole cache.
+games and invalidates via `InvalidateMarket` when `syncScoreboard` records a newly `FINAL` game or `syncNFLverse`
+commits changes. Sandbox stage transitions or resets clear the whole cache.
 
 Query parameters:
 
-- `?source=`: `slips` (default, `User slips` across all groups) or `market` (`Market-wide` pre-kickoff consensus lines on
-  `FINAL` games). Invalid values return `400 Bad Request`. Preserved on all season and engine filter URLs. In `market`
-  mode, `Slip Calibration (A-F)`, `SGP Correlation Lift`, and `Slip Factor Attribution` are hidden (replaced with a note
-  linking back to `User slips`), and `Pre-Kickoff Data Coverage` adds `Sharp benchmarks` and `nflverse L5 fallback`
-  tiles.
+- `?source=`: `slips` (default, `User slips` across all groups) or `market` (`Market-wide` pre-kickoff consensus lines
+  on `FINAL` games). Invalid values return `400 Bad Request`. Preserved on all season and engine filter URLs. In
+  `market` mode, `Slip Calibration (A-F)`, `SGP Correlation Lift`, and `Slip Factor Attribution` are hidden (replaced
+  with a note linking back to `User slips`), and `Pre-Kickoff Data Coverage` adds `Sharp benchmarks` and
+  `nflverse L5 fallback` tiles.
 - `?season=`: `all` (or `0`) for all seasons, or a positive season year. Defaults to the latest season with graded slips
   across all groups (`GradedSeasons`) in `slips` mode, or the latest season with `FINAL` games (`FinalSeasons`) in
   `market` mode, falling back to `Seasons` or `all`. Unreadable or non-positive values return `400 Bad Request`.
@@ -441,9 +441,9 @@ same check the analyzer screens use.
 stable anchors `#sys-grading`, `#sys-odds`, `#sys-badges`, `#sys-live`, `#sys-autograde`, `#sys-sources`, and
 `#sys-export`; other screens deep-link to them, so the IDs stay fixed.
 
-`GET /docs/glossary` filters a static `[]GlossaryEntry` slice in memory by name, category, summary, or example. Each entry
-renders at `#term-<slug>`, such as `#term-implied-prob` or `#term-epa`. Filtering runs no database query and fetches
-nothing. See [Docs hub](../concepts/docs-hub.md).
+`GET /docs/glossary` filters a static `[]GlossaryEntry` slice in memory by name, category, summary, or example. Each
+entry renders at `#term-<slug>`, such as `#term-implied-prob` or `#term-epa`. Filtering runs no database query and
+fetches nothing. See [Docs hub](../concepts/docs-hub.md).
 
 ### Profile
 
@@ -470,8 +470,9 @@ confirmation even when GitHub is unconfigured or unreachable.
 
 ### `pc_theme` cookie
 
-Every full-page handler reads the `pc_theme` cookie via `web.ThemeFromRequest(r)` and sets `Page.Theme` before rendering
-`web/templates/layout.html`. The cookie is an unsigned UI preference validated against a strict three-value allowlist in
+Every full-page handler reads the `pc_theme` cookie and sets `Page.Theme` before rendering `web/templates/layout.html`.
+Handlers that know the signed-in user call `web.ThemeForRequest(r, user.Name)`; sign-in pages call
+`web.ThemeFromRequest(r)`. The cookie is an unsigned UI preference validated against an allowlist in
 `internal/web/theme.go`:
 
 | `pc_theme` value | Label | `color-scheme` | `theme-color` | Notes |
@@ -479,14 +480,25 @@ Every full-page handler reads the `pc_theme` cookie via `web.ThemeFromRequest(r)
 | `paper-turf` | Paper & Turf | `dark` | `#0f1e16` | Default. Deep stadium felt chrome with cream ticket cards. |
 | `redzone` | RedZone | `dark` | `#090a0c` | Obsidian broadcast dark with turf green and gold accents. |
 | `almanac` | 90s Almanac | `light` | `#fff8e7` | Warm cream sports almanac with crisp white cards and ink borders. |
+| `connor-mode` | Connor Mode | `light` | `#e40303` | Temporary joke theme. Full-saturation pride flags, parade-poster type, and unicorns. |
 
 Missing or unrecognized cookie values fall back to `paper-turf`. `layout.html` renders
 `data-theme="{{.ActiveTheme.ID}}"` on `<html>` along with `<meta name="color-scheme">` and `<meta name="theme-color">`,
 so SSR pages paint with the chosen theme immediately and without flicker.
 
-Clicking `[data-theme-cycle]` in the header cycles `paper-turf` -> `redzone` -> `almanac` in `web/static/app.js`,
-updates `document.documentElement.dataset.theme` and the meta tags in place, and writes
-`pc_theme=<id>; Path=/; Max-Age=31536000; SameSite=Lax` (adding `; Secure` over HTTPS) with no server round-trip.
+<!-- BEGIN Connor Mode -->
+Temporary themes register themselves from their own file. Connor Mode is a temporary joke theme. A page for a person
+whose first name is `Connor` falls back to `connor-mode` instead. That personal default lives in `connorPersonalTheme`
+(`internal/web/connor_mode.go`) and re-applies on every request, so it is not a one-time choice. A `pc_theme` cookie
+that predates Connor Mode is ignored for Connor unless the browser also carries the `pc_theme_chosen=1` marker, which
+the theme switcher writes. That keeps an old saved theme from hiding his default while still letting him switch away on
+purpose. Everyone else keeps their existing `pc_theme` preference. Run `scripts/remove-connor-mode.sh` to delete the
+theme, its tests, and its marked code blocks.
+<!-- END Connor Mode -->
+
+Clicking `[data-theme-cycle]` in the header cycles through the theme catalog in `web/static/app.js`, updates
+`document.documentElement.dataset.theme` and the meta tags in place, and writes `pc_theme=<id>` with
+`Path=/; Max-Age=31536000; SameSite=Lax` (adding `; Secure` over HTTPS) with no server round-trip.
 
 ### Semantic theme tokens
 

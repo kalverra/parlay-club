@@ -169,6 +169,60 @@
   --font-code: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
 }
 
+/* BEGIN Connor Mode */
+/* Connor Mode: full-saturation pride flags, parade-poster type, and unicorns. */
+[data-theme="connor-mode"] {
+  color-scheme: light;
+
+  --page: #f5f5f7;
+  --page-ink: #111111;
+  --page-muted: #111111;
+
+  --chrome-bg: #111111;
+  --chrome-ink: #ffffff;
+  --chrome-muted: #d4d4d8;
+  --chrome-border: #e40303;
+
+  --surface: #ffffff;
+  --surface-2: #f2f2f5;
+  --ink: #111111;
+  --ink-muted: #52525b;
+  --ink-subtle: #71717a;
+  --line: #d4d4d8;
+  --line-strong: #111111;
+
+  --accent: #e40303;
+  --accent-ink: #ffffff;
+  --accent-soft: #ffe0e0;
+
+  --positive: #008026;
+  --positive-soft: #d9f5e1;
+  --positive-ink: #004d16;
+
+  --warning: #b45309;
+  --warning-soft: #fff0b3;
+  --warning-ink: #6b3b00;
+
+  --danger: #c40000;
+  --danger-soft: #ffd9d9;
+  --danger-ink: #7a0000;
+
+  --font-body: "Space Grotesk", system-ui, -apple-system, sans-serif;
+  --font-head: "Anton", "Space Grotesk", system-ui, sans-serif;
+  --font-code: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
+
+  --pride-flag: linear-gradient(
+    90deg,
+    #e40303 0 16.66%,
+    #ff8c00 16.66% 33.33%,
+    #ffed00 33.33% 50%,
+    #008026 50% 66.66%,
+    #004dff 66.66% 83.33%,
+    #750787 83.33% 100%
+  );
+}
+/* END Connor Mode */
+
 @layer components {
   .ui-card,
   .ui-slip-card {
@@ -242,6 +296,53 @@
     border: 2px solid #111111;
     box-shadow: 4px 4px 0 #111111;
   }
+
+  /* BEGIN Connor Mode */
+  [data-theme="connor-mode"] .ui-card,
+  [data-theme="connor-mode"] .ui-slip-card {
+    color: var(--ink);
+    border: 3px solid transparent;
+    border-radius: 0.5rem;
+    background:
+      linear-gradient(rgb(255 255 255 / 0.84), rgb(255 255 255 / 0.84)) padding-box,
+      var(--pride-flag) border-box;
+    box-shadow: 6px 6px 0 #111111;
+  }
+
+  [data-theme="connor-mode"] .ui-slip-card {
+    border-radius: 0.625rem;
+  }
+
+  [data-theme="connor-mode"] .ui-slip-divider {
+    border-top: 2px dashed #111111;
+  }
+
+  [data-theme="connor-mode"] .ui-next-card {
+    color: #111111;
+    border: 3px solid #111111;
+    border-radius: 0.5rem;
+    background-color: #ffffff;
+    background-image: var(--pride-flag);
+    background-repeat: no-repeat;
+    background-position: top;
+    background-size: 100% 10px;
+    box-shadow: 6px 6px 0 #111111;
+  }
+
+  [data-theme="connor-mode"] .ui-stamp {
+    border-width: 2px;
+    border-radius: 0.25rem;
+    transform: rotate(-3deg);
+    text-transform: uppercase;
+  }
+
+  [data-theme="connor-mode"] .ui-odds {
+    border: 2px solid #111111;
+    border-radius: 0.25rem;
+    background-color: #ffed00;
+    color: #111111;
+  }
+  /* END Connor Mode */
 
   .ui-odds {
     display: inline-flex;
@@ -406,6 +507,191 @@
     color: var(--ink-muted);
   }
 }
+
+/* BEGIN Connor Mode */
+/* Connor Mode chrome: a solid rainbow wash, flashing color bars, and unicorns. */
+[data-theme="connor-mode"] body {
+  background-color: #e40303;
+  background-image: linear-gradient(
+    135deg,
+    #e40303 0%,
+    #ff8c00 20%,
+    #ffed00 40%,
+    #008026 60%,
+    #004dff 80%,
+    #750787 100%
+  );
+  background-attachment: fixed;
+  text-shadow: 0 0 2px #ffffff, 0 0 6px #ffffff, 0 0 10px rgb(255 255 255 / 0.8);
+}
+
+[data-theme="connor-mode"] .ui-card,
+[data-theme="connor-mode"] .ui-slip-card,
+[data-theme="connor-mode"] .ui-next-card {
+  text-shadow: none;
+}
+
+[data-theme="connor-mode"] body::before,
+[data-theme="connor-mode"] body::after {
+  position: fixed;
+  z-index: 40;
+  pointer-events: none;
+  font-size: clamp(2.25rem, 11vw, 5rem);
+  line-height: 1;
+  opacity: 0.9;
+  animation: connor-bob 3s ease-in-out infinite;
+}
+
+[data-theme="connor-mode"] body::before {
+  content: "🦄";
+  bottom: 6.25rem;
+  left: -0.75rem;
+  transform: rotate(-12deg);
+}
+
+[data-theme="connor-mode"] body::after {
+  content: "🏳️‍🌈🏳️‍⚧️";
+  right: -0.75rem;
+  bottom: 6.25rem;
+  transform: rotate(10deg);
+  animation-delay: 0.75s;
+}
+
+[data-theme="connor-mode"] h1,
+[data-theme="connor-mode"] h2 {
+  font-family: var(--font-head);
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  text-shadow: 3px 3px 0 #ffffff;
+  text-transform: uppercase;
+}
+
+[data-theme="connor-mode"] header {
+  background-image: var(--pride-flag);
+  border-bottom-width: 3px;
+  border-bottom-color: #111111;
+  text-shadow: 0 1px 3px rgb(0 0 0 / 0.85);
+  animation: connor-flash 3.5s linear infinite;
+}
+
+[data-theme="connor-mode"] nav[aria-label="Main"] {
+  background-color: #111111;
+  background-image: var(--pride-flag);
+  border-top-width: 3px;
+  border-top-color: #111111;
+  animation: connor-flash 3.5s linear infinite;
+}
+
+[data-theme="connor-mode"] nav[aria-label="Main"] a {
+  margin: 4px;
+  border-radius: 4px;
+  background-color: #111111;
+  color: #ffffff;
+  text-shadow: none;
+}
+
+[data-theme="connor-mode"] nav[aria-label="Main"] a[aria-current="page"] {
+  background-color: #111111;
+  color: #ffed00;
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 4px;
+}
+
+.connor-marquee {
+  position: sticky;
+  top: 3.5rem;
+  z-index: 25;
+  overflow: hidden;
+  background-color: #111111;
+  border-top: 1px solid #111111;
+  border-bottom: 3px solid #111111;
+  font-family: var(--font-head);
+  font-size: 0.8125rem;
+  line-height: 1.9;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.connor-marquee span {
+  display: inline-block;
+  padding-block: 0.25rem;
+  background-image: var(--pride-flag);
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  animation: connor-marquee 26s linear infinite;
+}
+
+[data-theme="connor-mode"] ::selection {
+  background-color: #ffed00;
+  color: #111111;
+}
+
+[data-theme="connor-mode"] .bg-accent {
+  background-color: #111111;
+  background-image: var(--pride-flag);
+  color: #111111;
+  text-shadow: 0 1px 0 rgb(255 255 255 / 0.85);
+  box-shadow: inset 0 0 0 2px #111111;
+}
+
+[data-theme="connor-mode"] .bg-surface-2 {
+  background-image: linear-gradient(
+    90deg,
+    rgb(228 3 3 / 0.14),
+    rgb(255 140 0 / 0.14),
+    rgb(255 237 0 / 0.14),
+    rgb(0 128 38 / 0.14),
+    rgb(0 77 255 / 0.14),
+    rgb(117 7 135 / 0.14)
+  );
+}
+/* END Connor Mode */
+
+/* BEGIN Connor Mode */
+@keyframes connor-marquee {
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+@keyframes connor-flash {
+  0% {
+    filter: hue-rotate(0deg) saturate(1.1);
+  }
+
+  50% {
+    filter: hue-rotate(180deg) saturate(1.5);
+  }
+
+  100% {
+    filter: hue-rotate(360deg) saturate(1.1);
+  }
+}
+
+@keyframes connor-bob {
+  0%,
+  100% {
+    translate: 0 0;
+  }
+
+  50% {
+    translate: 0 -10px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-theme="connor-mode"] header,
+  [data-theme="connor-mode"] nav[aria-label="Main"],
+  [data-theme="connor-mode"] body::before,
+  [data-theme="connor-mode"] body::after,
+  .connor-marquee span {
+    animation: none;
+  }
+}
+/* END Connor Mode */
 
 /* The detail tab bar scrolls sideways on a phone without a visible bar. */
 .no-scrollbar {
