@@ -35,6 +35,7 @@ import (
 	"github.com/kalverra/parlay-club/internal/ingest/odds"
 	"github.com/kalverra/parlay-club/internal/ingest/weather"
 	"github.com/kalverra/parlay-club/internal/live"
+	"github.com/kalverra/parlay-club/internal/push"
 	"github.com/kalverra/parlay-club/internal/refresh"
 	"github.com/kalverra/parlay-club/internal/seed"
 	"github.com/kalverra/parlay-club/internal/slips"
@@ -157,6 +158,10 @@ func run() error {
 	groupHandlers := groups.NewHandlers(logger, store, auth.UserFrom, cookies, renderer, cfg.BaseURL)
 
 	stream := live.NewStream(hub, refresher.LiveWindow)
+	pushService := push.New(store, logger, push.Keys{
+		Public:  cfg.VAPIDPublicKey,
+		Private: cfg.VAPIDPrivateKey,
+	}, push.Options{Subject: cfg.BaseURL})
 	bugService := bugs.NewService(bugs.Deps{
 		Store:       store,
 		Repo:        cfg.GitHubRepo,
@@ -177,6 +182,7 @@ func run() error {
 		Stream:     stream,
 		Refresh:    refresher,
 		EvalCache:  evalCache,
+		Push:       pushService,
 		Now:        appNow,
 	})
 

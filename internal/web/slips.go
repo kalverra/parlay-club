@@ -439,6 +439,15 @@ type ProfilePage struct {
 	Page
 	HomeBook string
 	Members  []ProfileMember
+	Push     PushCard
+}
+
+// PushCard is the notifications card on the profile screen. The browser fills
+// in the per-device state; the server only says whether push exists and which
+// key to subscribe with.
+type PushCard struct {
+	Enabled   bool
+	PublicKey string
 }
 
 // ProfileMember is one person in the profile's member list.
@@ -1311,10 +1320,16 @@ func (h *slipHandlers) profile(w http.ResponseWriter, r *http.Request) {
 	if user.HomeBook != nil {
 		homeBook = *user.HomeBook
 	}
+	card := PushCard{}
+	if h.deps.Push.Enabled() {
+		card.Enabled = true
+		card.PublicKey = h.deps.Push.PublicKey()
+	}
 	h.renderPage(w, "profile", ProfilePage{
 		Page:     page,
 		HomeBook: homeBook,
 		Members:  memberViews,
+		Push:     card,
 	})
 }
 

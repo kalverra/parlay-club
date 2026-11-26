@@ -96,6 +96,312 @@ if ("serviceWorker" in navigator) {
   });
 }
 
+// Push notifications. The profile card reads the browser's own state, because a
+// subscription belongs to one device, not to the account. The server only
+// stores endpoints and sends to them.
+const pushSupported =
+  window.isSecureContext &&
+  "serviceWorker" in navigator &&
+  "Notification" in window &&
+  "PushManager" in window;
+const pushIsIOS =
+  /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+  (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+
+function pushIsStandalone() {
+  return (
+    window.navigator.standalone === true ||
+    window.matchMedia("(display-mode: standalone)").matches
+  );
+}
+
+// pushKeyBytes turns the base64url VAPID key into the byte array subscribe
+// wants.
+function pushKeyBytes(value) {
+  const padding = "=".repeat((4 - (value.length % 4)) % 4);
+  const base64 = (value + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const raw = atob(base64);
+  return Uint8Array.from(raw, (character) => character.charCodeAt(0));
+}
+
+// pushFetch calls a push route with the header CSRF needs. An expired session
+// comes back as HX-Redirect, so the card sends the browser to sign-in instead
+// of showing a state the server never accepted.
+async function pushFetch(method, path, payload) {
+  const response = await fetch(path, {
+    method,
+    credentials: "same-origin",
+    headers: { "HX-Request": "true", "Content-Type": "application/json" },
+    body: payload === undefined ? undefined : JSON.stringify(payload),
+  });
+
+  const redirect = response.headers.get("HX-Redirect");
+  if (redirect) {
+    window.location.assign(redirect);
+    throw new Error("redirected to sign-in");
+  }
+  if (!response.ok) {
+    const message = (await response.text()).trim();
+    throw new Error(message || "That didn't work.");
+  }
+  return response;
+}
+
+function pushRedirected(error) {
+  return String(error && error.message) === "redirected to sign-in";
+}
+
+// pushRegistration waits for the worker this page registered on load, with a
+// timeout so a browser that refuses workers does not leave the card checking
+// forever.
+function pushRegistration() {
+  return Promise.race([
+    navigator.serviceWorker.ready,
+    new Promise((_, reject) => {
+      setTimeout(() => reject(new Error("The service worker did not start.")), 5000);
+    }),
+  ]);
+}
+
+function bindPushCard(card) {
+  const publicKey = card.dataset.publicKey || "";
+  const stateText = card.querySelector("[data-push-state]");
+  const installHint = card.querySelector("[data-push-install-hint]");
+  const deniedHint = card.querySelector("[data-push-denied-hint]");
+  const onButton = card.querySelector("[data-push-on]");
+  const offButton = card.querySelector("[data-push-off]");
+  const testButton = card.querySelector("[data-push-test]");
+
+  const show = (element, visible) => {
+    if (element) {
+      element.hidden = !visible;
+    }
+  };
+  const setState = (text) => {
+    if (stateText) {
+      stateText.textContent = text;
+    }
+  };
+  const setBusy = (busy) => {
+    for (const button of [onButton, offButton, testButton]) {
+      if (button) {
+        button.disabled = busy;
+      }
+    }
+  };
+
+  card.hidden = false;
+
+  if (!pushSupported) {
+    const needsInstall = pushIsIOS && !pushIsStandalone();
+    setState(
+      needsInstall
+        ? "Install the app to turn on notifications."
+        : "This browser doesn't support notifications.",
+    );
+    show(installHint, needsInstall);
+    show(deniedHint, false);
+    show(onButton, false);
+    show(offButton, false);
+    show(testButton, false);
+    return;
+  }
+
+  async function refresh() {
+    try {
+      const registration = await pushRegistration();
+      const subscription = await registration.pushManager.getSubscription();
+      const denied = Notification.permission === "denied";
+      const on = subscription !== null;
+
+      // Denied hides the switch that would ask again, but a subscription made
+      // before the block can still be turned off.
+      show(deniedHint, denied);
+      show(installHint, false);
+      show(onButton, !on && !denied);
+      show(offButton, on);
+      show(testButton, on);
+
+      if (denied) {
+        setState("Blocked for this device.");
+      } else if (on) {
+        setState("On for this device.");
+      } else {
+        setState("Off for this device.");
+      }
+    } catch {
+      setState("Couldn't check this device. Reload and try again.");
+      show(onButton, false);
+      show(offButton, false);
+      show(testButton, false);
+    }
+  }
+
+  if (onButton) {
+    onButton.addEventListener("click", async () => {
+      setBusy(true);
+      try {
+        // The permission prompt only works inside the tap, so it comes before
+        // any other await.
+        const permission = await Notification.requestPermission();
+        if (permission !== "granted") {
+          await refresh();
+          return;
+        }
+
+        const registration = await pushRegistration();
+        let subscription = await registration.pushManager.getSubscription();
+        let created = false;
+        if (!subscription) {
+          subscription = await registration.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: pushKeyBytes(publicKey),
+          });
+          created = true;
+        }
+
+        try {
+          await pushFetch("POST", "/push/subscription", subscription.toJSON());
+        } catch (error) {
+          // The server never stored this device, so drop the browser's copy
+          // rather than let the card show On with nothing behind it.
+          if (created) {
+            await subscription.unsubscribe().catch(() => {});
+          }
+          throw error;
+        }
+
+        await refresh();
+        showToast("Notifications are on for this device.");
+      } catch (error) {
+        if (!pushRedirected(error)) {
+          showToast(error.message);
+        }
+        await refresh();
+      } finally {
+        setBusy(false);
+      }
+    });
+  }
+
+  if (offButton) {
+    offButton.addEventListener("click", async () => {
+      setBusy(true);
+      try {
+        const registration = await pushRegistration();
+        const subscription = await registration.pushManager.getSubscription();
+        if (subscription) {
+          const endpoint = subscription.endpoint;
+          await subscription.unsubscribe();
+          await pushFetch("DELETE", "/push/subscription", { endpoint });
+        }
+        await refresh();
+        showToast("Notifications are off for this device.");
+      } catch (error) {
+        if (!pushRedirected(error)) {
+          showToast(error.message);
+        }
+        await refresh();
+      } finally {
+        setBusy(false);
+      }
+    });
+  }
+
+  if (testButton) {
+    testButton.addEventListener("click", async () => {
+      setBusy(true);
+      try {
+        await pushFetch("POST", "/push/test");
+        showToast("Sent. Check this device.");
+      } catch (error) {
+        if (!pushRedirected(error)) {
+          showToast(error.message);
+        }
+      } finally {
+        setBusy(false);
+      }
+    });
+  }
+
+  refresh();
+}
+
+// Signing out on a shared phone must stop the next person's slips from landing
+// on it. The browser drops its subscription first, then the plain form posts.
+function bindLogoutForm(form) {
+  form.addEventListener("submit", async (event) => {
+    if (form.dataset.signingOut === "true") {
+      return;
+    }
+    event.preventDefault();
+    form.dataset.signingOut = "true";
+
+    try {
+      if (pushSupported) {
+        const registration = await navigator.serviceWorker.getRegistration();
+        const subscription = registration ? await registration.pushManager.getSubscription() : null;
+        if (subscription) {
+          const endpoint = subscription.endpoint;
+          await subscription.unsubscribe();
+          await pushFetch("DELETE", "/push/subscription", { endpoint });
+        }
+      }
+    } catch {
+      // Sign-out never waits on the push service or the network.
+    }
+
+    form.submit();
+  });
+}
+
+function initPush(root) {
+  if (!root) {
+    return;
+  }
+
+  const cards = [];
+  if (root.matches && root.matches("[data-push-card]")) {
+    cards.push(root);
+  }
+  if (root.querySelectorAll) {
+    cards.push(...root.querySelectorAll("[data-push-card]"));
+  }
+  for (const card of cards) {
+    if (card.dataset.pushReady === "true") {
+      continue;
+    }
+    card.dataset.pushReady = "true";
+    bindPushCard(card);
+  }
+
+  const forms = [];
+  if (root.matches && root.matches("[data-logout-form]")) {
+    forms.push(root);
+  }
+  if (root.querySelectorAll) {
+    forms.push(...root.querySelectorAll("[data-logout-form]"));
+  }
+  for (const form of forms) {
+    if (form.dataset.pushReady === "true") {
+      continue;
+    }
+    form.dataset.pushReady = "true";
+    bindLogoutForm(form);
+  }
+}
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", () => initPush(document));
+} else {
+  initPush(document);
+}
+
+document.addEventListener("htmx:afterSwap", (event) => {
+  initPush((event.detail && event.detail.target) || document);
+});
+
+
 // Image load errors do not bubble, so listen in capture phase to hide any
 // failed team logo or player portrait and reveal its sibling fallback badge.
 document.addEventListener(

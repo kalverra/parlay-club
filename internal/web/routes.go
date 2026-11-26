@@ -12,6 +12,7 @@ import (
 	"github.com/kalverra/parlay-club/internal/db"
 	"github.com/kalverra/parlay-club/internal/eval"
 	"github.com/kalverra/parlay-club/internal/live"
+	"github.com/kalverra/parlay-club/internal/push"
 	"github.com/kalverra/parlay-club/internal/slips"
 )
 
@@ -58,6 +59,9 @@ type Dependencies struct {
 	Refresh       Refresher
 	EvalCache     *eval.Cache
 	GradingEngine analyzer.GradingEngine
+	// Push stores browser subscriptions and sends notifications. A nil or
+	// disabled service leaves the profile card hidden and the push routes 404.
+	Push *push.Service
 	// Now supplies the app's clock. A nil Now uses time.Now; the sandbox passes
 	// its scenario clock so pickers, exports, and freshness agree with refresh.
 	Now func() time.Time
@@ -105,6 +109,8 @@ func NewWithDeps(deps Dependencies) http.Handler {
 	researchRoutes.Routes(mux)
 	bugRoutes := &bugHandlers{deps: deps}
 	bugRoutes.Routes(mux)
+	pushRoutes := &pushHandlers{deps: deps}
+	pushRoutes.Routes(mux)
 
 	return mux
 }

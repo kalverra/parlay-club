@@ -46,6 +46,58 @@
     </button>
   </form>
 
+  {{if .Push.Enabled}}
+  <section
+    class="ui-card space-y-3 p-4"
+    data-push-card
+    data-public-key="{{.Push.PublicKey}}"
+    hidden
+  >
+    <div>
+      <h2 class="text-sm font-semibold text-ink">Notifications</h2>
+      <p data-push-state class="mt-1 text-xs text-ink-subtle">Checking this device…</p>
+    </div>
+    <p
+      data-push-install-hint
+      class="hidden rounded-lg border border-line bg-surface-2 px-3 py-2 text-xs text-ink-muted"
+    >
+      On iPhone, notifications only work in the installed app. Tap Share, choose Add to Home Screen, then open it
+      from there.
+    </p>
+    <p
+      data-push-denied-hint
+      class="hidden rounded-lg border border-line bg-surface-2 px-3 py-2 text-xs text-ink-muted"
+    >
+      Notifications are blocked for this site. Allow them in your browser's site settings, then reload.
+    </p>
+    <div class="flex flex-wrap gap-2">
+      <button
+        type="button"
+        data-push-on
+        class="rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-accent-ink hover:opacity-90 disabled:opacity-60"
+      >
+        Turn on
+      </button>
+      <button
+        type="button"
+        data-push-off
+        hidden
+        class="rounded-lg border border-line-strong px-3 py-2 text-sm text-ink hover:bg-surface-2 disabled:opacity-60"
+      >
+        Turn off
+      </button>
+      <button
+        type="button"
+        data-push-test
+        hidden
+        class="rounded-lg border border-line-strong px-3 py-2 text-sm text-ink hover:bg-surface-2 disabled:opacity-60"
+      >
+        Send test
+      </button>
+    </div>
+  </section>
+  {{end}}
+
   <section class="ui-card p-4">
     <div class="flex items-center justify-between gap-2">
       <h2 class="text-sm font-semibold text-ink">Members</h2>
@@ -92,5 +144,14 @@
       {{end}}
     </ul>
   </section>
+
+  <form method="post" action="/logout" data-logout-form>
+    <button
+      type="submit"
+      class="w-full rounded-lg border border-line-strong px-3 py-2 text-sm text-ink hover:bg-surface-2"
+    >
+      Sign out
+    </button>
+  </form>
 </section>
 {{end}}

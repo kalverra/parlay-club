@@ -138,8 +138,8 @@ sequenceDiagram
 - **Turn off** calls `subscription.unsubscribe()` and then `DELETE /push/subscription` with the endpoint.
 - `POST /push/test` sends "Notifications are on" to the caller's own devices, so people can check it works.
 - The upsert reassigns an existing endpoint to the current user. On a shared phone, the last person to subscribe owns
-  it. The logout form's submit handler also unsubscribes and deletes, so a signed-out device stops getting the previous
-  person's slips.
+  it. The `/me` sign-out form's submit handler also unsubscribes and deletes, so a signed-out device stops getting the
+  previous person's slips.
 - `CSRF` requires `HX-Request: true` on non-GET requests, so `app.js` sets that header on its `fetch` calls. With the
   header set, an expired session gets `RequireUser`'s 200 plus `HX-Redirect: /login`. The client checks for that header
   and goes to sign-in, so the card never shows "On" by mistake.
@@ -534,7 +534,7 @@ Risk: medium (new persistent table and an external push integration; real-device
       migration `0020_push.sql` (`push_subscriptions`, `push_log`), and `internal/push` with subscription storage and
       `SendToUsers` over `webpush-go`, using the 3 second cap, TTL, Urgency, Topic, and 404/410 pruning. Cover it with
       an `httptest` push endpoint.
-- [ ] Add `POST /push/subscription`, `DELETE /push/subscription`, and `POST /push/test`. Add the notifications card on
+- [x] Add `POST /push/subscription`, `DELETE /push/subscription`, and `POST /push/test`. Add the notifications card on
       `/me`: browser-driven state, the iPhone install hint, the denied hint, on/off/test, and unsubscribe on logout. Add
       the `push` and `notificationclick` handlers to `sw.js`. Add route tests for auth, CSRF, reassign, the push-host
       allowlist, the 10-subscription cap, the expired-session redirect, and the VAPID-off 404.
