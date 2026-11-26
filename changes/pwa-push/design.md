@@ -530,7 +530,7 @@ across server and browser)
 
 Risk: medium (new persistent table and an external push integration; real-device permission flows are manual-only)
 
-- [ ] Add `VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY` to config, with push off unless both are set. Add `cmd/vapidkeys`,
+- [x] Add `VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY` to config, with push off unless both are set. Add `cmd/vapidkeys`,
       migration `0020_push.sql` (`push_subscriptions`, `push_log`), and `internal/push` with subscription storage and
       `SendToUsers` over `webpush-go`, using the 3 second cap, TTL, Urgency, Topic, and 404/410 pruning. Cover it with
       an `httptest` push endpoint.

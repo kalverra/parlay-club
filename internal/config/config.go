@@ -48,12 +48,21 @@ type Config struct {
 	GitHubToken        string
 	GitHubRepo         string
 	PrefillToken       string
+	VAPIDPublicKey     string
+	VAPIDPrivateKey    string
 	LogLevel           zerolog.Level
 	Sandbox            bool
 }
 
 // IsProd reports whether production rules apply.
 func (c Config) IsProd() bool { return c.AppEnv == EnvProd }
+
+// PushEnabled reports whether Web Push is available. A key pair half is not
+// enough: the app serves no push routes and sends nothing unless both keys are
+// set.
+func (c Config) PushEnabled() bool {
+	return c.VAPIDPublicKey != "" && c.VAPIDPrivateKey != ""
+}
 
 // Load builds a Config from env. It reports every problem it finds, joined, so a
 // misconfigured deploy shows all of them at once. The caller exits on error.
@@ -86,6 +95,8 @@ func Load(env Env) (Config, error) {
 		GitHubToken:        strings.TrimSpace(env("GITHUB_TOKEN")),
 		GitHubRepo:         gitHubRepoOr(env),
 		PrefillToken:       strings.TrimSpace(env("PREFILL_TOKEN")),
+		VAPIDPublicKey:     strings.TrimSpace(env("VAPID_PUBLIC_KEY")),
+		VAPIDPrivateKey:    strings.TrimSpace(env("VAPID_PRIVATE_KEY")),
 		LogLevel:           levelOr(env, prod, &problems),
 		Sandbox:            sandbox,
 	}

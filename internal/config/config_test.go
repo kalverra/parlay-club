@@ -36,6 +36,9 @@ func TestLoadDevDefaults(t *testing.T) {
 	assert.Empty(t, cfg.GitHubToken)
 	assert.Equal(t, "kalverra/parlay-club", cfg.GitHubRepo)
 	assert.Empty(t, cfg.PrefillToken)
+	assert.Empty(t, cfg.VAPIDPublicKey)
+	assert.Empty(t, cfg.VAPIDPrivateKey)
+	assert.False(t, cfg.PushEnabled())
 	assert.Equal(t, zerolog.DebugLevel, cfg.LogLevel)
 }
 
@@ -64,6 +67,8 @@ func TestLoadOverridesEveryValue(t *testing.T) {
 		"GITHUB_TOKEN":         "  ghp_secret  ",
 		"GITHUB_REPO":          "  other/repo  ",
 		"PREFILL_TOKEN":        "  prefill-secret  ",
+		"VAPID_PUBLIC_KEY":     "  public-key  ",
+		"VAPID_PRIVATE_KEY":    "  private-key  ",
 		"LOG_LEVEL":            "warn",
 	}))
 	require.NoError(t, err)
@@ -80,6 +85,9 @@ func TestLoadOverridesEveryValue(t *testing.T) {
 	assert.Equal(t, "ghp_secret", cfg.GitHubToken)
 	assert.Equal(t, "other/repo", cfg.GitHubRepo)
 	assert.Equal(t, "prefill-secret", cfg.PrefillToken)
+	assert.Equal(t, "public-key", cfg.VAPIDPublicKey)
+	assert.Equal(t, "private-key", cfg.VAPIDPrivateKey)
+	assert.True(t, cfg.PushEnabled())
 	assert.Equal(t, zerolog.WarnLevel, cfg.LogLevel)
 }
 
@@ -108,6 +116,9 @@ func TestLoadProdDefaults(t *testing.T) {
 	assert.Empty(t, cfg.GitHubToken)
 	assert.Equal(t, "kalverra/parlay-club", cfg.GitHubRepo)
 	assert.Empty(t, cfg.PrefillToken)
+	assert.Empty(t, cfg.VAPIDPublicKey)
+	assert.Empty(t, cfg.VAPIDPrivateKey)
+	assert.False(t, cfg.PushEnabled())
 	assert.Equal(t, zerolog.InfoLevel, cfg.LogLevel)
 }
 
@@ -375,6 +386,37 @@ func TestLoadOddsAPIKeysWithParlayAndOddsAPI(t *testing.T) {
 		assert.Equal(t, "parlay-key", cfg.OddsAPIKey)
 		assert.Equal(t, "the-odds-key", cfg.TheOddsAPIKey)
 	})
+}
+
+func TestLoadPushIsOffUnlessBothVAPIDKeysAreSet(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		values map[string]string
+		want   bool
+	}{
+		"both halves": {
+			values: map[string]string{"VAPID_PUBLIC_KEY": "public", "VAPID_PRIVATE_KEY": "private"},
+			want:   true,
+		},
+		"public only": {
+			values: map[string]string{"VAPID_PUBLIC_KEY": "public"},
+		},
+		"private only": {
+			values: map[string]string{"VAPID_PRIVATE_KEY": "private"},
+		},
+		"neither": {},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			cfg, err := config.Load(envFrom(test.values))
+			require.NoError(t, err)
+			assert.Equal(t, test.want, cfg.PushEnabled())
+		})
+	}
 }
 
 func TestLoadBlankGitHubRepoUsesDefault(t *testing.T) {
