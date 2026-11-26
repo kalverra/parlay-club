@@ -32,11 +32,9 @@ type GroupFrom func(context.Context) (db.Group, bool)
 // cookies.SetGroup; tests record the choice.
 type SetGroup func(http.ResponseWriter, int64)
 
-// Refresher describes on-demand sync for game props, research, and pick-time odds.
+// Refresher describes on-demand sync for game props and pick-time odds.
 type Refresher interface {
 	SyncGameProps(ctx context.Context, gameID string) error
-	SyncGameResearch(ctx context.Context, gameID string) error
-	SyncPlayerResearch(ctx context.Context, athleteID string) error
 	KickPickLines(ctx context.Context, weekID int64)
 	KickPickGame(ctx context.Context, weekID int64, gameID string)
 	KickSlipExportEnrich(ctx context.Context, slipID int64)

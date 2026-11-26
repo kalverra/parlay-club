@@ -1038,6 +1038,32 @@
 </div>
 {{end}}
 
+{{define "research-panel"}}
+<div id="research-panel"{{if .OOB}} hx-swap-oob="true"{{end}} class="space-y-3">
+  {{if .GameResearch}}
+    <div class="flex items-center justify-between gap-2">
+      <p class="text-[11px] font-semibold uppercase tracking-wide text-ink-muted">Game sheet</p>
+      <a
+        href="{{.BackHref}}"
+        class="text-xs font-medium text-ink-muted underline hover:text-ink"
+        >&larr; All bets</a
+      >
+    </div>
+    {{template "research-game" .GameResearch}}
+  {{else if .PlayerResearch}}
+    <div class="flex items-center justify-between gap-2">
+      <p class="text-[11px] font-semibold uppercase tracking-wide text-ink-muted">Player sheet</p>
+      <a
+        href="{{.BackHref}}"
+        class="text-xs font-medium text-ink-muted underline hover:text-ink"
+        >&larr; All bets</a
+      >
+    </div>
+    {{template "research-player" .PlayerResearch}}
+  {{end}}
+</div>
+{{end}}
+
 {{define "research-explore"}}
 <section id="research-explore" class="space-y-3" aria-label="Research explorer">
   <form
@@ -1315,6 +1341,9 @@
     </p>
   {{end}}
 </section>
+{{if .OOB}}
+  {{template "research-panel" (dict "GameResearch" .GameResearch "PlayerResearch" .PlayerResearch "BackHref" .BackHref "OOB" true)}}
+{{end}}
 {{end}}
 
 {{define "research-game"}}

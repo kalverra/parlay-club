@@ -638,7 +638,7 @@ func TestExplorePagesResults(t *testing.T) {
 		}
 		for _, limit := range []int{0, -5} {
 			got := board.Explore(many, games, stats, board.ExploreQuery{Limit: limit})
-			assert.Len(t, got.Rows, 50)
+			assert.Len(t, got.Rows, board.DefaultExploreLimit)
 			assert.Equal(t, 60, got.TotalMatched)
 			assert.True(t, got.HasMore)
 		}

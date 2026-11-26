@@ -1747,14 +1747,6 @@ func (r *pickTestRefresher) SyncGameProps(_ context.Context, _ string) error {
 	return nil
 }
 
-func (r *pickTestRefresher) SyncGameResearch(_ context.Context, _ string) error {
-	return nil
-}
-
-func (r *pickTestRefresher) SyncPlayerResearch(_ context.Context, _ string) error {
-	return nil
-}
-
 func (r *pickTestRefresher) KickPickLines(_ context.Context, weekID int64) {
 	r.linesCalls = append(r.linesCalls, weekID)
 }

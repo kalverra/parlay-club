@@ -264,3 +264,7 @@ matchup context, and optional slip-scope eligibility) Risk: low (read-only resea
       missing selections, and open-slip eligibility.
 - [x] Docs: update `docs/reference/routes.md` and `docs/concepts/slips.md` to document the Research primary view,
       explorer filters/sorts, and per-bet research route.
+
+## Reviews
+
+- [x] Final review: claude@claude-sonnet-5-5

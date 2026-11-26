@@ -92,7 +92,9 @@ var ExploreSignals = []string{
 }
 
 const (
-	defaultExploreLimit = 50
+	// DefaultExploreLimit is the phone-sized page the explorer shows before
+	// "Show more" asks for a larger one.
+	DefaultExploreLimit = 50
 
 	// Signal weights used to order the matchup sort and to score a row's
 	// primary badge, mirroring the pick board's signal ranking.
@@ -166,7 +168,7 @@ func Explore(
 	}
 	limit := q.Limit
 	if limit <= 0 {
-		limit = defaultExploreLimit
+		limit = DefaultExploreLimit
 	}
 
 	candidates := make([]exploreCandidate, 0, len(rows))
@@ -267,7 +269,7 @@ func (f exploreFilters) match(
 		scored: ScoredRow{
 			Row:        row,
 			Grade:      grade,
-			Reason:     exploreReason(grade),
+			Reason:     ExploreReason(grade),
 			ImpliedPct: impliedPct(row.Odds),
 		},
 		signals:    signals,
@@ -431,9 +433,10 @@ func exploreRowMatches(row Row, game analyzer.Game, hasGame bool, needle string)
 	return false
 }
 
-// exploreReason names the factor that moved the grade the most, preferring the
-// positive one when a positive and a negative tie.
-func exploreReason(grade analyzer.LegGrade) string {
+// ExploreReason names the factor that moved the grade the most, preferring the
+// positive one when a positive and a negative tie. The explorer and the per-bet
+// page share it so one rule names the top factor everywhere.
+func ExploreReason(grade analyzer.LegGrade) string {
 	best := analyzer.GradeFactor{}
 	found := false
 	for _, factor := range grade.Factors {

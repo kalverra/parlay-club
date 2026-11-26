@@ -396,27 +396,16 @@ for the Record Book.
 ## Research
 
 Research (`GET /research`) is a primary tab: a slate-wide explorer of every cached bet this week, with a targeted game or
-player sheet below it when a link names one. It opens from a player, prop, leg, or game link.
+player sheet below it when a link names one.
 
-- **Explorer:** `board.Build` folds one cached row per selection and `board.Explore` scores each with
-  `analyzer.ScoreLeg`, so browsing, searching, filtering, and sorting spend no paid API credits. Search covers player,
-  team, matchup, and market; the pickers target one game or athlete. Chips are bet type (Lines, Team totals, and each
-  prop group), grade (A, A–B, C+), signal (Smash matchup, High volume, Role bump, Fits slip), and sort (Best grade,
-  Matchup, Odds, Line, Kickoff, Player). Each count clears only that chip's own filter, a change swaps
-  `#research-explore` and pushes the URL, and each card links to the per-bet page.
-- **Per-bet research (`GET /research/bet`):** keys on `db.SameSelection` (`game_id`, `market`, `side`, `team`,
-  `player_id`, optional `player_name`), never line or price, so a shared link survives line drift. It compares home,
-  consensus, and best cached prices with a de-vigged edge when both sides are cached, lists every book, and gives the
-  full analyzer breakdown. A prop shows the player sheet scoped to the market and line; game markets show nfelo's model
-  spread and win chances against the market, both teams' EPA ranks, venue, weather, and key injuries. Up to five related
-  bets follow, same player first. An `OPEN` slip in the `pick` step that includes the game offers `+ Add to slip`, which
-  posts the normal add-leg route and returns here. A missing or kicked-off selection gets a not-found page.
-- **Game research (`GET /research/games/{id}`):** reads cached injuries, merges key-position `roster_players` injuries,
-  filters to `QB`, `RB`, `WR`, `TE`, `LT`, `OT`, `C`, `CB`, and `S`, and fixes unmatched prop names.
-- **Player research (`GET /research/players/{espnID}`):** reads the cached game log and shows the matchup strip, last-5
-  and season hit rates, the last-5 range and median, and the opposing-defense chart with per-bar rank badges. Fresh
-  nflverse data adds L3 usage tiles; opening from a leg or prop pill preselects that market and line.
-- **Media fallbacks and layout:** logos and portraits fall back to initials or text, and Research stays one column.
+- **Explorer and per-bet view:** `board.Build` and `board.Explore` score cached rows with `analyzer.ScoreLeg`, so browsing,
+  searching, filtering, and sorting spend no paid API credits. Each card opens `/research/bet`, which keys on
+  `db.SameSelection` rather than line or price, so shared links survive drift. An `OPEN` slip in the `pick` step offers
+  `+ Add to slip`, which posts the normal add-leg route; filters and sorts are in [the routes](../reference/routes.md#research).
+- **Sheets:** `GET /research/games/{id}` reads cached injuries and fixes unmatched prop names;
+  `GET /research/players/{espnID}` reads the cached game log and shows the matchup strip, L5 and season hit rates, the
+  last-5 range and median, and the opposing-defense chart. Logos and portraits fall back to initials or text, and Research
+  stays one column.
 
 ## Live progress
 

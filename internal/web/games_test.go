@@ -229,14 +229,6 @@ func (s *stubRefresher) SyncGameProps(_ context.Context, gameID string) error {
 	return nil
 }
 
-func (s *stubRefresher) SyncGameResearch(_ context.Context, _ string) error {
-	return nil
-}
-
-func (s *stubRefresher) SyncPlayerResearch(_ context.Context, _ string) error {
-	return nil
-}
-
 func (s *stubRefresher) KickPickLines(_ context.Context, _ int64) {}
 
 func (s *stubRefresher) KickPickGame(_ context.Context, _ int64, _ string) {}

@@ -103,8 +103,9 @@ syncs:
 - **Manual pick refresh:** Tapping "Refresh odds" (`POST /slips/{id}/pick/refresh`) on an `OPEN` slip with upcoming
   games calls `ForcePickRefresh(ctx, weekID, gameID)` synchronously, bypassing the normal staleness windows subject to a
   2-minute cooldown (`pickRefreshCooldown`).
-- **Prop load and research:** Tapping "Load them" on the pick board calls `SyncGameProps(ctx, gameID)`. Loading game
-  research calls `SyncGameResearch(ctx, gameID)`. Loading player research calls `SyncPlayerResearch(ctx, athleteID)`.
+- **Prop load and research:** Tapping "Load them" on the pick board calls `SyncGameProps(ctx, gameID)`. Research sheets,
+  the explorer, and `/research/bet` read cached SQLite only and never sync; the `Load props` tap on a targeted game is
+  their one paid path.
 - **Slip-lock prop enrichment:** When `POST /slips/{id}/lock` transitions a slip to `LOCKED`, `slipHandlers.lockIn`
   calls `KickSlipExportEnrich(ctx, slipID)`. It runs in the background (`context.WithoutCancel`, tracked in `s.wg`,
   30-second timeout), finds unique upcoming games on the slip with at least one prop leg missing a DraftKings or FanDuel
@@ -242,13 +243,12 @@ disabled, not failed. If one provider fails while the other succeeds, refresh lo
 rows, so `odds:lines` does not enter backoff. If every configured provider fails, the sync returns the joined error and
 the source backs off with cached rows still served.
 
-Props and research data run on demand through `SyncGameProps`, `KickPickLines` (`SyncPickLines`), `KickPickGame`
-(`SyncPickGame`), `ForcePickRefresh`, `SyncGameResearch`, and `SyncPlayerResearch`, while `KickSlipExportEnrich` runs in
-the background when a slip locks with unlinked prop legs, and bulk props for that game date's upcoming games warm during
-`RunPrefill`. Pick-time views on `OPEN` slips and slip-lock enrichment kick off refreshes asynchronously off the request
-path, while the pick board's "Load them" prompt, "Refresh odds" button, or a research partial run synchronously with a
-short 10-second timeout. The board never loops over games on page load: each tap or game selection targets at most that
-one game.
+Props run on demand through `SyncGameProps`, `KickPickLines` (`SyncPickLines`), `KickPickGame`
+(`SyncPickGame`), and `ForcePickRefresh`, while `KickSlipExportEnrich` runs in the background when a slip locks with
+unlinked prop legs, and bulk props for that game date's upcoming games warm during `RunPrefill`. Pick-time views on
+`OPEN` slips and slip-lock enrichment kick off refreshes asynchronously off the request path, while the pick board's
+"Load them" prompt or "Refresh odds" button runs synchronously with a short 10-second timeout. The board never loops over
+games on page load: each tap or game selection targets at most that one game.
 
 - `odds:props:{gameID}`: Stale after 30 minutes on the game's Eastern date or within 6 hours of kickoff, and 2 hours
   otherwise (15-minute idempotency window in `RunPrefill`; 2-minute manual cooldown in `ForcePickRefresh`), skipped once

@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kalverra/parlay-club/internal/analyzer"
+	"github.com/kalverra/parlay-club/internal/auth"
 	"github.com/kalverra/parlay-club/internal/db"
 	"github.com/kalverra/parlay-club/internal/live"
 	"github.com/kalverra/parlay-club/internal/slips"
@@ -23,23 +24,11 @@ import (
 )
 
 type researchTestRefresher struct {
-	gameResearchSynced   []string
-	playerResearchSynced []string
-	propsSynced          []string
+	propsSynced []string
 }
 
 func (r *researchTestRefresher) SyncGameProps(_ context.Context, gameID string) error {
 	r.propsSynced = append(r.propsSynced, gameID)
-	return nil
-}
-
-func (r *researchTestRefresher) SyncGameResearch(_ context.Context, gameID string) error {
-	r.gameResearchSynced = append(r.gameResearchSynced, gameID)
-	return nil
-}
-
-func (r *researchTestRefresher) SyncPlayerResearch(_ context.Context, athleteID string) error {
-	r.playerResearchSynced = append(r.playerResearchSynced, athleteID)
 	return nil
 }
 
@@ -123,8 +112,6 @@ func TestResearchPage(t *testing.T) {
 	)
 	assert.Contains(t, body, game.HomeTeam)
 	assert.Contains(t, body, "Josh Allen")
-	assert.Empty(t, refresher.gameResearchSynced)
-	assert.Empty(t, refresher.playerResearchSynced)
 	assert.Empty(t, refresher.propsSynced)
 
 	// 2. GET /research?game_id={id} pre-loads game research
@@ -136,7 +123,6 @@ func TestResearchPage(t *testing.T) {
 	assert.Contains(t, bodyGame, game.AwayTeam+" @ "+game.HomeTeam)
 	assert.Contains(t, bodyGame, "Key Injuries")
 	assert.Contains(t, bodyGame, "Player Matches")
-	assert.Empty(t, refresher.gameResearchSynced, "game sheets read cached research only")
 
 	// 3. GET /research?player_id={espnID} pre-loads player research
 	require.NoError(t, fixture.store.UpsertPlayerGameLog(t.Context(), db.PlayerGameLog{
@@ -155,7 +141,6 @@ func TestResearchPage(t *testing.T) {
 	assert.Contains(t, bodyPlayer, "8 GP")
 	assert.Contains(t, bodyPlayer, "L5 Median")
 	assert.Contains(t, bodyPlayer, "Season Mean")
-	assert.Empty(t, refresher.playerResearchSynced, "player sheets read cached research only")
 
 	// 4. GET /research?player=Josh+Allen resolves athlete ID
 	reqSearch := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/research?player=Josh+Allen", nil)
@@ -1397,8 +1382,6 @@ func TestResearchExplorerBrowsesCachedBetsWithoutRefresh(t *testing.T) {
 	assert.Contains(t, body, "/research/bet?")
 	assert.Contains(t, body, "from=%2Fresearch")
 
-	assert.Empty(t, refresher.gameResearchSynced, "browsing must not sync game research")
-	assert.Empty(t, refresher.playerResearchSynced, "browsing must not sync player research")
 	assert.Empty(t, refresher.propsSynced, "browsing must not fetch props")
 }
 
@@ -1459,9 +1442,68 @@ func TestResearchExploreFiltersSortsAndPushesURL(t *testing.T) {
 	require.Equal(t, http.StatusOK, recGame.Code)
 	assert.Equal(t, "/research?game_id="+game.ID, recGame.Header().Get("Hx-Push-Url"))
 
-	assert.Empty(t, refresher.gameResearchSynced, "exploring must not sync game research")
-	assert.Empty(t, refresher.playerResearchSynced, "exploring must not sync player research")
 	assert.Empty(t, refresher.propsSynced, "exploring must not fetch props")
+}
+
+func TestResearchExploreReplacesOpenSheet(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	game := addGame(t, fixture, gameKickoff())
+	seedResearchExplorer(t, fixture, game)
+	handler := researchHandlerWithRefresher(t, fixture, fixture.user, &researchTestRefresher{})
+
+	// Targeting a game loads its sheet into the out-of-band panel.
+	req := httptest.NewRequestWithContext(
+		t.Context(), http.MethodGet, "/research/explore?game_id="+game.ID, nil,
+	)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	body := rec.Body.String()
+	assert.Contains(t, body, `id="research-panel" hx-swap-oob="true"`)
+	assert.Contains(t, body, "Game sheet")
+	assert.Contains(t, body, "Key Injuries")
+
+	// Switching the targeted game replaces the sheet rather than leaving the
+	// old one above a list that now names another game.
+	other, err := fixture.store.UpsertGame(t.Context(), db.Game{
+		ID:         "401772002",
+		WeekID:     fixture.week.ID,
+		HomeTeam:   "DAL",
+		AwayTeam:   "PHI",
+		HomeName:   "Dallas Cowboys",
+		AwayName:   "Philadelphia Eagles",
+		HomeESPNID: "6",
+		AwayESPNID: "21",
+		Kickoff:    gameKickoff(),
+		Status:     db.GameScheduled,
+		UpdatedAt:  time.Now().UTC(),
+	})
+	require.NoError(t, err)
+
+	reqOther := httptest.NewRequestWithContext(
+		t.Context(), http.MethodGet, "/research/explore?game_id="+other.ID, nil,
+	)
+	recOther := httptest.NewRecorder()
+	handler.ServeHTTP(recOther, reqOther)
+	require.Equal(t, http.StatusOK, recOther.Code)
+	otherBody := recOther.Body.String()
+	assert.Contains(t, otherBody, ">PHI @ DAL</h2>")
+	assert.Contains(t, otherBody, "Game sheet")
+	assert.NotContains(t, otherBody, ">MIA @ BUF</h2>", "the previous game's sheet is gone")
+
+	// Clearing the target empties the panel, so no sheet lingers at all.
+	reqClear := httptest.NewRequestWithContext(
+		t.Context(), http.MethodGet, "/research/explore", nil,
+	)
+	recClear := httptest.NewRecorder()
+	handler.ServeHTTP(recClear, reqClear)
+	require.Equal(t, http.StatusOK, recClear.Code)
+	clearBody := recClear.Body.String()
+	assert.Contains(t, clearBody, `id="research-panel" hx-swap-oob="true"`)
+	assert.NotContains(t, clearBody, ">Game sheet</p>")
+	assert.NotContains(t, clearBody, ">Player sheet</p>")
 }
 
 func TestResearchTargetedGameOffersPropsButton(t *testing.T) {
@@ -1523,19 +1565,6 @@ func TestResearchTargetedGameOffersPropsButton(t *testing.T) {
 	require.Equal(t, http.StatusOK, recProps.Code)
 	assert.Equal(t, []string{game.ID}, refresher.propsSynced)
 	assert.NotContains(t, recProps.Body.String(), "<!doctype html>")
-
-	// Without HTMX the same button redirects back to the full page.
-	reqPlain := httptest.NewRequestWithContext(
-		t.Context(),
-		http.MethodPost,
-		"/research/games/"+game.ID+"/props",
-		strings.NewReader(form.Encode()),
-	)
-	reqPlain.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	recPlain := httptest.NewRecorder()
-	handler.ServeHTTP(recPlain, reqPlain)
-	assert.Equal(t, http.StatusSeeOther, recPlain.Code)
-	assert.Equal(t, "/research?game_id="+game.ID, recPlain.Header().Get("Location"))
 
 	// Once cached props exist, the button drops away.
 	_, err = fixture.store.UpsertOdds(t.Context(), []db.Odds{
@@ -1657,8 +1686,6 @@ func TestResearchBetPlayerPropRendersPlayerResearchAndPrices(t *testing.T) {
 	assert.Contains(t, body, "formaction=\"/slips/"+strconv.FormatInt(fixture.slip.ID, 10)+"/legs\"")
 
 	assert.Empty(t, refresher.propsSynced, "bet research must not fetch props")
-	assert.Empty(t, refresher.gameResearchSynced, "bet research must not sync game research")
-	assert.Empty(t, refresher.playerResearchSynced, "bet research must not sync player research")
 }
 
 func TestResearchBetGameMarketRendersTeamContext(t *testing.T) {
@@ -1776,8 +1803,6 @@ func TestResearchBetGameMarketRendersTeamContext(t *testing.T) {
 	assert.Contains(t, body, "More in this game", "the same game's other markets stay reachable")
 	assert.NotContains(t, body, "Player research")
 	assert.Empty(t, refresher.propsSynced)
-	assert.Empty(t, refresher.gameResearchSynced)
-	assert.Empty(t, refresher.playerResearchSynced)
 }
 
 func TestResearchBetMissingSelectionReturnsNotFound(t *testing.T) {
@@ -1828,7 +1853,10 @@ func TestResearchBetAddToSlipOnlyWhenOpenSlipIsPicking(t *testing.T) {
 		body := rec.Body.String()
 		assert.Contains(t, body, "Add to slip")
 		assert.Contains(t, body, "+ Week 9")
-		assert.Contains(t, body, "formaction=\"/slips/"+strconv.FormatInt(fixture.slip.ID, 10)+"/legs\"")
+		slipPath := "/slips/" + strconv.FormatInt(fixture.slip.ID, 10) + "/legs"
+		assert.Contains(t, body, "formaction=\""+slipPath+"\"")
+		assert.Contains(t, body, "hx-post=\""+slipPath+"\"")
+		assert.Contains(t, body, `hx-include="closest form"`)
 
 		// The form posts the existing add-leg route and returns to this bet.
 		form := url.Values{
@@ -1934,4 +1962,60 @@ func TestResearchBetAddToSlipOnlyWhenOpenSlipIsPicking(t *testing.T) {
 		assert.NotContains(t, body, "Add to slip")
 		assert.NotContains(t, body, "formaction=\"/slips/")
 	})
+}
+
+// The app puts auth.CSRF in front of every non-GET route. The bet page's slip
+// buttons must carry the HTMX header, or the production guard rejects the add.
+func TestResearchBetAddToSlipPassesCSRF(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	game := addGame(t, fixture, gameKickoff())
+	seedBetResearchPlayer(t, fixture, game)
+	handler := researchHandlerWithRefresher(t, fixture, fixture.user, &researchTestRefresher{})
+	guard := auth.NewHandlers(zerolog.Nop(), nil, nil, nil, nil, false).CSRF(handler)
+
+	values := url.Values{
+		"game_id":   {game.ID},
+		"market":    {"PASS_YDS"},
+		"side":      {"OVER"},
+		"team":      {"BUF"},
+		"player_id": {"3918298"},
+	}
+	betURL := "/research/bet?" + values.Encode()
+	form := url.Values{
+		"quick":       {"1"},
+		"from":        {"research"},
+		"return":      {betURL},
+		"game_id":     {game.ID},
+		"market_type": {"PASS_YDS"},
+		"team":        {"BUF"},
+		"player_name": {"Josh Allen"},
+		"player_id":   {"3918298"},
+		"side":        {"OVER"},
+		"line":        {"265.5"},
+		"odds":        {"-105"},
+	}
+	path := "/slips/" + strconv.FormatInt(fixture.slip.ID, 10) + "/legs"
+
+	// A plain form post, which is what the page would send without htmx, is
+	// rejected before the handler runs.
+	reqPlain := httptest.NewRequestWithContext(
+		t.Context(), http.MethodPost, path, strings.NewReader(form.Encode()),
+	)
+	reqPlain.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	recPlain := httptest.NewRecorder()
+	guard.ServeHTTP(recPlain, reqPlain)
+	assert.Equal(t, http.StatusForbidden, recPlain.Code)
+
+	// An HTMX post passes the guard and asks htmx to navigate back to the bet.
+	reqHTMX := httptest.NewRequestWithContext(
+		t.Context(), http.MethodPost, path, strings.NewReader(form.Encode()),
+	)
+	reqHTMX.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	reqHTMX.Header.Set("Hx-Request", "true")
+	recHTMX := httptest.NewRecorder()
+	guard.ServeHTTP(recHTMX, reqHTMX)
+	require.Equal(t, http.StatusOK, recHTMX.Code)
+	assert.Equal(t, betURL, recHTMX.Header().Get("Hx-Redirect"))
 }

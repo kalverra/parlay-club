@@ -343,7 +343,7 @@ opens the same leg form with `game_id` set and `quick=1`.
 | `GET /research/bet`               | Per-bet research: cached prices, grade, and the research for the bet's market | Full page; 404 for a selection not on the cached slate |
 | `GET /research/games/{id}`        | Game research: filtered injuries and prop player match list                | Partial |
 | `GET /research/players/{espnID}`  | Player research: matchup strip, L5 and opp-defense charts, hit rates, usage | Partial |
-| `POST /research/games/{id}/props` | Load one game's props from an explicit tap                                 | Explorer partial, or 303 to `/research?game_id=` |
+| `POST /research/games/{id}/props` | Load one game's props from an explicit tap                                 | Explorer partial with `HX-Push-Url` |
 | `POST /research/matches`          | Save manual player match from `odds_name`, `team`, and `athlete_id`        | Partial (refreshed game research) |
 
 `GET /research` renders the week's game and player pickers, the explorer, and, when targeted, the deeper sheet. It
@@ -375,7 +375,8 @@ The search input debounces at 300 ms. A search, chip, or sort calls `GET /resear
 with `outerHTML`, and sets `HX-Push-Url` to the matching `/research?...` URL. Empty states name why: no stored games, no
 lines, every game started, or nothing matches. A targeted game with lines but no props offers `Load props`, which posts
 `POST /research/games/{id}/props`, runs `SyncGameProps` for that one game with the usual credit floors, and answers the
-refreshed explorer plus `HX-Push-Url` (303 to `/research?game_id=` for a plain post). It is the only paid research route.
+refreshed explorer partial with `HX-Push-Url`. It is the only paid research route; a non-HTMX post is refused by the
+CSRF guard before it reaches the handler.
 
 `GET /research/bet` matches the query's selection to one cached row with `db.SameSelection`, so it ignores `line` and
 `odds`, and answers 404 with a short reason when the game is unknown, has kicked off, or the selection is not on the

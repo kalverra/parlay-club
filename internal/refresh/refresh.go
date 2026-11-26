@@ -941,6 +941,9 @@ func (s *Service) SyncGameProps(ctx context.Context, gameID string) error {
 }
 
 // SyncGameResearch syncs injuries, rosters, and props for one game if stale.
+//
+// No production route calls it now that research sheets read cached SQLite only.
+// It stays for the sandbox replay tests, which seed a full research sheet.
 func (s *Service) SyncGameResearch(ctx context.Context, gameID string) error {
 	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
 	defer cancel()
@@ -989,6 +992,9 @@ func (s *Service) SyncGameResearch(ctx context.Context, gameID string) error {
 }
 
 // SyncPlayerResearch syncs one athlete's game log if stale.
+//
+// No production route calls it now that player sheets read cached SQLite only.
+// It stays for the sandbox replay tests, which seed a full research sheet.
 func (s *Service) SyncPlayerResearch(ctx context.Context, athleteID string) error {
 	if athleteID == "" {
 		return nil

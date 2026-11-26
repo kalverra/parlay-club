@@ -81,6 +81,14 @@ type ResearchExploreView struct {
 	NoLines         bool
 	AllStarted      bool
 	Empty           bool
+
+	// GameResearch and PlayerResearch are the resolved target's sheet. The
+	// explorer partial renders them out of band when OOB is set so a search or
+	// chip change replaces an already-open sheet instead of leaving it on the
+	// old target.
+	GameResearch   *GameResearchView
+	PlayerResearch *PlayerResearchView
+	OOB            bool
 }
 
 // ResearchChip is one filter or sort link in the explorer.
@@ -138,7 +146,6 @@ type BetResearchPage struct {
 // be matched to a cached row, so the page renders a clean not-found state.
 type BetResearchView struct {
 	GameID          string
-	Market          string
 	MarketType      string
 	MarketLabel     string
 	Side            string
@@ -472,8 +479,38 @@ func (h *researchHandlers) researchExplore(w http.ResponseWriter, r *http.Reques
 	query := parseResearchQuery(r)
 	playerName := strings.TrimSpace(r.URL.Query().Get("player"))
 	explore := h.buildExplore(r.Context(), query, playerName)
+	explore = h.researchPanel(r.Context(), r, explore)
+	explore.OOB = true
 	w.Header().Set("Hx-Push-Url", researchPushURL(queryFromExplore(explore)))
 	h.renderPartial(w, "research-explore", explore)
+}
+
+// researchPanel resolves the sheet for an explorer target so an HTMX search or
+// chip change can replace an already-open #research-panel out of band. With no
+// target it stays empty, so the previous sheet goes away instead of lingering
+// under a list that now names something else.
+func (h *researchHandlers) researchPanel(
+	ctx context.Context,
+	r *http.Request,
+	view ResearchExploreView,
+) ResearchExploreView {
+	if h.deps.Store == nil {
+		return view
+	}
+	market := strings.TrimSpace(r.URL.Query().Get("market"))
+	lineStr := strings.TrimSpace(r.URL.Query().Get("line"))
+	legIDStr := strings.TrimSpace(r.URL.Query().Get("leg_id"))
+	switch {
+	case view.PlayerID != "":
+		if player, err := h.loadPlayerResearch(ctx, view.PlayerID, legIDStr, market, lineStr); err == nil {
+			view.PlayerResearch = player
+		}
+	case view.GameID != "":
+		if game, err := h.loadGameResearch(ctx, view.GameID); err == nil {
+			view.GameResearch = game
+		}
+	}
+	return view
 }
 
 // researchBet shows one bet's cached prices, analyzer grade, and the deeper
@@ -481,6 +518,11 @@ func (h *researchHandlers) researchExplore(w http.ResponseWriter, r *http.Reques
 func (h *researchHandlers) researchBet(w http.ResponseWriter, r *http.Request) {
 	page := h.page(r)
 	page.Title = "Bet research"
+	if h.deps.Store != nil {
+		if week, err := h.deps.Store.LatestWeek(r.Context()); err == nil {
+			page.WeekLabel = weekLabel(week)
+		}
+	}
 	view := h.buildBetResearch(r.Context(), r)
 	h.renderBet(w, BetResearchPage{Page: page, View: view})
 }
@@ -500,7 +542,6 @@ func (h *researchHandlers) buildBetResearch(ctx context.Context, r *http.Request
 	view := BetResearchView{
 		GameID:         selection.GameID,
 		MarketType:     selection.MarketType,
-		Market:         researchMarketLabel(selection.MarketType),
 		MarketLabel:    researchMarketLabel(selection.MarketType),
 		Side:           selection.Side,
 		Team:           selection.Team,
@@ -553,15 +594,16 @@ func (h *researchHandlers) buildBetResearch(ctx context.Context, r *http.Request
 		return view
 	}
 
-	games, stats := analyzer.LoadBoardSignals(ctx, h.deps.Store, now, game.WeekID, []db.Game{game}, betPlayerIDs(*bet))
+	games, stats := analyzer.LoadBoardSignals(
+		ctx, h.deps.Store, now, game.WeekID, []db.Game{game}, rowPlayerIDs([]board.Row{*bet}),
+	)
 	grade := analyzer.ScoreLeg(board.RowToAnalyzerLeg(*bet), games, stats)
 
 	view.Missing = false
 	view.MissingMessage = ""
 	view.Selection = bet.Text
 	view.MarketType = bet.Market
-	view.Market = researchMarketLabel(bet.Market)
-	view.MarketLabel = view.Market
+	view.MarketLabel = researchMarketLabel(bet.Market)
 	view.Side = bet.Side
 	view.Team = bet.Team
 	view.PlayerID = bet.PlayerID
@@ -582,7 +624,7 @@ func (h *researchHandlers) buildBetResearch(ctx context.Context, r *http.Request
 	view.Implied = formatImpliedChance(parlay.ImpliedProb(bet.Odds))
 	view.LineInput = researchLineText(bet.Line)
 	view.Grade = LegGradeView(grade)
-	view.Reason = betReason(grade)
+	view.Reason = board.ExploreReason(grade)
 	view.Warnings = betWarnings(*bet, games, stats)
 	switch bet.Team {
 	case game.AwayTeam:
@@ -661,33 +703,17 @@ func betRowSelection(row board.Row) db.SelectionKey {
 	}
 }
 
-// betPlayerIDs lists the player IDs the analyzer can use for one bet.
-func betPlayerIDs(row board.Row) []string {
-	if row.PlayerID == "" {
-		return nil
-	}
-	return []string{row.PlayerID}
-}
-
-// betReason names the factor that moved the grade the most, preferring the
-// positive one when a positive and a negative tie.
-func betReason(grade analyzer.LegGrade) string {
-	best := analyzer.GradeFactor{}
-	found := false
-	for _, factor := range grade.Factors {
-		if factor.Delta == 0 {
+// rowPlayerIDs lists the distinct player IDs the analyzer can use for a set of
+// rows.
+func rowPlayerIDs(rows []board.Row) []string {
+	ids := make([]string, 0, len(rows))
+	for _, row := range rows {
+		if row.PlayerID == "" || slices.Contains(ids, row.PlayerID) {
 			continue
 		}
-		if !found || math.Abs(float64(factor.Delta)) > math.Abs(float64(best.Delta)) ||
-			(math.Abs(float64(factor.Delta)) == math.Abs(float64(best.Delta)) && factor.Delta > best.Delta) {
-			best = factor
-			found = true
-		}
+		ids = append(ids, row.PlayerID)
 	}
-	if !found {
-		return "Balanced profile"
-	}
-	return best.Label
+	return ids
 }
 
 // betWarnings runs the analyzer over the bet on its own and returns the
@@ -1271,14 +1297,11 @@ func (h *researchHandlers) researchGameProps(w http.ResponseWriter, r *http.Requ
 		}
 	}
 
-	if r.Header.Get("Hx-Request") == "" {
-		http.Redirect(w, r, "/research?game_id="+url.QueryEscape(gameID), http.StatusSeeOther)
-		return
-	}
-
 	query := parseResearchQuery(r)
 	query.GameID = gameID
 	explore := h.buildExplore(r.Context(), query, "")
+	explore = h.researchPanel(r.Context(), r, explore)
+	explore.OOB = true
 	w.Header().Set("Hx-Push-Url", researchPushURL(queryFromExplore(explore)))
 	h.renderPartial(w, "research-explore", explore)
 }
@@ -1462,7 +1485,7 @@ func researchExploreURL(q researchQuery) string {
 // URL so shared links read cleanly.
 func queryFromExplore(view ResearchExploreView) researchQuery {
 	limit := view.Limit
-	if limit <= 50 {
+	if limit <= board.DefaultExploreLimit {
 		limit = 0
 	}
 	return researchQuery{
@@ -1496,7 +1519,7 @@ func (h *researchHandlers) buildExplore(
 		Limit:    q.Limit,
 	}
 	if view.Limit <= 0 {
-		view.Limit = 50
+		view.Limit = board.DefaultExploreLimit
 	}
 	result := board.Explore(nil, nil, nil, board.ExploreQuery{})
 
@@ -1574,7 +1597,7 @@ func (h *researchHandlers) buildExplore(
 
 	if result.HasMore {
 		next := queryFromExplore(view)
-		next.Limit = view.Limit + 50
+		next.Limit = view.Limit + board.DefaultExploreLimit
 		view.MoreHref = researchExploreURL(next)
 		view.MorePushURL = researchPushURL(next)
 	}
@@ -1649,13 +1672,7 @@ func (h *researchHandlers) loadResearchBoardSignals(
 	games []db.Game,
 	rows []board.Row,
 ) (map[string]analyzer.Game, map[string]analyzer.PlayerStats) {
-	playerIDs := make([]string, 0, len(rows))
-	for _, row := range rows {
-		if row.PlayerID != "" {
-			playerIDs = append(playerIDs, row.PlayerID)
-		}
-	}
-	return analyzer.LoadBoardSignals(ctx, h.deps.Store, now, weekID, games, playerIDs)
+	return analyzer.LoadBoardSignals(ctx, h.deps.Store, now, weekID, games, rowPlayerIDs(rows))
 }
 
 // researchSignals loads the badges a row can earn: nflverse team EPA, player
@@ -1668,13 +1685,7 @@ func (h *researchHandlers) researchSignals(
 	roster []db.RosterPlayer,
 	rows []board.Row,
 ) board.BoardSignals {
-	playerIDs := make([]string, 0, len(rows))
-	for _, row := range rows {
-		if row.PlayerID != "" {
-			playerIDs = append(playerIDs, row.PlayerID)
-		}
-	}
-	teamEPA, playerUsage := analyzer.LoadGameSignals(ctx, h.deps.Store, now, weekID, playerIDs)
+	teamEPA, playerUsage := analyzer.LoadGameSignals(ctx, h.deps.Store, now, weekID, rowPlayerIDs(rows))
 	injuries := make(map[string][]espn.Injury)
 	for _, game := range games {
 		for team, teamInjuries := range analyzer.MergeGameInjuries(game, roster) {

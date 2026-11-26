@@ -14,30 +14,6 @@
 
   {{template "research-explore" .Explore}}
 
-  {{if .GameResearch}}
-    <div id="research-panel" class="space-y-3">
-      <div class="flex items-center justify-between gap-2">
-        <p class="text-[11px] font-semibold uppercase tracking-wide text-ink-muted">Game sheet</p>
-        <a
-          href="{{.Explore.BackHref}}"
-          class="text-xs font-medium text-ink-muted underline hover:text-ink"
-          >&larr; All bets</a
-        >
-      </div>
-      {{template "research-game" .GameResearch}}
-    </div>
-  {{else if .PlayerResearch}}
-    <div id="research-panel" class="space-y-3">
-      <div class="flex items-center justify-between gap-2">
-        <p class="text-[11px] font-semibold uppercase tracking-wide text-ink-muted">Player sheet</p>
-        <a
-          href="{{.Explore.BackHref}}"
-          class="text-xs font-medium text-ink-muted underline hover:text-ink"
-          >&larr; All bets</a
-        >
-      </div>
-      {{template "research-player" .PlayerResearch}}
-    </div>
-  {{end}}
+  {{template "research-panel" (dict "GameResearch" .GameResearch "PlayerResearch" .PlayerResearch "BackHref" .Explore.BackHref)}}
 </section>
 {{end}}
