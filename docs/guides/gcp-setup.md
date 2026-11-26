@@ -19,8 +19,10 @@ You run this once per project. Every step is safe to repeat, and the setup scrip
 ## Preconditions
 
 - A Google Cloud project with billing enabled. Note the project ID, not the display name.
+
 - Your account is an **Owner** on the project and a **Billing Account Administrator** on the billing account. The script
   grants IAM roles and creates a budget, which need both.
+
 - The [Google Cloud SDK](https://cloud.google.com/sdk/docs/install) is installed and signed in:
 
   ```sh
@@ -30,6 +32,7 @@ You run this once per project. Every step is safe to repeat, and the setup scrip
 
 - Admin access to the GitHub repo, enough to set Actions variables. The repo is `kalverra/parlay-club` unless you forked
   it.
+
 - Access to [Parlay API](https://parlay-api.com) and [The Odds API](https://the-odds-api.com) for keys, or nothing if
   you skip odds.
 
@@ -49,11 +52,11 @@ The script stops at the first failure and prints what it finished. It creates:
 | Resource             | Details                                                                                   |
 | -------------------- | ----------------------------------------------------------------------------------------- |
 | APIs                 | Cloud Run, Artifact Registry, Secret Manager, Cloud Scheduler, IAM, STS, billing budgets, GCS |
-| GCS bucket           | `gs://PROJECT_ID-parlay-litestream` in `us-central1`, for Litestream, with soft-delete cleared (`--clear-soft-delete`) |
+| GCS bucket           | `gs://PROJECT_ID-parlay-litestream` in `us-central1`, for Litestream, with soft-delete cleared (`--clear-soft-delete`) and a 30-day lifecycle on `backups/` |
 | Artifact Registry    | Docker repo `parlay-club` with a cleanup policy that keeps the last 3 images               |
 | Secrets              | `session-key`, `google-client-id`, `google-client-secret`, `odds-api-key`, `the-odds-api-key`, all empty; `github-token` and `prefill-token`, empty and optional |
 | Runtime account      | `parlay-runtime`, read/write on the bucket and read on all seven secrets                  |
-| Deployer account     | `parlay-deployer`, `run.admin`, `artifactregistry.writer`, and `secretmanager.viewer`, plus `storage.bucketViewer` on the bucket and act-as on the runtime account |
+| Deployer account     | `parlay-deployer`, `run.admin`, `artifactregistry.writer`, and `secretmanager.viewer`, plus `storage.bucketViewer`, `storage.objectViewer`, and `storage.objectCreator` on the bucket, and act-as on the runtime account |
 | Cloud Run agent      | read on the image repo, so Cloud Run can pull the image                                   |
 | Workload Identity    | pool `github` and provider `github`, limited to `kalverra/parlay-club`                    |
 | Billing budget       | `$5` a month with email alerts at 50%, 90%, and 100%                                       |
@@ -136,10 +139,10 @@ Tokens expire: when the issue call starts failing, add a new version and deploy 
 
 With a `prefill-token` version, the optional `POST /internal/prefill` fallback endpoint accepts bearer-token requests;
 without one, the endpoint stays disabled (`404`). Per-game-day morning pre-fill already runs automatically on the first
-authenticated full-page visit at or after 6:00 AM `America/New_York` on any scheduled game day while upcoming non-`FINAL`
-games remain on that date (tracked in `sync_state` as `prefill:gameday`), so only add `prefill-token` if you want the
-Cloud Scheduler fallback in step 8 or a manual trigger.
-Generate a random bearer token and save the value so you can pass it to Cloud Scheduler:
+authenticated full-page visit at or after 6:00 AM `America/New_York` on any scheduled game day while upcoming
+non-`FINAL` games remain on that date (tracked in `sync_state` as `prefill:gameday`), so only add `prefill-token` if you
+want the Cloud Scheduler fallback in step 8 or a manual trigger. Generate a random bearer token and save the value so
+you can pass it to Cloud Scheduler:
 
 ```sh
 PREFILL_TOKEN=$(openssl rand -base64 32 | tr -d '\n')
@@ -272,7 +275,8 @@ The free-tier pieces this app leans on:
 
 - Cloud Run scales to zero (`--min-instances 0`) and runs at most one instance.
 - Artifact Registry keeps only the last 3 images.
-- The bucket holds the SQLite replica, which is small, and has soft-delete cleared so compacted Litestream LTX segments are freed right away instead of billed for 7 extra days.
+- The bucket holds the SQLite replica, which is small, and has soft-delete cleared so compacted Litestream LTX segments
+  are freed right away instead of billed for 7 extra days.
 - Parlay API has a 1,000-credit monthly budget and The Odds API has 500, both tracked in the app; see
   [Data refresh](../concepts/data-refresh.md).
 

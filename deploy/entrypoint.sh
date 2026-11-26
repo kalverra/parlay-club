@@ -16,10 +16,12 @@ fi
 export DB_PATH LITESTREAM_REPLICA_URL
 
 # -if-db-not-exists keeps a warm instance's database. -if-replica-exists lets a
-# first boot start with an empty replica.
+# first boot start with an empty replica. -integrity-check makes a corrupt
+# restore fail the boot instead of serving a database that answers 500s.
 litestream restore \
 	-if-db-not-exists \
 	-if-replica-exists \
+	-integrity-check full \
 	-config /etc/litestream.yml \
 	"$DB_PATH"
 

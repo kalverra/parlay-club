@@ -1,0 +1,95 @@
+name: Database backup check
+
+# Restore the live Litestream replica, run a full SQLite integrity check, and
+# keep the verified result as an independent backup. A corrupt replica fails
+# this job before the next deploy or cold start can serve it.
+#
+# See docs/runbooks/database-recovery.md.
+
+on:
+  schedule:
+    # 07:17 UTC is 03:17 ET, outside every game window.
+    - cron: "17 7 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+  issues: write
+
+concurrency:
+  group: database-backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    name: Restore, verify, and save
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out the recovery scripts
+        uses: actions/checkout@v7.0.1
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3.0.0
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.DEPLOY_SA }}
+          project_id: ${{ vars.GCP_PROJECT }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v3.0.1
+        with:
+          project_id: ${{ vars.GCP_PROJECT }}
+
+      - name: Download Litestream
+        env:
+          LITESTREAM_VERSION: 0.5.18
+        run: |
+          set -euo pipefail
+          curl -fsSL \
+            "https://github.com/benbjohnson/litestream/releases/download/v${LITESTREAM_VERSION}/litestream-${LITESTREAM_VERSION}-linux-x86_64.tar.gz" \
+            | tar -xz -C "$RUNNER_TEMP" litestream
+          echo "LITESTREAM_BIN=$RUNNER_TEMP/litestream" >> "$GITHUB_ENV"
+
+      - name: Restore and verify the latest replica
+        env:
+          BUCKET: ${{ vars.LITESTREAM_BUCKET }}
+          REPLICA_URL: ${{ vars.LITESTREAM_REPLICA_URL }}
+        run: |
+          set -euo pipefail
+          replica="${REPLICA_URL:-gs://$BUCKET/parlay.db}"
+          out="$RUNNER_TEMP/backup.db"
+          deploy/verify_replica.sh "$replica" "$out"
+          if [ -f "$out" ]; then
+            echo "BACKUP_FILE=$out" >> "$GITHUB_ENV"
+          fi
+
+      - name: Upload the verified backup
+        if: env.BACKUP_FILE != ''
+        env:
+          BUCKET: ${{ vars.LITESTREAM_BUCKET }}
+        run: |
+          set -euo pipefail
+          date=$(date -u +%Y-%m-%d)
+          gcloud storage cp --quiet "$BACKUP_FILE" "gs://$BUCKET/backups/parlay-${date}.db"
+          echo "backup: gs://$BUCKET/backups/parlay-${date}.db" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Open an issue when the scheduled check fails
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          title="Scheduled Litestream replica check failed"
+          existing=$(gh issue list --repo "$REPO" --state open \
+            --search "$title" --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            echo "issue already open: #$existing"
+            exit 0
+          fi
+          gh issue create --repo "$REPO" \
+            --title "$title" \
+            --body "The scheduled restore or backup of the Litestream replica failed at $(date -u +%FT%TZ). Do not redeploy or cold-start the service until a good restore point is found. Follow docs/runbooks/database-recovery.md."

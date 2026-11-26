@@ -5,8 +5,9 @@ type: runbook
 summary: How a commit reaches Cloud Run, why deploys pause during game windows, how to force one, and how to verify, roll back, and read the spend.
 tags: [deploy, cloud-run, github-actions, blackout, litestream, rollback, runbook, cloud-scheduler]
 budget:
+  max_lines: 220
   max_spans_per_100_lines: 65
-  reason: Names exact Cloud Run flags, secrets, workflow variables, and verification commands across the deploy runbook.
+  reason: Names exact Cloud Run flags, secrets, workflow variables, drain sequence, and verification commands across the deploy runbook.
 ---
 
 # Deploy
@@ -25,9 +26,10 @@ setup lives in [GCP setup](../guides/gcp-setup.md); this runbook covers every de
   without one, bug reports stay in SQLite and `POST /internal/prefill` returns `404` (per-game-day pre-fill still runs
   automatically on the first authenticated visit at or after 6:00 AM ET on any scheduled game day via `prefill:gameday`
   in `sync_state`).
-- `parlay-deployer` can read Secret Manager metadata and the Litestream bucket. A project set up before the pre-flight
-  checks existed needs `deploy/setup.sh` run once more; it grants `roles/secretmanager.viewer` and
-  `roles/storage.bucketViewer`.
+- `parlay-deployer` can read Secret Manager metadata and the Litestream bucket, read replica objects, and write verified
+  backups under `backups/`. A project set up before these checks existed needs `deploy/setup.sh` run once more; it
+  grants `roles/secretmanager.viewer`, `roles/storage.bucketViewer`, `roles/storage.objectViewer`, and
+  `roles/storage.objectCreator`.
 - You can open the repo's **Actions** tab, or you have `gcloud` signed in for traffic changes and log checks.
 - For a normal deploy, CI passes on `main`. For a manual deploy, you know which branch head will ship.
 - If a game is on, you have decided whether to wait or to force the deploy and accept the write-loss risk.
@@ -43,6 +45,11 @@ setup lives in [GCP setup](../guides/gcp-setup.md); this runbook covers every de
 
 Deploys queue. The `deploy` concurrency group runs one at a time and does not cancel a run in progress, because two
 overlapping deploys are exactly what the blackout exists to prevent.
+
+A deploy now stops the service before starting the new revision, so expect roughly 15–30 seconds of
+`Service unavailable` while the old Litestream process finishes its last sync. That is deliberate: two Litestream
+processes writing one replica can corrupt it. If the deploy fails after the drain, the workflow sets scaling back to
+automatic.
 
 ### The blackout
 
@@ -84,17 +91,21 @@ push, so a broken gate fails before it can block or allow a deploy.
    are checked separately; when each has an `ENABLED` version the job sets `MOUNT_GITHUB_TOKEN=true` or
    `MOUNT_PREFILL_TOKEN=true` so the deploy mounts it, and when one does not the job logs a notice and leaves bug
    reports in SQLite or `POST /internal/prefill` disabled (`404`).
-7. Builds the `Dockerfile` with Buildx and pushes the image to Artifact Registry tagged with the commit SHA, reusing
+7. Restores the live replica with Litestream and runs `PRAGMA integrity_check` before spending time on a build. A
+   corrupt replica fails here, so the old revision keeps serving.
+8. Builds the `Dockerfile` with Buildx and pushes the image to Artifact Registry tagged with the commit SHA, reusing
    layers from the GitHub Actions cache.
-8. Runs `gcloud run deploy` with one instance at most, concurrency 80, 1 CPU, 512 MiB, a 3600 second timeout, CPU boost,
-   public access, the runtime account, `APP_ENV=prod`, `DB_PATH=/data/parlay.db`, `LITESTREAM_BUCKET`, `BASE_URL`, and
-   `GITHUB_REPO` (from the optional `ISSUES_REPO` variable, or the repo that runs the workflow). It mounts the five
-   required Secret Manager secrets, plus `GITHUB_TOKEN` when `github-token` has a version and `PREFILL_TOKEN` when
-   `prefill-token` has a version.
-9. Reads the service URL and retries once with `BASE_URL` set to that URL if the first revision could not boot. That is
-   the first-deploy path; later deploys get `BASE_URL` from the repo variable.
-10. Probes `GET /readyz` on the new revision (Google Frontend reserves `/healthz` on `*.run.app`), then writes the image
-    and URL to the job summary.
+9. Drains the service: sets manual scaling to zero, waits 15 seconds for the old Litestream process to finish its final
+   sync, then deploys. This prevents two Litestream processes from writing the same replica during the rollout.
+10. Runs `gcloud run deploy` with automatic scaling restored, one instance at most, concurrency 80, 1 CPU, 512 MiB, a
+    3600 second timeout, CPU boost, public access, the runtime account, `APP_ENV=prod`, `DB_PATH=/data/parlay.db`,
+    `LITESTREAM_BUCKET`, optional `LITESTREAM_REPLICA_URL`, `BASE_URL`, and `GITHUB_REPO` (from the optional
+    `ISSUES_REPO` variable, or the repo that runs the workflow). It mounts the five required Secret Manager secrets,
+    plus `GITHUB_TOKEN` when `github-token` has a version and `PREFILL_TOKEN` when `prefill-token` has a version.
+11. Reads the service URL and retries once with `BASE_URL` set to that URL if the first revision could not boot. That is
+    the first-deploy path; later deploys get `BASE_URL` from the repo variable.
+12. Probes `GET /readyz` on the new revision (Google Frontend reserves `/healthz` on `*.run.app`), then writes the image
+    and URL to the job summary. A failure after the drain sets scaling back to automatic.
 
 The image holds the server, the pinned Litestream binary, its config, the entrypoint, `seed/history.yaml`, and `web/`.
 The entrypoint restores the database, then runs the server under `litestream replicate`.
@@ -205,3 +216,6 @@ yourself under **Billing → Account management** if those mails never arrive.
 | History is missing after a deploy                    | No group existed at boot, or it is not the first group. Create the first group, deploy again.|
 | First boot logs `no matching backups found`          | The replica is empty. Normal. The revision starts a fresh database and replicates it.       |
 | A deploy lost writes                                 | It ran during a game window, probably forced. Prefer waiting, or `force` only when quiet.   |
+| Deploy fails at `Verify the live replica`             | The replica is corrupt. Follow [Database recovery](database-recovery.md) before deploying.  |
+| `database disk image is malformed (11)`               | The running revision restored a corrupt replica. Follow [Database recovery](database-recovery.md). |
+| Deploy fails after `Drain the old revision`           | Check the build and boot logs. The failure step sets scaling back to automatic.            |

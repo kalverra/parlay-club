@@ -39,4 +39,5 @@
 
 ## Runbook
 
+- [Database recovery](runbooks/database-recovery.md): Recover from a corrupt Litestream replica by finding the last good transaction, seeding a fresh replica, and repointing Cloud Run without losing user data.
 - [Deploy](runbooks/deploy.md): How a commit reaches Cloud Run, why deploys pause during game windows, how to force one, and how to verify, roll back, and read the spend.

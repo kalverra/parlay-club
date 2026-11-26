@@ -31,7 +31,8 @@ exits with status 1 when any value is invalid.
 | `PREFILL_TOKEN`        | empty                    | Bearer token for `POST /internal/prefill`. Optional in dev and prod; empty disables the endpoint (`404`). |
 | `LOG_LEVEL`            | `debug`                  | A zerolog level: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `panic`, `disabled`. `prod` defaults to `info`. |
 | `SUNDAY_SANDBOX`       | empty                    | `1` runs the offline Sunday sandbox. It fixes the database at `./data/sunday-sandbox.db` and ignores `DB_PATH`. Rejected in prod. |
-| `LITESTREAM_BUCKET`    | unset                    | Read by Litestream, not by the app.                                           |
+| `LITESTREAM_BUCKET`    | unset                    | Read by Litestream, not by the app. The entrypoint restores and replicates `gs://$LITESTREAM_BUCKET/parlay.db`. |
+| `LITESTREAM_REPLICA_URL` | unset                  | Read by Litestream, not by the app. Overrides the entrypoint's default replica URL. Point it at a fresh prefix after a recovery; see [Database recovery](../runbooks/database-recovery.md). |
 
 Dev falls back to `http://localhost:{PORT}` for `BASE_URL` and a fixed `SESSION_KEY`. It never invents Google values. In
 prod, a missing `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `BASE_URL`, or `SESSION_KEY` fails startup instead of

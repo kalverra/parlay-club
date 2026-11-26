@@ -66,6 +66,7 @@ jobs:
           DEPLOY_SA: ${{ vars.DEPLOY_SA }}
           RUNTIME_SA: ${{ vars.RUNTIME_SA }}
           LITESTREAM_BUCKET: ${{ vars.LITESTREAM_BUCKET }}
+          LITESTREAM_REPLICA_URL: ${{ vars.LITESTREAM_REPLICA_URL }}
           AR_REPO: ${{ vars.AR_REPO }}
           BASE_URL: ${{ vars.BASE_URL }}
         run: |
@@ -86,6 +87,13 @@ jobs:
           # be http or https with a host.
           if [ -n "${BASE_URL:-}" ] && ! [[ "$BASE_URL" =~ ^https?://[^/?#[:space:]]+ ]]; then
             echo "::error::BASE_URL must be an http or https URL with a host, got '$BASE_URL'"
+            exit 1
+          fi
+
+          # Optional. Empty means the entrypoint's default of
+          # gs://$LITESTREAM_BUCKET/parlay.db.
+          if [ -n "${LITESTREAM_REPLICA_URL:-}" ] && ! [[ "$LITESTREAM_REPLICA_URL" =~ ^(gs|file):// ]]; then
+            echo "::error::LITESTREAM_REPLICA_URL must start with gs:// or file://, got '$LITESTREAM_REPLICA_URL'"
             exit 1
           fi
 
@@ -142,6 +150,25 @@ jobs:
           fi
 
           echo "should_deploy=true" >> "$GITHUB_OUTPUT"
+
+      # A corrupted replica must never be handed to a fresh revision. Restore
+      # it here, before the old revision stops serving, and fail the deploy if
+      # SQLite's full integrity check rejects it.
+      - name: Verify the live replica
+        if: steps.runtime.outputs.should_deploy == 'true'
+        env:
+          BUCKET: ${{ vars.LITESTREAM_BUCKET }}
+          REPLICA_URL: ${{ vars.LITESTREAM_REPLICA_URL }}
+          LITESTREAM_VERSION: 0.5.18
+        run: |
+          set -euo pipefail
+
+          curl -fsSL \
+            "https://github.com/benbjohnson/litestream/releases/download/v${LITESTREAM_VERSION}/litestream-${LITESTREAM_VERSION}-linux-x86_64.tar.gz" \
+            | tar -xz -C "$RUNNER_TEMP" litestream
+          export LITESTREAM_BIN="$RUNNER_TEMP/litestream"
+
+          deploy/verify_replica.sh "${REPLICA_URL:-gs://$BUCKET/parlay.db}"
 
       # Cloud Run rejects a revision that points at a missing resource or an
       # empty secret, so check everything before spending minutes on a build.
@@ -272,6 +299,30 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      # Two Litestream processes writing one replica can corrupt it. Cloud Run
+      # starts the new revision before it stops the old one, so disable the
+      # service first and let the old instance finish its final sync.
+      - name: Drain the old revision
+        if: steps.runtime.outputs.should_deploy == 'true'
+        env:
+          PROJECT: ${{ vars.GCP_PROJECT }}
+          REGION: ${{ vars.GCP_REGION }}
+        run: |
+          set -euo pipefail
+
+          if ! gcloud run services describe "$SERVICE" \
+            --project "$PROJECT" --region "$REGION" >/dev/null 2>&1; then
+            echo "service does not exist yet; nothing to drain"
+            exit 0
+          fi
+
+          gcloud run services update "$SERVICE" \
+            --project "$PROJECT" --region "$REGION" \
+            --scaling=0
+          # Cloud Run gives an instance 10 seconds to stop. Wait for the old
+          # Litestream process to finish its final sync before starting one.
+          sleep 15
+
       - name: Deploy to Cloud Run
         if: steps.runtime.outputs.should_deploy == 'true'
         env:
@@ -279,6 +330,7 @@ jobs:
           REGION: ${{ vars.GCP_REGION }}
           RUNTIME_SA: ${{ vars.RUNTIME_SA }}
           BUCKET: ${{ vars.LITESTREAM_BUCKET }}
+          REPLICA_URL: ${{ vars.LITESTREAM_REPLICA_URL }}
           BASE_URL_VAR: ${{ vars.BASE_URL }}
           REPO: ${{ vars.ISSUES_REPO || github.repository }}
         run: |
@@ -295,6 +347,9 @@ jobs:
             local env_vars="APP_ENV=prod,DB_PATH=/data/parlay.db,LITESTREAM_BUCKET=$BUCKET,GITHUB_REPO=$REPO"
             if [ -n "$base_url" ]; then
               env_vars="$env_vars,BASE_URL=$base_url"
+            fi
+            if [ -n "${REPLICA_URL:-}" ]; then
+              env_vars="$env_vars,LITESTREAM_REPLICA_URL=$REPLICA_URL"
             fi
             local secrets="SESSION_KEY=session-key:latest,GOOGLE_CLIENT_ID=google-client-id:latest,GOOGLE_CLIENT_SECRET=google-client-secret:latest,ODDS_API_KEY=odds-api-key:latest,THE_ODDS_API_KEY=the-odds-api-key:latest"
             if [ "${MOUNT_GITHUB_TOKEN:-}" = "true" ]; then
@@ -314,6 +369,7 @@ jobs:
               --memory 512Mi \
               --timeout 3600 \
               --cpu-boost \
+              --scaling=auto \
               --allow-unauthenticated \
               --service-account "$RUNTIME_SA" \
               --update-env-vars "$env_vars" \
@@ -359,3 +415,15 @@ jobs:
           if [ -z "${BASE_URL_VAR:-}" ]; then
             echo "::notice::set the BASE_URL repo variable to $URL so future deploys pass it without a retry"
           fi
+
+      # The drain step stops the service. Never leave it disabled because a
+      # later build or deploy step failed.
+      - name: Re-enable the service after a failed deploy
+        if: failure()
+        env:
+          PROJECT: ${{ vars.GCP_PROJECT }}
+          REGION: ${{ vars.GCP_REGION }}
+        run: |
+          gcloud run services update "$SERVICE" \
+            --project "$PROJECT" --region "$REGION" \
+            --scaling=auto || true

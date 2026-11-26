@@ -104,6 +104,26 @@ gcloud storage buckets update "gs://$BUCKET" \
 	--clear-soft-delete \
 	--quiet
 
+# The nightly verified backups live under backups/, apart from the Litestream
+# LTX tree. Keep 30 days so a corrupt replica always has a recent clean copy.
+say "Setting a 30-day lifecycle on gs://$BUCKET/backups/"
+backup_lifecycle=$(mktemp)
+cat > "$backup_lifecycle" <<'JSON'
+{
+  "rule": [
+    {
+      "action": {"type": "Delete"},
+      "condition": {"age": 30, "matchesPrefix": ["backups/"]}
+    }
+  ]
+}
+JSON
+gcloud storage buckets update "gs://$BUCKET" \
+	--project="$PROJECT_ID" \
+	--lifecycle-file="$backup_lifecycle" \
+	--quiet
+rm -f "$backup_lifecycle"
+
 say "Creating the Artifact Registry repo $AR_REPO"
 if gcloud artifacts repositories describe "$AR_REPO" \
 	--project="$PROJECT_ID" --location="$REGION" >/dev/null 2>&1; then
@@ -194,12 +214,21 @@ for role in roles/run.admin roles/artifactregistry.writer roles/secretmanager.vi
 done
 
 # The pre-flight also describes the Litestream bucket, which needs bucket
-# metadata read on that bucket only.
+# metadata read on that bucket only. The deploy verifies the replica before it
+# builds, so the deployer reads replica objects, and the nightly backup job
+# writes verified copies under backups/.
 gcloud storage buckets add-iam-policy-binding "gs://$BUCKET" \
 	--project="$PROJECT_ID" \
 	--member="serviceAccount:$DEPLOY_SA" \
 	--role=roles/storage.bucketViewer \
 	--quiet
+for role in roles/storage.objectViewer roles/storage.objectCreator; do
+	gcloud storage buckets add-iam-policy-binding "gs://$BUCKET" \
+		--project="$PROJECT_ID" \
+		--member="serviceAccount:$DEPLOY_SA" \
+		--role="$role" \
+		--quiet
+done
 
 gcloud iam service-accounts add-iam-policy-binding "$RUNTIME_SA" \
 	--project="$PROJECT_ID" \

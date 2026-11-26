@@ -58,6 +58,7 @@ rebuild answers an error and the next reset can try again. The normal `./data/pa
 litestream restore \
 	-if-db-not-exists \
 	-if-replica-exists \
+	-integrity-check full \
 	-config /etc/litestream.yml \
 	"$DB_PATH"
 
@@ -70,14 +71,16 @@ exec litestream replicate -config /etc/litestream.yml -exec /app/server
 - `-if-db-not-exists` keeps the file a warm instance already has, so a restart on the same instance does not restore
   over newer writes.
 - `-if-replica-exists` lets the first boot start with an empty replica and create the database fresh.
+- `-integrity-check full` runs `PRAGMA integrity_check` on the restored copy. A corrupt replica fails the boot, so Cloud
+  Run keeps the previous revision serving instead of moving traffic to a database that answers 500s.
 - `litestream replicate -exec` starts the server as a child and forwards signals to it. When the server exits,
   Litestream does a final sync before the container ends.
 
 The image runs as a non-root user and owns `/data`. It copies `seed/history.yaml` too, because the loader's default path
 is relative to `/app`. See [History file](../reference/history-file.md).
 
-`deploy/litestream.yml` is Litestream 0.5 syntax: it sets `sync-interval: 10s`, compaction `levels` (`5m`, `1h`, `24h`), and
-`snapshot` (`interval: 24h`, `retention: 24h`), alongside a `dbs` list with one `path` and its `replica.url`, both
+`deploy/litestream.yml` is Litestream 0.5 syntax: it sets `sync-interval: 10s`, compaction `levels` (`5m`, `1h`, `24h`),
+and `snapshot` (`interval: 24h`, `retention: 24h`), alongside a `dbs` list with one `path` and its `replica.url`, both
 expanded from the environment. The Dockerfile pins Litestream 0.5.18 in its own build stage and copies the binary into
 the runtime image, so the config and the binary always match.
 
@@ -91,22 +94,40 @@ durable on the instance disk before it reaches GCS.
 
 Compaction runs at `levels` of `5m`, `1h`, and `24h`, and `snapshot` keeps 24-hour snapshots (`interval: 24h`,
 `retention: 24h`) for point-in-time recovery without 30-second L1 rewrites. `deploy/setup.sh` clears GCS's default 7-day
-soft-delete policy on the replica bucket (`--clear-soft-delete`) so compacted and expired LTX segments are freed
-instead of retained for a week.
+soft-delete policy on the replica bucket (`--clear-soft-delete`) so compacted and expired LTX segments are freed instead
+of retained for a week.
 
 On SIGTERM the server ends open SSE streams, drains in-flight requests for up to 8 seconds (`http.Server.Shutdown`),
 then cancels and waits for background refreshes inside that same budget. `database.Close()` runs only after both drains,
 and then Litestream forwards the exit, syncs, and stops. Cloud Run allows 10 seconds, so the two seconds of slack are
 deliberate. Keep the server from needing more. See [Data refresh](data-refresh.md) for the refresh drain.
 
+## Verified backups
+
+Litestream 0.5 has known restore corruption bugs when a snapshot overlaps a checkpoint. The replica can report no errors
+and still restore a database that fails `PRAGMA integrity_check`. Three layers catch that:
+
+- The deploy workflow restores the live replica and runs a full integrity check before it builds or drains anything.
+- The entrypoint runs `-integrity-check full` on every restore, so a cold start fails instead of serving 500s.
+- A nightly workflow restores the latest replica, verifies it, and uploads the verified database to
+  `gs://$LITESTREAM_BUCKET/backups/parlay-YYYY-MM-DD.db`. The bucket keeps 30 days of them. A failed check opens an
+  issue.
+
+The backups are plain SQLite files, not LTX segments. See [Database recovery](../runbooks/database-recovery.md) for
+using one, or a specific transaction ID, to rebuild a replica.
+
 ## Two writers during a deploy
 
-A deploy starts the new instance before the old one stops. The new instance restores from the replica while the old one
-may still commit writes, so writes made in that gap can be lost. A startup lease does not fix this: Cloud Run waits for
-the new instance to be ready before stopping the old one, so a lease would block every deploy.
+A normal Cloud Run deploy starts the new instance before it stops the old one. Both run Litestream against the same
+replica for a few seconds, and Litestream explicitly forbids concurrent replicators. The new instance also restores
+while the old one may still commit writes, so writes in that gap can be lost.
 
-The mitigation is the deploy blackout. `deploy/blackout.sh` exits 1 inside the game windows, and the deploy workflow
-refuses to run unless it is forced. Outside those windows the app is quiet enough that the gap costs nothing.
+The deploy workflow now drains first: it sets the service to manual scaling with zero instances, waits 15 seconds for
+the old Litestream process to finish its final sync, then deploys and restores automatic scaling. That trades a short
+outage for one writer. The deploy blackout still keeps routine deploys out of the game windows, when the app is busiest.
+
+If a deploy fails after the drain, the workflow's last step sets scaling back to automatic so the service is not left
+disabled.
 
 ## Restoring locally
 
