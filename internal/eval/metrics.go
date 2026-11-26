@@ -2,15 +2,49 @@ package eval
 
 import (
 	"cmp"
+	"math"
 	"slices"
 
 	"github.com/kalverra/parlay-club/internal/analyzer"
 	"github.com/kalverra/parlay-club/internal/parlay"
 )
 
-const ungradedBand = "ungraded"
+const (
+	ungradedBand = "ungraded"
+
+	defaultReliabilityBins = 10
+	minBinSpreadRatio      = 0.80
+	minCalibProb           = 1e-6
+	maxCalibProb           = 1.0 - 1e-6
+)
 
 var bandOrder = []string{"A", "B", "C", "D", "F", ungradedBand}
+
+// ReliabilityBin holds predicted vs. empirical hit rate in one probability bucket.
+type ReliabilityBin struct {
+	BinLow       float64 `json:"bin_low"`
+	BinHigh      float64 `json:"bin_high"`
+	Count        int     `json:"count"`
+	MeanPredProb float64 `json:"mean_pred_prob"`
+	EmpiricalHit float64 `json:"empirical_hit"`
+}
+
+// CalibrationMetrics holds proper scoring rules, classwise ECE, reliability
+// bin spread, market baseline, and SGP copula-vs-independence comparisons.
+type CalibrationMetrics struct {
+	LogLoss           float64          `json:"log_loss"`
+	BrierScore        float64          `json:"brier_score"`
+	ClasswiseECE      float64          `json:"classwise_ece"`
+	PopulatedBins     int              `json:"populated_bins"`
+	TotalBins         int              `json:"total_bins"`
+	BinSpreadOK       bool             `json:"bin_spread_ok"` // >= 80% bins populated
+	MarketLogLoss     float64          `json:"market_log_loss,omitempty"`
+	MarketBrier       float64          `json:"market_brier,omitempty"`
+	SGPLogLoss        float64          `json:"sgp_log_loss,omitempty"`
+	NaiveIndepLogLoss float64          `json:"naive_indep_log_loss,omitempty"`
+	SGPCount          int              `json:"sgp_count,omitempty"`
+	Reliability       []ReliabilityBin `json:"reliability,omitempty"`
+}
 
 // BandStats holds calibration and return metrics for one grade band.
 type BandStats struct {
@@ -54,18 +88,19 @@ type WeekSummary struct {
 }
 
 // Report summarizes calibration, factor attribution, and monotonicity for one
-// rubric evaluated on a ReplayDataset.
+// rubric or GradingEngine evaluated on a ReplayDataset.
 type Report struct {
-	RubricName       string        `json:"rubric_name"`
-	Coverage         DataCoverage  `json:"coverage"`
-	LegBands         []BandStats   `json:"leg_bands"`
-	SlipBands        []BandStats   `json:"slip_bands"`
-	Weekly           []WeekSummary `json:"weekly"`
-	Factors          []FactorStats `json:"factors"`
-	SlipFactors      []FactorStats `json:"slip_factors,omitempty"`
-	LegMonotonic     bool          `json:"leg_monotonic"`
-	LegMonotonicWin  bool          `json:"leg_monotonic_win"`
-	LegMonotonicLift bool          `json:"leg_monotonic_lift"`
+	RubricName       string             `json:"rubric_name"`
+	Coverage         DataCoverage       `json:"coverage"`
+	Calibration      CalibrationMetrics `json:"calibration"`
+	LegBands         []BandStats        `json:"leg_bands"`
+	SlipBands        []BandStats        `json:"slip_bands"`
+	Weekly           []WeekSummary      `json:"weekly"`
+	Factors          []FactorStats      `json:"factors"`
+	SlipFactors      []FactorStats      `json:"slip_factors,omitempty"`
+	LegMonotonic     bool               `json:"leg_monotonic"`
+	LegMonotonicWin  bool               `json:"leg_monotonic_win"`
+	LegMonotonicLift bool               `json:"leg_monotonic_lift"`
 	legOutcomes      []legOutcome
 }
 
@@ -288,6 +323,9 @@ func recordFactors(
 		if !ok {
 			label := labels[f.Rule]
 			if label == "" {
+				label = f.Label
+			}
+			if label == "" {
 				label = f.Rule
 			}
 			fa = &factorAccum{rule: f.Rule, label: label}
@@ -314,15 +352,71 @@ func finalizeFactorStats(acc map[string]*factorAccum) []FactorStats {
 	return out
 }
 
+type rubricEngine struct {
+	rubric analyzer.Rubric
+}
+
+func (e rubricEngine) Name() string {
+	return e.rubric.Name
+}
+
+func (e rubricEngine) ScoreLeg(
+	leg analyzer.Leg,
+	games map[string]analyzer.Game,
+	stats map[string]analyzer.PlayerStats,
+) analyzer.LegGrade {
+	return analyzer.ScoreLegWithRubric(leg, games, stats, e.rubric)
+}
+
+func (e rubricEngine) EvaluateSlip(
+	legs []analyzer.Leg,
+	games map[string]analyzer.Game,
+	stats map[string]analyzer.PlayerStats,
+) analyzer.SlipEvaluation {
+	return analyzer.EvaluateSlipWithRubric(legs, games, stats, e.rubric)
+}
+
 // Evaluate scores every slip and leg in dataset under rubric and returns leg
 // and slip calibration by band, weekly progression, lift over implied odds,
 // flat ROI, per-factor attribution, and monotonicity checks.
 func Evaluate(dataset ReplayDataset, rubric analyzer.Rubric) Report {
+	return evaluateWithEngine(dataset, rubricEngine{rubric: rubric}, rubricFactorLabels(rubric))
+}
+
+// EvaluateEngine scores every slip and leg in dataset under engine and returns
+// band calibration, proper scoring CalibrationMetrics, weekly progression,
+// factor attribution, and monotonicity checks.
+func EvaluateEngine(dataset ReplayDataset, engine analyzer.GradingEngine) Report {
+	if engine == nil {
+		engine = resolveDefaultEngine()
+	}
+	return evaluateWithEngine(dataset, engine, rubricFactorLabels(analyzer.ActiveRubric))
+}
+
+func resolveDefaultEngine() analyzer.GradingEngine {
+	if analyzer.ActiveEngine != nil {
+		return analyzer.ActiveEngine
+	}
+	return analyzer.EngineV1
+}
+
+func activeEngineName() string {
+	if analyzer.ActiveEngine != nil {
+		return analyzer.ActiveEngine.Name()
+	}
+	return analyzer.ActiveRubric.Name
+}
+
+func evaluateWithEngine(
+	dataset ReplayDataset,
+	engine analyzer.GradingEngine,
+	factorLabels map[string]string,
+) Report {
 	legBands := newBandAccumMap()
 	slipBands := newBandAccumMap()
 	factors := make(map[string]*factorAccum)
 	slipFactors := make(map[string]*factorAccum)
-	factorLabels := rubricFactorLabels(rubric)
+	var calib calibAccum
 	var outcomes []legOutcome
 	weekly := make([]WeekSummary, 0, len(dataset.Weeks))
 
@@ -337,6 +431,7 @@ func Evaluate(dataset ReplayDataset, rubric analyzer.Rubric) Report {
 			legBands[band].add(rl.Result, dec)
 			weekLegBands[band].add(rl.Result, dec)
 			weekOverallLegs.add(rl.Result, dec)
+			calib.addLeg(rl, lg, week.Games)
 
 			decided := rl.Result == parlay.Won || rl.Result == parlay.Lost
 			outcomes = append(outcomes, legOutcome{
@@ -363,11 +458,12 @@ func Evaluate(dataset ReplayDataset, rubric analyzer.Rubric) Report {
 				analyzerLegs[i] = rl.Leg
 			}
 
-			slipGrade := analyzer.ScoreSlipWithRubric(analyzerLegs, week.Games, week.Stats, rubric)
+			slipGrade := engine.EvaluateSlip(analyzerLegs, week.Games, week.Stats).Grade
 			slipBand := normalizeBand(slipGrade.Letter)
 			slipDec := slipDecimalOdds(slip)
 			slipBands[slipBand].add(slip.Result, slipDec)
 			weekSlipBands[slipBand].add(slip.Result, slipDec)
+			calib.addSlip(slip, slipGrade)
 			if slip.Result == parlay.Won || slip.Result == parlay.Lost {
 				recordFactors(slipFactors, factorLabels, slipGrade.Factors, slip.Result, slipDec)
 			}
@@ -388,7 +484,7 @@ func Evaluate(dataset ReplayDataset, rubric analyzer.Rubric) Report {
 			if !isSettledResult(rl.Result) {
 				continue
 			}
-			lg := analyzer.ScoreLegWithRubric(rl.Leg, week.Games, week.Stats, rubric)
+			lg := engine.ScoreLeg(rl.Leg, week.Games, week.Stats)
 			recordLeg(rl, lg, 0, i, true)
 		}
 
@@ -421,8 +517,9 @@ func Evaluate(dataset ReplayDataset, rubric analyzer.Rubric) Report {
 	monoWin, monoLift := checkMonotonicity(legBandStats)
 
 	return Report{
-		RubricName:       rubric.Name,
+		RubricName:       engine.Name(),
 		Coverage:         dataset.Coverage,
+		Calibration:      calib.metrics(),
 		LegBands:         legBandStats,
 		SlipBands:        slipBandStats,
 		Weekly:           weekly,
@@ -442,6 +539,23 @@ func EvaluateAll(dataset ReplayDataset, rubrics []analyzer.Rubric) SuiteReport {
 	for _, r := range rubrics {
 		reports = append(reports, Evaluate(dataset, r))
 	}
+	return buildSuiteReport(analyzer.ActiveRubric.Name, dataset.Coverage, reports)
+}
+
+// EvaluateAllEngines evaluates every GradingEngine in engines side-by-side
+// against dataset and compares each subsequent engine against the first.
+func EvaluateAllEngines(dataset ReplayDataset, engines []analyzer.GradingEngine) SuiteReport {
+	reports := make([]Report, 0, len(engines))
+	for _, e := range engines {
+		if e == nil {
+			continue
+		}
+		reports = append(reports, EvaluateEngine(dataset, e))
+	}
+	return buildSuiteReport(activeEngineName(), dataset.Coverage, reports)
+}
+
+func buildSuiteReport(activeName string, cov DataCoverage, reports []Report) SuiteReport {
 	diffs := make([]DiffReport, 0)
 	if len(reports) > 1 {
 		diffs = make([]DiffReport, 0, len(reports)-1)
@@ -450,8 +564,8 @@ func EvaluateAll(dataset ReplayDataset, rubrics []analyzer.Rubric) SuiteReport {
 		}
 	}
 	return SuiteReport{
-		ActiveRubric: analyzer.ActiveRubric.Name,
-		Coverage:     dataset.Coverage,
+		ActiveRubric: activeName,
+		Coverage:     cov,
 		Reports:      reports,
 		Diffs:        diffs,
 	}
@@ -469,6 +583,17 @@ func weekTypeRank(weekType string) int {
 func CompareRubrics(dataset ReplayDataset, baseline, candidate analyzer.Rubric) (Report, Report, DiffReport) {
 	baseReport := Evaluate(dataset, baseline)
 	candReport := Evaluate(dataset, candidate)
+	return baseReport, candReport, Compare(baseReport, candReport)
+}
+
+// CompareEngines evaluates baseline and candidate GradingEngines against
+// dataset and returns both reports along with their DiffReport.
+func CompareEngines(
+	dataset ReplayDataset,
+	baseline, candidate analyzer.GradingEngine,
+) (Report, Report, DiffReport) {
+	baseReport := EvaluateEngine(dataset, baseline)
+	candReport := EvaluateEngine(dataset, candidate)
 	return baseReport, candReport, Compare(baseReport, candReport)
 }
 
@@ -656,4 +781,197 @@ func computeMigrations(base, cand []legOutcome) []MigrationCell {
 		}
 	}
 	return out
+}
+
+type calibAccum struct {
+	modelCount  int
+	modelLLSum  float64
+	modelBrier  float64
+	binCounts   [defaultReliabilityBins]int
+	binPredSum  [defaultReliabilityBins]float64
+	binHitSum   [defaultReliabilityBins]float64
+	marketCount int
+	marketLLSum float64
+	marketBrier float64
+	sgpCount    int
+	sgpLLSum    float64
+	naiveLLSum  float64
+}
+
+func (a *calibAccum) addLeg(rl ReplayedLeg, lg analyzer.LegGrade, games map[string]analyzer.Game) {
+	if rl.Result != parlay.Won && rl.Result != parlay.Lost {
+		return
+	}
+	outcome := 0.0
+	if rl.Result == parlay.Won {
+		outcome = 1.0
+	}
+
+	if lg.CalibratedProb > 0 && lg.CalibratedProb < 1 {
+		p := clampCalibProb(lg.CalibratedProb)
+		a.modelCount++
+		a.modelLLSum += binaryLogLossSample(p, outcome)
+		diff := p - outcome
+		a.modelBrier += diff * diff
+		idx := reliabilityBinIndex(p, defaultReliabilityBins)
+		a.binCounts[idx]++
+		a.binPredSum[idx] += p
+		a.binHitSum[idx] += outcome
+	}
+
+	if lg.Letter != "" {
+		if mp := resolveMarketBaselineProb(rl, lg, games); mp > 0 && mp < 1 {
+			p := clampCalibProb(mp)
+			a.marketCount++
+			a.marketLLSum += binaryLogLossSample(p, outcome)
+			diff := p - outcome
+			a.marketBrier += diff * diff
+		}
+	}
+}
+
+func (a *calibAccum) addSlip(slip ReplayedSlip, sg analyzer.SlipGrade) {
+	if slip.Result != parlay.Won && slip.Result != parlay.Lost {
+		return
+	}
+	if !(sg.CalibratedProb > 0 && sg.CalibratedProb < 1) {
+		return
+	}
+	if !isSameGameParlay(slip.Legs, sg.LegGrades) {
+		return
+	}
+
+	indepProb := 1.0
+	gradedCount := 0
+	for _, lg := range sg.LegGrades {
+		if lg.Letter == "" {
+			continue
+		}
+		if !(lg.CalibratedProb > 0 && lg.CalibratedProb < 1) {
+			return
+		}
+		indepProb *= lg.CalibratedProb
+		gradedCount++
+	}
+	if gradedCount < 2 {
+		return
+	}
+
+	outcome := 0.0
+	if slip.Result == parlay.Won {
+		outcome = 1.0
+	}
+	jointP := clampCalibProb(sg.CalibratedProb)
+	indepP := clampCalibProb(indepProb)
+	a.sgpCount++
+	a.sgpLLSum += binaryLogLossSample(jointP, outcome)
+	a.naiveLLSum += binaryLogLossSample(indepP, outcome)
+}
+
+func (a *calibAccum) metrics() CalibrationMetrics {
+	m := CalibrationMetrics{
+		TotalBins: defaultReliabilityBins,
+	}
+	if a.modelCount > 0 {
+		n := float64(a.modelCount)
+		m.LogLoss = a.modelLLSum / n
+		m.BrierScore = a.modelBrier / n
+
+		bins := make([]ReliabilityBin, defaultReliabilityBins)
+		populated := 0
+		ece := 0.0
+		for i := range defaultReliabilityBins {
+			lo := float64(i) / float64(defaultReliabilityBins)
+			hi := float64(i+1) / float64(defaultReliabilityBins)
+			cnt := a.binCounts[i]
+			var meanPred, empHit float64
+			if cnt > 0 {
+				populated++
+				meanPred = a.binPredSum[i] / float64(cnt)
+				empHit = a.binHitSum[i] / float64(cnt)
+				// Matches ml/distributions.py reliability_summary (2-class symmetric ECE).
+				ece += (float64(cnt) / n) * math.Abs(meanPred-empHit)
+			}
+			bins[i] = ReliabilityBin{
+				BinLow:       lo,
+				BinHigh:      hi,
+				Count:        cnt,
+				MeanPredProb: meanPred,
+				EmpiricalHit: empHit,
+			}
+		}
+		m.ClasswiseECE = ece
+		m.PopulatedBins = populated
+		m.BinSpreadOK = populated >= int(math.Ceil(minBinSpreadRatio*float64(defaultReliabilityBins)))
+		m.Reliability = bins
+	}
+	if a.marketCount > 0 {
+		n := float64(a.marketCount)
+		m.MarketLogLoss = a.marketLLSum / n
+		m.MarketBrier = a.marketBrier / n
+	}
+	if a.sgpCount > 0 {
+		n := float64(a.sgpCount)
+		m.SGPLogLoss = a.sgpLLSum / n
+		m.NaiveIndepLogLoss = a.naiveLLSum / n
+		m.SGPCount = a.sgpCount
+	}
+	return m
+}
+
+func isSameGameParlay(legs []ReplayedLeg, grades []analyzer.LegGrade) bool {
+	countsByGame := make(map[string]int, len(legs))
+	for i, rl := range legs {
+		if i >= len(grades) || grades[i].Letter == "" || rl.Leg.GameID == "" {
+			continue
+		}
+		countsByGame[rl.Leg.GameID]++
+		if countsByGame[rl.Leg.GameID] >= 2 {
+			return true
+		}
+	}
+	return false
+}
+
+func resolveMarketBaselineProb(rl ReplayedLeg, lg analyzer.LegGrade, games map[string]analyzer.Game) float64 {
+	if lg.MarketProb > 0 && lg.MarketProb < 1 {
+		return lg.MarketProb
+	}
+	if rl.Leg.GameID != "" {
+		if g, ok := games[rl.Leg.GameID]; ok {
+			if p, ok := analyzer.SharpMarketProb(g, rl.Leg); ok {
+				return p
+			}
+		}
+	}
+	if dec := legDecimalOdds(rl); dec > 1 {
+		return 1.0 / dec
+	}
+	return 0
+}
+
+func binaryLogLossSample(p, outcome float64) float64 {
+	return -(outcome*math.Log(p) + (1.0-outcome)*math.Log1p(-p))
+}
+
+func clampCalibProb(p float64) float64 {
+	if math.IsNaN(p) {
+		return 0.5
+	}
+	if p < minCalibProb {
+		return minCalibProb
+	}
+	if p > maxCalibProb {
+		return maxCalibProb
+	}
+	return p
+}
+
+func reliabilityBinIndex(p float64, nBins int) int {
+	for i := range nBins - 1 {
+		if p < float64(i+1)/float64(nBins) {
+			return i
+		}
+	}
+	return nBins - 1
 }

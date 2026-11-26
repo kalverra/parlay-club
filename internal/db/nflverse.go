@@ -63,6 +63,15 @@ type NFLversePlayerWeek struct {
 	KickerPts     int
 	TotalEPA      float64
 	RZOpps        int
+	ExpPassYds    float64
+	ExpRushYds    float64
+	ExpRecYds     float64
+	ExpReceptions float64
+	ExpPassTDs    float64
+	ExpRushTDs    float64
+	ExpRecTDs     float64
+	CarryShare    float64
+	CPOE          float64
 	UpdatedAt     time.Time
 }
 
@@ -75,7 +84,9 @@ const nflversePlayerWeekColumns = `
 	espn_id, season, season_type, week_num, team, opponent, player_name,
 	position, offense_snaps, offense_pct, target_share, air_yards_share, wopr,
 	pass_att, pass_yds, pass_tds, carries, rush_yds, rush_tds, targets,
-	receptions, rec_yds, rec_tds, kicker_pts, total_epa, rz_opps, updated_at`
+	receptions, rec_yds, rec_tds, kicker_pts, total_epa, rz_opps,
+	exp_pass_yds, exp_rush_yds, exp_rec_yds, exp_receptions,
+	exp_pass_tds, exp_rush_tds, exp_rec_tds, carry_share, cpoe, updated_at`
 
 // UpsertNFLversePlayerIDs writes each player crosswalk row and reports whether
 // any row changed. Identical rows keep their existing updated_at.
@@ -318,8 +329,10 @@ func (s *Store) UpsertNFLversePlayerWeeks(ctx context.Context, rows []NFLversePl
 				target_share, air_yards_share, wopr, pass_att, pass_yds,
 				pass_tds, carries, rush_yds, rush_tds, targets,
 				receptions, rec_yds, rec_tds, kicker_pts, total_epa,
-				rz_opps, updated_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				rz_opps, exp_pass_yds, exp_rush_yds, exp_rec_yds,
+				exp_receptions, exp_pass_tds, exp_rush_tds, exp_rec_tds,
+				carry_share, cpoe, updated_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT (espn_id, season, season_type, week_num) DO UPDATE SET
 				team = excluded.team,
 				opponent = excluded.opponent,
@@ -343,6 +356,15 @@ func (s *Store) UpsertNFLversePlayerWeeks(ctx context.Context, rows []NFLversePl
 				kicker_pts = excluded.kicker_pts,
 				total_epa = excluded.total_epa,
 				rz_opps = excluded.rz_opps,
+				exp_pass_yds = excluded.exp_pass_yds,
+				exp_rush_yds = excluded.exp_rush_yds,
+				exp_rec_yds = excluded.exp_rec_yds,
+				exp_receptions = excluded.exp_receptions,
+				exp_pass_tds = excluded.exp_pass_tds,
+				exp_rush_tds = excluded.exp_rush_tds,
+				exp_rec_tds = excluded.exp_rec_tds,
+				carry_share = excluded.carry_share,
+				cpoe = excluded.cpoe,
 				updated_at = excluded.updated_at
 			WHERE nflverse_player_weeks.team IS NOT excluded.team
 				OR nflverse_player_weeks.opponent IS NOT excluded.opponent
@@ -365,7 +387,16 @@ func (s *Store) UpsertNFLversePlayerWeeks(ctx context.Context, rows []NFLversePl
 				OR nflverse_player_weeks.rec_tds IS NOT excluded.rec_tds
 				OR nflverse_player_weeks.kicker_pts IS NOT excluded.kicker_pts
 				OR nflverse_player_weeks.total_epa IS NOT excluded.total_epa
-				OR nflverse_player_weeks.rz_opps IS NOT excluded.rz_opps`)
+				OR nflverse_player_weeks.rz_opps IS NOT excluded.rz_opps
+				OR nflverse_player_weeks.exp_pass_yds IS NOT excluded.exp_pass_yds
+				OR nflverse_player_weeks.exp_rush_yds IS NOT excluded.exp_rush_yds
+				OR nflverse_player_weeks.exp_rec_yds IS NOT excluded.exp_rec_yds
+				OR nflverse_player_weeks.exp_receptions IS NOT excluded.exp_receptions
+				OR nflverse_player_weeks.exp_pass_tds IS NOT excluded.exp_pass_tds
+				OR nflverse_player_weeks.exp_rush_tds IS NOT excluded.exp_rush_tds
+				OR nflverse_player_weeks.exp_rec_tds IS NOT excluded.exp_rec_tds
+				OR nflverse_player_weeks.carry_share IS NOT excluded.carry_share
+				OR nflverse_player_weeks.cpoe IS NOT excluded.cpoe`)
 		if err != nil {
 			return fmt.Errorf("prepare upsert nflverse player weeks: %w", err)
 		}
@@ -399,6 +430,15 @@ func (s *Store) UpsertNFLversePlayerWeeks(ctx context.Context, rows []NFLversePl
 				row.KickerPts,
 				row.TotalEPA,
 				row.RZOpps,
+				row.ExpPassYds,
+				row.ExpRushYds,
+				row.ExpRecYds,
+				row.ExpReceptions,
+				row.ExpPassTDs,
+				row.ExpRushTDs,
+				row.ExpRecTDs,
+				row.CarryShare,
+				row.CPOE,
 				formatTimestamp(row.UpdatedAt),
 			)
 			if err != nil {
@@ -537,12 +577,31 @@ func (s *Store) NFLversePlayerWeeksForSeason(
 	ctx context.Context,
 	season, seasonType int,
 ) ([]NFLversePlayerWeek, error) {
+	return s.NFLversePlayerWeeksForSeasonTypes(ctx, season, seasonType)
+}
+
+// NFLversePlayerWeeksForSeasonTypes returns all stored player-week rows for a
+// season across the given season types, ordered most recent season type and
+// week first, then ESPN ID.
+func (s *Store) NFLversePlayerWeeksForSeasonTypes(
+	ctx context.Context,
+	season int,
+	seasonTypes ...int,
+) ([]NFLversePlayerWeek, error) {
+	if len(seasonTypes) == 0 {
+		return nil, nil
+	}
+	placeholders, typeArgs := seasonTypePlaceholders(seasonTypes)
+	args := make([]any, 0, 1+len(typeArgs))
+	args = append(args, season)
+	args = append(args, typeArgs...)
+
 	rows, err := s.readConn().QueryContext(ctx, "SELECT"+nflversePlayerWeekColumns+`
 		FROM nflverse_player_weeks
-		WHERE season = ? AND season_type = ?
-		ORDER BY week_num DESC, espn_id ASC`, season, seasonType)
+		WHERE season = ? AND season_type IN (`+placeholders+`)
+		ORDER BY season_type DESC, week_num DESC, espn_id ASC`, args...)
 	if err != nil {
-		return nil, fmt.Errorf("nflverse player weeks %d/%d: %w", season, seasonType, err)
+		return nil, fmt.Errorf("nflverse player weeks %d/%v: %w", season, seasonTypes, err)
 	}
 	defer func() { _ = rows.Close() }()
 	return scanNFLversePlayerWeeks(rows)
@@ -671,6 +730,15 @@ func scanNFLversePlayerWeeks(rows *sql.Rows) ([]NFLversePlayerWeek, error) {
 			&item.KickerPts,
 			&item.TotalEPA,
 			&item.RZOpps,
+			&item.ExpPassYds,
+			&item.ExpRushYds,
+			&item.ExpRecYds,
+			&item.ExpReceptions,
+			&item.ExpPassTDs,
+			&item.ExpRushTDs,
+			&item.ExpRecTDs,
+			&item.CarryShare,
+			&item.CPOE,
 			&updatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan nflverse player week: %w", err)

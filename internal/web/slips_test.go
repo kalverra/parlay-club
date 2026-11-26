@@ -1705,8 +1705,125 @@ func seedAGradeBoardForHubTest(t *testing.T, fixture *slipFixture, game db.Game)
 		StatsJSON:   `{"RUSH_YDS":[85.0, 90.0, 95.0, 100.0, 88.0]}`,
 		UpdatedAt:   now,
 	}))
+	require.NoError(t, fixture.store.RecordSync(t.Context(), "nflverse:season:2026", now, nil))
+	var nflRows []db.NFLversePlayerWeek
+	for w := 1; w <= 5; w++ {
+		nflRows = append(nflRows,
+			db.NFLversePlayerWeek{
+				ESPNID: "p-allen", Season: 2026, SeasonType: 2, WeekNum: w,
+				Team: "BUF", Opponent: "MIA", PlayerName: "Josh Allen", Position: "QB",
+				PassAtt: 34, PassYds: 295, PassTDs: 2, ExpPassYds: 285, OffensePct: 0.98, TotalEPA: 9.0,
+				UpdatedAt: now,
+			},
+			db.NFLversePlayerWeek{
+				ESPNID: "p-cook", Season: 2026, SeasonType: 2, WeekNum: w,
+				Team: "BUF", Opponent: "MIA", PlayerName: "James Cook", Position: "RB",
+				Carries: 18, RushYds: 92, RushTDs: 1, CarryShare: 0.68, ExpRushYds: 86, OffensePct: 0.72, TotalEPA: 3.5,
+				UpdatedAt: now,
+			},
+		)
+	}
+	_, err := fixture.store.UpsertNFLversePlayerWeeks(t.Context(), nflRows)
+	require.NoError(t, err)
 
-	_, err := fixture.store.UpsertOdds(t.Context(), []db.Odds{
+	existingOdds, err := fixture.store.OddsForGame(t.Context(), game.ID)
+	require.NoError(t, err)
+	hasGameLines := false
+	for _, row := range existingOdds {
+		if !db.IsPropRow(row) {
+			hasGameLines = true
+			break
+		}
+	}
+
+	var oddsRows []db.Odds
+	if !hasGameLines {
+		oddsRows = append(oddsRows,
+			db.Odds{
+				GameID:     game.ID,
+				Book:       "pinnacle",
+				MarketType: "SPREAD",
+				Team:       "BUF",
+				Side:       "TEAM",
+				Line:       new(-4.5),
+				Price:      -110,
+				FetchedAt:  now,
+			},
+			db.Odds{
+				GameID:     game.ID,
+				Book:       "pinnacle",
+				MarketType: "SPREAD",
+				Team:       "MIA",
+				Side:       "TEAM",
+				Line:       new(4.5),
+				Price:      -110,
+				FetchedAt:  now,
+			},
+			db.Odds{
+				GameID:     game.ID,
+				Book:       "pinnacle",
+				MarketType: "TOTAL",
+				Side:       "OVER",
+				Line:       new(49.5),
+				Price:      -110,
+				FetchedAt:  now,
+			},
+			db.Odds{
+				GameID:     game.ID,
+				Book:       "pinnacle",
+				MarketType: "TOTAL",
+				Side:       "UNDER",
+				Line:       new(49.5),
+				Price:      -110,
+				FetchedAt:  now,
+			},
+		)
+	}
+	oddsRows = append(oddsRows, []db.Odds{
+		{
+			GameID:     game.ID,
+			Book:       "pinnacle",
+			MarketType: "PASS_YDS",
+			Team:       "BUF",
+			PlayerName: "Josh Allen",
+			Side:       "OVER",
+			Line:       new(245.5),
+			Price:      -155,
+			FetchedAt:  now,
+		},
+		{
+			GameID:     game.ID,
+			Book:       "pinnacle",
+			MarketType: "PASS_YDS",
+			Team:       "BUF",
+			PlayerName: "Josh Allen",
+			Side:       "UNDER",
+			Line:       new(245.5),
+			Price:      125,
+			FetchedAt:  now,
+		},
+		{
+			GameID:     game.ID,
+			Book:       "pinnacle",
+			MarketType: "RUSH_YDS",
+			Team:       "BUF",
+			PlayerName: "James Cook",
+			Side:       "OVER",
+			Line:       new(65.5),
+			Price:      -155,
+			FetchedAt:  now,
+		},
+		{
+			GameID:     game.ID,
+			Book:       "pinnacle",
+			MarketType: "RUSH_YDS",
+			Team:       "BUF",
+			PlayerName: "James Cook",
+			Side:       "UNDER",
+			Line:       new(65.5),
+			Price:      125,
+			FetchedAt:  now,
+		},
 		{
 			GameID:     game.ID,
 			Book:       "draftkings",
@@ -1751,7 +1868,8 @@ func seedAGradeBoardForHubTest(t *testing.T, fixture *slipFixture, game db.Game)
 			Price:      -115,
 			FetchedAt:  now,
 		},
-	})
+	}...)
+	_, err = fixture.store.UpsertOdds(t.Context(), oddsRows)
 	require.NoError(t, err)
 }
 
@@ -1924,10 +2042,10 @@ func TestSlipHubHighlightsRenderImpliedChances(t *testing.T) {
 	body := rec.Body.String()
 	assert.Contains(t, body, "data-highlight-leg")
 	assert.Contains(t, body, "data-highlight-parlay")
-	// Single-leg highlights and combo leg items are -105 -> (51%).
-	assert.Contains(t, body, "(51%)")
-	// 2-leg combo of -105 and -105 is +281 -> (26%).
-	assert.Contains(t, body, "(26%)")
+	// Single-leg highlights and combo leg items average Pinnacle (-155) and DraftKings (-105) -> -125 (56%).
+	assert.Contains(t, body, "(56%)")
+	// 2-leg combo of -125 and -125 is +224 -> (31%).
+	assert.Contains(t, body, "(31%)")
 }
 
 func TestSlipHubLiveProgressStates(t *testing.T) {

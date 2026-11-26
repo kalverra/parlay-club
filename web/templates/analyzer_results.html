@@ -11,7 +11,7 @@
       <div class="space-y-1">
         <h1 class="text-xl font-semibold">Grading Results</h1>
         <p class="text-sm text-page-muted">
-          {{.ScopeLabel}} &middot; {{.SeasonLabel}}
+          {{.ScopeLabel}} &middot; {{.SeasonLabel}}{{if .SelectedEngine}} &middot; Engine {{.SelectedEngine}}{{end}}
         </p>
       </div>
       <a
@@ -48,10 +48,10 @@
       </div>
     {{end}}
 
-    {{if gt (len .Rubrics) 1}}
-      <div class="flex flex-wrap items-center gap-2 text-xs">
-        <span class="text-page-muted">Rubric:</span>
-        {{range .Rubrics}}
+    {{if gt (len .Engines) 1}}
+      <div class="flex flex-wrap items-center gap-2 text-xs" role="group" aria-label="Grading engine">
+        <span class="text-page-muted">Engine:</span>
+        {{range .Engines}}
           <a
             href="{{.URL}}"
             class="rounded-full border px-2.5 py-0.5 font-medium {{if .Current}}border-positive bg-positive-soft text-positive-ink{{else}}border-line-strong bg-surface text-ink hover:bg-surface-2{{end}}"
@@ -72,6 +72,169 @@
       {{end}}
     </p>
   {{else}}
+    <section class="ui-card space-y-4 p-4">
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <h2 class="text-base font-semibold text-ink">Probability Calibration ({{.SelectedEngine}})</h2>
+        {{if .Calibration.HasModelProbs}}
+          <span class="rounded-full border px-2.5 py-0.5 text-xs font-medium {{if .Calibration.BinSpreadOK}}border-positive bg-positive-soft text-positive-ink{{else}}border-line-strong bg-surface-2 text-ink-muted{{end}}">
+            Bin spread {{.Calibration.BinSpread}} {{if .Calibration.BinSpreadOK}}(&ge;80%){{else}}(&lt;80%){{end}}
+          </span>
+        {{else}}
+          <span class="rounded-full border border-line-strong bg-surface-2 px-2.5 py-0.5 text-xs font-medium text-ink-muted">
+            A&ndash;F points only
+          </span>
+        {{end}}
+      </div>
+
+      <div class="grid grid-cols-2 gap-2 text-xs sm:grid-cols-3">
+        <div class="rounded-lg border border-line bg-surface-2 p-3">
+          <p class="text-ink-muted">Log Loss</p>
+          <p class="mt-1 font-mono text-base font-semibold tabular-nums {{if .Calibration.BeatsMarketLL}}text-positive-ink{{else if .Calibration.TrailsMarketLL}}text-danger-ink{{else}}text-ink{{end}}">{{.Calibration.LogLoss}}</p>
+          <p class="mt-0.5 text-[11px] text-ink-subtle">
+            {{if and .Calibration.HasModelProbs .Calibration.HasMarket}}vs. Market {{.Calibration.MarketLogLoss}}{{else}}Lower is sharper{{end}}
+          </p>
+        </div>
+        <div class="rounded-lg border border-line bg-surface-2 p-3">
+          <p class="text-ink-muted">Brier Score</p>
+          <p class="mt-1 font-mono text-base font-semibold tabular-nums {{if .Calibration.BeatsMarketBrier}}text-positive-ink{{else if .Calibration.TrailsMarketBrier}}text-danger-ink{{else}}text-ink{{end}}">{{.Calibration.BrierScore}}</p>
+          <p class="mt-0.5 text-[11px] text-ink-subtle">
+            {{if and .Calibration.HasModelProbs .Calibration.HasMarket}}vs. Market {{.Calibration.MarketBrier}}{{else}}Mean squared error{{end}}
+          </p>
+        </div>
+        <div class="rounded-lg border border-line bg-surface-2 p-3">
+          <p class="text-ink-muted">Classwise ECE</p>
+          <p class="mt-1 font-mono text-base font-semibold tabular-nums text-ink">{{.Calibration.ClasswiseECE}}</p>
+          <p class="mt-0.5 text-[11px] text-ink-subtle">10-bin calibration gap</p>
+        </div>
+        <div class="rounded-lg border border-line bg-surface-2 p-3">
+          <p class="text-ink-muted">Bin Spread</p>
+          <p class="mt-1 font-mono text-base font-semibold tabular-nums {{if .Calibration.BinSpreadOK}}text-positive-ink{{else}}text-ink{{end}}">{{.Calibration.BinSpread}}</p>
+          <p class="mt-0.5 text-[11px] text-ink-subtle">{{if .Calibration.BinSpreadOK}}Meets &ge;80% target{{else}}Target &ge;80% bins{{end}}</p>
+        </div>
+        {{if .Calibration.HasMarket}}
+          <div class="rounded-lg border border-line bg-surface-2 p-3">
+            <p class="text-ink-muted">Market Log Loss</p>
+            <p class="mt-1 font-mono text-base font-semibold tabular-nums text-ink">{{.Calibration.MarketLogLoss}}</p>
+            <p class="mt-0.5 text-[11px] text-ink-subtle">De-vigged baseline</p>
+          </div>
+          <div class="rounded-lg border border-line bg-surface-2 p-3">
+            <p class="text-ink-muted">Market Brier</p>
+            <p class="mt-1 font-mono text-base font-semibold tabular-nums text-ink">{{.Calibration.MarketBrier}}</p>
+            <p class="mt-0.5 text-[11px] text-ink-subtle">De-vigged baseline</p>
+          </div>
+        {{end}}
+      </div>
+
+      {{if not .IsMarket}}
+        {{if .Calibration.HasSGP}}
+          <div class="rounded-lg border border-line bg-surface-2 p-3 space-y-2">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <h3 class="text-xs font-semibold uppercase tracking-wide text-ink-muted">SGP Correlation Lift</h3>
+              <span class="font-mono text-xs tabular-nums text-ink-muted">{{.Calibration.SGPLabel}}</span>
+            </div>
+            <div class="grid grid-cols-3 gap-2 text-xs">
+              <div>
+                <p class="text-ink-subtle">Copula LL</p>
+                <p class="mt-0.5 font-mono text-sm font-semibold tabular-nums text-ink">{{.Calibration.SGPLogLoss}}</p>
+              </div>
+              <div>
+                <p class="text-ink-subtle">Naive LL</p>
+                <p class="mt-0.5 font-mono text-sm font-semibold tabular-nums text-ink-muted">{{.Calibration.NaiveIndepLogLoss}}</p>
+              </div>
+              <div>
+                <p class="text-ink-subtle">Lift (LL &Delta;)</p>
+                <p class="mt-0.5 font-mono text-sm font-semibold tabular-nums {{if .Calibration.SGPLiftPositive}}text-positive-ink{{else if .Calibration.SGPLiftNegative}}text-danger-ink{{else}}text-ink{{end}}">{{.Calibration.SGPLift}}</p>
+              </div>
+            </div>
+            <p class="text-[11px] text-ink-muted">
+              {{if .Calibration.SGPLiftPositive}}
+                Copula joint probability beats naive leg multiplication on settled SGPs.
+              {{else if .Calibration.SGPLiftNegative}}
+                Naive independence leads copula log loss in this SGP sample.
+              {{else}}
+                Copula and naive independence match in this SGP sample.
+              {{end}}
+            </p>
+          </div>
+        {{else if not .Calibration.HasModelProbs}}
+          <p class="text-xs text-ink-muted">
+            Engine <code class="font-mono text-ink">{{.SelectedEngine}}</code> scores A&ndash;F bands without probability outputs. Switch to <code class="font-mono text-ink">v2</code> above to inspect calibrated log loss, reliability bins, and SGP copula lift.
+          </p>
+        {{else}}
+          <p class="text-xs text-ink-muted">
+            No settled same-game parlays yet for SGP correlation lift.
+          </p>
+        {{end}}
+      {{else if not .Calibration.HasModelProbs}}
+        <p class="text-xs text-ink-muted">
+          Engine <code class="font-mono text-ink">{{.SelectedEngine}}</code> scores A&ndash;F bands without probability outputs. Switch to <code class="font-mono text-ink">v2</code> above to inspect calibrated log loss and reliability bins.
+        </p>
+      {{end}}
+
+      {{if .Calibration.Reliability}}
+        <div class="space-y-2">
+          <h3 class="text-xs font-semibold uppercase tracking-wide text-ink-muted">Reliability Table (10% Bins)</h3>
+          <div class="divide-y divide-line rounded-lg border border-line bg-surface-2 sm:hidden">
+            {{range .Calibration.Reliability}}
+              <div class="px-3 py-2 text-xs">
+                {{if .Empty}}
+                  <div class="flex items-center justify-between gap-2 text-ink-subtle">
+                    <span class="font-mono">{{.Label}}</span>
+                    <span class="font-mono tabular-nums">{{.CountLabel}}</span>
+                  </div>
+                {{else}}
+                  <div class="space-y-1">
+                    <div class="flex items-center justify-between gap-2">
+                      <span class="font-mono font-semibold text-ink">{{.Label}}</span>
+                      <span class="font-mono tabular-nums text-ink-muted">{{.CountLabel}}</span>
+                    </div>
+                    <div class="grid grid-cols-3 gap-2">
+                      <div>
+                        <p class="text-[11px] text-ink-subtle">Pred</p>
+                        <p class="font-mono font-semibold tabular-nums text-ink">{{.MeanPred}}</p>
+                      </div>
+                      <div>
+                        <p class="text-[11px] text-ink-subtle">Actual</p>
+                        <p class="font-mono font-semibold tabular-nums text-ink">{{.Empirical}}</p>
+                      </div>
+                      <div>
+                        <p class="text-[11px] text-ink-subtle">Gap</p>
+                        <p class="font-mono font-semibold tabular-nums text-ink">{{.Gap}}</p>
+                      </div>
+                    </div>
+                  </div>
+                {{end}}
+              </div>
+            {{end}}
+          </div>
+
+          <div class="hidden sm:block overflow-x-auto rounded-lg border border-line bg-surface-2">
+            <table class="w-full text-left text-xs">
+              <thead class="border-b border-line text-ink-muted">
+                <tr>
+                  <th class="px-3 py-2">Bin</th>
+                  <th class="px-3 py-2 text-right">Legs</th>
+                  <th class="px-3 py-2 text-right">Mean Pred</th>
+                  <th class="px-3 py-2 text-right">Actual Hit</th>
+                  <th class="px-3 py-2 text-right">Gap</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-line">
+                {{range .Calibration.Reliability}}
+                  <tr class="{{if .Empty}}text-ink-subtle{{end}}">
+                    <td class="px-3 py-1.5 font-mono font-medium">{{.Label}}</td>
+                    <td class="px-3 py-1.5 text-right font-mono tabular-nums">{{.Count}}</td>
+                    <td class="px-3 py-1.5 text-right font-mono tabular-nums">{{.MeanPred}}</td>
+                    <td class="px-3 py-1.5 text-right font-mono font-semibold tabular-nums">{{.Empirical}}</td>
+                    <td class="px-3 py-1.5 text-right font-mono tabular-nums">{{.Gap}}</td>
+                  </tr>
+                {{end}}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      {{end}}
+    </section>
     <section class="ui-card space-y-3 p-4">
       <div class="flex flex-wrap items-center justify-between gap-2">
         <h2 class="text-base font-semibold text-ink">Leg Calibration (A&ndash;F)</h2>
@@ -208,11 +371,87 @@
     </section>
     {{end}}
 
-    <section class="ui-card space-y-3 p-4">
-      <h2 class="text-base font-semibold text-ink">Rubric Comparison</h2>
-      {{if not .ShowRubricDiffs}}
+    <section class="ui-card space-y-4 p-4">
+      <h2 class="text-base font-semibold text-ink">Engine Comparison</h2>
+      {{if gt (len .EngineComparisons) 1}}
+        <div class="space-y-2 sm:hidden">
+          {{range .EngineComparisons}}
+            <div class="rounded-lg border border-line bg-surface-2 p-3 space-y-2">
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <a href="{{.URL}}" class="text-xs font-semibold text-ink hover:underline">
+                  {{.Name}}{{if .Active}} (active){{end}}
+                </a>
+                <span class="rounded-full border px-2 py-0.5 text-[11px] font-medium {{if .Current}}border-positive bg-positive-soft text-positive-ink{{else}}border-line-strong bg-surface text-ink-muted{{end}}">
+                  {{if .Current}}Viewing{{else}}Compare{{end}}
+                </span>
+              </div>
+              <div class="grid grid-cols-3 gap-2 text-xs">
+                <div>
+                  <p class="text-ink-subtle">Log Loss</p>
+                  <p class="mt-0.5 font-mono font-semibold tabular-nums text-ink">{{.LogLoss}}</p>
+                </div>
+                <div>
+                  <p class="text-ink-subtle">Brier</p>
+                  <p class="mt-0.5 font-mono font-semibold tabular-nums text-ink">{{.BrierScore}}</p>
+                </div>
+                <div>
+                  <p class="text-ink-subtle">ECE</p>
+                  <p class="mt-0.5 font-mono font-semibold tabular-nums text-ink">{{.ClasswiseECE}}</p>
+                </div>
+              </div>
+              <div class="flex flex-wrap items-center justify-between gap-2 border-t border-line pt-2 text-[11px] text-ink-muted">
+                <span>Bins: <span class="font-mono text-ink tabular-nums">{{.BinSpread}}</span></span>
+                {{if and (not $.IsMarket) .HasSGP}}
+                  <span>SGP Lift: <span class="font-mono font-semibold tabular-nums {{if .SGPLiftPos}}text-positive-ink{{else if .SGPLiftNeg}}text-danger-ink{{else}}text-ink{{end}}">{{.SGPLift}}</span></span>
+                {{end}}
+                <span>Monotonic: <span class="font-mono text-ink">{{if .Monotonic}}Yes{{else}}No{{end}}</span></span>
+              </div>
+            </div>
+          {{end}}
+        </div>
+
+        <div class="hidden sm:block overflow-x-auto rounded-lg border border-line bg-surface-2">
+          <table class="w-full text-left text-xs">
+            <thead class="border-b border-line text-ink-muted">
+              <tr>
+                <th class="px-3 py-2">Engine</th>
+                <th class="px-3 py-2 text-right">Log Loss</th>
+                <th class="px-3 py-2 text-right">Brier</th>
+                <th class="px-3 py-2 text-right">ECE</th>
+                <th class="px-3 py-2 text-right">Bin Spread</th>
+                {{if not $.IsMarket}}
+                  <th class="px-3 py-2 text-right">SGP LL</th>
+                  <th class="px-3 py-2 text-right">SGP Lift</th>
+                {{end}}
+                <th class="px-3 py-2 text-right">Monotonic</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-line">
+              {{range .EngineComparisons}}
+                <tr>
+                  <td class="px-3 py-2 font-medium text-ink">
+                    <a href="{{.URL}}" class="hover:underline {{if .Current}}font-semibold{{end}}">{{.Name}}</a>
+                    {{if .Active}}<span class="ml-1 text-[11px] text-positive-ink">(active)</span>{{end}}
+                  </td>
+                  <td class="px-3 py-2 text-right font-mono font-semibold tabular-nums text-ink">{{.LogLoss}}</td>
+                  <td class="px-3 py-2 text-right font-mono tabular-nums text-ink">{{.BrierScore}}</td>
+                  <td class="px-3 py-2 text-right font-mono tabular-nums text-ink">{{.ClasswiseECE}}</td>
+                  <td class="px-3 py-2 text-right font-mono tabular-nums {{if .BinSpreadOK}}text-positive-ink{{else}}text-ink-muted{{end}}">{{.BinSpread}}</td>
+                  {{if not $.IsMarket}}
+                    <td class="px-3 py-2 text-right font-mono tabular-nums text-ink">{{.SGPLogLoss}}</td>
+                    <td class="px-3 py-2 text-right font-mono font-semibold tabular-nums {{if .SGPLiftPos}}text-positive-ink{{else if .SGPLiftNeg}}text-danger-ink{{else}}text-ink-muted{{end}}">{{.SGPLift}}</td>
+                  {{end}}
+                  <td class="px-3 py-2 text-right font-mono text-ink-muted">{{if .Monotonic}}Yes{{else}}No{{end}}</td>
+                </tr>
+              {{end}}
+            </tbody>
+          </table>
+        </div>
+      {{end}}
+
+      {{if not .ShowEngineDiffs}}
         <p class="text-xs text-ink-muted">
-          Side-by-side comparison appears automatically when additional rubrics are registered alongside <code class="font-mono text-ink">{{.SelectedRubric}}</code>.
+          Side-by-side comparison appears automatically when additional engines are registered alongside <code class="font-mono text-ink">{{.SelectedEngine}}</code>.
         </p>
       {{else}}
         {{range .Diffs}}
@@ -220,7 +459,31 @@
             <h3 class="text-xs font-semibold uppercase tracking-wide text-ink-muted">
               {{.BaselineName}} &rarr; {{.CandidateName}} (Leg Bands)
             </h3>
-            <div class="overflow-x-auto rounded-lg border border-line bg-surface-2">
+            <div class="space-y-2 sm:hidden">
+              {{range .LegBandDiffs}}
+                <div class="rounded-lg border border-line bg-surface-2 p-3 space-y-2">
+                  <div class="flex items-center justify-between gap-2">
+                    <span class="rounded-full border px-2 py-0.5 text-xs font-semibold {{.Class}}">{{.Band}}</span>
+                    <span class="font-mono text-xs tabular-nums text-ink-muted">{{.SampleChange}}</span>
+                  </div>
+                  <div class="grid grid-cols-3 gap-2 text-xs">
+                    <div>
+                      <p class="text-ink-subtle">Win &Delta;</p>
+                      <p class="mt-0.5 font-mono font-semibold tabular-nums {{if .WinPositive}}text-positive-ink{{else if .WinNegative}}text-danger-ink{{else}}text-ink{{end}}">{{.WinRateDelta}}</p>
+                    </div>
+                    <div>
+                      <p class="text-ink-subtle">Lift &Delta;</p>
+                      <p class="mt-0.5 font-mono font-semibold tabular-nums {{if .LiftPositive}}text-positive-ink{{else if .LiftNegative}}text-danger-ink{{else}}text-ink{{end}}">{{.LiftDelta}}</p>
+                    </div>
+                    <div>
+                      <p class="text-ink-subtle">ROI &Delta;</p>
+                      <p class="mt-0.5 font-mono font-semibold tabular-nums {{if .ROIPositive}}text-positive-ink{{else if .ROINegative}}text-danger-ink{{else}}text-ink{{end}}">{{.FlatROIDelta}}</p>
+                    </div>
+                  </div>
+                </div>
+              {{end}}
+            </div>
+            <div class="hidden sm:block overflow-x-auto rounded-lg border border-line bg-surface-2">
               <table class="w-full text-left text-xs">
                 <thead class="border-b border-line text-ink-muted">
                   <tr>
@@ -252,9 +515,9 @@
                 <div class="flex flex-wrap gap-2">
                   {{range .Migrations}}
                     <span class="inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface-2 px-2.5 py-1 text-xs text-ink">
-                      <span class="rounded-full border px-1.5 py-0.2 text-[11px] font-semibold {{.FromClass}}">{{.FromBand}}</span>
+                      <span class="rounded-full border px-1.5 py-0.5 text-[11px] font-semibold {{.FromClass}}">{{.FromBand}}</span>
                       &rarr;
-                      <span class="rounded-full border px-1.5 py-0.2 text-[11px] font-semibold {{.ToClass}}">{{.ToBand}}</span>
+                      <span class="rounded-full border px-1.5 py-0.5 text-[11px] font-semibold {{.ToClass}}">{{.ToBand}}</span>
                       <span class="font-mono tabular-nums text-ink-muted">{{.Total}} ({{.Record}}, {{.HitPct}})</span>
                     </span>
                   {{end}}

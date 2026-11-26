@@ -1,6 +1,7 @@
 package web
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -63,29 +64,39 @@ type PickSlateView struct {
 	AllStarted bool
 }
 
+// GameGradeBadge is one non-zero grade-tier count pill on a game card.
+type GameGradeBadge struct {
+	Letter    string
+	Count     int
+	Class     string
+	AriaLabel string
+}
+
 // PickGameCardView is one game on the slate, with its lines at a glance. A game
 // with lines but no prop rows offers to load them.
 type PickGameCardView struct {
-	SlipID          int64
-	ID              string
-	Matchup         string
-	Venue           string
-	Away            string
-	Home            string
-	AwayLogo        string
-	HomeLogo        string
-	KickoffISO      string
-	KickoffFallback string
-	Spread          string
-	Total           string
-	Moneyline       string
-	Props           int
-	HasProps        bool
-	Unloaded        bool
-	AGradeCount     int
-	Href            string
-	PushURL         string
-	Active          bool
+	SlipID            int64
+	ID                string
+	Matchup           string
+	Venue             string
+	Weather           string
+	Away              string
+	Home              string
+	AwayLogo          string
+	HomeLogo          string
+	KickoffISO        string
+	KickoffFallback   string
+	Spread            string
+	Total             string
+	Moneyline         string
+	Props             int
+	HasProps          bool
+	Unloaded          bool
+	GradeBadges       []GameGradeBadge
+	TopPlayersSummary string
+	Href              string
+	PushURL           string
+	Active            bool
 }
 
 // PickDetailView is the open game's pinned header, its tab bar, and the rows
@@ -543,14 +554,14 @@ func (h *slipHandlers) pickPageData(
 	slateModel := board.BuildSlate(games, rows, roster, q)
 	var boardGames map[string]analyzer.Game
 	var boardStats map[string]analyzer.PlayerStats
-	var aGradeCounts map[string]int
+	var insights map[string]gameCardInsights
 	if slip.Status == db.SlipOpen && len(rows) > 0 {
 		sigStart := time.Now()
 		boardGames, boardStats = h.loadBoardSignalsForRows(ctx, now, slip.WeekID, games, rows)
 		AddDBTiming(ctx, time.Since(sigStart))
-		aGradeCounts = aGradeCountsByGame(games, rows, boardGames, boardStats)
+		insights = gameCardInsightsByGame(games, rows, boardGames, boardStats)
 	}
-	slate := buildPickSlate(slip, slateModel, q, aGradeCounts)
+	slate := buildPickSlate(slip, slateModel, q, insights)
 	AddBoardTiming(ctx, time.Since(slateStart))
 	q.GameID = slateModel.ResolvedGameID
 
@@ -626,14 +637,14 @@ func (h *slipHandlers) pickSlateData(
 
 	boardStart := time.Now()
 	rows := board.Build(games, odds, roster, homeBook, mine, now)
-	var aGradeCounts map[string]int
+	var insights map[string]gameCardInsights
 	if slip.Status == db.SlipOpen && len(rows) > 0 {
 		sigStart := time.Now()
 		boardGames, boardStats := h.loadBoardSignalsForRows(ctx, now, slip.WeekID, games, rows)
 		AddDBTiming(ctx, time.Since(sigStart))
-		aGradeCounts = aGradeCountsByGame(games, rows, boardGames, boardStats)
+		insights = gameCardInsightsByGame(games, rows, boardGames, boardStats)
 	}
-	slate := buildPickSlate(slip, board.BuildSlate(games, rows, roster, q), q, aGradeCounts)
+	slate := buildPickSlate(slip, board.BuildSlate(games, rows, roster, q), q, insights)
 	AddBoardTiming(ctx, time.Since(boardStart))
 	return slate, nil
 }
@@ -718,7 +729,7 @@ func buildPickSlate(
 	slip db.Slip,
 	model board.Slate,
 	q board.Query,
-	aGradeCounts map[string]int,
+	insightsByGame map[string]gameCardInsights,
 ) PickSlateView {
 	q.GameID = model.ResolvedGameID
 	slate := PickSlateView{
@@ -740,7 +751,10 @@ func buildPickSlate(
 	}
 	for _, card := range model.Cards {
 		view := pickGameCardView(slip.ID, card, q)
-		view.AGradeCount = aGradeCounts[card.ID]
+		if info, ok := insightsByGame[card.ID]; ok {
+			view.GradeBadges = info.Grades
+			view.TopPlayersSummary = info.TopPlayersSummary
+		}
 		slate.Cards = append(slate.Cards, view)
 	}
 	return slate
@@ -958,6 +972,7 @@ func pickGameCardView(slipID int64, card board.GameCard, q board.Query) PickGame
 		ID:              card.ID,
 		Matchup:         card.Matchup,
 		Venue:           card.Venue,
+		Weather:         gameWeatherSummary(card),
 		Away:            card.Away,
 		Home:            card.Home,
 		AwayLogo:        card.AwayLogo,
@@ -976,64 +991,95 @@ func pickGameCardView(slipID int64, card board.GameCard, q board.Query) PickGame
 	}
 }
 
-// spreadSummary prints both sides of a spread, or nothing when it is missing.
+// gameWeatherSummary formats a compact dome/weather badge with an emoji.
+func gameWeatherSummary(card board.GameCard) string {
+	if card.Indoor {
+		return "🏟️ Dome"
+	}
+	var emoji string
+	switch {
+	case card.PrecipIN != nil && *card.PrecipIN > 0:
+		if card.TempF != nil && *card.TempF <= 32 {
+			emoji = "❄️"
+		} else {
+			emoji = "🌧️"
+		}
+	case (card.WindMPH != nil && *card.WindMPH >= 15) || (card.WindGustMPH != nil && *card.WindGustMPH >= 25):
+		emoji = "💨"
+	case card.TempF != nil && *card.TempF <= 32:
+		emoji = "🥶"
+	case card.TempF != nil:
+		emoji = "☀️"
+	}
+	var parts []string
+	if card.TempF != nil {
+		parts = append(parts, fmt.Sprintf("%.0f°F", *card.TempF))
+	}
+	if card.WindMPH != nil && *card.WindMPH >= 5 {
+		parts = append(parts, fmt.Sprintf("%.0f mph", *card.WindMPH))
+	}
+	metrics := strings.Join(parts, " · ")
+	if emoji != "" && metrics != "" {
+		return emoji + " " + metrics
+	}
+	if emoji != "" {
+		return emoji
+	}
+	return metrics
+}
+
+// spreadSummary prints the favored side of the spread (or the available side
+// when only one is stored), omitting standard -110 juice.
 func spreadSummary(card board.GameCard) string {
 	spread := card.Lines.Spread
 	if spread == nil {
 		return ""
 	}
-	parts := make([]string, 0, 2)
+	if spread.HomeLine != "" && strings.HasPrefix(spread.HomeLine, "-") {
+		return withNonStandardPrice(card.Home+" "+spread.HomeLine, spread.HomeOdds)
+	}
 	if spread.AwayLine != "" {
-		parts = append(parts, withPrice(card.Away+" "+spread.AwayLine, spread.AwayOdds))
+		return withNonStandardPrice(card.Away+" "+spread.AwayLine, spread.AwayOdds)
 	}
 	if spread.HomeLine != "" {
-		parts = append(parts, withPrice(card.Home+" "+spread.HomeLine, spread.HomeOdds))
+		return withNonStandardPrice(card.Home+" "+spread.HomeLine, spread.HomeOdds)
 	}
-	return strings.Join(parts, " · ")
+	return ""
 }
 
-// totalSummary prints the over/under line, or nothing when it is missing.
+// totalSummary prints the over/under total line without redundant -110 juice.
 func totalSummary(card board.GameCard) string {
 	total := card.Lines.Total
 	if total == nil {
 		return ""
 	}
-	parts := make([]string, 0, 2)
-	if total.OverOdds != "" {
-		parts = append(parts, "O "+total.OverOdds)
-	}
-	if total.UnderOdds != "" {
-		parts = append(parts, "U "+total.UnderOdds)
-	}
-	label := "O/U"
 	if total.Line != "" {
-		label += " " + total.Line
+		return "O/U " + total.Line
 	}
-	if len(parts) > 0 {
-		label += " · " + strings.Join(parts, " · ")
-	}
-	return label
+	return "O/U"
 }
 
-// moneylineSummary prints both moneylines, or nothing when they are missing.
+// moneylineSummary prints away / home moneyline odds concisely.
 func moneylineSummary(card board.GameCard) string {
 	moneyline := card.Lines.Moneyline
 	if moneyline == nil {
 		return ""
 	}
-	parts := make([]string, 0, 2)
+	if moneyline.AwayOdds != "" && moneyline.HomeOdds != "" {
+		return moneyline.AwayOdds + " / " + moneyline.HomeOdds
+	}
 	if moneyline.AwayOdds != "" {
-		parts = append(parts, card.Away+" "+moneyline.AwayOdds)
+		return card.Away + " " + moneyline.AwayOdds
 	}
 	if moneyline.HomeOdds != "" {
-		parts = append(parts, card.Home+" "+moneyline.HomeOdds)
+		return card.Home + " " + moneyline.HomeOdds
 	}
-	return strings.Join(parts, " · ")
+	return ""
 }
 
-// withPrice appends a price in parentheses when there is one.
-func withPrice(label, price string) string {
-	if price == "" {
+// withNonStandardPrice appends a price in parentheses when it differs from -110.
+func withNonStandardPrice(label, price string) string {
+	if price == "" || price == "-110" {
 		return label
 	}
 	return label + " (" + price + ")"
@@ -1172,7 +1218,7 @@ func (h *slipHandlers) dockFrom(
 	view.CombinedImplied = formatImpliedChance(parlay.DecimalImpliedProb(combined))
 
 	gamesByID, stats := analyzer.LoadSlipSignals(ctx, h.deps.Store, now, slip.WeekID, games, legs)
-	analysis, legGrades := analyzerView(legs, gamesByID, stats, names)
+	analysis, legGrades := analyzerView(legs, gamesByID, stats, names, h.deps.GradingEngine)
 	view.Grade = analysis.Grade
 	for i := range view.Legs {
 		view.Legs[i].Grade = legGrades[view.Legs[i].ID]
@@ -1693,12 +1739,34 @@ func (h *slipHandlers) loadBoardSignalsForRows(
 	return analyzer.LoadBoardSignals(ctx, h.deps.Store, now, weekID, games, playerIDs)
 }
 
-func aGradeCountsByGame(
+type gameCardInsights struct {
+	Grades            []GameGradeBadge
+	TopPlayersSummary string
+}
+
+var gameCardGradeOrder = []string{"A", "B", "C", "D", "F"}
+
+func gameGradeBadgeClass(letter string) string {
+	switch letter {
+	case "A":
+		return "border-positive bg-positive-soft text-positive-ink"
+	case "B":
+		return "border-accent bg-accent-soft text-ink"
+	case "C":
+		return "border-line bg-surface-2 text-ink-muted"
+	case "D":
+		return "border-warning bg-warning-soft text-warning-ink"
+	default:
+		return "border-danger bg-danger-soft text-danger-ink"
+	}
+}
+
+func gameCardInsightsByGame(
 	games []db.Game,
 	rows []board.Row,
 	boardGames map[string]analyzer.Game,
 	boardStats map[string]analyzer.PlayerStats,
-) map[string]int {
+) map[string]gameCardInsights {
 	if len(games) == 0 || len(rows) == 0 || len(boardGames) == 0 {
 		return nil
 	}
@@ -1708,23 +1776,72 @@ func aGradeCountsByGame(
 			rowsByGame[row.GameID] = append(rowsByGame[row.GameID], row)
 		}
 	}
-	counts := make(map[string]int, len(games))
+	insights := make(map[string]gameCardInsights, len(games))
 	for _, game := range games {
 		gameRows := rowsByGame[game.ID]
 		if len(gameRows) == 0 {
 			continue
 		}
-		set := board.SelectHighlights(gameRows, boardGames, boardStats, board.HighlightOptions{
-			MaxLegs:       len(gameRows),
-			MaxParlays:    -1,
-			MaxPerPlayer:  -1,
-			ExcludePicked: true,
+		gradeCounts := make(map[string]int, len(gameCardGradeOrder))
+		playerScores := make(map[string]int)
+		for _, row := range gameRows {
+			if row.Picked != 0 || row.Market == "OTHER" {
+				continue
+			}
+			grade := analyzer.ScoreLeg(board.RowToAnalyzerLeg(row), boardGames, boardStats)
+			gradeCounts[grade.Letter]++
+			if row.Category != board.CategoryLines && row.PlayerName != "" {
+				if prev, ok := playerScores[row.PlayerName]; !ok || grade.Score > prev {
+					playerScores[row.PlayerName] = grade.Score
+				}
+			}
+		}
+
+		var badges []GameGradeBadge
+		for _, letter := range gameCardGradeOrder {
+			count := gradeCounts[letter]
+			if count == 0 {
+				continue
+			}
+			badges = append(badges, GameGradeBadge{
+				Letter:    letter,
+				Count:     count,
+				Class:     gameGradeBadgeClass(letter),
+				AriaLabel: fmt.Sprintf("%d %s-grade", count, letter),
+			})
+		}
+
+		type playerRank struct {
+			name  string
+			score int
+		}
+		ranked := make([]playerRank, 0, len(playerScores))
+		for name, score := range playerScores {
+			ranked = append(ranked, playerRank{name: name, score: score})
+		}
+		slices.SortFunc(ranked, func(a, b playerRank) int {
+			if c := cmp.Compare(b.score, a.score); c != 0 {
+				return c
+			}
+			return cmp.Compare(a.name, b.name)
 		})
-		if len(set.Legs) > 0 {
-			counts[game.ID] = len(set.Legs)
+		const maxTopPlayers = 3
+		if len(ranked) > maxTopPlayers {
+			ranked = ranked[:maxTopPlayers]
+		}
+		topNames := make([]string, 0, len(ranked))
+		for _, p := range ranked {
+			topNames = append(topNames, abbreviatePlayerName(p.name))
+		}
+
+		if len(badges) > 0 || len(topNames) > 0 {
+			insights[game.ID] = gameCardInsights{
+				Grades:            badges,
+				TopPlayersSummary: strings.Join(topNames, " · "),
+			}
 		}
 	}
-	return counts
+	return insights
 }
 
 func gameHighlightsView(

@@ -37,10 +37,14 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 
 	dbPath := fs.String("db", "", "path to SQLite database (opened read-only)")
 	datasetPath := fs.String("dataset", "", "path to replay dataset JSON file (mutually exclusive with --db)")
-	allRubrics := fs.Bool("all", false, "evaluate all built-in rubrics and emit suite calibration + diffs")
-	rubricName := fs.String("rubric", analyzer.RubricV1.Name, "built-in rubric name for single-rubric eval")
-	baselineName := fs.String("baseline", "", "baseline built-in rubric name for comparison")
-	candidateName := fs.String("candidate", "", "candidate built-in rubric name for comparison")
+	allRubrics := fs.Bool(
+		"all",
+		false,
+		"evaluate all built-in grading engines side-by-side and emit suite calibration + diffs",
+	)
+	rubricName := fs.String("rubric", analyzer.RubricV1.Name, "built-in grading engine or rubric name for single eval")
+	baselineName := fs.String("baseline", "", "baseline built-in grading engine or rubric name for comparison")
+	candidateName := fs.String("candidate", "", "candidate built-in grading engine or rubric name for comparison")
 	candidateFile := fs.String("candidate-file", "", "path to candidate rubric JSON file for comparison")
 	season := fs.Int("season", 0, "filter to season year (0 = all)")
 	fromWeek := fs.Int("from-week", 0, "filter to week >= from-week (0 = unbounded)")
@@ -114,7 +118,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 }
 
 func runAll(stdout io.Writer, dataset eval.ReplayDataset, format string) error {
-	suite := eval.EvaluateAll(dataset, analyzer.BuiltInRubrics())
+	suite := eval.EvaluateAllEngines(dataset, analyzer.BuiltInEngines())
 	switch format {
 	case "json":
 		return writeJSON(stdout, suite)
@@ -125,16 +129,15 @@ func runAll(stdout io.Writer, dataset eval.ReplayDataset, format string) error {
 	}
 }
 
-func runSingle(stdout io.Writer, dataset eval.ReplayDataset, rubricName, format string) error {
-	rubric, ok := analyzer.RubricByName(rubricName)
+func runSingle(stdout io.Writer, dataset eval.ReplayDataset, targetName, format string) error {
+	report, ok := evaluateBuiltInTarget(dataset, targetName)
 	if !ok {
 		return fmt.Errorf(
-			"unknown rubric %q (available: %s)",
-			rubricName,
-			strings.Join(analyzer.RubricNames(), ", "),
+			"unknown rubric or engine %q (available: %s)",
+			targetName,
+			strings.Join(availableTargetNames(), ", "),
 		)
 	}
-	report := eval.Evaluate(dataset, rubric)
 	switch format {
 	case "json":
 		return writeJSON(stdout, report)
@@ -154,21 +157,21 @@ func runCompare(
 	if baseName == "" {
 		baseName = analyzer.RubricV1.Name
 	}
-	baseRubric, ok := analyzer.RubricByName(baseName)
+	baseReport, ok := evaluateBuiltInTarget(dataset, baseName)
 	if !ok {
 		return fmt.Errorf(
-			"unknown baseline rubric %q (available: %s)",
+			"unknown baseline rubric or engine %q (available: %s)",
 			baseName,
-			strings.Join(analyzer.RubricNames(), ", "),
+			strings.Join(availableTargetNames(), ", "),
 		)
 	}
 
-	candRubric, err := loadCandidateRubric(candidateName, candidateFile)
+	candReport, err := evaluateCandidateTarget(dataset, candidateName, candidateFile)
 	if err != nil {
 		return err
 	}
 
-	baseReport, candReport, diff := eval.CompareRubrics(dataset, baseRubric, candRubric)
+	diff := eval.Compare(baseReport, candReport)
 
 	switch format {
 	case "json":
@@ -184,6 +187,56 @@ func runCompare(
 	}
 }
 
+func evaluateBuiltInTarget(dataset eval.ReplayDataset, name string) (eval.Report, bool) {
+	if engine, ok := analyzer.EngineByName(name); ok {
+		return eval.EvaluateEngine(dataset, engine), true
+	}
+	if rubric, ok := analyzer.RubricByName(name); ok {
+		return eval.Evaluate(dataset, rubric), true
+	}
+	return eval.Report{}, false
+}
+
+func evaluateCandidateTarget(dataset eval.ReplayDataset, name, file string) (eval.Report, error) {
+	if file != "" {
+		candRubric, err := loadCandidateRubricFile(file)
+		if err != nil {
+			return eval.Report{}, err
+		}
+		return eval.Evaluate(dataset, candRubric), nil
+	}
+	if name == "" {
+		return eval.Report{}, errors.New("--candidate or --candidate-file is required when --baseline is set")
+	}
+	report, ok := evaluateBuiltInTarget(dataset, name)
+	if !ok {
+		return eval.Report{}, fmt.Errorf(
+			"unknown candidate rubric or engine %q (available: %s)",
+			name,
+			strings.Join(availableTargetNames(), ", "),
+		)
+	}
+	return report, nil
+}
+
+func availableTargetNames() []string {
+	seen := make(map[string]bool)
+	var out []string
+	for _, n := range analyzer.EngineNames() {
+		if !seen[n] {
+			seen[n] = true
+			out = append(out, n)
+		}
+	}
+	for _, n := range analyzer.RubricNames() {
+		if !seen[n] {
+			seen[n] = true
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
 func loadDatasetFromDB(ctx context.Context, dbPath string, filter eval.ReplayFilter) (eval.ReplayDataset, error) {
 	database, err := db.OpenReadOnly(dbPath)
 	if err != nil {
@@ -197,33 +250,19 @@ func loadDatasetFromDB(ctx context.Context, dbPath string, filter eval.ReplayFil
 	return eval.LoadDataset(ctx, store, filter)
 }
 
-func loadCandidateRubric(name, file string) (analyzer.Rubric, error) {
-	if file != "" {
-		cleanPath := filepath.Clean(file)
-		// #nosec G304 -- CLI flag intentionally reads a user-specified rubric JSON file.
-		raw, err := os.ReadFile(cleanPath)
-		if err != nil {
-			return analyzer.Rubric{}, fmt.Errorf("read candidate rubric %s: %w", cleanPath, err)
-		}
-		var r analyzer.Rubric
-		if err := json.Unmarshal(raw, &r); err != nil {
-			return analyzer.Rubric{}, fmt.Errorf("parse candidate rubric %s: %w", cleanPath, err)
-		}
-		if strings.TrimSpace(r.Name) == "" {
-			r.Name = filepath.Base(cleanPath)
-		}
-		return r, nil
+func loadCandidateRubricFile(file string) (analyzer.Rubric, error) {
+	cleanPath := filepath.Clean(file)
+	// #nosec G304 -- CLI flag intentionally reads a user-specified rubric JSON file.
+	raw, err := os.ReadFile(cleanPath)
+	if err != nil {
+		return analyzer.Rubric{}, fmt.Errorf("read candidate rubric %s: %w", cleanPath, err)
 	}
-	if name == "" {
-		return analyzer.Rubric{}, errors.New("--candidate or --candidate-file is required when --baseline is set")
+	var r analyzer.Rubric
+	if err := json.Unmarshal(raw, &r); err != nil {
+		return analyzer.Rubric{}, fmt.Errorf("parse candidate rubric %s: %w", cleanPath, err)
 	}
-	r, ok := analyzer.RubricByName(name)
-	if !ok {
-		return analyzer.Rubric{}, fmt.Errorf(
-			"unknown candidate rubric %q (available: %s)",
-			name,
-			strings.Join(analyzer.RubricNames(), ", "),
-		)
+	if strings.TrimSpace(r.Name) == "" {
+		r.Name = filepath.Base(cleanPath)
 	}
 	return r, nil
 }
@@ -267,6 +306,16 @@ func writeReportText(w io.Writer, r eval.Report) error {
 	}
 	ew.printf("Monotonic: %v (win=%v, lift=%v)\n", r.LegMonotonic, r.LegMonotonicWin, r.LegMonotonicLift)
 
+	if hasCalibrationData(r.Calibration) {
+		ew.println("\nProbability Calibration:")
+		if ew.err != nil {
+			return ew.err
+		}
+		if err := writeCalibrationText(w, r.Calibration); err != nil {
+			return err
+		}
+	}
+
 	ew.println("\nFactor Attribution:")
 	if ew.err != nil {
 		return ew.err
@@ -298,6 +347,16 @@ func writeDiffText(w io.Writer, base, cand eval.Report, diff eval.DiffReport) er
 	ew := &errWriter{w: w}
 	ew.printf("Comparison: %s -> %s\n", diff.BaselineName, diff.CandidateName)
 	writeCoverage(ew, base.Coverage)
+
+	if hasCalibrationData(base.Calibration) || hasCalibrationData(cand.Calibration) {
+		ew.println("\nEngine Calibration Comparison:")
+		if ew.err != nil {
+			return ew.err
+		}
+		if err := writeEngineComparisonTable(w, []eval.Report{base, cand}); err != nil {
+			return err
+		}
+	}
 
 	ew.println("\nLeg Calibration Diff:")
 	if ew.err != nil {
@@ -428,11 +487,20 @@ func writeMigrationsTable(w io.Writer, migrations []eval.MigrationCell) error {
 func writeSuiteText(w io.Writer, suite eval.SuiteReport) error {
 	ew := &errWriter{w: w}
 	ew.printf("Suite (active: %s)\n", suite.ActiveRubric)
+	if len(suite.Reports) > 1 {
+		ew.println("\nEngine Calibration Comparison:")
+		if ew.err != nil {
+			return ew.err
+		}
+		if err := writeEngineComparisonTable(w, suite.Reports); err != nil {
+			return err
+		}
+	}
 	if ew.err != nil {
 		return ew.err
 	}
 	for i, r := range suite.Reports {
-		if i > 0 {
+		if i > 0 || len(suite.Reports) > 1 {
 			ew.println()
 			if ew.err != nil {
 				return ew.err
@@ -478,6 +546,11 @@ func writeSuiteMarkdown(w io.Writer, suite eval.SuiteReport) error {
 	ew.printf("## Grading Eval Suite (active: `%s`)\n\n", suite.ActiveRubric)
 	writeCoverageMarkdown(ew, suite.Coverage)
 
+	if len(suite.Reports) > 0 {
+		ew.printf("\n### Engine Calibration Comparison\n\n")
+		writeEngineComparisonMarkdown(ew, suite.Reports)
+	}
+
 	for _, r := range suite.Reports {
 		ew.printf("\n### Rubric: `%s`\n\n", r.RubricName)
 		writeReportSectionsMarkdown(ew, r)
@@ -494,6 +567,10 @@ func writeDiffMarkdown(w io.Writer, base, cand eval.Report, diff eval.DiffReport
 	ew := &errWriter{w: w}
 	ew.printf("## Grading Eval Comparison: `%s` -> `%s`\n\n", diff.BaselineName, diff.CandidateName)
 	writeCoverageMarkdown(ew, base.Coverage)
+	if hasCalibrationData(base.Calibration) || hasCalibrationData(cand.Calibration) {
+		ew.printf("\n#### Engine Calibration Comparison\n\n")
+		writeEngineComparisonMarkdown(ew, []eval.Report{base, cand})
+	}
 	ew.println()
 	writeDiffSectionsMarkdown(ew, diff)
 	ew.printf("\n### Candidate Factor Attribution (`%s`)\n\n", cand.RubricName)
@@ -527,6 +604,11 @@ func writeReportSectionsMarkdown(ew *errWriter, r eval.Report) {
 		"\nMonotonic: `%v` (win=`%v`, lift=`%v`)\n",
 		r.LegMonotonic, r.LegMonotonicWin, r.LegMonotonicLift,
 	)
+
+	if hasCalibrationData(r.Calibration) {
+		ew.printf("\n#### Probability Calibration\n\n")
+		writeCalibrationMarkdown(ew, r.Calibration)
+	}
 
 	if hasBandTotals(r.SlipBands) {
 		ew.printf("\n#### Slip Calibration\n\n")
@@ -626,6 +708,168 @@ func writeMigrationsMarkdown(ew *errWriter, migrations []eval.MigrationCell) {
 		ew.printf(
 			"| %s | %s | %d | %d | %d-%d | %.3f |\n",
 			m.FromBand, m.ToBand, m.Total, m.Decided, m.Wins, m.Losses, m.WinRate,
+		)
+	}
+}
+
+func hasCalibrationData(c eval.CalibrationMetrics) bool {
+	return len(c.Reliability) > 0 || c.MarketLogLoss > 0 || c.MarketBrier > 0 || c.SGPCount > 0
+}
+
+func hasModelCalibration(c eval.CalibrationMetrics) bool {
+	return len(c.Reliability) > 0
+}
+
+func writeCalibrationText(w io.Writer, c eval.CalibrationMetrics) error {
+	ew := &errWriter{w: w}
+	if hasModelCalibration(c) {
+		ew.printf(
+			"  LogLoss=%.4f  Brier=%.4f  ClasswiseECE=%.4f  BinSpread=%d/%d (ok=%v)\n",
+			c.LogLoss, c.BrierScore, c.ClasswiseECE, c.PopulatedBins, c.TotalBins, c.BinSpreadOK,
+		)
+	} else {
+		ew.println("  ModelProbabilities: n/a (no calibrated probabilities emitted)")
+	}
+	if c.MarketLogLoss > 0 || c.MarketBrier > 0 {
+		ew.printf("  MarketBaseline: LogLoss=%.4f  Brier=%.4f\n", c.MarketLogLoss, c.MarketBrier)
+	}
+	if c.SGPCount > 0 {
+		ew.printf(
+			"  SGP Joint (n=%d): CopulaLogLoss=%.4f  NaiveIndepLogLoss=%.4f\n",
+			c.SGPCount, c.SGPLogLoss, c.NaiveIndepLogLoss,
+		)
+	}
+	if ew.err != nil {
+		return ew.err
+	}
+	if len(c.Reliability) == 0 {
+		return nil
+	}
+
+	ew.println("\nReliability Bins:")
+	if ew.err != nil {
+		return ew.err
+	}
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	tew := &errWriter{w: tw}
+	tew.println("Bin\tCount\tMeanPred\tEmpiricalHit")
+	for _, b := range c.Reliability {
+		tew.printf("%.2f-%.2f\t%d\t%.3f\t%.3f\n", b.BinLow, b.BinHigh, b.Count, b.MeanPredProb, b.EmpiricalHit)
+	}
+	if tew.err != nil {
+		return tew.err
+	}
+	return tw.Flush()
+}
+
+func writeEngineComparisonTable(w io.Writer, reports []eval.Report) error {
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	ew := &errWriter{w: tw}
+	ew.println(
+		"Engine\tLogLoss\tBrier\tClasswiseECE\tBinSpread\t" +
+			"MarketLL\tMarketBrier\tSGPLogLoss\tNaiveSGPLL\tSGPCount",
+	)
+	for _, r := range reports {
+		c := r.Calibration
+		ll := "-"
+		brier := "-"
+		ece := "-"
+		if hasModelCalibration(c) {
+			ll = fmt.Sprintf("%.4f", c.LogLoss)
+			brier = fmt.Sprintf("%.4f", c.BrierScore)
+			ece = fmt.Sprintf("%.4f", c.ClasswiseECE)
+		}
+		spread := fmt.Sprintf("%d/%d (%v)", c.PopulatedBins, c.TotalBins, c.BinSpreadOK)
+		mktLL := "-"
+		mktBrier := "-"
+		if c.MarketLogLoss > 0 || c.MarketBrier > 0 {
+			mktLL = fmt.Sprintf("%.4f", c.MarketLogLoss)
+			mktBrier = fmt.Sprintf("%.4f", c.MarketBrier)
+		}
+		sgpLL := "-"
+		naiveLL := "-"
+		if c.SGPCount > 0 {
+			sgpLL = fmt.Sprintf("%.4f", c.SGPLogLoss)
+			naiveLL = fmt.Sprintf("%.4f", c.NaiveIndepLogLoss)
+		}
+		ew.printf(
+			"%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\n",
+			r.RubricName, ll, brier, ece, spread, mktLL, mktBrier, sgpLL, naiveLL, c.SGPCount,
+		)
+	}
+	if ew.err != nil {
+		return ew.err
+	}
+	return tw.Flush()
+}
+
+func writeCalibrationMarkdown(ew *errWriter, c eval.CalibrationMetrics) {
+	ew.println("| Metric | Value |")
+	ew.println("| --- | ---: |")
+	if hasModelCalibration(c) {
+		ew.printf("| Log Loss | %.4f |\n", c.LogLoss)
+		ew.printf("| Brier Score | %.4f |\n", c.BrierScore)
+		ew.printf("| Classwise ECE | %.4f |\n", c.ClasswiseECE)
+		ew.printf("| Bin Spread (>=80%%) | %d/%d (`%v`) |\n", c.PopulatedBins, c.TotalBins, c.BinSpreadOK)
+	} else {
+		ew.println("| Model Probabilities | _n/a_ |")
+	}
+	if c.MarketLogLoss > 0 || c.MarketBrier > 0 {
+		ew.printf("| Market Log Loss | %.4f |\n", c.MarketLogLoss)
+		ew.printf("| Market Brier | %.4f |\n", c.MarketBrier)
+	}
+	if c.SGPCount > 0 {
+		ew.printf("| SGP Joint Log Loss (n=%d) | %.4f |\n", c.SGPCount, c.SGPLogLoss)
+		ew.printf("| SGP Naive Indep Log Loss | %.4f |\n", c.NaiveIndepLogLoss)
+	}
+	if len(c.Reliability) > 0 {
+		ew.printf("\n##### Reliability Bins\n\n")
+		ew.println("| Bin | Count | Mean Pred | Empirical Hit |")
+		ew.println("| --- | ---: | ---: | ---: |")
+		for _, b := range c.Reliability {
+			ew.printf(
+				"| %.2f-%.2f | %d | %.3f | %.3f |\n",
+				b.BinLow,
+				b.BinHigh,
+				b.Count,
+				b.MeanPredProb,
+				b.EmpiricalHit,
+			)
+		}
+	}
+}
+
+func writeEngineComparisonMarkdown(ew *errWriter, reports []eval.Report) {
+	ew.println(
+		"| Engine | Log Loss | Brier | Classwise ECE | Bin Spread | Market LL | Market Brier | SGP LL | Naive SGP LL | SGPs |",
+	)
+	ew.println("| --- | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: |")
+	for _, r := range reports {
+		c := r.Calibration
+		ll := "–"
+		brier := "–"
+		ece := "–"
+		if hasModelCalibration(c) {
+			ll = fmt.Sprintf("%.4f", c.LogLoss)
+			brier = fmt.Sprintf("%.4f", c.BrierScore)
+			ece = fmt.Sprintf("%.4f", c.ClasswiseECE)
+		}
+		spread := fmt.Sprintf("%d/%d (`%v`)", c.PopulatedBins, c.TotalBins, c.BinSpreadOK)
+		mktLL := "–"
+		mktBrier := "–"
+		if c.MarketLogLoss > 0 || c.MarketBrier > 0 {
+			mktLL = fmt.Sprintf("%.4f", c.MarketLogLoss)
+			mktBrier = fmt.Sprintf("%.4f", c.MarketBrier)
+		}
+		sgpLL := "–"
+		naiveLL := "–"
+		if c.SGPCount > 0 {
+			sgpLL = fmt.Sprintf("%.4f", c.SGPLogLoss)
+			naiveLL = fmt.Sprintf("%.4f", c.NaiveIndepLogLoss)
+		}
+		ew.printf(
+			"| `%s` | %s | %s | %s | %s | %s | %s | %s | %s | %d |\n",
+			r.RubricName, ll, brier, ece, spread, mktLL, mktBrier, sgpLL, naiveLL, c.SGPCount,
 		)
 	}
 }

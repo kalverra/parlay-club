@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/kalverra/parlay-club/internal/analyzer"
 	"github.com/kalverra/parlay-club/internal/db"
 	"github.com/kalverra/parlay-club/internal/eval"
 	"github.com/kalverra/parlay-club/internal/ingest/archive"
@@ -76,20 +77,25 @@ func TestCacheGetOrComputeAndInvalidate(t *testing.T) {
 
 	cache := eval.NewCache()
 
-	// First compute for group A and group B.
+	// First compute for group A and group B (evaluates all built-in engines side-by-side).
+	wantEngines := len(analyzer.BuiltInEngines())
 	reportA1, err := cache.GetOrCompute(ctx, store, groupA.ID, 2025)
 	require.NoError(t, err)
-	require.Len(t, reportA1.Reports, 1)
+	require.Len(t, reportA1.Reports, wantEngines)
+	require.Len(t, reportA1.Diffs, wantEngines-1)
+	assert.Equal(t, "v1", reportA1.Reports[0].RubricName)
+	assert.Equal(t, "v2", reportA1.Reports[1].RubricName)
+	assert.NotEmpty(t, reportA1.Reports[1].Calibration.Reliability)
 	assert.Equal(t, 1, reportA1.Coverage.TotalLegs)
 
 	reportB1, err := cache.GetOrCompute(ctx, store, groupB.ID, 2025)
 	require.NoError(t, err)
-	require.Len(t, reportB1.Reports, 1)
+	require.Len(t, reportB1.Reports, wantEngines)
 	assert.Equal(t, 1, reportB1.Coverage.TotalLegs)
 
 	global1, err := cache.GetOrCompute(ctx, store, 0, 2025)
 	require.NoError(t, err)
-	require.Len(t, global1.Reports, 1)
+	require.Len(t, global1.Reports, wantEngines)
 	assert.Equal(t, 2, global1.Coverage.TotalLegs)
 
 	// Add another settled slip to both groups in DB without invalidating yet.

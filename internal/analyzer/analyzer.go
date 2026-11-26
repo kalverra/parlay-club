@@ -52,21 +52,37 @@ type Injury struct {
 	Status    string
 }
 
+// MarketScript holds consensus game-script anchors derived from cached
+// SPREAD and TOTAL odds rows for one game.
+type MarketScript struct {
+	HomeSpread       float64 // consensus home spread (negative = home favored)
+	GameTotal        float64 // consensus game over/under
+	HomeImpliedTotal float64 // (GameTotal - HomeSpread) / 2
+	AwayImpliedTotal float64 // (GameTotal + HomeSpread) / 2
+	HasSpread        bool
+	HasTotal         bool
+}
+
 // Game is the slice of a game the analyzer needs: the two teams, whether it is
 // indoors, the forecast when there is one, nfelo's model when it is fresh,
-// optional nflverse team EPA/pace profiles, team injury lists, and optional
-// sharp-book fair benchmarks.
+// optional nflverse team EPA/pace profiles, role-specific defense allowed
+// profiles, team injury lists, optional sharp-book fair benchmarks, and cached
+// market-script anchors.
 type Game struct {
-	ID       string
-	Home     string
-	Away     string
-	Indoor   bool
-	Weather  *Weather                // nil when unknown
-	Nfelo    *Nfelo                  // nil when unknown or stale
-	HomeEPA  *TeamDefenseProfile     // nil when unknown or stale (> 7 days)
-	AwayEPA  *TeamDefenseProfile     // nil when unknown or stale (> 7 days)
-	Injuries map[string][]Injury     // keyed by team abbreviation (e.g. "BUF")
-	Sharp    map[SharpKey]SharpQuote `json:"-"` // nil when no sharp benchmarks are available
+	ID              string
+	Home            string
+	Away            string
+	Indoor          bool
+	Weather         *Weather                              // nil when unknown
+	Nfelo           *Nfelo                                // nil when unknown or stale
+	HomeEPA         *TeamDefenseProfile                   // nil when unknown or stale (> 7 days)
+	AwayEPA         *TeamDefenseProfile                   // nil when unknown or stale (> 7 days)
+	HomeRoleDefense map[RoleArchetype]*RoleDefenseProfile // keyed by opposing RoleArchetype
+	AwayRoleDefense map[RoleArchetype]*RoleDefenseProfile // keyed by opposing RoleArchetype
+	Injuries        map[string][]Injury                   // keyed by team abbreviation (e.g. "BUF")
+	Sharp           map[SharpKey]SharpQuote               `json:"-"` // nil when no sharp benchmarks are available
+	MarketScript    MarketScript                          // derived from cached SPREAD and TOTAL odds rows
+	ContextSignals  []ContextSignal                       `json:"context_signals,omitempty"`
 }
 
 // TeamDefenseProfile holds one team's season-to-date and last-4-week
@@ -170,6 +186,100 @@ func (g Game) OpponentEPA(team string) *TeamDefenseProfile {
 	}
 }
 
+// OpponentRoleDefense returns the opposing team's defense-allowed profile for
+// role relative to team, or nil when missing or team is not in the game.
+func (g Game) OpponentRoleDefense(team string, role RoleArchetype) *RoleDefenseProfile {
+	if role == RoleUnknown {
+		return nil
+	}
+	switch team {
+	case g.Home:
+		return g.AwayRoleDefense[role]
+	case g.Away:
+		return g.HomeRoleDefense[role]
+	default:
+		return nil
+	}
+}
+
+// RoleArchetype classifies a skill player's trailing usage tier on their team.
+type RoleArchetype string
+
+// Canonical player role archetypes used for priors, defense splits, and copula nodes.
+const (
+	RoleUnknown RoleArchetype = ""
+	RoleQB      RoleArchetype = "QB"
+	RoleWR1     RoleArchetype = "WR1"
+	RoleWR2     RoleArchetype = "WR2"
+	RoleTE1     RoleArchetype = "TE1"
+	RoleRB1     RoleArchetype = "RB1"
+	RoleRB2     RoleArchetype = "RB2"
+)
+
+// PlayerEWMAUsage holds exponentially weighted moving averages (most recent
+// game weighted highest) of a player's snap, share, volume, efficiency, and
+// expected-opportunity metrics. Populated whenever at least 1 prior week
+// exists so early-season sparse weeks remain usable.
+type PlayerEWMAUsage struct {
+	GamesPlayed   int
+	HalfLifeWeeks float64
+	OffensePct    float64
+	TargetShare   float64
+	AirYardsShare float64
+	WOPR          float64
+	CarryShare    float64
+	PassAtt       float64
+	Carries       float64
+	Targets       float64
+	Receptions    float64
+	PassYds       float64
+	RushYds       float64
+	RecYds        float64
+	PassTDs       float64
+	RushTDs       float64
+	RecTDs        float64
+	RZOpps        float64
+	TotalEPA      float64
+	CPOE          float64
+	ExpPassYds    float64
+	ExpRushYds    float64
+	ExpRecYds     float64
+	ExpReceptions float64
+	ExpPassTDs    float64
+	ExpRushTDs    float64
+	ExpRecTDs     float64
+}
+
+// PlayerRoleProfile pairs a player's latest team and position with their
+// deterministic trailing RoleArchetype and EWMA usage/opportunity features.
+type PlayerRoleProfile struct {
+	ESPNID   string
+	Team     string
+	Position string
+	Role     RoleArchetype
+	EWMA     *PlayerEWMAUsage
+}
+
+// RoleDefenseProfile holds one defense's per-game stats allowed to a single
+// opposing RoleArchetype, plus league rankings (1 = stingiest defense, 0 = unset).
+type RoleDefenseProfile struct {
+	Role              RoleArchetype
+	Games             int
+	PassYdsAllowed    float64
+	PassTDsAllowed    float64
+	RushYdsAllowed    float64
+	RushTDsAllowed    float64
+	RecYdsAllowed     float64
+	ReceptionsAllowed float64
+	RecTDsAllowed     float64
+	TargetsAllowed    float64
+	CarriesAllowed    float64
+	TotalEPAAllowed   float64
+	ExpYdsAllowed     float64
+	YdsAllowedRank    int
+	EPAAllowedRank    int
+}
+
 // PlayerWeekUsage holds one week of nflverse usage and efficiency for a player.
 // Share fields (OffensePct, TargetShare, AirYardsShare) are 0..1 fractions.
 type PlayerWeekUsage struct {
@@ -257,12 +367,16 @@ func (u *PlayerUsage) AverageCarries() float64 {
 	return float64(sum) / float64(len(u.Weeks))
 }
 
-// PlayerStats holds a matched player's position, recent games per market,
-// most recent game first, this season only, plus optional nflverse usage metrics.
+// PlayerStats holds a matched player's position, trailing role archetype,
+// recent games per market, most recent game first, this season only, plus
+// optional nflverse usage and EWMA opportunity metrics.
 type PlayerStats struct {
-	Position string // ESPN position abbreviation (e.g. "TE", "WR", "RB")
-	Games    map[string][]float64
-	Usage    *PlayerUsage
+	Position       string // ESPN position abbreviation (e.g. "TE", "WR", "RB")
+	Role           RoleArchetype
+	Games          map[string][]float64
+	Usage          *PlayerUsage
+	EWMA           *PlayerEWMAUsage
+	ContextSignals []ContextSignal `json:"context_signals,omitempty"`
 }
 
 // AnalyzeSlip runs every rule over the slip and returns the warnings sorted by

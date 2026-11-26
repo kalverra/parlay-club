@@ -2,17 +2,17 @@
 id: analyzer-rules
 title: Analyzer rules
 type: reference
-summary: The stable IDs, severities, triggers, and example messages for the correlation, weather, key-number, chalk, player stats, nfelo model, and nflverse rules, plus the A–F leg and slip grading rubric in internal/analyzer.
-tags: [analyzer, rules, grades, rubric, warnings, correlation, severity, slips, nfelo, nflverse, model, quarterback, props, player-stats]
+summary: The stable IDs, severities, triggers, and example messages for all 16 analyzer rules, plus the v2 calibrated four-pillar grading model, Gaussian copula script scoring, extensible context overlays, and v1 rubric reference.
+tags: [analyzer, rules, grades, pillars, copula, overlays, rubric, warnings, correlation, severity, slips, nfelo, nflverse, model, quarterback, props, player-stats]
 ---
 
 # Analyzer rules
 
 ## Summary
 
-`internal/analyzer` holds the sharp-friend checks and grading functions that run under a slip. `AnalyzeSlip(legs, games, stats)`, `ScoreLeg(leg, games, stats)`, and `ScoreSlip(legs, games, stats)` are pure and deterministic: no I/O, no clock, and no LLM calls. `AnalyzeSlip` returns warnings with a stable rule ID, a severity, a message, and the legs involved; `ScoreLeg` and `ScoreSlip` return `A`–`F` grades with `GradeFactor` breakdowns. `RuleDocs()` and `GradeRubric()` expose the live rules and scoring weights for `/analyzer/guide`.
+`internal/analyzer` holds the sharp-friend checks and grading engines that run under a slip. `AnalyzeSlip(legs, games, stats)`, `EvaluateSlip(legs, games, stats)`, `ScoreLeg(leg, games, stats)`, and `ScoreSlip(legs, games, stats)` are pure and deterministic: no I/O, no clock, no network, and no LLM calls. `AnalyzeSlip` returns warnings with a stable rule ID, severity, message, and involved legs. `ScoreLeg` and `ScoreSlip` delegate to `ActiveEngine` (currently `EngineV2`, with `EngineV1` preserved in `BuiltInEngines()` for comparison). `RuleDocs()` and `GradeRubric()` expose live rule and rubric data for `/analyzer/guide`.
 
-When nfelo's model is fresh, `hook` and `chalk` add a sentence about it, and `qb_drag` reads it for a downgraded quarterback. When player game logs exist, `median_trap` warns when a yardage over sits above recent game medians. When `nflverse` team EPA and player usage are fresh, `tough_matchup`, `shrinking_role`, `pace_clash`, and `td_spike_risk` fire alongside EPA and usage grading factors. A game or leg without those optional inputs behaves cleanly and fails soft.
+When nfelo's model is fresh, `hook` and `chalk` add a sentence about it, and `qb_drag` reads it for a downgraded quarterback. When player game logs exist, `median_trap` warns when a yardage over sits above recent game medians. When `nflverse` team EPA and player usage are fresh, `tough_matchup`, `shrinking_role`, `pace_clash`, and `td_spike_risk` fire alongside v2 role-archetype, EWMA, and expected-opportunity features. A game or leg without those optional inputs behaves cleanly and fails soft.
 
 Rule IDs are stable across releases. A warning's severity is `Info`, `Warn`, or `Danger`.
 
@@ -23,11 +23,14 @@ Rule IDs are stable across releases. A warning's severity is `Info`, `Warn`, or 
 - **Same team** means an equal `Team`. **Opponent** is the other team in the leg's game.
 - **Favorite**: a `SPREAD` with a line below 0, or an `ML` with negative odds. **Underdog**: a `SPREAD` with a line above 0, or an `ML` with positive odds.
 - **Passing/receiving over**: an `OVER` on `PASS_YDS`, `PASS_TDS`, `REC_YDS`, or `RECEPTIONS`.
-- **Model data**: nfelo's pre-game spread, win probability, and QB adjustments for the game. `internal/analyzer` (`LoadSlipSignals`) attaches it only when the game is `SCHEDULED` and the last successful `nfelo:projections` fetch is under 72 hours old. Otherwise the game has no model, and the model sentences and `qb_drag` stay quiet.
-- **Player stats**: `stats` maps ESPN athlete IDs to recent game logs per market, most recent first, and includes `Position` from `roster_players`. `internal/analyzer` (`LoadSlipSignals`) populates it from `player_gamelogs` for every matched `PlayerID` on the slip. An unmatched player, a missing game log, or a market with fewer than 3 games leaves player-stat rules quiet.
-- **Team injuries (roster + summary merge)**: `Game.Injuries` maps each team abbreviation to its merged injury list. `internal/analyzer` (`LoadSlipSignals` via `MergeGameInjuries` and `espn.MergeTeamInjuries`) combines `games.injuries_json` (ESPN summary, kept primary) with key-position injuries (`QB`, `RB`, `WR`, `TE`, `LT`, `C`, `CB`, `S`) from `roster_players.injury_status`, backfilling any player truncated past ESPN's 5-per-team summary cap.
-- **nflverse team EPA & player usage**: `Game.HomeEPA` and `Game.AwayEPA` hold league ranks (`1..32`, where `1` is the toughest defense, highest offense, fastest pace, or highest pass rate) for `DefPassEPAAllowedRank`, `DefRushEPAAllowedRank`, `OffPassEPARank`, `PlaysPerGameRank`, and `PassRateRank`. `PlayerStats.Usage` holds weekly `OffensePct`, `TargetShare`, `AirYardsShare`, `WOPR`, `Carries`, `Targets`, and `TotalEPA` (most recent first, requiring ≥ 3 weeks for usage rules). `internal/analyzer` attaches both only when `nflverse:season:{year}` is under 7 days old.
-- **Sharp-book benchmarks**: `Game.Sharp` maps `SharpKey` (`MarketType`, `Team`, normalized `PlayerName`, `Side`) to a de-vigged `SharpQuote` built by `BuildSharpBenchmarks` over `db.CurrentOdds`. Books are tiered: **Tier 1** (`Pinnacle`, `Circa`, `Bookmaker`), **Tier 2** (`LowVig`, `BetOnline`), and **Tier 3** (`market consensus` across `>= 3` traditional sportsbooks quoting the exact same line, excluding DFS pick'em apps and peer-to-peer exchanges). Two-way quotes are paired and de-vigged when overround falls in `[0.95, 1.25]`; one-sided markets (`ANYTIME_TD`) and unpaired quotes are skipped cleanly.
+- **Model data**: nfelo's pre-game spread, win probability, and QB adjustments for the game. `LoadSlipSignals` attaches it only when the game is `SCHEDULED` and the last successful `nfelo:projections` fetch is under 72 hours old. Otherwise the game has no model, and the model sentences and `qb_drag` stay quiet.
+- **MarketScript**: `Game.MarketScript` derives consensus `HomeSpread`, `GameTotal`, `HomeImpliedTotal`, and `AwayImpliedTotal` strictly from already-cached `SPREAD` and `TOTAL` odds rows.
+- **Player stats & EWMA usage**: `stats` maps ESPN athlete IDs to recent game logs per market (most recent first), `Position` from `roster_players`, deterministic `Role` (`RoleArchetype`: `QB`, `WR1`, `WR2`, `TE1`, `RB1`, `RB2` ranked by trailing team target or carry/snap share), `PlayerUsage` (requiring `>= 3` weeks for usage warning rules), and `PlayerEWMAUsage` (3-week half-life EWMA populated whenever `>= 1` prior week exists, including `ff_opportunity` expected opportunity and `cpoe`).
+- **Role defense allowed**: `Game.HomeRoleDefense` and `Game.AwayRoleDefense` map opposing `RoleArchetype` values to per-game yards, receptions, TDs, and EPA allowed (`RoleDefenseProfile`) when `nflverse:season:{year}` is under 7 days old.
+- **Team injuries (roster + summary merge)**: `Game.Injuries` maps each team abbreviation to its merged injury list. `LoadSlipSignals` combines `games.injuries_json` (ESPN summary, kept primary) with key-position injuries (`QB`, `RB`, `WR`, `TE`, `LT`, `C`, `CB`, `S`) from `roster_players.injury_status`, backfilling any player truncated past ESPN's 5-per-team summary cap.
+- **External context signals**: `Game.ContextSignals` and `PlayerStats.ContextSignals` accept optional structured `ContextSignal` events (`injury`, `news`, `line_move`, `inactive`) consumed by `external_context_signals` without model retraining.
+- **nflverse team EPA**: `Game.HomeEPA` and `Game.AwayEPA` hold league ranks (`1..32`, where `1` is toughest defense, highest offense, fastest pace, or highest pass rate) for `DefPassEPAAllowedRank`, `DefRushEPAAllowedRank`, `OffPassEPARank`, `PlaysPerGameRank`, and `PassRateRank` when `nflverse:season:{year}` is under 7 days old.
+- **Sharp-book benchmarks**: `Game.Sharp` maps `SharpKey` (`MarketType`, `Team`, normalized `PlayerName`, `Side`) to a de-vigged `SharpQuote` built by `BuildSharpBenchmarks` over `db.CurrentOdds`. Books are tiered: **Tier 1** (`Pinnacle`, `Circa`, `Bookmaker`), **Tier 2** (`LowVig`, `BetOnline`), and **Tier 3** (`market consensus` across `>= 3` traditional sportsbooks quoting the exact same line, excluding DFS pick'em apps and peer-to-peer exchanges). Two-way quotes pair when overround falls in `[0.95, 1.25]` and populate multiplicative `FairProb`, Power-devigged `PowerFairProb`, `VigPct`, and `BookCount`. One-sided markets (`ANYTIME_TD`) and unpaired quotes fail soft cleanly.
 - When a rule's legs belong to more than one person, the message names each owner.
 
 ## Rule Set A: Correlation
@@ -244,11 +247,9 @@ Touchdown scoring outpacing underlying opportunity over the last 3 games (requir
 
 > Dawson Knox has 3 TDs in the last 3 games on a 11% target share and 0 carries/game — TD luck can cool off.
 
-## Leg and Slip Grading Rubric
+## Score Bands and Pillar Tones
 
-`ScoreLeg` and `ScoreSlip` compute deterministic `0..100` scores (clamped) and map them to `A`–`F` letter grades with `GradeFactor` breakdowns. `GradeRubric()` exposes this exact rubric for `/analyzer/guide`.
-
-### Score Bands
+Both `EngineV2` and `EngineV1` map clamped `0..100` integer scores to `A`–`F` letter grades:
 
 | Letter | Range    | Description |
 | ------ | -------- | ----------- |
@@ -258,9 +259,122 @@ Touchdown scoring outpacing underlying opportunity over the last 3 games (requir
 | `D`    | `48–59`  | Multiple headwinds or script friction dragging down the ticket. |
 | `F`    | `0–47`   | Severe script conflict, heavy chalk, or stacked environmental headwinds. |
 
-### Leg Scoring Factors (`ScoreLeg`)
+In v2, each individual `PillarScore` (`0..100`) maps to one tonal UI badge: `good` (`>= 80`), `neutral` (`68–79`),
+`warn` (`56–67`), or `bad` (`< 56`).
 
-Every matched leg (not `OTHER`, with a valid `GameID` in the games map) starts at a baseline of `75` (`B`). Adjustments are summed within three capped categories:
+## v2 Four-Pillar Grading Model (`ActiveEngine = EngineV2`)
+
+`EngineV2` (`DefaultV2Config`) grades matched legs and slips across four independent `0..100` pillars—`Price & Vig`
+(`price_vig`), `Script Fit` (`script_fit`), `Stability & Tail Risk` (`stability_risk`), and `Context & Traps`
+(`context_traps`)—while populating `CalibratedProb`, `MarketProb`, `CorrMultiplier`, `Uncertain`, and backwards-compatible
+`Factors`.
+
+### Pillar Rollup Weights and Score Caps
+
+| Context | `Price & Vig` | `Script Fit` | `Stability & Tail Risk` | `Context & Traps` | Score caps |
+| ------- | ------------- | ------------ | ----------------------- | ----------------- | ---------- |
+| Single leg (no script signal) | `40%` | `0%` | `25%` | `35%` | `<= 72` (`C`) if any `Danger` overlay fires or `Price & Vig < 45` |
+| Single leg (with script signal) | `30%` | `15%` | `25%` | `30%` | `<= 72` (`C`) if any `Danger` overlay fires or `Price & Vig < 45` |
+| Multi-leg slip | `35%` | `25%` | `20%` | `20%` | `<= 72` (`C`) on `Danger` conflict, `CorrMultiplier < 0.85`, or `Price & Vig < 45`; `<= 84` (`B`) on `Warn` conflict or `Uncertain` |
+
+A single-leg slip mirrors that leg's score, letter, pillars, and `CalibratedProb` with `CorrMultiplier = 1.0`.
+
+### Prop Distributions, Shrinkage, and Calibration (`internal/modelv2`)
+
+The embedded `v2.json.gz` artifact (`FeatureSchemaVersion = 1`) serves seven player prop markets with flat GBDT ensembles
+predicting distribution parameters rather than point totals:
+
+| Market | Distribution family | Parameters | Survival & tail risk |
+| ------ | ------------------- | ---------- | -------------------- |
+| `PASS_YDS`, `RUSH_YDS`, `REC_YDS` | `zero_adj_gamma` (also supports `zero_adj_lognormal`) | Zero-mass `pi0`, mean `mu`, shape `k` | `(1 - pi0) * Q(k, line * k / mu)`; exact mixture `CV` and `Skewness` |
+| `RECEPTIONS`, `RUSH_ATT` | `negbin` | Mean `mu`, dispersion `r` | Log-space PMF sum (`<= 256`) or regularized incomplete beta `I` tail |
+| `PASS_TDS` | `poisson` (optional `negbin` when `r` present) | Rate `lambda` | Exact Poisson–Gamma upper tail `P(floor(line)+1, lambda)` |
+| `ANYTIME_TD` | `bernoulli` | Event probability `p` | Direct `p` for `YES` (or `1 - p` for `NO`), high-swing binary variance |
+
+Inference pipeline per prop leg:
+
+1. **Weeks 1–5 Empirical Bayes shrinkage (`ShrinkFeatureSlice`)**: When `games_played < 5` (`ShrinkMaxGames = 5`),
+   observed EWMA usage and production features shrink toward the matching `RolePrior` (`MARKET:ROLE`, falling back to
+   position default then `MARKET:DEFAULT`) using `weight = n / (n + tau)` (`DefaultPriorStrength = 3.0`).
+2. **Market anchor blend**: Survival probability blends with the exact-line Power-devigged `SharpQuote.PowerFairProb`
+   (`w * p_market + (1 - w) * p_model`, artifact `market_blend_weight = 0.70`). If any active `ContextOverlay` sets
+   `HeightenedUncertainty = true`, `w` increases by `+0.15` (`HeightenedUncertaintyBlendBoost`, capped at `0.95`).
+3. **Post-hoc calibration**: The blended (or raw) probability passes through the market's learned `platt` (logistic in
+   logit space) or `isotonic` (monotone piecewise-linear) calibrator and clamps to `[0.01, 0.99]`.
+
+For non-prop game lines (`SPREAD`, `ML`, `TOTAL`, `TEAM_TOTAL`), `EngineV2` blends Power-devigged sharp/consensus anchors
+(`GameLineMarketBlend = 0.70`, adjusting different lines via normal CDF with `SpreadMarginStdDev = 13.45`,
+`GameTotalStdDev = 13.80`, `TeamTotalStdDev = 9.80`) with nfelo or `MarketScript` normal-model baselines, falling back to
+retail implied probability stripped of `4.5%` assumed two-way vig when no sharp benchmark is available.
+
+### Four-Pillar Scoring Mechanics
+
+- **`Price & Vig` (`price_vig`)**: Evaluates `parlay.FairEV(calibratedProb, leg.Odds)` (or per-leg equivalent joint EV
+  `pow(1 + jointEV, 1/n) - 1` on multi-leg slips) along a piecewise-linear monotonic curve (`+8% -> 100`, `+5% -> 98`,
+  `0% -> 85`, `-4.5% -> 74`, `-10% -> 48`, `-15% -> 33`, `-25% -> 10`). On multi-leg slips, `ParlayFreeLegs = 3` deducts
+  `ParlayVigDragStep = 2` points per extra leg beyond 3, and **SGP correlation tax** deducts `10` points
+  (`SGPCorrTaxPenalty`) when `CorrMultiplier > 1.05` (`SGPCorrTaxMinMult`) yet `1 / combinedDecimal > p_joint`.
+  Copy always cites American odds and fair prices, never `"+EV %"`.
+- **`Script Fit` (`script_fit`)**:
+  - *Single leg*: starts at `75` and adjusts for spread/total alignment on rushing Overs/Unders (`+12` when favored
+    `<= -7.0`, `+6` at `<= -3.5`, `-12` at `>= +4.5`, `-18` at `>= +7.0` for rush Overs) and passing/receiving
+    Overs/Unders (`-8` on double-digit favorites `<= -10.0` or low totals `<= 39.5`; `+8` on shootouts `>= 48.0`).
+  - *Multi-leg slip*: maps copula `CorrMultiplier` (`>= 1.10 -> 90..98`, `1.05..1.10 -> 82..89`, `0.95..1.05 -> 75`,
+    `0.85..0.95 -> 45..62`, `< 0.85 -> 15..44`), capped at `<= 44` for `Danger` script conflicts (`trailing_rb`,
+    `total_contradiction`), `<= 62` for `Warn` conflicts (`blowout_passing`), and floored at `>= 86` for clean positive
+    stacks with `CorrMultiplier >= 1.0`.
+- **`Stability & Tail Risk` (`stability_risk`)**: Starts at `82` (`v2StabilityBase`), penalizes heavy chalk (`<= -230`),
+  low calibrated probability (`< 0.25 -> -18..-28`, `< 0.38 -> -8`, `>= 0.56` non-chalk `-> +6`), touchdown markets
+  (`ANYTIME_TD -10`, `PASS_TDS -5`), wide distribution tails (`CV >= 0.85` or `Skewness >= 1.5 -> -8`; `CV >= 0.55` or
+  `Skewness >= 1.0 -> -4`; `CV <= 0.32` and `Skewness < 0.7 -> +5`), and early-season `<= 2` game samples (`-4`).
+  Multi-leg slips blend `0.6 * avgLegStability + 0.4 * minLegStability`, minus `3` per leg beyond 2, `-10` when the
+  weakest leg is `< 0.25` (or `-5` when `< 0.35`), and `-5` per extra chalk leg beyond the first.
+- **`Context & Traps` (`context_traps`)**: Starts at `75`, sums `ScoreDelta` across active `ContextOverlay` findings
+  (clamped to `[-55, +20]`), and surfaces the top 3 findings by severity then magnitude. Multi-leg slips average leg
+  scores or weight `0.4 * avg + 0.6 * worst` whenever any leg sits below `75`.
+
+### Gaussian Copula Script Scoring (`CopulaArtifact.EstimateJoint`)
+
+Multi-leg slips compute joint hit probability deterministically without random jitter:
+
+1. Legs are grouped by `GameID`; independent games multiply (`CorrMultiplier = 1.0` across games).
+2. Each same-game leg resolves to a canonical node (`TEAM_MARGIN`, `GAME_TOTAL`, `<ROLE>_<MARKET>`, or
+   `OPP_<ROLE>_<MARKET>`) with direction sign `+1` (`OVER`/`YES`/team line) or `-1` (`UNDER`/`NO`).
+3. Each game selects its correlation matrix from `CopulaArtifact`: `heavy_favorite` when `|HomeSpread| >= 7.0`,
+   `shootout` when `GameTotal >= 48.0`, otherwise `neutral`. Same-player pairs apply `WithinPlayer` correlation
+   overrides, same-node distinct players default to `0.20`, and opposite-sign legs negate pairwise correlation.
+4. Cholesky factorization (`L * L^T`) with a unit-diagonal-preserving jitter fallback decomposes the submatrix, and
+   `8,192` precomputed deterministic QMC (Sobol dims 1–32 + Halton primes) normal draws estimate
+   `p_joint = P(forall i: (L*u)_i <= Phi^-1(p_i))` in sub-millisecond time.
+
+### Extensible Context & Injury Overlays (`DefaultContextOverlays`)
+
+`EvaluateOverlays` runs 12 ordered `ContextOverlay` checks on every leg without modifying or retraining `v2.json.gz`:
+
+| Overlay rule | Severity | Pillar delta | Heightened uncertainty | Trigger |
+| ------------ | -------- | ------------ | ---------------------- | ------- |
+| `player_injury_status` | `Danger`/`Warn`/`Info` | `-20` to `0` | Yes | Player listed `Out`/`IR` (`-20` Over, `-10` Under), `Doubtful` (`-15`/`-5`), or `Questionable` (`-6` Over, `0` Under) in `Game.Injuries`. |
+| `teammate_out_bump` | `Info` | `+5` | Yes | Same-team, same-position (`WR`/`TE`/`RB`) teammate listed `Out` on a receiving/rushing Over or `ANYTIME_TD` `YES`. |
+| `qb_drag` | `Info` | `-8` | No | Fresh nfelo QB adjustment `<= -30` Elo on favorite spread/ML or passing/receiving/team-total Over. |
+| `wind` | `Warn`/`Danger` | `-8` / `-18` | No | Outdoor wind `>= 15` mph / gusts `>= 25` mph (`-8`) or wind `>= 20` mph (`-18`) on passing/receiving/kicking/total Overs. |
+| `fake_weather` | `Info` | `-3` | No | Outdoor light rain (`0 < precip < 0.1` in/hr) and wind `< 10` mph on `TOTAL` `UNDER`. |
+| `hook` | `Warn` | `-10` (`-4` w/ cushion) | No | Spread at `-3.5`, `+2.5`, `-7.5`, or `+6.5`; softened to `-4` with `>= +2` nfelo spread cushion. |
+| `total_key_number` | `Info` | `-5` | No | Game `TOTAL` within `0.5` of `37`, `41`, `43`, `44`, `47`, or `51`. |
+| `shrinking_role` | `Warn` | `-15` | Yes | Last-2-game `OffensePct` dropped `>= 15` pp or `TargetShare` dropped `>= 8` pp vs. season average. |
+| `td_spike_risk` | `Info` | `-6` | No | `ANYTIME_TD` `YES` with `>= 3` L3 TDs on `< 15%` target share and `< 8` carries/g, or `PASS_TDS` Over with `>= 6` L3 TDs on `<= 0` avg `TotalEPA`. |
+| `narrative_streak_trap` | `Warn` | `-8` | No | `OVER` cleared 5 straight games, yet fair probability `< 0.50` or line jumped materially (`>= max(3, 5%*L5Mean)` yds / `>= max(0.5, 8%*L5Mean)` count) above recent average/median with fair prob `< 0.55`. |
+| `model_market_divergence` | `Warn` | `-4` | Yes | Raw model probability and exact-line sharp market anchor differ by `>= 0.08`. |
+| `external_context_signals` | Caller-defined | Caller-defined | Caller-defined | Structured `ContextSignal` items attached to `Game.ContextSignals` or `PlayerStats.ContextSignals`. |
+
+## v1 Additive Rubric Reference (`EngineV1` / `RubricV1`)
+
+`EngineV1` (`ScoreLegWithRubric` and `ScoreSlipWithRubric` using `RubricV1`) remains registered for side-by-side offline
+and `/analyzer/results` comparison, and `GradeRubric()` continues to expose its baseline factor list on
+`/analyzer/guide`.
+
+### v1 Leg Scoring Factors
+
+Every matched leg starts at a baseline of `75` (`B`). Adjustments are summed within three capped categories:
 
 - **Form & Usage** (clamped to `-20` to `+15`)
 - **Matchup & Environment** (clamped to `-20` to `+15`)
@@ -296,9 +410,9 @@ When `Game.Sharp` has a benchmark for a leg, `scoreLineAndPrice` checks line dif
 - **Price edge (`sharp_price_edge`)**: `"Strong price at +105 vs. LowVig fair price near -108."`
 - **Price fade (`sharp_price_fade`)**: `"Steep price at -135 vs. LowVig fair price near -112."`
 
-### Slip Scoring Factors (`ScoreSlip`)
+### v1 Slip Scoring Factors
 
-`ScoreSlip` starts from the rounded average of its graded legs' numeric scores (returning an empty grade if no legs are gradable), then applies slip-level correlation and drag factors:
+`ScoreSlipWithRubric` starts from the rounded average of its graded legs' numeric scores (returning an empty grade if no legs are gradable), then applies slip-level correlation and drag factors:
 
 | Factor                | Delta         | Trigger |
 | --------------------- | ------------- | ------- |

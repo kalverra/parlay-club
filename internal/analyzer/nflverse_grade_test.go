@@ -374,7 +374,7 @@ func TestScoreLeg(t *testing.T) {
 			leg(3, "Adam", "missing", "SPREAD", "BUF", "", "TEAM", new(-3.0), -110),
 		}
 		for _, l := range skipped {
-			g := analyzer.ScoreLeg(l, games(), nil)
+			g := analyzer.EngineV1.ScoreLeg(l, games(), nil)
 			assert.Equal(t, l.ID, g.LegID)
 			assert.Empty(t, g.Letter)
 			assert.Zero(t, g.Score)
@@ -384,7 +384,11 @@ func TestScoreLeg(t *testing.T) {
 
 	t.Run("neutral leg starts at 75 (B) with no factors", func(t *testing.T) {
 		t.Parallel()
-		g := analyzer.ScoreLeg(leg(1, "Adam", "buf-mia", "SPREAD", "BUF", "", "TEAM", new(-3.0), -110), games(), nil)
+		g := analyzer.EngineV1.ScoreLeg(
+			leg(1, "Adam", "buf-mia", "SPREAD", "BUF", "", "TEAM", new(-3.0), -110),
+			games(),
+			nil,
+		)
 		assert.Equal(t, "B", g.Letter)
 		assert.Equal(t, 75, g.Score)
 		assert.Empty(t, g.Factors)
@@ -405,7 +409,11 @@ func TestScoreLeg(t *testing.T) {
 				},
 			},
 		}
-		g := analyzer.ScoreLeg(l, epaGames(nil, &analyzer.TeamDefenseProfile{DefPassEPAAllowedRank: 28}), stats)
+		g := analyzer.EngineV1.ScoreLeg(
+			l,
+			epaGames(nil, &analyzer.TeamDefenseProfile{DefPassEPAAllowedRank: 28}),
+			stats,
+		)
 		assert.Equal(t, "A", g.Letter)
 		assert.Equal(t, 100, g.Score)
 		assertSumEqualsScore(t, g)
@@ -415,7 +423,7 @@ func TestScoreLeg(t *testing.T) {
 		t.Parallel()
 		l := leg(1, "Adam", "buf-mia", "SPREAD", "BUF", "", "TEAM", new(-3.5), -110)
 		// In nfeloGames, BUF is Away and MIA is Home, so HomeSpread: +5.5 means BUF -5.5.
-		g := analyzer.ScoreLeg(l, nfeloGames(&analyzer.Nfelo{HomeSpread: 5.5}), nil)
+		g := analyzer.EngineV1.ScoreLeg(l, nfeloGames(&analyzer.Nfelo{HomeSpread: 5.5}), nil)
 		// 75 - 4 (softened hook) + 8 (nfelo_cushion) = 79 (B)
 		assert.Equal(t, "B", g.Letter)
 		assert.Equal(t, 79, g.Score)
@@ -441,7 +449,7 @@ func TestScoreLeg(t *testing.T) {
 				Games:    map[string][]float64{"REC_YDS": {5, 7, 12, 0, 14}},
 			},
 		}
-		g := analyzer.ScoreLeg(l, gs, stats)
+		g := analyzer.EngineV1.ScoreLeg(l, gs, stats)
 		// 75 - 5 (softened median_trap) + 5 (teammate_out_bump) = 75 (B)
 		assert.Equal(t, "B", g.Letter)
 		assert.Equal(t, 75, g.Score)
@@ -472,7 +480,7 @@ func TestScoreLeg(t *testing.T) {
 				},
 			},
 		}
-		g := analyzer.ScoreLeg(l, gs, stats)
+		g := analyzer.EngineV1.ScoreLeg(l, gs, stats)
 		// Form & usage capped at -20 (median_trap -15 + shrinking_role -15 -> -20)
 		// Matchup & env capped at -20 (tough_matchup -12 + wind -18 + qb_drag -8 -> -20)
 		// Line & price: chalk -500 -> -18
@@ -584,7 +592,7 @@ func TestScoreLeg(t *testing.T) {
 		for _, tc := range tests {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
-				g := analyzer.ScoreLeg(tc.leg, tc.games, tc.stats)
+				g := analyzer.EngineV1.ScoreLeg(tc.leg, tc.games, tc.stats)
 				assert.Equal(t, tc.score, g.Score)
 				assert.Equal(t, tc.grade, g.Letter)
 				assertSumEqualsScore(t, g)
@@ -598,7 +606,9 @@ func TestScoreSlip(t *testing.T) {
 
 	t.Run("empty or ungradable slip returns empty grade", func(t *testing.T) {
 		t.Parallel()
-		got := analyzer.ScoreSlip([]analyzer.Leg{leg(1, "Adam", "", "OTHER", "BUF", "", "", nil, -110)}, games(), nil)
+		got := analyzer.EngineV1.EvaluateSlip(
+			[]analyzer.Leg{leg(1, "Adam", "", "OTHER", "BUF", "", "", nil, -110)}, games(), nil,
+		).Grade
 		assert.Empty(t, got.Letter)
 		assert.Zero(t, got.Score)
 		require.Len(t, got.LegGrades, 1)
@@ -612,7 +622,7 @@ func TestScoreSlip(t *testing.T) {
 			withPlayerID(leg(2, "Adam", "buf-mia", "REC_YDS", "BUF", "Khalil Shakir", "OVER", new(75.5), -110), "wr"),
 			leg(3, "Adam", "buf-mia", "TOTAL", "", "", "OVER", new(48.5), -110),
 		}
-		got := analyzer.ScoreSlip(legs, games(), nil)
+		got := analyzer.EngineV1.EvaluateSlip(legs, games(), nil).Grade
 		// Each leg baseline 75 -> avg 75 + 8 (stack_shootout) = 83 (B)
 		assert.Equal(t, "B", got.Letter)
 		assert.Equal(t, 83, got.Score)
@@ -630,13 +640,18 @@ func TestScoreSlip(t *testing.T) {
 			leg(3, "Adam", "buf-mia", "ML", "BUF", "", "TEAM", nil, -110),
 			leg(4, "Adam", "buf-mia", "TOTAL", "", "", "UNDER", new(45.5), -110),
 		}
-		got := analyzer.ScoreSlip(legs, games(), nil)
+		got := analyzer.EngineV1.EvaluateSlip(legs, games(), nil).Grade
 		// Legs 1 & 2 have chalk -300 (-12 each -> 63), legs 3 & 4 are 75 -> avg 69
 		// Slip factors: trailing_rb (-20), parlay_drag (-3 for 4th leg), chalk_drag (-5 for 2nd chalk)
 		// Total: 69 - 20 - 3 - 5 = 41 (F)
 		assert.Equal(t, "F", got.Letter)
 		assert.Equal(t, 41, got.Score)
-		assert.Equal(t, got, analyzer.ScoreSlip(legs, games(), nil), "ScoreSlip must be deterministic")
+		assert.Equal(
+			t,
+			got,
+			analyzer.EngineV1.EvaluateSlip(legs, games(), nil).Grade,
+			"ScoreSlip must be deterministic",
+		)
 	})
 }
 

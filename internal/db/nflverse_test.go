@@ -183,6 +183,10 @@ func TestUpsertNFLversePlayerWeeksIdempotentAndQuery(t *testing.T) {
 			RecTDs:        2,
 			TotalEPA:      11.2,
 			RZOpps:        3,
+			ExpRecYds:     118.4,
+			ExpReceptions: 8.6,
+			ExpRecTDs:     1.1,
+			CarryShare:    0.04,
 			UpdatedAt:     first,
 		},
 	}
@@ -217,8 +221,26 @@ func TestUpsertNFLversePlayerWeeksIdempotentAndQuery(t *testing.T) {
 	byPlayer, err = store.NFLversePlayerWeeksForPlayer(t.Context(), "4362628", 2026, 2)
 	require.NoError(t, err)
 	assert.InDelta(t, 0.98, byPlayer[0].OffensePct, 1e-9)
+	assert.InDelta(t, 118.4, byPlayer[0].ExpRecYds, 1e-9)
+	assert.InDelta(t, 8.6, byPlayer[0].ExpReceptions, 1e-9)
+	assert.InDelta(t, 1.1, byPlayer[0].ExpRecTDs, 1e-9)
+	assert.InDelta(t, 0.04, byPlayer[0].CarryShare, 1e-9)
 	assert.Equal(t, second, byPlayer[0].UpdatedAt)
 	assert.Equal(t, first, byPlayer[1].UpdatedAt)
+
+	// Changing v2 opportunity / carry_share / cpoe fields triggers an update.
+	rows[1].ExpRecYds = 121.0
+	rows[1].CarryShare = 0.05
+	rows[1].CPOE = 3.2
+	changed, err = store.UpsertNFLversePlayerWeeks(t.Context(), rows)
+	require.NoError(t, err)
+	assert.True(t, changed)
+
+	byPlayer, err = store.NFLversePlayerWeeksForPlayer(t.Context(), "4362628", 2026, 2)
+	require.NoError(t, err)
+	assert.InDelta(t, 121.0, byPlayer[0].ExpRecYds, 1e-9)
+	assert.InDelta(t, 0.05, byPlayer[0].CarryShare, 1e-9)
+	assert.InDelta(t, 3.2, byPlayer[0].CPOE, 1e-9)
 
 	batch, err := store.NFLversePlayerWeeksForPlayers(t.Context(), []string{"4362628", "missing"}, 2026, 2)
 	require.NoError(t, err)
@@ -324,4 +346,16 @@ func TestUpsertNFLversePlayerWeeksIdempotentAndQuery(t *testing.T) {
 	emptyPos, err := store.NFLversePlayerWeeksForPositionTypes(t.Context(), "WR", 2026)
 	require.NoError(t, err)
 	assert.Empty(t, emptyPos)
+
+	seasonAll, err := store.NFLversePlayerWeeksForSeasonTypes(t.Context(), 2026, 2, 3)
+	require.NoError(t, err)
+	require.Len(t, seasonAll, 5)
+	assert.Equal(t, 3, seasonAll[0].SeasonType)
+	assert.Equal(t, 8, seasonAll[1].WeekNum)
+	assert.Equal(t, 7, seasonAll[3].WeekNum)
+	assert.Equal(t, 6, seasonAll[4].WeekNum)
+
+	emptySeasonTypes, err := store.NFLversePlayerWeeksForSeasonTypes(t.Context(), 2026)
+	require.NoError(t, err)
+	assert.Empty(t, emptySeasonTypes)
 }

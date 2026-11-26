@@ -12,3 +12,13 @@ data/
 tmp/
 
 .env
+
+*.test
+
+# Offline Python ML training workspace
+ml/.venv/
+ml/__pycache__/
+ml/**/__pycache__/
+ml/.pytest_cache/
+ml/cache/
+ml/.coverage

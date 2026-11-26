@@ -9,7 +9,7 @@
 
 ## Concept
 
-- [Analyzer](concepts/analyzer.md): How the sharp-friend analyzer turns legs, games, weather, player stats, nfelo's model, and nflverse efficiency into plain-Go warnings and deterministic A–F grades.
+- [Analyzer](concepts/analyzer.md): How the sharp-friend analyzer turns legs, games, weather, player stats, nfelo's model, and nflverse efficiency into plain-Go warnings and calibrated four-pillar A–F grades.
 - [Data refresh](concepts/data-refresh.md): How page loads, per-game-day pre-fill, and on-demand views sync slate, weather, odds, props, rosters, injuries, projections, and auto-grading with staleness windows, credit floors, and shutdown drain.
 - [Export](concepts/export.md): How a locked slip turns stored sportsbook deep links into a one-tap combined DraftKings or FanDuel link, with per-leg taps, a manual list, and copy text for every pick that has no link.
 - [Groups](concepts/groups.md): How groups split people into shared clubs, how invites and leaving work, how recurring slip schedules automate weekly slips, and how the active group scopes what a person sees.
@@ -24,14 +24,14 @@
 ## Guide
 
 - [GCP setup](guides/gcp-setup.md): Create the Google Cloud project resources once, add the secrets and GitHub variables, and run the first deploy that puts the app on Cloud Run.
-- [Local development](guides/local-dev.md): Start the app with hot reload, run the offline Sunday sandbox, set up the git hooks, and fall back to a plain server run when you need it.
+- [Local development](guides/local-dev.md): Start the app with hot reload, run the offline Sunday sandbox, set up the git hooks, run offline evals, and retrain the v2 grading model.
 
 ## Reference
 
-- [Analyzer rules](reference/analyzer-rules.md): The stable IDs, severities, triggers, and example messages for the correlation, weather, key-number, chalk, player stats, nfelo model, and nflverse rules, plus the A–F leg and slip grading rubric in internal/analyzer.
+- [Analyzer rules](reference/analyzer-rules.md): The stable IDs, severities, triggers, and example messages for all 16 analyzer rules, plus the v2 calibrated four-pillar grading model, Gaussian copula script scoring, extensible context overlays, and v1 rubric reference.
 - [Configuration](reference/config.md): Environment variables the server reads, their dev defaults, the odds provider keys, pre-fill bearer token, and GitHub issue reporting settings they configure, the offline sandbox switch, and the values it rejects in prod.
 - [Data sources](reference/data-sources.md): ESPN scoreboard, rosters, game logs, and injuries, Open-Meteo weather, Parlay API and The Odds API lines, props, and credits, nfelo, nflverse, player matching, and the API archive.
-- [Odds math](reference/odds-math.md): Formulas in internal/parlay for odds, implied probability, de-vigging, price edge, payouts, and units, plus internal/progress for live leg and parlay progress and hit probability.
+- [Odds math](reference/odds-math.md): Formulas in internal/parlay for odds, implied probability, multiplicative, Power, and Shin de-vigging, price edge, fair EV, payouts, and units, plus internal/progress for live leg and parlay progress and hit probability.
 - [Routes](reference/routes.md): Every HTTP route the server serves, the middleware in front of them, and the status codes, HTMX headers, and SSE frames handlers return.
 - [Sandbox replay](reference/sandbox-replay.md): The fail-closed HTTP transport and named week 9 response registry behind the local Sunday sandbox, the requests they answer or leave as labeled empty fallbacks, which fixtures are real captures versus derived snapshots, and how startup, reset, stages, seeded people, and scripted grades replay them.
 - [Database schema](reference/schema.md): SQLite schema, migrations, connection pools, and table conventions for groups, users, games, odds, nfelo, nflverse, slips, legs, rosters, game logs, and the API archive.

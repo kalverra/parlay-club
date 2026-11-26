@@ -1,10 +1,12 @@
 package web
 
 import (
+	"cmp"
 	"fmt"
 	"math"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -19,13 +21,28 @@ type AnalyzerView struct {
 	Warnings []AnalyzerWarningView
 }
 
-// GradeView is a clickable A-F grade pill with an inline factor breakdown.
+// GradeView is a clickable A-F grade pill with an inline breakdown.
 type GradeView struct {
-	Letter  string
-	Score   int
-	Class   string
-	Summary string
-	Factors []GradeFactorView
+	Letter      string
+	Score       int
+	Class       string
+	Summary     string
+	Uncertain   bool
+	CorrSummary string
+	Pillars     []PillarView
+	Why         []string
+	Factors     []GradeFactorView
+}
+
+// PillarView is one v2 scoring pillar inside a grade breakdown popover.
+type PillarView struct {
+	Key       string
+	Label     string
+	Score     int
+	Tone      string
+	ToneClass string
+	BarClass  string
+	Summary   string
 }
 
 // GradeFactorView is one scoring adjustment in a grade breakdown.
@@ -57,10 +74,26 @@ type AnalyzerLegView struct {
 // AnalyzerGuidePage is the in-app grading rubric and analyzer rule reference.
 type AnalyzerGuidePage struct {
 	Page
-	BackURL    string
-	Rubric     analyzer.RubricDoc
-	Bands      []GuideBandView
-	Categories []GuideRuleCategoryView
+	BackURL      string
+	EngineName   string
+	V2Active     bool
+	Pillars      []GuidePillarView
+	LegWeights   string
+	LegScriptWts string
+	SlipWeights  string
+	Rubric       analyzer.RubricDoc
+	Bands        []GuideBandView
+	Categories   []GuideRuleCategoryView
+}
+
+// GuidePillarView documents one v2 grading pillar on the guide page.
+type GuidePillarView struct {
+	Key        string
+	Label      string
+	LegWeight  string
+	SlipWeight string
+	Summary    string
+	Points     []string
 }
 
 // GuideBandView is one letter-grade score band on the guide page.
@@ -127,14 +160,29 @@ func (h *slipHandlers) analyzerGuide(w http.ResponseWriter, r *http.Request) {
 		categories[idx].Rules = append(categories[idx].Rules, ruleView)
 	}
 
+	engine := h.deps.GradingEngine
+	if engine == nil {
+		engine = analyzer.ActiveEngine
+	}
+	engineName := "v1"
+	if engine != nil && engine.Name() != "" {
+		engineName = engine.Name()
+	}
+
 	page := h.page(r, "Grading & Analyzer Guide")
 	page.Tab = ""
 	h.renderPage(w, "analyzer-guide", AnalyzerGuidePage{
-		Page:       page,
-		BackURL:    backURL,
-		Rubric:     rubric,
-		Bands:      bands,
-		Categories: categories,
+		Page:         page,
+		BackURL:      backURL,
+		EngineName:   engineName,
+		V2Active:     engineName == "v2",
+		Pillars:      guidePillars(analyzer.DefaultV2Config),
+		LegWeights:   formatLegWeights(analyzer.DefaultV2Config),
+		LegScriptWts: formatLegScriptWeights(analyzer.DefaultV2Config),
+		SlipWeights:  formatSlipWeights(analyzer.DefaultV2Config),
+		Rubric:       rubric,
+		Bands:        bands,
+		Categories:   categories,
 	})
 }
 
@@ -163,12 +211,13 @@ func safeReturnPath(raw string) string {
 }
 
 // analyzerView shapes the analyzer's warnings and deterministic A-F grades for
-// the slip banner and each leg row.
+// the slip banner and each leg row using engine (defaulting to ActiveEngine).
 func analyzerView(
 	legs []db.Leg,
 	gamesByID map[string]analyzer.Game,
 	stats map[string]analyzer.PlayerStats,
 	names map[int64]string,
+	engine analyzer.GradingEngine,
 ) (AnalyzerView, map[int64]GradeView) {
 	input := make([]analyzer.Leg, 0, len(legs))
 	legsByID := make(map[int64]db.Leg, len(legs))
@@ -177,7 +226,12 @@ func analyzerView(
 		input = append(input, analyzer.LegFromDB(leg, names[leg.UserID]))
 	}
 
-	eval := analyzer.EvaluateSlip(input, gamesByID, stats)
+	var eval analyzer.SlipEvaluation
+	if engine != nil {
+		eval = engine.EvaluateSlip(input, gamesByID, stats)
+	} else {
+		eval = analyzer.EvaluateSlip(input, gamesByID, stats)
+	}
 	warnings := eval.Warnings
 	slipGrade := eval.Grade
 
@@ -186,12 +240,12 @@ func analyzerView(
 		if lg.Letter == "" {
 			continue
 		}
-		legGrades[lg.LegID] = gradeView(lg.Letter, lg.Score, "", lg.Factors)
+		legGrades[lg.LegID] = LegGradeView(lg)
 	}
 
 	view := AnalyzerView{
 		Clean: len(warnings) == 0,
-		Grade: gradeView(slipGrade.Letter, slipGrade.Score, slipGrade.Summary, slipGrade.Factors),
+		Grade: SlipGradeView(slipGrade),
 	}
 	for _, warning := range warnings {
 		label, class := analyzerSeverity(warning.Severity)
@@ -217,7 +271,44 @@ func analyzerView(
 	return view, legGrades
 }
 
-func gradeView(letter string, score int, summary string, factors []analyzer.GradeFactor) GradeView {
+// LegGradeView shapes an analyzer.LegGrade into a template-ready GradeView.
+func LegGradeView(lg analyzer.LegGrade) GradeView {
+	return buildGradeView(
+		lg.Letter,
+		lg.Score,
+		"",
+		lg.Uncertain,
+		0,
+		false,
+		lg.Pillars,
+		lg.Factors,
+	)
+}
+
+// SlipGradeView shapes an analyzer.SlipGrade into a template-ready GradeView.
+func SlipGradeView(sg analyzer.SlipGrade) GradeView {
+	return buildGradeView(
+		sg.Letter,
+		sg.Score,
+		sg.Summary,
+		sg.Uncertain,
+		sg.CorrMultiplier,
+		len(sg.LegGrades) > 1,
+		sg.Pillars,
+		sg.Factors,
+	)
+}
+
+func buildGradeView(
+	letter string,
+	score int,
+	summary string,
+	uncertain bool,
+	corrMult float64,
+	multiLeg bool,
+	pillars []analyzer.PillarScore,
+	factors []analyzer.GradeFactor,
+) GradeView {
 	if letter == "" {
 		return GradeView{}
 	}
@@ -232,13 +323,250 @@ func gradeView(letter string, score int, summary string, factors []analyzer.Grad
 			Detail:    f.Detail,
 		})
 	}
-	return GradeView{
-		Letter:  letter,
-		Score:   score,
-		Class:   gradeClass(letter),
-		Summary: summary,
-		Factors: factorViews,
+	pillarViews := make([]PillarView, 0, len(pillars))
+	for _, p := range pillars {
+		toneClass, barClass := pillarToneClasses(p.Tone)
+		pillarViews = append(pillarViews, PillarView{
+			Key:       p.Key,
+			Label:     p.Label,
+			Score:     clampScore(p.Score),
+			Tone:      p.Tone,
+			ToneClass: toneClass,
+			BarClass:  barClass,
+			Summary:   p.Summary,
+		})
 	}
+
+	var why []string
+	var corrSummary string
+	if len(pillars) > 0 {
+		why = collectWhyBullets(pillars)
+		if multiLeg {
+			corrSummary = formatCorrSummary(corrMult)
+		}
+	}
+
+	return GradeView{
+		Letter:      letter,
+		Score:       score,
+		Class:       gradeClass(letter),
+		Summary:     summary,
+		Uncertain:   uncertain,
+		CorrSummary: corrSummary,
+		Pillars:     pillarViews,
+		Why:         why,
+		Factors:     factorViews,
+	}
+}
+
+func clampScore(score int) int {
+	return min(max(score, 0), 100)
+}
+
+func pillarToneClasses(tone string) (badgeClass, barClass string) {
+	switch tone {
+	case analyzer.ToneGood:
+		return "border-positive bg-positive-soft text-positive-ink", "bg-positive"
+	case analyzer.ToneWarn:
+		return "border-warning bg-warning-soft text-warning-ink", "bg-warning"
+	case analyzer.ToneBad:
+		return "border-danger bg-danger-soft text-danger-ink", "bg-danger"
+	default:
+		return "border-line-strong bg-surface-2 text-ink-muted", "bg-ink-subtle"
+	}
+}
+
+func collectWhyBullets(pillars []analyzer.PillarScore) []string {
+	const maxWhyBullets = 3
+
+	ordered := slices.Clone(pillars)
+	slices.SortStableFunc(ordered, func(a, b analyzer.PillarScore) int {
+		aActive := hasSpecificReason(a)
+		bActive := hasSpecificReason(b)
+		if aActive != bActive {
+			if aActive {
+				return -1
+			}
+			return 1
+		}
+		return cmp.Compare(pillarImpact(b), pillarImpact(a))
+	})
+
+	specific := make([]string, 0, maxWhyBullets)
+	fallback := make([]string, 0, maxWhyBullets)
+	seen := make(map[string]struct{}, len(pillars)*2)
+
+	for _, p := range ordered {
+		for _, r := range p.Reasons {
+			text := strings.TrimSpace(r)
+			if text == "" {
+				continue
+			}
+			if _, dup := seen[text]; dup {
+				continue
+			}
+			seen[text] = struct{}{}
+			if isNeutralBoilerplate(text) {
+				if len(fallback) < maxWhyBullets {
+					fallback = append(fallback, text)
+				}
+				continue
+			}
+			specific = append(specific, text)
+			if len(specific) == maxWhyBullets {
+				return specific
+			}
+		}
+	}
+
+	if len(specific) > 0 {
+		return specific
+	}
+	return fallback
+}
+
+func pillarImpact(p analyzer.PillarScore) int {
+	diff := p.Score - 75
+	if diff < 0 {
+		return -diff
+	}
+	return diff
+}
+
+func hasSpecificReason(p analyzer.PillarScore) bool {
+	for _, r := range p.Reasons {
+		text := strings.TrimSpace(r)
+		if text != "" && !isNeutralBoilerplate(text) {
+			return true
+		}
+	}
+	return false
+}
+
+func isNeutralBoilerplate(reason string) bool {
+	switch reason {
+	case "Neutral single-leg game script.",
+		"No injury, weather, or trap flags active.",
+		"Clean context with no injury, weather, or trap flags.",
+		"Clean context across all legs.",
+		"Legs span separate games, so they settle independently.",
+		"Normal week-to-week variance for this market.",
+		"Balanced leg stability across the ticket.":
+		return true
+	default:
+		return false
+	}
+}
+
+func formatCorrSummary(corrMult float64) string {
+	switch {
+	case corrMult <= 0:
+		return ""
+	case corrMult >= 1.05:
+		return fmt.Sprintf("Script multiplier: %.2fx (legs rise together)", corrMult)
+	case corrMult >= 1.02:
+		return fmt.Sprintf("Script multiplier: %.2fx (mild positive fit)", corrMult)
+	case corrMult <= 0.90:
+		return fmt.Sprintf("Script multiplier: %.2fx (legs pull apart)", corrMult)
+	case corrMult <= 0.97:
+		return fmt.Sprintf("Script multiplier: %.2fx (mild script drag)", corrMult)
+	default:
+		return ""
+	}
+}
+
+func guidePillars(cfg analyzer.V2Config) []GuidePillarView {
+	return []GuidePillarView{
+		{
+			Key:   analyzer.PillarPriceVig,
+			Label: analyzer.PillarLabelPriceVig,
+			LegWeight: fmt.Sprintf(
+				"%d%% (%d%% w/ script)",
+				pctInt(cfg.LegWeightPrice),
+				pctInt(cfg.LegScriptWeightPrice),
+			),
+			SlipWeight: fmt.Sprintf("%d%%", pctInt(cfg.SlipWeightPrice)),
+			Summary:    "Checks retail odds against Power-devigged sharp consensus and calibrated fair value.",
+			Points: []string{
+				"Power de-vigging accounts for favorite-longshot bias in player props and Anytime TD lines.",
+				"Flags steep vig, line fades vs. sharp/consensus books, heavy chalk (-230 or shorter), and parlay juice drag.",
+				"Detects SGP correlation tax when a stack fits the script but the book's leg prices already charge for it.",
+			},
+		},
+		{
+			Key:        analyzer.PillarScriptFit,
+			Label:      analyzer.PillarLabelScriptFit,
+			LegWeight:  fmt.Sprintf("%d%% (when active)", pctInt(cfg.LegScriptWeightScript)),
+			SlipWeight: fmt.Sprintf("%d%%", pctInt(cfg.SlipWeightScript)),
+			Summary:    "Scores same-game correlation with a deterministic Gaussian copula plus single-leg script alignment.",
+			Points: []string{
+				"Estimates joint slip probability across same-game legs and compares it against independent leg multiplication.",
+				"Cross-game legs settle independently; single-leg props still check spread and total fit.",
+				"Severe script contradictions (like trailing RB overs or total-Under conflicts) cap the overall slip grade.",
+			},
+		},
+		{
+			Key:        analyzer.PillarStability,
+			Label:      analyzer.PillarLabelStability,
+			LegWeight:  fmt.Sprintf("%d%%", pctInt(cfg.LegWeightStability)),
+			SlipWeight: fmt.Sprintf("%d%%", pctInt(cfg.SlipWeightStability)),
+			Summary:    "Measures week-to-week repeatability using calibrated hit probability and outcome distribution shape.",
+			Points: []string{
+				"Models yardage curves (Zero-Adjusted Gamma/Log-Normal) and count stats (Negative Binomial) for tail risk.",
+				"Flags high-swing Anytime TDs, longshot alt lines, and early-season samples shrunk toward role priors.",
+				"Captures compounding miss risk as parlay leg count rises or multiple chalk legs stack up.",
+			},
+		},
+		{
+			Key:   analyzer.PillarContextTraps,
+			Label: analyzer.PillarLabelContextTraps,
+			LegWeight: fmt.Sprintf(
+				"%d%% (%d%% w/ script)",
+				pctInt(cfg.LegWeightContext),
+				pctInt(cfg.LegScriptWeightContext),
+			),
+			SlipWeight: fmt.Sprintf("%d%%", pctInt(cfg.SlipWeightContext)),
+			Summary:    "Applies deterministic overlays for injuries, weather, key numbers, role shifts, and trap lines.",
+			Points: []string{
+				"Covers player injury status, teammate-out volume bumps, wind headwinds, hooks, nfelo QB drag, and shrinking roles.",
+				"Catches narrative hot-streak traps where the line has moved past recent medians, plus wide model-vs-market gaps.",
+				"Consumes structured external context signals (late inactives, news, line moves) without retraining the model.",
+			},
+		},
+	}
+}
+
+func pctInt(weight float64) int {
+	return int(math.Round(weight * 100))
+}
+
+func formatLegWeights(cfg analyzer.V2Config) string {
+	return fmt.Sprintf(
+		"Price & Vig %d%%, Stability & Tail Risk %d%%, Context & Traps %d%%",
+		pctInt(cfg.LegWeightPrice),
+		pctInt(cfg.LegWeightStability),
+		pctInt(cfg.LegWeightContext),
+	)
+}
+
+func formatLegScriptWeights(cfg analyzer.V2Config) string {
+	return fmt.Sprintf(
+		"Price & Vig %d%%, Script Fit %d%%, Stability & Tail Risk %d%%, Context & Traps %d%%",
+		pctInt(cfg.LegScriptWeightPrice),
+		pctInt(cfg.LegScriptWeightScript),
+		pctInt(cfg.LegScriptWeightStability),
+		pctInt(cfg.LegScriptWeightContext),
+	)
+}
+
+func formatSlipWeights(cfg analyzer.V2Config) string {
+	return fmt.Sprintf(
+		"Price & Vig %d%%, Script Fit %d%%, Stability & Tail Risk %d%%, Context & Traps %d%%",
+		pctInt(cfg.SlipWeightPrice),
+		pctInt(cfg.SlipWeightScript),
+		pctInt(cfg.SlipWeightStability),
+		pctInt(cfg.SlipWeightContext),
+	)
 }
 
 func gradeClass(letter string) string {

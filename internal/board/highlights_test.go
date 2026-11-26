@@ -50,24 +50,66 @@ func TestSelectHighlightsFiltersAndDeduplicates(t *testing.T) {
 			ID:   "g1",
 			Home: "BUF",
 			Away: "MIA",
+			MarketScript: analyzer.MarketScript{
+				HomeSpread:       -2.5,
+				GameTotal:        49.5,
+				HomeImpliedTotal: 26.0,
+				AwayImpliedTotal: 23.5,
+				HasSpread:        true,
+				HasTotal:         true,
+			},
 			HomeEPA: &analyzer.TeamDefenseProfile{
 				DefPassEPAAllowedRank: 10,
 				DefRushEPAAllowedRank: 10,
+				PlaysPerGame:          64,
+				PassRate:              0.58,
 			},
 			AwayEPA: &analyzer.TeamDefenseProfile{
 				DefPassEPAAllowedRank: 30, // favorable pass defense for BUF
 				DefRushEPAAllowedRank: 29, // favorable rush defense for BUF
+				DefPassEPAAllowed:     0.20,
+				DefRushEPAAllowed:     0.15,
+			},
+			Sharp: map[analyzer.SharpKey]analyzer.SharpQuote{
+				{MarketType: "PASS_YDS", Team: "BUF", PlayerName: "josh allen", Side: "OVER"}: {
+					Line: new(235.5), FairProb: 0.62, PowerFairProb: 0.62, Source: "Pinnacle", Tier: 1,
+				},
+				{MarketType: "PASS_TDS", Team: "BUF", PlayerName: "josh allen", Side: "OVER"}: {
+					Line: new(1.5), FairProb: 0.62, PowerFairProb: 0.62, Source: "Pinnacle", Tier: 1,
+				},
+				{MarketType: "REC_YDS", Team: "BUF", PlayerName: "khalil shakir", Side: "OVER"}: {
+					Line: new(38.5), FairProb: 0.62, PowerFairProb: 0.62, Source: "Pinnacle", Tier: 1,
+				},
+				{MarketType: "RUSH_YDS", Team: "BUF", PlayerName: "james cook", Side: "OVER"}: {
+					Line: new(44.5), FairProb: 0.62, PowerFairProb: 0.62, Source: "Pinnacle", Tier: 1,
+				},
 			},
 		},
 		"g2": {
 			ID:   "g2",
 			Home: "KC",
 			Away: "LV",
+			MarketScript: analyzer.MarketScript{
+				HomeSpread:       -2.5,
+				GameTotal:        49.5,
+				HomeImpliedTotal: 26.0,
+				AwayImpliedTotal: 23.5,
+				HasSpread:        true,
+				HasTotal:         true,
+			},
 			HomeEPA: &analyzer.TeamDefenseProfile{
 				DefPassEPAAllowedRank: 12,
+				PlaysPerGame:          64,
+				PassRate:              0.58,
 			},
 			AwayEPA: &analyzer.TeamDefenseProfile{
 				DefPassEPAAllowedRank: 28,
+				DefPassEPAAllowed:     0.18,
+			},
+			Sharp: map[analyzer.SharpKey]analyzer.SharpQuote{
+				{MarketType: "REC_YDS", Team: "KC", PlayerName: "xavier worthy", Side: "OVER"}: {
+					Line: new(38.5), FairProb: 0.62, PowerFairProb: 0.62, Source: "Pinnacle", Tier: 1,
+				},
 			},
 		},
 	}
@@ -75,37 +117,78 @@ func TestSelectHighlightsFiltersAndDeduplicates(t *testing.T) {
 	stats := map[string]analyzer.PlayerStats{
 		"qb1": {
 			Position: "QB",
+			Role:     analyzer.RoleQB,
 			Games: map[string][]float64{
-				"PASS_YDS": {290, 285, 280, 275, 270}, // 5/5 over 250.5 -> +10 hit rate
-				"PASS_TDS": {3, 2, 2, 2, 2},           // 5/5 over 1.5 -> +10 hit rate
+				"PASS_YDS": {290, 285, 280, 275, 270},
+				"PASS_TDS": {3, 2, 2, 2, 2},
+			},
+			EWMA: &analyzer.PlayerEWMAUsage{
+				GamesPlayed: 6,
+				PassYds:     285,
+				PassTDs:     2.3,
+				PassAtt:     35,
+				OffensePct:  0.98,
+				ExpPassYds:  278,
+				ExpPassTDs:  2.1,
 			},
 			Usage: &analyzer.PlayerUsage{
 				Last3SnapAvg:  0.98,
-				SeasonSnapAvg: 0.78, // +5 rising usage -> PASS_TDS 75 + 10 + 5 = 90, PASS_YDS 75 + 10 + 5 + 10 = 100
+				SeasonSnapAvg: 0.78,
 			},
 		},
 		"wr1": {
 			Position: "WR",
+			Role:     analyzer.RoleWR1,
 			Games: map[string][]float64{
-				"REC_YDS": {95, 90, 88, 84, 82}, // 5/5 over 65.5 -> +10 hit rate
+				"REC_YDS": {95, 90, 88, 84, 82},
+			},
+			EWMA: &analyzer.PlayerEWMAUsage{
+				GamesPlayed: 6,
+				RecYds:      96,
+				Receptions:  7.5,
+				TargetShare: 0.30,
+				OffensePct:  0.95,
+				ExpRecYds:   92,
+				TotalEPA:    5.5,
 			},
 		},
 		"rb1": {
 			Position: "RB",
+			Role:     analyzer.RoleRB1,
 			Games: map[string][]float64{
-				"RUSH_YDS": {90, 85, 82, 80, 78}, // 5/5 over 64.5 -> +10 hit rate
+				"RUSH_YDS": {90, 85, 82, 80, 78},
+			},
+			EWMA: &analyzer.PlayerEWMAUsage{
+				GamesPlayed: 6,
+				RushYds:     92,
+				Carries:     19,
+				CarryShare:  0.70,
+				OffensePct:  0.78,
+				ExpRushYds:  86,
+				TotalEPA:    4.0,
 			},
 		},
 		"wr3": {
 			Position: "WR",
+			Role:     analyzer.RoleWR1,
 			Games: map[string][]float64{
-				"REC_YDS": {95, 90, 88, 84, 82}, // 5/5 over 65.5 -> +10 hit rate
+				"REC_YDS": {95, 90, 88, 84, 82},
+			},
+			EWMA: &analyzer.PlayerEWMAUsage{
+				GamesPlayed: 6,
+				RecYds:      96,
+				Receptions:  7.5,
+				TargetShare: 0.30,
+				OffensePct:  0.95,
+				ExpRecYds:   92,
+				TotalEPA:    5.5,
 			},
 		},
 		"wr2": {
 			Position: "WR",
+			Role:     analyzer.RoleWR2,
 			Games: map[string][]float64{
-				"REC_YDS": {50, 50, 50, 50, 50}, // 0/5 over 65.5 -> median trap, not A-grade
+				"REC_YDS": {50, 50, 50, 50, 50},
 			},
 		},
 	}
@@ -115,7 +198,7 @@ func TestSelectHighlightsFiltersAndDeduplicates(t *testing.T) {
 		{
 			GameID: "g1", Market: "PASS_YDS", Team: "BUF",
 			PlayerID: "qb1", PlayerName: "Josh Allen", Side: "OVER",
-			Line: new(250.5), Odds: -105, Picked: 99,
+			Line: new(235.5), Odds: -105, Picked: 99,
 		},
 		// Same player, second A-grade market (PASS_TDS)
 		{
@@ -123,23 +206,23 @@ func TestSelectHighlightsFiltersAndDeduplicates(t *testing.T) {
 			PlayerID: "qb1", PlayerName: "Josh Allen", Side: "OVER",
 			Line: new(1.5), Odds: -120,
 		},
-		// A-grade WR1 (score 75 + 10 hit rate + 10 favorable = 95)
+		// A-grade WR1
 		{
 			GameID: "g1", Market: "REC_YDS", Team: "BUF",
 			PlayerID: "wr1", PlayerName: "Khalil Shakir", Side: "OVER",
-			Line: new(65.5), Odds: -115,
+			Line: new(38.5), Odds: -115,
 		},
-		// Same score (95) as WR1, better odds (-105 > -115) -> should rank above WR1!
+		// Same score as WR1, better odds (-105 > -115) -> ranks above WR1
 		{
 			GameID: "g1", Market: "RUSH_YDS", Team: "BUF",
 			PlayerID: "rb1", PlayerName: "James Cook", Side: "OVER",
-			Line: new(64.5), Odds: -105,
+			Line: new(44.5), Odds: -105,
 		},
-		// Same score (95) and same odds (-105) as RB1, later GameID ("g2" > "g1") -> tie-break by GameID
+		// Same score and odds (-105) as RB1, later GameID ("g2" > "g1") -> tie-break by GameID
 		{
 			GameID: "g2", Market: "REC_YDS", Team: "KC",
 			PlayerID: "wr3", PlayerName: "Xavier Worthy", Side: "OVER",
-			Line: new(65.5), Odds: -105,
+			Line: new(38.5), Odds: -105,
 		},
 		// Not A-grade
 		{
@@ -206,27 +289,61 @@ func TestSelectHighlightsParlayCombos(t *testing.T) {
 				ID:   "g2",
 				Home: "CIN",
 				Away: "BAL",
+				MarketScript: analyzer.MarketScript{
+					HomeSpread:       -2.5,
+					GameTotal:        52.5,
+					HomeImpliedTotal: 27.5,
+					AwayImpliedTotal: 25.0,
+					HasSpread:        true,
+					HasTotal:         true,
+				},
 				AwayEPA: &analyzer.TeamDefenseProfile{
 					DefPassEPAAllowedRank: 29,
+					DefPassEPAAllowed:     0.20,
 				},
 				Nfelo: &analyzer.Nfelo{
 					HomeSpread: -2.5,
+				},
+				Sharp: map[analyzer.SharpKey]analyzer.SharpQuote{
+					{MarketType: "PASS_YDS", Team: "CIN", PlayerName: "joe burrow", Side: "OVER"}: {
+						Line: new(245.5), FairProb: 0.62, PowerFairProb: 0.62, Source: "Pinnacle", Tier: 1,
+					},
+					{MarketType: "REC_YDS", Team: "CIN", PlayerName: "jamarr chase", Side: "OVER"}: {
+						Line: new(42.5), FairProb: 0.65, PowerFairProb: 0.65, Source: "Pinnacle", Tier: 1,
+					},
+					{MarketType: "TOTAL", Side: "OVER"}: {
+						Line: new(48.5), FairProb: 0.51, PowerFairProb: 0.51, Source: "Pinnacle", Tier: 1,
+					},
 				},
 			},
 		}
 
 		stats := map[string]analyzer.PlayerStats{
-			// g2 shootout trio: QB (A), WR (A), TOTAL OVER (B -> lifted to A by +8 stack bonus)
+			// g2 shootout trio: QB (A), WR (A), TOTAL OVER (B -> lifted to A by shootout copula + stack bonus)
 			"qb_cin": {
 				Position: "QB",
+				Role:     analyzer.RoleQB,
 				Games: map[string][]float64{
 					"PASS_YDS": {310, 305, 300, 295, 290},
+				},
+				EWMA: &analyzer.PlayerEWMAUsage{
+					GamesPlayed: 6, PassYds: 300, PassAtt: 38, OffensePct: 0.99, ExpPassYds: 292, TotalEPA: 9.5,
 				},
 			},
 			"wr_cin": {
 				Position: "WR",
+				Role:     analyzer.RoleWR1,
 				Games: map[string][]float64{
 					"REC_YDS": {105, 100, 95, 92, 90},
+				},
+				EWMA: &analyzer.PlayerEWMAUsage{
+					GamesPlayed: 6,
+					RecYds:      105,
+					Receptions:  8.0,
+					TargetShare: 0.32,
+					OffensePct:  0.96,
+					ExpRecYds:   98,
+					TotalEPA:    6.0,
 				},
 			},
 			// g1 RB + BUF spread (-10.5)
@@ -258,7 +375,7 @@ func TestSelectHighlightsParlayCombos(t *testing.T) {
 				PlayerID:   "qb_cin",
 				PlayerName: "Joe Burrow",
 				Side:       "OVER",
-				Line:       new(275.5),
+				Line:       new(245.5),
 				Odds:       -110,
 			},
 			{
@@ -268,7 +385,7 @@ func TestSelectHighlightsParlayCombos(t *testing.T) {
 				PlayerID:   "wr_cin",
 				PlayerName: "Ja'Marr Chase",
 				Side:       "OVER",
-				Line:       new(85.5),
+				Line:       new(42.5),
 				Odds:       -110,
 			},
 			// TOTAL OVER 48.5 (not near key number) -> score 75 (B), lifted to A (96) by +8 shootout stack!
@@ -335,12 +452,16 @@ func TestSelectHighlightsParlayCombos(t *testing.T) {
 		stats := map[string]analyzer.PlayerStats{
 			"rb_mia": {
 				Position: "RB",
-				Games:    map[string][]float64{"RUSH_YDS": {90, 88, 85, 82, 80}}, // +10 hit rate + 10 matchup = 95 (A)
+				Role:     analyzer.RoleRB1,
+				Games:    map[string][]float64{"RUSH_YDS": {90, 88, 85, 82, 80}},
+				EWMA: &analyzer.PlayerEWMAUsage{
+					GamesPlayed: 6, RushYds: 86, Carries: 18, CarryShare: 0.68, OffensePct: 0.76, ExpRushYds: 82,
+				},
 			},
 		}
 
 		rows := []board.Row{
-			// MIA +10.5 spread with nfelo cushion (+8) and sharp edge (+7) -> 90 (A)
+			// MIA +10.5 spread with nfelo cushion (+8) and sharp edge -> A
 			{GameID: "g1", Market: "SPREAD", Team: "MIA", Side: "TEAM", Line: new(10.5), Odds: -110},
 			{
 				GameID:     "g1",
@@ -349,19 +470,35 @@ func TestSelectHighlightsParlayCombos(t *testing.T) {
 				PlayerID:   "rb_mia",
 				PlayerName: "De'Von Achane",
 				Side:       "OVER",
-				Line:       new(64.5),
+				Line:       new(52.5),
 				Odds:       -110,
 			},
 		}
-		// Add sharp benchmark for MIA +10.5 so SPREAD is A-grade
+		// Add sharp benchmarks so both MIA +10.5 and De'Von Achane RUSH_YDS are A-grade individually.
 		g1 := games["g1"]
-		g1.Nfelo = &analyzer.Nfelo{HomeSpread: -6.5} // MIA +10.5 vs nfelo +6.5 -> 4 pt cushion (+8)
+		g1.Nfelo = &analyzer.Nfelo{HomeSpread: -6.5}
+		g1.MarketScript = analyzer.MarketScript{
+			HomeSpread:       -3.5,
+			GameTotal:        48.5,
+			HomeImpliedTotal: 26.0,
+			AwayImpliedTotal: 22.5,
+			HasSpread:        true,
+			HasTotal:         true,
+		}
 		g1.Sharp = map[analyzer.SharpKey]analyzer.SharpQuote{
 			{MarketType: "SPREAD", Team: "MIA", Side: "TEAM"}: {
-				Line:     new(8.5),
-				FairProb: 0.55,
-				Source:   "Pinnacle",
-				Tier:     1,
+				Line:          new(8.5),
+				FairProb:      0.55,
+				PowerFairProb: 0.55,
+				Source:        "Pinnacle",
+				Tier:          1,
+			},
+			{MarketType: "RUSH_YDS", Team: "MIA", PlayerName: "devon achane", Side: "OVER"}: {
+				Line:          new(52.5),
+				FairProb:      0.62,
+				PowerFairProb: 0.62,
+				Source:        "Pinnacle",
+				Tier:          1,
 			},
 		}
 		games["g1"] = g1
@@ -384,18 +521,62 @@ func TestSelectHighlightsParlayCombos(t *testing.T) {
 				ID:      "g1",
 				Home:    "BUF",
 				Away:    "MIA",
-				AwayEPA: &analyzer.TeamDefenseProfile{DefPassEPAAllowedRank: 30},
+				AwayEPA: &analyzer.TeamDefenseProfile{DefPassEPAAllowedRank: 30, DefPassEPAAllowed: 0.20},
+				MarketScript: analyzer.MarketScript{
+					HomeSpread: -2.5, GameTotal: 49.5, HomeImpliedTotal: 26.0, AwayImpliedTotal: 23.5,
+					HasSpread: true, HasTotal: true,
+				},
+				Sharp: map[analyzer.SharpKey]analyzer.SharpQuote{
+					{MarketType: "REC_YDS", Team: "BUF", PlayerName: "p1", Side: "OVER"}: {
+						Line: new(38.5), FairProb: 0.64, PowerFairProb: 0.64, Source: "Pinnacle", Tier: 1,
+					},
+				},
 			},
 			"g2": {
 				ID:      "g2",
 				Home:    "KC",
 				Away:    "LV",
-				AwayEPA: &analyzer.TeamDefenseProfile{DefPassEPAAllowedRank: 30},
+				AwayEPA: &analyzer.TeamDefenseProfile{DefPassEPAAllowedRank: 30, DefPassEPAAllowed: 0.20},
+				MarketScript: analyzer.MarketScript{
+					HomeSpread: -2.5, GameTotal: 49.5, HomeImpliedTotal: 26.0, AwayImpliedTotal: 23.5,
+					HasSpread: true, HasTotal: true,
+				},
+				Sharp: map[analyzer.SharpKey]analyzer.SharpQuote{
+					{MarketType: "REC_YDS", Team: "KC", PlayerName: "p2", Side: "OVER"}: {
+						Line: new(38.5), FairProb: 0.64, PowerFairProb: 0.64, Source: "Pinnacle", Tier: 1,
+					},
+				},
 			},
 		}
 		stats := map[string]analyzer.PlayerStats{
-			"p1": {Position: "WR", Games: map[string][]float64{"REC_YDS": {90, 90, 90, 90, 90}}},
-			"p2": {Position: "WR", Games: map[string][]float64{"REC_YDS": {90, 90, 90, 90, 90}}},
+			"p1": {
+				Position: "WR",
+				Role:     analyzer.RoleWR1,
+				Games:    map[string][]float64{"REC_YDS": {90, 90, 90, 90, 90}},
+				EWMA: &analyzer.PlayerEWMAUsage{
+					GamesPlayed: 6,
+					RecYds:      96,
+					Receptions:  7.5,
+					TargetShare: 0.30,
+					OffensePct:  0.95,
+					ExpRecYds:   92,
+					TotalEPA:    5.5,
+				},
+			},
+			"p2": {
+				Position: "WR",
+				Role:     analyzer.RoleWR1,
+				Games:    map[string][]float64{"REC_YDS": {90, 90, 90, 90, 90}},
+				EWMA: &analyzer.PlayerEWMAUsage{
+					GamesPlayed: 6,
+					RecYds:      96,
+					Receptions:  7.5,
+					TargetShare: 0.30,
+					OffensePct:  0.95,
+					ExpRecYds:   92,
+					TotalEPA:    5.5,
+				},
+			},
 		}
 		rows := []board.Row{
 			{
@@ -405,7 +586,7 @@ func TestSelectHighlightsParlayCombos(t *testing.T) {
 				PlayerID:   "p1",
 				PlayerName: "P1",
 				Side:       "OVER",
-				Line:       new(60.5),
+				Line:       new(38.5),
 				Odds:       -110,
 			},
 			{
@@ -415,7 +596,7 @@ func TestSelectHighlightsParlayCombos(t *testing.T) {
 				PlayerID:   "p2",
 				PlayerName: "P2",
 				Side:       "OVER",
-				Line:       new(60.5),
+				Line:       new(38.5),
 				Odds:       -110,
 			},
 		}

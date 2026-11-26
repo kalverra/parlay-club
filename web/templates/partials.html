@@ -273,27 +273,8 @@
                     >
                       Grade {{.Grade.Letter}}
                     </summary>
-                    <div class="mt-1.5 w-64 max-w-full rounded-lg border border-line-strong bg-surface p-2.5 text-xs text-ink shadow-lg">
-                      <div class="flex items-center justify-between gap-2 border-b border-line pb-1.5">
-                        <span class="font-semibold text-ink">Leg grade: {{.Grade.Letter}} ({{.Grade.Score}})</span>
-                        <a
-                          href="/analyzer/guide?from=/slips/{{$.Slip.ID}}#leg-grades"
-                          class="font-medium text-ink underline decoration-line-strong underline-offset-2 hover:opacity-75"
-                          >See full rubric</a
-                        >
-                      </div>
-                      {{if .Grade.Factors}}
-                        <ul class="mt-1.5 space-y-1">
-                          {{range .Grade.Factors}}
-                            <li class="flex items-start justify-between gap-2">
-                              <span class="min-w-0 text-ink-muted">{{.Label}}</span>
-                              <span class="shrink-0 font-semibold {{if .Positive}}text-positive-ink{{else if .Negative}}text-warning-ink{{else}}text-ink-muted{{end}}">{{.DeltaText}}</span>
-                            </li>
-                          {{end}}
-                        </ul>
-                      {{else}}
-                        <p class="mt-1.5 text-ink-muted">Baseline 75 — no extra adjustments.</p>
-                      {{end}}
+                    <div class="mt-1.5 w-72 max-w-full rounded-lg border border-line-strong bg-surface p-2.5 text-xs text-ink shadow-lg">
+                      {{template "grade-breakdown" (dict "Grade" .Grade "HeaderLabel" (printf "Leg grade: %s (%d)" .Grade.Letter .Grade.Score) "GuideHref" (printf "/analyzer/guide?from=/slips/%d#leg-grades" $.Slip.ID) "IsSlip" false "EmptyText" "Baseline 75 — no extra adjustments.")}}
                     </div>
                   </details>
                 {{end}}
@@ -419,27 +400,8 @@
           </span>
           <span class="shrink-0 text-ink-subtle">Details &#9662;</span>
         </summary>
-        <div class="mt-2 space-y-1.5 border-t border-line pt-2 text-xs">
-          <div class="flex items-center justify-between gap-2">
-            <span class="font-medium text-ink">Score: {{.Slip.Analyzer.Grade.Score}}/100</span>
-            <a
-              href="/analyzer/guide?from=/slips/{{.Slip.ID}}#slip-grade"
-              class="font-medium text-ink underline decoration-line-strong underline-offset-2 hover:opacity-75"
-              >See full rubric</a
-            >
-          </div>
-          {{if .Slip.Analyzer.Grade.Factors}}
-            <ul class="space-y-1">
-              {{range .Slip.Analyzer.Grade.Factors}}
-                <li class="flex items-start justify-between gap-2">
-                  <span class="min-w-0 text-ink-muted">{{.Label}}{{if .Detail}} — {{.Detail}}{{end}}</span>
-                  <span class="shrink-0 font-semibold {{if .Positive}}text-positive-ink{{else if .Negative}}text-warning-ink{{else}}text-ink-muted{{end}}">{{.DeltaText}}</span>
-                </li>
-              {{end}}
-            </ul>
-          {{else}}
-            <p class="text-ink-muted">Weighted leg average with no extra correlation or drag adjustments.</p>
-          {{end}}
+        <div class="mt-2 border-t border-line pt-2 text-xs">
+          {{template "grade-breakdown" (dict "Grade" .Slip.Analyzer.Grade "HeaderLabel" (printf "Score: %d/100" .Slip.Analyzer.Grade.Score) "GuideHref" (printf "/analyzer/guide?from=/slips/%d#slip-grade" .Slip.ID) "IsSlip" true "EmptyText" "Weighted leg average with no extra correlation or drag adjustments.")}}
         </div>
       </details>
     {{end}}
@@ -1635,8 +1597,8 @@
             hx-target="#pick-body"
             hx-swap="outerHTML"
             hx-push-url="{{.PushURL}}"
-            class="inline-flex min-h-12 items-center rounded-full px-2.5 py-1 text-xs font-medium {{if .Active}}bg-accent text-accent-ink{{else}}border border-chrome-border bg-chrome text-chrome-ink hover:bg-chrome-border/40{{end}}"
-            >{{.Label}}{{if .Count}} <span class="opacity-70">{{.Count}}</span>{{end}}</a
+            class="inline-flex min-h-12 items-center rounded-full px-2.5 py-1 text-xs font-medium gap-1.5 {{if .Active}}bg-accent text-accent-ink{{else}}border border-chrome-border bg-chrome text-chrome-ink hover:bg-chrome-border/40{{end}}"
+            >{{.Label}}{{if .Count}}<span class="font-mono text-[11px] tabular-nums opacity-75">{{.Count}}</span>{{end}}</a
           >
         {{end}}
       </div>
@@ -1676,14 +1638,21 @@
                 {{template "team-logo" (dict "URL" .HomeLogo "Size" "h-6 w-6")}}
               </div>
               <p class="mt-0.5 text-xs text-ink-muted">
-                {{if .KickoffISO}}<time datetime="{{.KickoffISO}}">{{.KickoffFallback}}</time>{{end}}{{if .Venue}} &middot; {{.Venue}}{{end}}
+                {{if .KickoffISO}}<time datetime="{{.KickoffISO}}">{{.KickoffFallback}}</time>{{end}}{{if .Venue}} &middot; {{.Venue}}{{end}}{{if .Weather}} &middot; <span data-game-weather>{{.Weather}}</span>{{end}}
               </p>
             </div>
             <div class="flex shrink-0 flex-col items-end gap-1">
-              {{if .AGradeCount}}
-                <span class="rounded-full border border-positive bg-positive-soft px-2 py-0.5 text-[11px] font-semibold text-positive-ink" data-game-a-grade-count>
-                  {{.AGradeCount}} A-grade
-                </span>
+              {{if .GradeBadges}}
+                <div class="flex flex-wrap justify-end gap-1" data-game-grade-distribution>
+                  {{range .GradeBadges}}
+                    <span
+                      class="rounded-full border px-1.5 py-0.5 text-[11px] font-semibold {{.Class}}"
+                      title="{{.AriaLabel}}"
+                      aria-label="{{.AriaLabel}}"
+                      {{if eq .Letter "A"}}data-game-a-grade-count{{end}}
+                    >{{.Count}}{{.Letter}}</span>
+                  {{end}}
+                </div>
               {{end}}
               <span class="rounded-full px-2 py-0.5 text-[11px] font-medium {{if .HasProps}}bg-surface-2 text-ink{{else}}text-ink-subtle{{end}}">
                 {{if .HasProps}}Explore {{.Props}} prop{{if ne .Props 1}}s{{end}}{{else}}No props yet{{end}}
@@ -1691,11 +1660,16 @@
             </div>
           </div>
           {{if or .Spread .Total .Moneyline}}
-            <dl class="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
+            <dl class="mt-2 grid grid-cols-3 gap-x-2 text-xs">
               {{if .Spread}}<div class="min-w-0"><dt class="text-ink-subtle">Spread</dt><dd class="truncate font-mono text-ink">{{.Spread}}</dd></div>{{end}}
               {{if .Total}}<div class="min-w-0"><dt class="text-ink-subtle">Total</dt><dd class="truncate font-mono text-ink">{{.Total}}</dd></div>{{end}}
-              {{if .Moneyline}}<div class="col-span-2 min-w-0"><dt class="text-ink-subtle">Moneyline</dt><dd class="truncate font-mono text-ink">{{.Moneyline}}</dd></div>{{end}}
+              {{if .Moneyline}}<div class="min-w-0"><dt class="text-ink-subtle">Moneyline</dt><dd class="truncate font-mono text-ink">{{.Moneyline}}</dd></div>{{end}}
             </dl>
+          {{end}}
+          {{if .TopPlayersSummary}}
+            <p class="mt-1.5 truncate text-xs text-ink-muted" data-game-top-players>
+              Top props: <span class="text-ink">{{.TopPlayersSummary}}</span>
+            </p>
           {{end}}
         </a>
         {{if .Unloaded}}
@@ -1809,8 +1783,8 @@
             hx-swap="outerHTML"
             hx-push-url="{{.PushURL}}"
             {{if .Active}}aria-current="true"{{end}}
-            class="inline-flex min-h-12 shrink-0 items-center rounded-full px-2.5 py-1 text-xs font-medium {{if .Active}}bg-accent text-accent-ink{{else}}border border-chrome-border bg-chrome text-chrome-ink hover:bg-chrome-border/40{{end}}"
-            >{{.Label}}{{if .Count}} <span class="opacity-70">{{.Count}}</span>{{end}}</a
+            class="inline-flex min-h-12 shrink-0 items-center rounded-full px-2.5 py-1 text-xs font-medium gap-1.5 {{if .Active}}bg-accent text-accent-ink{{else}}border border-chrome-border bg-chrome text-chrome-ink hover:bg-chrome-border/40{{end}}"
+            >{{.Label}}{{if .Count}}<span class="font-mono text-[11px] tabular-nums opacity-75">{{.Count}}</span>{{end}}</a
           >
         {{end}}
       </div>
@@ -1950,27 +1924,8 @@
                 >
                   Grade {{.Grade.Letter}}
                 </summary>
-                <div class="mt-1.5 w-60 max-w-full rounded-lg border border-line-strong bg-surface p-2 text-xs text-ink shadow-lg">
-                  <div class="flex items-center justify-between gap-2 border-b border-line pb-1">
-                    <span class="font-semibold text-ink">Leg grade: {{.Grade.Letter}} ({{.Grade.Score}})</span>
-                    <a
-                      href="/analyzer/guide?from=/slips/{{$.SlipID}}/pick#leg-grades"
-                      class="font-medium text-ink underline decoration-line-strong underline-offset-2 hover:opacity-75"
-                      >See full rubric</a
-                    >
-                  </div>
-                  {{if .Grade.Factors}}
-                    <ul class="mt-1 space-y-1">
-                      {{range .Grade.Factors}}
-                        <li class="flex items-start justify-between gap-2">
-                          <span class="min-w-0 text-ink-muted">{{.Label}}</span>
-                          <span class="shrink-0 font-semibold {{if .Positive}}text-positive-ink{{else if .Negative}}text-warning-ink{{else}}text-ink-muted{{end}}">{{.DeltaText}}</span>
-                        </li>
-                      {{end}}
-                    </ul>
-                  {{else}}
-                    <p class="mt-1 text-ink-muted">Baseline 75 — no extra adjustments.</p>
-                  {{end}}
+                <div class="mt-1.5 w-72 max-w-full rounded-lg border border-line-strong bg-surface p-2 text-xs text-ink shadow-lg">
+                  {{template "grade-breakdown" (dict "Grade" .Grade "HeaderLabel" (printf "Leg grade: %s (%d)" .Grade.Letter .Grade.Score) "GuideHref" (printf "/analyzer/guide?from=/slips/%d/pick#leg-grades" $.SlipID) "IsSlip" false "EmptyText" "Baseline 75 — no extra adjustments.")}}
                 </div>
               </details>
             {{end}}
@@ -2029,27 +1984,8 @@
         </span>
         <span class="shrink-0 text-ink-subtle">Details &#9662;</span>
       </summary>
-      <div class="mt-2 space-y-1.5 border-t border-line pt-2 text-xs">
-        <div class="flex items-center justify-between gap-2">
-          <span class="font-medium text-ink">Score: {{.Grade.Score}}/100</span>
-          <a
-            href="/analyzer/guide?from=/slips/{{.SlipID}}/pick#slip-grade"
-            class="font-medium text-ink underline decoration-line-strong underline-offset-2 hover:opacity-75"
-            >See full rubric</a
-          >
-        </div>
-        {{if .Grade.Factors}}
-          <ul class="space-y-1">
-            {{range .Grade.Factors}}
-              <li class="flex items-start justify-between gap-2">
-                <span class="min-w-0 text-ink-muted">{{.Label}}{{if .Detail}} — {{.Detail}}{{end}}</span>
-                <span class="shrink-0 font-semibold {{if .Positive}}text-positive-ink{{else if .Negative}}text-warning-ink{{else}}text-ink-muted{{end}}">{{.DeltaText}}</span>
-              </li>
-            {{end}}
-          </ul>
-        {{else}}
-          <p class="text-ink-muted">Weighted leg average with no extra correlation or drag adjustments.</p>
-        {{end}}
+      <div class="mt-2 border-t border-line pt-2 text-xs">
+        {{template "grade-breakdown" (dict "Grade" .Grade "HeaderLabel" (printf "Score: %d/100" .Grade.Score) "GuideHref" (printf "/analyzer/guide?from=/slips/%d/pick#slip-grade" .SlipID) "IsSlip" true "EmptyText" "Weighted leg average with no extra correlation or drag adjustments.")}}
       </div>
     </details>
   {{end}}
@@ -2288,26 +2224,8 @@
                     >
                       {{.Grade.Letter}} ({{.Grade.Score}})
                     </summary>
-                    <div class="mt-1.5 w-64 max-w-full rounded-lg border border-line-strong bg-surface p-2.5 text-xs text-ink shadow-lg">
-                      <div class="flex items-center justify-between gap-2 border-b border-line pb-1.5">
-                        <span class="font-semibold text-ink">Leg grade: {{.Grade.Letter}} ({{.Grade.Score}})</span>
-                        <a
-                          href="/analyzer/guide?from={{$guideFrom}}#leg-grades"
-                          class="font-medium text-ink underline decoration-line-strong underline-offset-2 hover:opacity-75"
-                        >See full rubric</a>
-                      </div>
-                      {{if .Grade.Factors}}
-                        <ul class="mt-1.5 space-y-1">
-                          {{range .Grade.Factors}}
-                            <li class="flex items-start justify-between gap-2">
-                              <span class="min-w-0 text-ink-muted">{{.Label}}</span>
-                              <span class="shrink-0 font-semibold {{if .Positive}}text-positive-ink{{else if .Negative}}text-warning-ink{{else}}text-ink-muted{{end}}">{{.DeltaText}}</span>
-                            </li>
-                          {{end}}
-                        </ul>
-                      {{else}}
-                        <p class="mt-1.5 text-ink-muted">Baseline 75 — no extra adjustments.</p>
-                      {{end}}
+                    <div class="mt-1.5 w-72 max-w-full rounded-lg border border-line-strong bg-surface p-2.5 text-xs text-ink shadow-lg">
+                      {{template "grade-breakdown" (dict "Grade" .Grade "HeaderLabel" (printf "Leg grade: %s (%d)" .Grade.Letter .Grade.Score) "GuideHref" (printf "/analyzer/guide?from=%s#leg-grades" $guideFrom) "IsSlip" false "EmptyText" "Baseline 75 — no extra adjustments.")}}
                     </div>
                   </details>
                   <span class="ui-odds">{{.Price}}{{if .ImpliedChance}} <span class="font-normal text-ink-muted" title="Implied chance from odds">({{.ImpliedChance}})</span>{{end}}</span>
@@ -2356,26 +2274,8 @@
                     >
                       {{.Grade.Letter}} ({{.Grade.Score}})
                     </summary>
-                    <div class="mt-1.5 w-64 max-w-full rounded-lg border border-line-strong bg-surface p-2.5 text-xs text-ink shadow-lg">
-                      <div class="flex items-center justify-between gap-2 border-b border-line pb-1.5">
-                        <span class="font-semibold text-ink">Slip grade: {{.Grade.Letter}} ({{.Grade.Score}})</span>
-                        <a
-                          href="/analyzer/guide?from={{$guideFrom}}#slip-grade"
-                          class="font-medium text-ink underline decoration-line-strong underline-offset-2 hover:opacity-75"
-                        >See full rubric</a>
-                      </div>
-                      {{if .Grade.Factors}}
-                        <ul class="mt-1.5 space-y-1">
-                          {{range .Grade.Factors}}
-                            <li class="flex items-start justify-between gap-2">
-                              <span class="min-w-0 text-ink-muted">{{.Label}}{{if .Detail}} — {{.Detail}}{{end}}</span>
-                              <span class="shrink-0 font-semibold {{if .Positive}}text-positive-ink{{else if .Negative}}text-warning-ink{{else}}text-ink-muted{{end}}">{{.DeltaText}}</span>
-                            </li>
-                          {{end}}
-                        </ul>
-                      {{else}}
-                        <p class="mt-1.5 text-ink-muted">Weighted leg average with no extra correlation or drag adjustments.</p>
-                      {{end}}
+                    <div class="mt-1.5 w-72 max-w-full rounded-lg border border-line-strong bg-surface p-2.5 text-xs text-ink shadow-lg">
+                      {{template "grade-breakdown" (dict "Grade" .Grade "HeaderLabel" (printf "Slip grade: %s (%d)" .Grade.Letter .Grade.Score) "GuideHref" (printf "/analyzer/guide?from=%s#slip-grade" $guideFrom) "IsSlip" true "EmptyText" "Weighted leg average with no extra correlation or drag adjustments.")}}
                     </div>
                   </details>
                   <span class="font-semibold text-ink">{{.Label}}</span>
@@ -2499,4 +2399,66 @@
   {{else}}
     <p class="text-sm text-ink-muted">No upcoming games left in this week.</p>
   {{end}}
+{{end}}
+
+{{define "grade-breakdown"}}
+<div class="min-w-0 space-y-2">
+  <div class="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 border-b border-line pb-1.5">
+    <span class="font-semibold text-ink">{{.HeaderLabel}}</span>
+    <a
+      href="{{.GuideHref}}"
+      class="shrink-0 font-medium text-ink underline decoration-line-strong underline-offset-2 hover:opacity-75"
+      >See full rubric</a
+    >
+  </div>
+  {{if .Grade.Uncertain}}
+    <div data-uncertainty-badge>
+      <span class="inline-flex items-center rounded-full border border-warning bg-warning-soft px-2 py-0.5 text-[10px] font-semibold text-warning-ink">
+        High uncertainty
+      </span>
+    </div>
+  {{end}}
+  {{if .Grade.CorrSummary}}
+    <p class="text-[11px] font-medium text-ink-muted break-words" data-corr-summary>{{.Grade.CorrSummary}}</p>
+  {{end}}
+  {{if .Grade.Pillars}}
+    <ul class="space-y-2" data-grade-pillars>
+      {{range .Grade.Pillars}}
+        <li class="min-w-0 space-y-1" data-pillar="{{.Key}}">
+          <div class="flex items-center justify-between gap-2">
+            <span class="min-w-0 truncate font-medium text-ink">{{.Label}}</span>
+            <span class="shrink-0 rounded-full border px-1.5 py-0.5 text-[10px] font-semibold tabular-nums {{.ToneClass}}">{{.Score}}</span>
+          </div>
+          <div class="h-1.5 w-full overflow-hidden rounded-full bg-ink/15">
+            <div class="h-full rounded-full {{.BarClass}}" style="width: {{.Score}}%"></div>
+          </div>
+          {{if .Summary}}
+            <p class="text-[11px] leading-snug text-ink-muted break-words">{{.Summary}}</p>
+          {{end}}
+        </li>
+      {{end}}
+    </ul>
+    {{if .Grade.Why}}
+      <div class="border-t border-line pt-1.5" data-grade-why>
+        <p class="text-[10px] font-semibold uppercase tracking-wide text-ink-subtle">Why</p>
+        <ul class="mt-1 list-disc space-y-0.5 pl-4 text-[11px] leading-snug text-ink-muted break-words">
+          {{range .Grade.Why}}
+            <li>{{.}}</li>
+          {{end}}
+        </ul>
+      </div>
+    {{end}}
+  {{else if .Grade.Factors}}
+    <ul class="space-y-1">
+      {{range .Grade.Factors}}
+        <li class="flex items-start justify-between gap-2">
+          <span class="min-w-0 text-ink-muted">{{.Label}}{{if and $.IsSlip .Detail}} — {{.Detail}}{{end}}</span>
+          <span class="shrink-0 font-semibold {{if .Positive}}text-positive-ink{{else if .Negative}}text-warning-ink{{else}}text-ink-muted{{end}}">{{.DeltaText}}</span>
+        </li>
+      {{end}}
+    </ul>
+  {{else}}
+    <p class="text-ink-muted">{{.EmptyText}}</p>
+  {{end}}
+</div>
 {{end}}

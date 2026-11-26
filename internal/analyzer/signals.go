@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"slices"
 	"strings"
 	"time"
@@ -186,6 +187,511 @@ func rankTeams(
 	})
 	for i, team := range ordered {
 		assign(team, i+1)
+	}
+}
+
+// EWMAHalfLifeWeeks is the default half-life in games for exponential moving
+// average usage and opportunity features.
+const EWMAHalfLifeWeeks = 3.0
+
+// ComputeEWMA computes the normalized (adjust=True) exponentially weighted
+// moving average of values ordered most recent first (values[0] has weight 1.0,
+// values[i] has weight 0.5^(i/halfLife)). Returns 0 when values is empty.
+func ComputeEWMA(values []float64, halfLife float64) float64 {
+	if len(values) == 0 {
+		return 0
+	}
+	if halfLife <= 0 {
+		halfLife = EWMAHalfLifeWeeks
+	}
+	lambda := math.Pow(0.5, 1.0/halfLife)
+	weight := 1.0
+	var weightedSum, weightTotal float64
+	for _, v := range values {
+		weightedSum += weight * v
+		weightTotal += weight
+		weight *= lambda
+	}
+	if weightTotal == 0 {
+		return 0
+	}
+	return weightedSum / weightTotal
+}
+
+// BuildPlayerEWMAUsage computes EWMA usage, production, efficiency, and
+// expected-opportunity features from nflverse player-week rows using
+// EWMAHalfLifeWeeks. Unlike BuildPlayerUsage, it returns a profile whenever at
+// least 1 prior week exists. Returns nil when rows is empty.
+func BuildPlayerEWMAUsage(rows []db.NFLversePlayerWeek) *PlayerEWMAUsage {
+	return BuildPlayerEWMAUsageWithHalfLife(rows, EWMAHalfLifeWeeks)
+}
+
+// BuildPlayerEWMAUsageWithHalfLife computes EWMA usage, production,
+// efficiency, and expected-opportunity features using the supplied half-life in
+// games. Returns nil when rows is empty.
+func BuildPlayerEWMAUsageWithHalfLife(rows []db.NFLversePlayerWeek, halfLife float64) *PlayerEWMAUsage {
+	if len(rows) == 0 {
+		return nil
+	}
+	if halfLife <= 0 {
+		halfLife = EWMAHalfLifeWeeks
+	}
+	ordered := sortPlayerWeeksDesc(rows)
+	lambda := math.Pow(0.5, 1.0/halfLife)
+	weight := 1.0
+	var weightTotal float64
+
+	out := &PlayerEWMAUsage{
+		GamesPlayed:   len(ordered),
+		HalfLifeWeeks: halfLife,
+	}
+	for _, r := range ordered {
+		weightTotal += weight
+		out.OffensePct += weight * r.OffensePct
+		out.TargetShare += weight * r.TargetShare
+		out.AirYardsShare += weight * r.AirYardsShare
+		out.WOPR += weight * r.WOPR
+		out.CarryShare += weight * r.CarryShare
+		out.PassAtt += weight * float64(r.PassAtt)
+		out.Carries += weight * float64(r.Carries)
+		out.Targets += weight * float64(r.Targets)
+		out.Receptions += weight * float64(r.Receptions)
+		out.PassYds += weight * float64(r.PassYds)
+		out.RushYds += weight * float64(r.RushYds)
+		out.RecYds += weight * float64(r.RecYds)
+		out.PassTDs += weight * float64(r.PassTDs)
+		out.RushTDs += weight * float64(r.RushTDs)
+		out.RecTDs += weight * float64(r.RecTDs)
+		out.RZOpps += weight * float64(r.RZOpps)
+		out.TotalEPA += weight * r.TotalEPA
+		out.CPOE += weight * r.CPOE
+		out.ExpPassYds += weight * r.ExpPassYds
+		out.ExpRushYds += weight * r.ExpRushYds
+		out.ExpRecYds += weight * r.ExpRecYds
+		out.ExpReceptions += weight * r.ExpReceptions
+		out.ExpPassTDs += weight * r.ExpPassTDs
+		out.ExpRushTDs += weight * r.ExpRushTDs
+		out.ExpRecTDs += weight * r.ExpRecTDs
+		weight *= lambda
+	}
+	if weightTotal == 0 {
+		return nil
+	}
+	inv := 1.0 / weightTotal
+	out.OffensePct *= inv
+	out.TargetShare *= inv
+	out.AirYardsShare *= inv
+	out.WOPR *= inv
+	out.CarryShare *= inv
+	out.PassAtt *= inv
+	out.Carries *= inv
+	out.Targets *= inv
+	out.Receptions *= inv
+	out.PassYds *= inv
+	out.RushYds *= inv
+	out.RecYds *= inv
+	out.PassTDs *= inv
+	out.RushTDs *= inv
+	out.RecTDs *= inv
+	out.RZOpps *= inv
+	out.TotalEPA *= inv
+	out.CPOE *= inv
+	out.ExpPassYds *= inv
+	out.ExpRushYds *= inv
+	out.ExpRecYds *= inv
+	out.ExpReceptions *= inv
+	out.ExpPassTDs *= inv
+	out.ExpRushTDs *= inv
+	out.ExpRecTDs *= inv
+	return out
+}
+
+// BuildPlayerRoleProfiles deterministically derives each player's EWMA usage
+// and RoleArchetype (QB, WR1, WR2, TE1, RB1, RB2) from trailing nflverse
+// player-week rows by ranking teammates within (team, position).
+func BuildPlayerRoleProfiles(rows []db.NFLversePlayerWeek) map[string]PlayerRoleProfile {
+	if len(rows) == 0 {
+		return nil
+	}
+	byPlayer := groupNFLverseRowsByPlayer(rows)
+	if len(byPlayer) == 0 {
+		return nil
+	}
+
+	profiles := make(map[string]PlayerRoleProfile, len(byPlayer))
+	type teamPosKey struct {
+		team string
+		pos  string
+	}
+	byTeamPos := make(map[teamPosKey][]PlayerRoleProfile)
+
+	for espnID, pRows := range byPlayer {
+		ordered := sortPlayerWeeksDesc(pRows)
+		ewma := BuildPlayerEWMAUsage(ordered)
+		team := latestNonEmptyTeam(ordered)
+		pos := latestNormalizedPosition(ordered)
+		prof := PlayerRoleProfile{
+			ESPNID:   espnID,
+			Team:     team,
+			Position: pos,
+			EWMA:     ewma,
+		}
+		if pos == "QB" {
+			prof.Role = RoleQB
+		}
+		profiles[espnID] = prof
+
+		if team == "" || ewma == nil || !hasOffensiveParticipation(ewma) {
+			continue
+		}
+		if pos == "WR" || pos == "TE" || pos == "RB" {
+			key := teamPosKey{team: team, pos: pos}
+			byTeamPos[key] = append(byTeamPos[key], prof)
+		}
+	}
+
+	for key, group := range byTeamPos {
+		switch key.pos {
+		case "WR":
+			sortPassCatchersDesc(group)
+			for i, p := range group {
+				switch i {
+				case 0:
+					p.Role = RoleWR1
+				case 1:
+					p.Role = RoleWR2
+				default:
+					continue
+				}
+				profiles[p.ESPNID] = p
+			}
+		case "TE":
+			sortPassCatchersDesc(group)
+			if len(group) > 0 {
+				p := group[0]
+				p.Role = RoleTE1
+				profiles[p.ESPNID] = p
+			}
+		case "RB":
+			sortRBsDesc(group)
+			for i, p := range group {
+				switch i {
+				case 0:
+					p.Role = RoleRB1
+				case 1:
+					p.Role = RoleRB2
+				default:
+					continue
+				}
+				profiles[p.ESPNID] = p
+			}
+		}
+	}
+	return profiles
+}
+
+var allRoleArchetypes = []RoleArchetype{
+	RoleQB,
+	RoleWR1,
+	RoleWR2,
+	RoleTE1,
+	RoleRB1,
+	RoleRB2,
+}
+
+// BuildOppRoleDefenseProfiles aggregates opposing player-week rows into
+// per-game stats allowed and league ranks for each (defense, RoleArchetype).
+// When roles is nil, player role profiles are derived from rows first.
+func BuildOppRoleDefenseProfiles(
+	rows []db.NFLversePlayerWeek,
+	roles map[string]PlayerRoleProfile,
+) map[string]map[RoleArchetype]*RoleDefenseProfile {
+	if len(rows) == 0 {
+		return nil
+	}
+	if roles == nil {
+		roles = BuildPlayerRoleProfiles(rows)
+	}
+	if len(roles) == 0 {
+		return nil
+	}
+
+	type oppRoleGameKey struct {
+		opponent   string
+		role       RoleArchetype
+		seasonType int
+		weekNum    int
+	}
+	type gameSum struct {
+		passYds    float64
+		passTDs    float64
+		rushYds    float64
+		rushTDs    float64
+		recYds     float64
+		receptions float64
+		recTDs     float64
+		targets    float64
+		carries    float64
+		totalEPA   float64
+		expYds     float64
+	}
+
+	byGame := make(map[oppRoleGameKey]gameSum)
+	for _, row := range rows {
+		opp := strings.ToUpper(strings.TrimSpace(row.Opponent))
+		if opp == "" {
+			continue
+		}
+		prof, ok := roles[row.ESPNID]
+		if !ok || prof.Role == RoleUnknown {
+			continue
+		}
+		key := oppRoleGameKey{
+			opponent:   opp,
+			role:       prof.Role,
+			seasonType: row.SeasonType,
+			weekNum:    row.WeekNum,
+		}
+		cur := byGame[key]
+		cur.passYds += float64(row.PassYds)
+		cur.passTDs += float64(row.PassTDs)
+		cur.rushYds += float64(row.RushYds)
+		cur.rushTDs += float64(row.RushTDs)
+		cur.recYds += float64(row.RecYds)
+		cur.receptions += float64(row.Receptions)
+		cur.recTDs += float64(row.RecTDs)
+		cur.targets += float64(row.Targets)
+		cur.carries += float64(row.Carries)
+		cur.totalEPA += row.TotalEPA
+		cur.expYds += roleExpYds(prof.Role, row)
+		byGame[key] = cur
+	}
+	if len(byGame) == 0 {
+		return nil
+	}
+
+	out := make(map[string]map[RoleArchetype]*RoleDefenseProfile)
+	for key, sum := range byGame {
+		byRole := out[key.opponent]
+		if byRole == nil {
+			byRole = make(map[RoleArchetype]*RoleDefenseProfile)
+			out[key.opponent] = byRole
+		}
+		prof := byRole[key.role]
+		if prof == nil {
+			prof = &RoleDefenseProfile{Role: key.role}
+			byRole[key.role] = prof
+		}
+		prof.Games++
+		prof.PassYdsAllowed += sum.passYds
+		prof.PassTDsAllowed += sum.passTDs
+		prof.RushYdsAllowed += sum.rushYds
+		prof.RushTDsAllowed += sum.rushTDs
+		prof.RecYdsAllowed += sum.recYds
+		prof.ReceptionsAllowed += sum.receptions
+		prof.RecTDsAllowed += sum.recTDs
+		prof.TargetsAllowed += sum.targets
+		prof.CarriesAllowed += sum.carries
+		prof.TotalEPAAllowed += sum.totalEPA
+		prof.ExpYdsAllowed += sum.expYds
+	}
+
+	for _, byRole := range out {
+		for _, prof := range byRole {
+			if prof.Games == 0 {
+				continue
+			}
+			inv := 1.0 / float64(prof.Games)
+			prof.PassYdsAllowed *= inv
+			prof.PassTDsAllowed *= inv
+			prof.RushYdsAllowed *= inv
+			prof.RushTDsAllowed *= inv
+			prof.RecYdsAllowed *= inv
+			prof.ReceptionsAllowed *= inv
+			prof.RecTDsAllowed *= inv
+			prof.TargetsAllowed *= inv
+			prof.CarriesAllowed *= inv
+			prof.TotalEPAAllowed *= inv
+			prof.ExpYdsAllowed *= inv
+		}
+	}
+
+	for _, role := range allRoleArchetypes {
+		var teams []string
+		for team, byRole := range out {
+			if byRole[role] != nil {
+				teams = append(teams, team)
+			}
+		}
+		if len(teams) == 0 {
+			continue
+		}
+		rankTeams(teams, func(t string) float64 {
+			return rolePrimaryYdsAllowed(role, out[t][role])
+		}, false, func(t string, r int) {
+			out[t][role].YdsAllowedRank = r
+		})
+		rankTeams(teams, func(t string) float64 {
+			return out[t][role].TotalEPAAllowed
+		}, false, func(t string, r int) {
+			out[t][role].EPAAllowedRank = r
+		})
+	}
+	return out
+}
+
+func groupNFLverseRowsByPlayer(rows []db.NFLversePlayerWeek) map[string][]db.NFLversePlayerWeek {
+	grouped := make(map[string][]db.NFLversePlayerWeek)
+	for _, r := range rows {
+		if r.ESPNID == "" {
+			continue
+		}
+		grouped[r.ESPNID] = append(grouped[r.ESPNID], r)
+	}
+	return grouped
+}
+
+func sortPlayerWeeksDesc(rows []db.NFLversePlayerWeek) []db.NFLversePlayerWeek {
+	if len(rows) <= 1 {
+		return rows
+	}
+	alreadySorted := true
+	for i := 1; i < len(rows); i++ {
+		if comparePlayerWeeksDesc(rows[i-1], rows[i]) > 0 {
+			alreadySorted = false
+			break
+		}
+	}
+	if alreadySorted {
+		return rows
+	}
+	ordered := slices.Clone(rows)
+	slices.SortStableFunc(ordered, comparePlayerWeeksDesc)
+	return ordered
+}
+
+func comparePlayerWeeksDesc(a, b db.NFLversePlayerWeek) int {
+	if c := cmp.Compare(b.Season, a.Season); c != 0 {
+		return c
+	}
+	if c := cmp.Compare(b.SeasonType, a.SeasonType); c != 0 {
+		return c
+	}
+	if c := cmp.Compare(b.WeekNum, a.WeekNum); c != 0 {
+		return c
+	}
+	return cmp.Compare(a.ESPNID, b.ESPNID)
+}
+
+func latestNonEmptyTeam(ordered []db.NFLversePlayerWeek) string {
+	for _, r := range ordered {
+		if team := strings.ToUpper(strings.TrimSpace(r.Team)); team != "" {
+			return team
+		}
+	}
+	return ""
+}
+
+func latestNormalizedPosition(ordered []db.NFLversePlayerWeek) string {
+	for _, r := range ordered {
+		if pos := db.NormalizePosition(r.Position); pos != "" {
+			return pos
+		}
+	}
+	return ""
+}
+
+func hasOffensiveParticipation(e *PlayerEWMAUsage) bool {
+	return e.OffensePct > 0 ||
+		e.TargetShare > 0 ||
+		e.CarryShare > 0 ||
+		e.WOPR > 0 ||
+		e.Targets > 0 ||
+		e.Carries > 0 ||
+		e.PassAtt > 0 ||
+		e.ExpPassYds > 0 ||
+		e.ExpRushYds > 0 ||
+		e.ExpRecYds > 0
+}
+
+func sortPassCatchersDesc(group []PlayerRoleProfile) {
+	slices.SortFunc(group, func(a, b PlayerRoleProfile) int {
+		if c := cmp.Compare(b.EWMA.TargetShare, a.EWMA.TargetShare); c != 0 {
+			return c
+		}
+		if c := cmp.Compare(b.EWMA.WOPR, a.EWMA.WOPR); c != 0 {
+			return c
+		}
+		if c := cmp.Compare(b.EWMA.OffensePct, a.EWMA.OffensePct); c != 0 {
+			return c
+		}
+		if c := cmp.Compare(b.EWMA.Targets, a.EWMA.Targets); c != 0 {
+			return c
+		}
+		if c := cmp.Compare(b.EWMA.GamesPlayed, a.EWMA.GamesPlayed); c != 0 {
+			return c
+		}
+		return cmp.Compare(a.ESPNID, b.ESPNID)
+	})
+}
+
+func rbWorkloadScore(e *PlayerEWMAUsage) float64 {
+	if e == nil {
+		return 0
+	}
+	return 0.60*e.CarryShare + 0.40*e.OffensePct
+}
+
+func sortRBsDesc(group []PlayerRoleProfile) {
+	slices.SortFunc(group, func(a, b PlayerRoleProfile) int {
+		if c := cmp.Compare(rbWorkloadScore(b.EWMA), rbWorkloadScore(a.EWMA)); c != 0 {
+			return c
+		}
+		if c := cmp.Compare(b.EWMA.CarryShare, a.EWMA.CarryShare); c != 0 {
+			return c
+		}
+		if c := cmp.Compare(b.EWMA.Carries, a.EWMA.Carries); c != 0 {
+			return c
+		}
+		if c := cmp.Compare(b.EWMA.OffensePct, a.EWMA.OffensePct); c != 0 {
+			return c
+		}
+		if c := cmp.Compare(b.EWMA.TargetShare, a.EWMA.TargetShare); c != 0 {
+			return c
+		}
+		if c := cmp.Compare(b.EWMA.GamesPlayed, a.EWMA.GamesPlayed); c != 0 {
+			return c
+		}
+		return cmp.Compare(a.ESPNID, b.ESPNID)
+	})
+}
+
+func roleExpYds(role RoleArchetype, row db.NFLversePlayerWeek) float64 {
+	switch role {
+	case RoleQB:
+		return row.ExpPassYds
+	case RoleRB1, RoleRB2:
+		return row.ExpRushYds
+	case RoleWR1, RoleWR2, RoleTE1:
+		return row.ExpRecYds
+	default:
+		return 0
+	}
+}
+
+func rolePrimaryYdsAllowed(role RoleArchetype, prof *RoleDefenseProfile) float64 {
+	if prof == nil {
+		return 0
+	}
+	switch role {
+	case RoleQB:
+		return prof.PassYdsAllowed
+	case RoleRB1, RoleRB2:
+		return prof.RushYdsAllowed
+	case RoleWR1, RoleWR2, RoleTE1:
+		return prof.RecYdsAllowed
+	default:
+		return 0
 	}
 }
 
@@ -472,11 +978,28 @@ func loadSignals(
 
 	var teamEPA map[string]*TeamDefenseProfile
 	var usageByPlayer map[string]*PlayerUsage
+	var roleProfiles map[string]PlayerRoleProfile
+	var roleDefByTeam map[string]map[RoleArchetype]*RoleDefenseProfile
 
 	if week, err := store.WeekByID(ctx, weekID); err == nil {
 		if profiles, fresh := LoadFreshTeamProfiles(ctx, store, now, week); fresh {
 			teamEPA = profiles
-			usageByPlayer = LoadPlayerUsageForIDs(ctx, store, athleteIDs, week.Season, week.SeasonType)
+			if len(athleteIDs) > 0 {
+				seasonTypes := NFLverseSeasonTypes(week.SeasonType)
+				if allRows, err := store.NFLversePlayerWeeksForSeasonTypes(
+					ctx, week.Season, seasonTypes...,
+				); err == nil && len(allRows) > 0 {
+					byPlayer := groupNFLverseRowsByPlayer(allRows)
+					usageByPlayer = make(map[string]*PlayerUsage, len(athleteIDs))
+					for _, id := range athleteIDs {
+						if usage := BuildPlayerUsage(sortPlayerWeeksDesc(byPlayer[id])); usage != nil {
+							usageByPlayer[id] = usage
+						}
+					}
+					roleProfiles = BuildPlayerRoleProfiles(allRows)
+					roleDefByTeam = BuildOppRoleDefenseProfiles(allRows, roleProfiles)
+				}
+			}
 		}
 	}
 
@@ -493,12 +1016,15 @@ func loadSignals(
 		}
 	}
 
+	var oddsRows []db.Odds
 	var sharpByGame map[string]map[SharpKey]SharpQuote
 	if len(games) > 0 {
-		if oddsRows, err := store.OddsForWeek(ctx, weekID); err == nil {
+		if loaded, err := store.OddsForWeek(ctx, weekID); err == nil {
+			oddsRows = loaded
 			sharpByGame = BuildSharpBenchmarks(oddsRows)
 		}
 	}
+	scriptByGame := BuildMarketScripts(games, oddsRows)
 
 	gamesByID := make(map[string]Game, len(games))
 	for _, game := range games {
@@ -507,8 +1033,13 @@ func loadSignals(
 			proj = &p
 		}
 		converted := GameFromDB(game, proj, teamEPA)
+		if len(roleDefByTeam) > 0 {
+			converted.HomeRoleDefense = roleDefByTeam[game.HomeTeam]
+			converted.AwayRoleDefense = roleDefByTeam[game.AwayTeam]
+		}
 		converted.Injuries = toAnalyzerInjuries(MergeGameInjuries(game, rosters))
 		converted.Sharp = sharpByGame[game.ID]
+		converted.MarketScript = scriptByGame[game.ID]
 		gamesByID[game.ID] = converted
 	}
 
@@ -527,17 +1058,186 @@ func loadSignals(
 			_ = json.Unmarshal([]byte(log.StatsJSON), &markets)
 		}
 		usage := usageByPlayer[id]
+		var ewma *PlayerEWMAUsage
+		var role RoleArchetype
+		var nflvPos string
+		if prof, ok := roleProfiles[id]; ok {
+			ewma = prof.EWMA
+			role = prof.Role
+			nflvPos = prof.Position
+		}
 		pos := positionByID[id]
-		if len(markets) == 0 && usage == nil && pos == "" {
+		if pos == "" {
+			pos = nflvPos
+		}
+		if role == RoleUnknown && db.NormalizePosition(pos) == "QB" {
+			role = RoleQB
+		}
+		if len(markets) == 0 && usage == nil && ewma == nil && pos == "" && role == RoleUnknown {
 			continue
 		}
 		stats[id] = PlayerStats{
 			Position: pos,
+			Role:     role,
 			Games:    markets,
 			Usage:    usage,
+			EWMA:     ewma,
 		}
 	}
 	return gamesByID, stats
+}
+
+// BuildMarketScripts derives consensus spread, game total, and implied team
+// totals per game from cached SPREAD and TOTAL odds rows without extra DB
+// queries or API calls.
+func BuildMarketScripts(games []db.Game, rows []db.Odds) map[string]MarketScript {
+	if len(games) == 0 || len(rows) == 0 {
+		return nil
+	}
+
+	byGame := make(map[string][]db.Odds, len(games))
+	for _, row := range rows {
+		if row.GameID == "" || row.Line == nil {
+			continue
+		}
+		market := strings.ToUpper(strings.TrimSpace(row.MarketType))
+		if market != marketSpread && market != marketTotal {
+			continue
+		}
+		byGame[row.GameID] = append(byGame[row.GameID], row)
+	}
+	if len(byGame) == 0 {
+		return nil
+	}
+
+	out := make(map[string]MarketScript, len(games))
+	for _, g := range games {
+		ms := BuildMarketScript(g.HomeTeam, g.AwayTeam, byGame[g.ID])
+		if ms.HasSpread || ms.HasTotal {
+			out[g.ID] = ms
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// BuildMarketScript derives consensus spread, game total, and implied team
+// totals for one game from cached SPREAD and TOTAL odds rows.
+func BuildMarketScript(homeTeam, awayTeam string, rows []db.Odds) MarketScript {
+	if len(rows) == 0 {
+		return MarketScript{}
+	}
+
+	home := strings.ToUpper(strings.TrimSpace(homeTeam))
+	away := strings.ToUpper(strings.TrimSpace(awayTeam))
+	spreads, totals := collectScriptLines(home, away, rows)
+
+	var ms MarketScript
+	if len(spreads) > 0 {
+		ms.HomeSpread = Median(spreads)
+		ms.HasSpread = true
+	}
+	if len(totals) > 0 {
+		ms.GameTotal = Median(totals)
+		ms.HasTotal = true
+	}
+	if ms.HasSpread && ms.HasTotal {
+		ms.HomeImpliedTotal = (ms.GameTotal - ms.HomeSpread) / 2
+		ms.AwayImpliedTotal = (ms.GameTotal + ms.HomeSpread) / 2
+	}
+	return ms
+}
+
+type twoSideLine struct {
+	hasA bool
+	valA float64
+	hasB bool
+	valB float64
+}
+
+func collectScriptLines(home, away string, rows []db.Odds) (spreads, totals []float64) {
+	spreadByBook := make(map[string]*twoSideLine)
+	totalByBook := make(map[string]*twoSideLine)
+
+	for _, row := range rows {
+		if row.Line == nil {
+			continue
+		}
+		book := db.NormalizeBook(row.Book)
+		if book == "" || excludedTier3Books[book] {
+			continue
+		}
+		market := strings.ToUpper(strings.TrimSpace(row.MarketType))
+		side := strings.ToUpper(strings.TrimSpace(row.Side))
+		switch market {
+		case marketSpread:
+			if side != "TEAM" {
+				continue
+			}
+			team := strings.ToUpper(strings.TrimSpace(row.Team))
+			isHome := home != "" && team == home
+			isAway := away != "" && team == away
+			if !isHome && !isAway {
+				continue
+			}
+			recordBookLine(spreadByBook, book, isHome, *row.Line)
+		case marketTotal:
+			if *row.Line <= 0 || (side != sideOver && side != sideUnder) {
+				continue
+			}
+			recordBookLine(totalByBook, book, side == sideOver, *row.Line)
+		}
+	}
+
+	spreads = make([]float64, 0, len(spreadByBook))
+	for _, entry := range spreadByBook {
+		switch {
+		case entry.hasA && entry.hasB:
+			if math.Abs(entry.valA+entry.valB) <= lineMatchEpsilon {
+				spreads = append(spreads, entry.valA)
+			} else {
+				spreads = append(spreads, (entry.valA-entry.valB)/2)
+			}
+		case entry.hasA:
+			spreads = append(spreads, entry.valA)
+		case entry.hasB:
+			spreads = append(spreads, -entry.valB)
+		}
+	}
+
+	totals = make([]float64, 0, len(totalByBook))
+	for _, entry := range totalByBook {
+		switch {
+		case entry.hasA && entry.hasB:
+			if math.Abs(entry.valA-entry.valB) <= lineMatchEpsilon {
+				totals = append(totals, entry.valA)
+			} else {
+				totals = append(totals, (entry.valA+entry.valB)/2)
+			}
+		case entry.hasA:
+			totals = append(totals, entry.valA)
+		case entry.hasB:
+			totals = append(totals, entry.valB)
+		}
+	}
+	return spreads, totals
+}
+
+func recordBookLine(byBook map[string]*twoSideLine, book string, isSideA bool, val float64) {
+	entry := byBook[book]
+	if entry == nil {
+		entry = &twoSideLine{}
+		byBook[book] = entry
+	}
+	if isSideA {
+		entry.hasA = true
+		entry.valA = val
+	} else {
+		entry.hasB = true
+		entry.valB = val
+	}
 }
 
 // LoadGameSignals loads fresh nflverse team defense profiles and player usage

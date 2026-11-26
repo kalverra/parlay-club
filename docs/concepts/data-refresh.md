@@ -189,10 +189,12 @@ all kicked off is skipped because the projections are pre-game numbers that no l
 API credits, so it has no floor and does not wait on the odds sync.
 
 `nflverse:season:{year}` is per season, covering both regular-season and postseason weeks. One pass fetches `Players`,
-`TeamStats`, `PlayerStats`, and `SnapCounts` for `week.Season`, joins player usage (by GSIS ID) and snap counts (by PFR
-ID) onto ESPN `athlete_id`, and upserts `nflverse_player_ids`, `nflverse_team_weeks`, and `nflverse_player_weeks` in one
-transaction. Unmatched players are omitted, and any fetch failure leaves stored rows and `sync_state` untouched so the
-source enters the 5-minute backoff.
+`TeamStats`, `PlayerStats`, and `SnapCounts` for `week.Season`, plus fail-soft `FFOpportunity` expected-opportunity rows,
+joins player usage (by GSIS ID), snap counts (by PFR ID), team carry share (`carries / team_carries`), CPOE
+(`passing_cpoe`), and expected opportunity onto ESPN `athlete_id`, and upserts `nflverse_player_ids`,
+`nflverse_team_weeks`, and `nflverse_player_weeks` in one transaction. Unmatched players are omitted, an
+`FFOpportunity` error logs a warning without aborting the sync, and any core fetch failure leaves stored rows and
+`sync_state` untouched so the source enters the 5-minute backoff.
 
 ## Auto-grading
 

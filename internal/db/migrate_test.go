@@ -15,7 +15,7 @@ import (
 )
 
 // latestSchemaVersion is the version the last migration records.
-const latestSchemaVersion = 18
+const latestSchemaVersion = 19
 
 func TestMigrateFreshDatabase(t *testing.T) {
 	t.Parallel()
@@ -592,6 +592,48 @@ func TestMigration0018LiveGameState(t *testing.T) {
 	assert.Equal(t, int64(3), period.Int64)
 	assert.Equal(t, "8:42", clock.String)
 	assert.Equal(t, `{"hasStats":true}`, boxscore.String)
+}
+
+func TestMigration0019V2OpportunitySignals(t *testing.T) {
+	t.Parallel()
+
+	database := openTestDB(t)
+	require.NoError(t, db.Migrate(t.Context(), database))
+
+	_, err := database.ExecContext(t.Context(), `
+		INSERT INTO nflverse_player_weeks (
+			espn_id, season, season_type, week_num, team,
+			offense_snaps, offense_pct, target_share, air_yards_share, wopr,
+			carries, targets, total_epa, rz_opps, updated_at
+		) VALUES (
+			'4362628', 2026, 2, 9, 'CIN',
+			50, 0.9, 0.3, 0.4, 0.7,
+			1, 10, 5.2, 2, '2026-11-08T12:00:00Z'
+		)`)
+	require.NoError(t, err)
+
+	var (
+		expPassYds, expRushYds, expRecYds, expReceptions float64
+		expPassTDs, expRushTDs, expRecTDs                float64
+		carryShare, cpoe                                 float64
+	)
+	require.NoError(t, database.QueryRowContext(t.Context(), `
+		SELECT exp_pass_yds, exp_rush_yds, exp_rec_yds, exp_receptions,
+		       exp_pass_tds, exp_rush_tds, exp_rec_tds, carry_share, cpoe
+		FROM nflverse_player_weeks WHERE espn_id = '4362628'`).
+		Scan(
+			&expPassYds, &expRushYds, &expRecYds, &expReceptions,
+			&expPassTDs, &expRushTDs, &expRecTDs, &carryShare, &cpoe,
+		))
+	assert.Zero(t, expPassYds)
+	assert.Zero(t, expRushYds)
+	assert.Zero(t, expRecYds)
+	assert.Zero(t, expReceptions)
+	assert.Zero(t, expPassTDs)
+	assert.Zero(t, expRushTDs)
+	assert.Zero(t, expRecTDs)
+	assert.Zero(t, carryShare)
+	assert.Zero(t, cpoe)
 }
 
 // schemaVersion reads PRAGMA user_version, the migration runner's record of the

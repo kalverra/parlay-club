@@ -195,7 +195,7 @@ func TestEvalCLI(t *testing.T) {
 
 		md := out.String()
 		assert.Contains(t, md, "## Grading Eval: v1")
-		assert.Contains(t, md, "**Data Coverage:** legs=72")
+		assert.Contains(t, md, "**Data Coverage:** legs=236")
 		assert.Contains(t, md, "| Band | Total | Decided | W-L-P |")
 		assert.Contains(t, md, "#### Slip Calibration")
 		assert.Contains(t, md, "#### Top Factor Attribution")
@@ -224,9 +224,13 @@ func TestEvalCLI(t *testing.T) {
 
 		var suite eval.SuiteReport
 		require.NoError(t, json.Unmarshal(out.Bytes(), &suite))
-		assert.Equal(t, analyzer.ActiveRubric.Name, suite.ActiveRubric)
-		assert.Equal(t, 72, suite.Coverage.TotalLegs)
-		require.Len(t, suite.Reports, len(analyzer.BuiltInRubrics()))
+		assert.Equal(t, analyzer.ActiveEngine.Name(), suite.ActiveRubric)
+		assert.Equal(t, 236, suite.Coverage.TotalLegs)
+		require.Len(t, suite.Reports, len(analyzer.BuiltInEngines()))
+		assert.Equal(t, "v1", suite.Reports[0].RubricName)
+		assert.Equal(t, "v2", suite.Reports[1].RubricName)
+		assert.Greater(t, suite.Reports[1].Calibration.LogLoss, 0.0)
+		assert.Positive(t, suite.Reports[1].Calibration.SGPCount)
 		assert.Len(t, suite.Reports[0].Weekly, 4)
 	})
 
@@ -238,9 +242,14 @@ func TestEvalCLI(t *testing.T) {
 		require.NoError(t, err)
 
 		text := out.String()
-		assert.Contains(t, text, "Suite (active: v1)")
+		assert.Contains(t, text, "Suite (active: v2)")
+		assert.Contains(t, text, "Engine Calibration Comparison:")
 		assert.Contains(t, text, "Rubric: v1")
-		assert.Contains(t, text, "Data Coverage: legs=72")
+		assert.Contains(t, text, "Rubric: v2")
+		assert.Contains(t, text, "Probability Calibration:")
+		assert.Contains(t, text, "SGP Joint (n=")
+		assert.Contains(t, text, "Reliability Bins:")
+		assert.Contains(t, text, "Data Coverage: legs=236")
 	})
 
 	t.Run("dataset all rubrics markdown format", func(t *testing.T) {
@@ -251,13 +260,87 @@ func TestEvalCLI(t *testing.T) {
 		require.NoError(t, err)
 
 		md := out.String()
-		assert.Contains(t, md, "## Grading Eval Suite (active: `v1`)")
+		assert.Contains(t, md, "## Grading Eval Suite (active: `v2`)")
+		assert.Contains(t, md, "### Engine Calibration Comparison")
 		assert.Contains(t, md, "### Rubric: `v1`")
+		assert.Contains(t, md, "### Rubric: `v2`")
+		assert.Contains(t, md, "#### Probability Calibration")
+		assert.Contains(t, md, "##### Reliability Bins")
 		assert.Contains(t, md, "#### Leg Calibration")
 		assert.Contains(t, md, "#### Slip Calibration")
 		assert.Contains(t, md, "#### Top Factor Attribution")
 		assert.Contains(t, md, "#### Slip Factor Attribution")
 		assert.Contains(t, md, "blowout_passing")
+	})
+
+	t.Run("dataset single v2 engine json, text, and markdown", func(t *testing.T) {
+		t.Parallel()
+		datasetPath := filepath.Join("..", "..", "internal", "eval", "testdata", "benchmark_dataset.json")
+
+		var jsonOut, errBuf bytes.Buffer
+		require.NoError(t, run(
+			t.Context(),
+			[]string{"--dataset", datasetPath, "--rubric", "v2", "--format", "json"},
+			&jsonOut,
+			&errBuf,
+		))
+		var rep eval.Report
+		require.NoError(t, json.Unmarshal(jsonOut.Bytes(), &rep))
+		assert.Equal(t, "v2", rep.RubricName)
+		assert.Equal(t, 10, rep.Calibration.TotalBins)
+		assert.Len(t, rep.Calibration.Reliability, 10)
+		assert.Greater(t, rep.Calibration.LogLoss, 0.0)
+		assert.Greater(t, rep.Calibration.MarketLogLoss, 0.0)
+		assert.Equal(t, 70, rep.Calibration.SGPCount)
+		assert.Less(t, rep.Calibration.SGPLogLoss, rep.Calibration.NaiveIndepLogLoss)
+
+		var textOut bytes.Buffer
+		require.NoError(t, run(
+			t.Context(),
+			[]string{"--dataset", datasetPath, "--rubric", "v2", "--format", "text"},
+			&textOut,
+			&errBuf,
+		))
+		assert.Contains(t, textOut.String(), "Rubric: v2")
+		assert.Contains(t, textOut.String(), "LogLoss=")
+		assert.Contains(t, textOut.String(), "ClasswiseECE=")
+		assert.Contains(t, textOut.String(), "SGP Joint (n=70):")
+
+		var mdOut bytes.Buffer
+		require.NoError(t, run(
+			t.Context(),
+			[]string{"--dataset", datasetPath, "--rubric", "v2", "--format", "markdown"},
+			&mdOut,
+			&errBuf,
+		))
+		assert.Contains(t, mdOut.String(), "## Grading Eval: v2")
+		assert.Contains(t, mdOut.String(), "| SGP Joint Log Loss (n=70) |")
+		assert.Contains(t, mdOut.String(), "| SGP Naive Indep Log Loss |")
+	})
+
+	t.Run("dataset compare v1 vs v2 text and markdown", func(t *testing.T) {
+		t.Parallel()
+		datasetPath := filepath.Join("..", "..", "internal", "eval", "testdata", "benchmark_dataset.json")
+
+		var textOut, errBuf bytes.Buffer
+		require.NoError(t, run(
+			t.Context(),
+			[]string{"--dataset", datasetPath, "--baseline", "v1", "--candidate", "v2", "--format", "text"},
+			&textOut,
+			&errBuf,
+		))
+		assert.Contains(t, textOut.String(), "Comparison: v1 -> v2")
+		assert.Contains(t, textOut.String(), "Engine Calibration Comparison:")
+
+		var mdOut bytes.Buffer
+		require.NoError(t, run(
+			t.Context(),
+			[]string{"--dataset", datasetPath, "--baseline", "v1", "--candidate", "v2", "--format", "markdown"},
+			&mdOut,
+			&errBuf,
+		))
+		assert.Contains(t, mdOut.String(), "## Grading Eval Comparison: `v1` -> `v2`")
+		assert.Contains(t, mdOut.String(), "#### Engine Calibration Comparison")
 	})
 
 	t.Run("dataset compare markdown format", func(t *testing.T) {

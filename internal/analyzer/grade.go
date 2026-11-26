@@ -24,21 +24,40 @@ type GradeFactor struct {
 	Detail string
 }
 
+// PillarScore is one decomposed v2 quality pillar for a leg or slip grade.
+type PillarScore struct {
+	Key     string   // "price_vig", "script_fit", "stability_risk", "context_traps"
+	Label   string   // "Price & Vig", "Script Fit", "Stability & Tail Risk", "Context & Traps"
+	Score   int      // 0..100
+	Tone    string   // "good", "neutral", "warn", "bad"
+	Summary string   // concise sharp-friend takeaway
+	Reasons []string // 1-3 approximate plain-English reasons
+}
+
 // LegGrade is the deterministic quality grade for one slip leg.
 type LegGrade struct {
-	LegID   int64
-	Letter  string        // "A", "B", "C", "D", "F", or "" when skipped
-	Score   int           // 0..100 (0 when skipped)
-	Factors []GradeFactor // applied adjustments in deterministic order
+	LegID          int64
+	Letter         string        // "A", "B", "C", "D", "F", or "" when skipped
+	Score          int           // 0..100 (0 when skipped)
+	Factors        []GradeFactor // applied adjustments in deterministic order
+	Pillars        []PillarScore // v2 four-pillar breakdown (nil on v1)
+	CalibratedProb float64       // calibrated fair leg probability (0 on v1 or skipped)
+	MarketProb     float64       // Power-devigged market anchor (0 if unavailable)
+	Uncertain      bool          // heightened uncertainty from role/injury/news shifts
 }
 
 // SlipGrade is the deterministic overall quality grade for a parlay slip.
 type SlipGrade struct {
-	Letter    string        // "A", "B", "C", "D", "F", or "" when no legs are gradable
-	Score     int           // 0..100
-	Summary   string        // one-line sharp-friend summary
-	Factors   []GradeFactor // slip-level adjustments (correlation, parlay drag, chalk drag)
-	LegGrades []LegGrade    // per-leg grades in input leg order
+	Letter         string        // "A", "B", "C", "D", "F", or "" when no legs are gradable
+	Score          int           // 0..100
+	Summary        string        // one-line sharp-friend summary
+	Factors        []GradeFactor // slip-level adjustments (correlation, parlay drag, chalk drag)
+	LegGrades      []LegGrade    // per-leg grades in input leg order
+	Pillars        []PillarScore // v2 four-pillar breakdown (nil on v1)
+	CalibratedProb float64       // calibrated joint slip probability (0 on v1 or skipped)
+	MarketProb     float64       // Power-devigged independent market probability (0 if unavailable)
+	CorrMultiplier float64       // M_corr = p_joint / prod(p_i) (0 on v1)
+	Uncertain      bool          // true when any graded leg has heightened uncertainty
 }
 
 // SlipEvaluation holds both the analyzer warnings and deterministic grade from
@@ -48,10 +67,77 @@ type SlipEvaluation struct {
 	Grade    SlipGrade
 }
 
+// GradingEngine scores single legs and full parlay slips deterministically.
+type GradingEngine interface {
+	Name() string
+	ScoreLeg(leg Leg, games map[string]Game, stats map[string]PlayerStats) LegGrade
+	EvaluateSlip(legs []Leg, games map[string]Game, stats map[string]PlayerStats) SlipEvaluation
+}
+
+type v1Engine struct{}
+
+func (v1Engine) Name() string {
+	return RubricV1.Name
+}
+
+func (v1Engine) ScoreLeg(leg Leg, games map[string]Game, stats map[string]PlayerStats) LegGrade {
+	return ScoreLegWithRubric(leg, games, stats, ActiveRubric)
+}
+
+func (v1Engine) EvaluateSlip(legs []Leg, games map[string]Game, stats map[string]PlayerStats) SlipEvaluation {
+	return EvaluateSlipWithRubric(legs, games, stats, ActiveRubric)
+}
+
+var (
+	// EngineV1 is the additive v1 rubric grading engine.
+	EngineV1 GradingEngine = v1Engine{}
+
+	// EngineV2 is the calibrated four-pillar v2 grading engine.
+	EngineV2 GradingEngine = NewEngineV2(DefaultV2Config)
+
+	// ActiveEngine is the grading engine used by ScoreLeg, ScoreSlip, and
+	// EvaluateSlip.
+	ActiveEngine GradingEngine = EngineV2
+
+	builtinEngines = []GradingEngine{
+		EngineV1,
+		EngineV2,
+	}
+)
+
+// EngineByName returns the built-in GradingEngine matching name.
+func EngineByName(name string) (GradingEngine, bool) {
+	for _, e := range builtinEngines {
+		if e.Name() == name {
+			return e, true
+		}
+	}
+	return nil, false
+}
+
+// EngineNames returns the names of all built-in grading engines in registry order.
+func EngineNames() []string {
+	names := make([]string, len(builtinEngines))
+	for i, e := range builtinEngines {
+		names[i] = e.Name()
+	}
+	return names
+}
+
+// BuiltInEngines returns a copy of all built-in grading engines in registry order.
+func BuiltInEngines() []GradingEngine {
+	out := make([]GradingEngine, len(builtinEngines))
+	copy(out, builtinEngines)
+	return out
+}
+
 // ScoreLeg computes the deterministic A-F quality grade and factor breakdown
-// for a single leg using ActiveRubric. Legs with market OTHER, no game, or a
+// for a single leg using ActiveEngine. Legs with market OTHER, no game, or a
 // missing game are skipped (Letter == "", Score == 0).
 func ScoreLeg(leg Leg, games map[string]Game, stats map[string]PlayerStats) LegGrade {
+	if ActiveEngine != nil {
+		return ActiveEngine.ScoreLeg(leg, games, stats)
+	}
 	return ScoreLegWithRubric(leg, games, stats, ActiveRubric)
 }
 
@@ -86,9 +172,9 @@ func ScoreLegWithRubric(leg Leg, games map[string]Game, stats map[string]PlayerS
 }
 
 // ScoreSlip computes per-leg grades and the overall parlay grade using
-// ActiveRubric.
+// ActiveEngine.
 func ScoreSlip(legs []Leg, games map[string]Game, stats map[string]PlayerStats) SlipGrade {
-	return ScoreSlipWithRubric(legs, games, stats, ActiveRubric)
+	return EvaluateSlip(legs, games, stats).Grade
 }
 
 // ScoreSlipWithRubric computes per-leg grades and the overall parlay grade from
@@ -98,9 +184,12 @@ func ScoreSlipWithRubric(legs []Leg, games map[string]Game, stats map[string]Pla
 	return EvaluateSlipWithRubric(legs, games, stats, rubric).Grade
 }
 
-// EvaluateSlip runs slip analysis and rubric grading in a single pass using
-// ActiveRubric.
+// EvaluateSlip runs slip analysis and grading in a single pass using
+// ActiveEngine.
 func EvaluateSlip(legs []Leg, games map[string]Game, stats map[string]PlayerStats) SlipEvaluation {
+	if ActiveEngine != nil {
+		return ActiveEngine.EvaluateSlip(legs, games, stats)
+	}
 	return EvaluateSlipWithRubric(legs, games, stats, ActiveRubric)
 }
 

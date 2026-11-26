@@ -105,12 +105,12 @@ func TestRubricV1Equivalence(t *testing.T) {
 	}
 
 	for _, leg := range legs {
-		want := analyzer.ScoreLeg(leg, games, stats)
+		want := analyzer.EngineV1.ScoreLeg(leg, games, stats)
 		got := analyzer.ScoreLegWithRubric(leg, games, stats, analyzer.RubricV1)
 		assert.Equal(t, want, got, "leg %d mismatch", leg.ID)
 	}
 
-	wantSlip := analyzer.ScoreSlip(legs, games, stats)
+	wantSlip := analyzer.EngineV1.EvaluateSlip(legs, games, stats).Grade
 	gotSlip := analyzer.ScoreSlipWithRubric(legs, games, stats, analyzer.RubricV1)
 	assert.Equal(t, wantSlip, gotSlip)
 }
@@ -133,7 +133,7 @@ func TestRubricOverrideIsolation(t *testing.T) {
 		Team: "BUF", Side: "TEAM", Line: new(-3.5), Odds: -110,
 	}
 
-	baseGrade := analyzer.ScoreLeg(leg, games, nil)
+	baseGrade := analyzer.EngineV1.ScoreLeg(leg, games, nil)
 
 	custom := analyzer.RubricV1
 	custom.Name = "custom"
@@ -145,9 +145,9 @@ func TestRubricOverrideIsolation(t *testing.T) {
 	assert.NotEqual(t, baseGrade.Score, customGrade.Score)
 	assert.Equal(t, "A", customGrade.Letter)
 
-	// ActiveRubric and subsequent ScoreLeg calls must remain unaffected.
+	// ActiveRubric and subsequent EngineV1.ScoreLeg calls must remain unaffected.
 	assert.Equal(t, analyzer.RubricV1, analyzer.ActiveRubric)
-	assert.Equal(t, baseGrade, analyzer.ScoreLeg(leg, games, nil))
+	assert.Equal(t, baseGrade, analyzer.EngineV1.ScoreLeg(leg, games, nil))
 }
 
 func TestRubricOverrideSlipFactors(t *testing.T) {
@@ -183,7 +183,7 @@ func TestRubricOverrideSlipFactors(t *testing.T) {
 		{ID: 4, Owner: "Adam", GameID: "buf-mia", Market: "MONEYLINE", Team: "MIA", Side: "TEAM", Odds: -300},
 	}
 
-	baseSlip := analyzer.ScoreSlip(legs, games, nil)
+	baseSlip := analyzer.EngineV1.EvaluateSlip(legs, games, nil).Grade
 
 	custom := analyzer.RubricV1
 	custom.StackBonus = 12
@@ -191,7 +191,7 @@ func TestRubricOverrideSlipFactors(t *testing.T) {
 	customSlip := analyzer.ScoreSlipWithRubric(legs, games, nil, custom)
 
 	assert.NotEqual(t, baseSlip.Score, customSlip.Score)
-	assert.Equal(t, baseSlip, analyzer.ScoreSlip(legs, games, nil))
+	assert.Equal(t, baseSlip, analyzer.EngineV1.EvaluateSlip(legs, games, nil).Grade)
 }
 
 func TestEvaluateSlipParity(t *testing.T) {
@@ -280,8 +280,8 @@ func TestEvaluateSlipParity(t *testing.T) {
 			t.Parallel()
 
 			wantWarnings := analyzer.AnalyzeSlip(tc.legs, games, stats)
-			wantGrade := analyzer.ScoreSlip(tc.legs, games, stats)
-			got := analyzer.EvaluateSlip(tc.legs, games, stats)
+			wantGrade := analyzer.EngineV1.EvaluateSlip(tc.legs, games, stats).Grade
+			got := analyzer.EngineV1.EvaluateSlip(tc.legs, games, stats)
 
 			assert.Equal(t, wantWarnings, got.Warnings)
 			assert.Equal(t, wantGrade, got.Grade)

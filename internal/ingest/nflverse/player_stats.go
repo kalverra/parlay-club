@@ -22,6 +22,7 @@ type PlayerWeek struct {
 	AirYardsShare  float64
 	WOPR           float64
 	PassingEPA     float64
+	PassingCPOE    float64
 	RushingEPA     float64
 	ReceivingEPA   float64
 	Targets        int
@@ -68,6 +69,10 @@ var playerStatsColumns = []string{
 	"pat_made",
 }
 
+var optionalPlayerStatsColumns = []string{
+	"passing_cpoe",
+}
+
 // PlayerStats fetches stats_player_week_{season}.csv and returns one PlayerWeek
 // per usable row.
 func (c *Client) PlayerStats(ctx context.Context, season int) ([]PlayerWeek, error) {
@@ -89,7 +94,7 @@ func (c *Client) PlayerStats(ctx context.Context, season int) ([]PlayerWeek, err
 }
 
 func parsePlayerStats(body io.Reader) ([]PlayerWeek, error) {
-	return parseCSV(body, playerStatsColumns, parsePlayerStatsRow)
+	return parseCSVWithOptional(body, playerStatsColumns, optionalPlayerStatsColumns, parsePlayerStatsRow)
 }
 
 func parsePlayerStatsRow(record []string, cols map[string]int, line int) (PlayerWeek, bool, error) {
@@ -147,6 +152,10 @@ func parsePlayerStatsRow(record []string, cols map[string]int, line int) (Player
 		if err != nil {
 			return PlayerWeek{}, false, err
 		}
+	}
+	pw.PassingCPOE, err = parseOptionalFloat(optionalCell(record, cols, "passing_cpoe"), "passing_cpoe", line)
+	if err != nil {
+		return PlayerWeek{}, false, err
 	}
 
 	ints := []struct {

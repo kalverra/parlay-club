@@ -23,10 +23,11 @@ func (s *Service) nflverseSource(week db.Week, games []db.Game, now time.Time) s
 	}
 }
 
-// syncNFLverse fetches the four nflverse CSVs for week.Season, joins player
-// usage and snap counts onto ESPN IDs, upserts the tables in one transaction,
-// and records the sync. Any fetch failure leaves stored rows and sync_state
-// untouched so the caller backs off and retries.
+// syncNFLverse fetches the nflverse CSVs for week.Season, joins player usage,
+// snap counts, team carry share, and fail-soft expected-opportunity rows onto
+// ESPN IDs, upserts the tables in one transaction, and records the sync. Any
+// core fetch failure leaves stored rows and sync_state untouched so the caller
+// backs off and retries; an FFOpportunity failure logs a warning and continues.
 func (s *Service) syncNFLverse(ctx context.Context, week db.Week, now time.Time) (bool, error) {
 	if s.nflverse == nil || week.Season <= 0 ||
 		(week.SeasonType != nflverse.SeasonTypeRegular && week.SeasonType != nflverse.SeasonTypePostseason) {
@@ -49,10 +50,27 @@ func (s *Service) syncNFLverse(ctx context.Context, week db.Week, now time.Time)
 	if err != nil {
 		return false, fmt.Errorf("nflverse snap counts: %w", err)
 	}
+	opportunities, err := s.nflverse.FFOpportunity(ctx, week.Season)
+	if err != nil {
+		s.logger.Warn().
+			Err(err).
+			Int("season", week.Season).
+			Msg("nflverse ff_opportunity unavailable; continuing without expected opportunity")
+		opportunities = nil
+	}
 
 	playerIDRows, espnByGSIS, espnByPFR := buildNFLversePlayerIDs(players, now)
 	teamRows := buildNFLverseTeamWeeks(teamStats, week.Season, now)
-	playerWeekRows := buildNFLversePlayerWeeks(playerStats, snapCounts, espnByGSIS, espnByPFR, week.Season, now)
+	playerWeekRows := buildNFLversePlayerWeeks(
+		playerStats,
+		snapCounts,
+		teamStats,
+		opportunities,
+		espnByGSIS,
+		espnByPFR,
+		week.Season,
+		now,
+	)
 
 	changed := false
 	err = s.store.Tx(ctx, func(tx *db.Store) error {
@@ -146,14 +164,37 @@ type nflversePlayerWeekKey struct {
 	week       int
 }
 
+type nflverseTeamWeekKey struct {
+	season     int
+	seasonType int
+	week       int
+	team       string
+}
+
 func buildNFLversePlayerWeeks(
 	playerStats []nflverse.PlayerWeek,
 	snapCounts []nflverse.SnapCount,
+	teamStats []nflverse.TeamWeek,
+	opportunities []nflverse.PlayerOpportunity,
 	espnByGSIS map[string]string,
 	espnByPFR map[string]string,
 	season int,
 	now time.Time,
 ) []db.NFLversePlayerWeek {
+	teamCarries := make(map[nflverseTeamWeekKey]int, len(teamStats))
+	for _, tw := range teamStats {
+		if tw.Season != season ||
+			(tw.SeasonType != nflverse.SeasonTypeRegular && tw.SeasonType != nflverse.SeasonTypePostseason) {
+			continue
+		}
+		teamCarries[nflverseTeamWeekKey{
+			season:     tw.Season,
+			seasonType: tw.SeasonType,
+			week:       tw.Week,
+			team:       tw.Team,
+		}] = tw.Carries
+	}
+
 	byKey := make(map[nflversePlayerWeekKey]db.NFLversePlayerWeek, len(playerStats))
 	order := make([]nflversePlayerWeekKey, 0, len(playerStats))
 
@@ -174,6 +215,15 @@ func buildNFLversePlayerWeeks(
 		}
 		if _, exists := byKey[key]; !exists {
 			order = append(order, key)
+		}
+		var carryShare float64
+		if tc := teamCarries[nflverseTeamWeekKey{
+			season:     ps.Season,
+			seasonType: ps.SeasonType,
+			week:       ps.Week,
+			team:       ps.Team,
+		}]; tc > 0 && ps.Carries > 0 {
+			carryShare = float64(ps.Carries) / float64(tc)
 		}
 		byKey[key] = db.NFLversePlayerWeek{
 			ESPNID:        espnID,
@@ -199,6 +249,8 @@ func buildNFLversePlayerWeeks(
 			RecTDs:        ps.ReceivingTDs,
 			KickerPts:     3*ps.FGMade + ps.PATMade,
 			TotalEPA:      ps.PassingEPA + ps.RushingEPA + ps.ReceivingEPA,
+			CarryShare:    carryShare,
+			CPOE:          ps.PassingCPOE,
 			UpdatedAt:     now,
 		}
 	}
@@ -234,6 +286,55 @@ func buildNFLversePlayerWeeks(
 		}
 		row.OffenseSnaps = sc.OffenseSnaps
 		row.OffensePct = sc.OffensePct
+		byKey[key] = row
+	}
+
+	for _, opp := range opportunities {
+		if opp.Season != season ||
+			(opp.SeasonType != nflverse.SeasonTypeRegular && opp.SeasonType != nflverse.SeasonTypePostseason) {
+			continue
+		}
+		espnID, ok := espnByGSIS[opp.PlayerID]
+		if !ok {
+			continue
+		}
+		key := nflversePlayerWeekKey{
+			espnID:     espnID,
+			season:     opp.Season,
+			seasonType: opp.SeasonType,
+			week:       opp.Week,
+		}
+		row, exists := byKey[key]
+		if !exists {
+			order = append(order, key)
+			row = db.NFLversePlayerWeek{
+				ESPNID:     espnID,
+				Season:     opp.Season,
+				SeasonType: opp.SeasonType,
+				WeekNum:    opp.Week,
+				Team:       opp.Team,
+				PlayerName: opp.PlayerName,
+				Position:   opp.Position,
+				UpdatedAt:  now,
+			}
+		} else {
+			if row.Team == "" {
+				row.Team = opp.Team
+			}
+			if row.PlayerName == "" {
+				row.PlayerName = opp.PlayerName
+			}
+			if row.Position == "" {
+				row.Position = opp.Position
+			}
+		}
+		row.ExpPassYds = opp.ExpPassYds
+		row.ExpRushYds = opp.ExpRushYds
+		row.ExpRecYds = opp.ExpRecYds
+		row.ExpReceptions = opp.ExpReceptions
+		row.ExpPassTDs = opp.ExpPassTDs
+		row.ExpRushTDs = opp.ExpRushTDs
+		row.ExpRecTDs = opp.ExpRecTDs
 		byKey[key] = row
 	}
 

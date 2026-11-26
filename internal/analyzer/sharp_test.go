@@ -12,6 +12,7 @@ import (
 	"github.com/kalverra/parlay-club/internal/analyzer"
 	"github.com/kalverra/parlay-club/internal/db"
 	"github.com/kalverra/parlay-club/internal/ingest/odds"
+	"github.com/kalverra/parlay-club/internal/parlay"
 )
 
 func TestBuildSharpBenchmarksTierPrecedence(t *testing.T) {
@@ -123,7 +124,12 @@ func TestBuildSharpBenchmarksTierPrecedence(t *testing.T) {
 		require.NotNil(t, q.Line)
 		assert.InDelta(t, -3.5, *q.Line, 1e-9)
 		assert.InDelta(t, 0.5, q.FairProb, 1e-6)
+		assert.InDelta(t, 0.5, q.PowerFairProb, 1e-6)
+		wantVig, ok := parlay.VigPct(-110, -110)
+		require.True(t, ok)
+		assert.InDelta(t, wantVig, q.VigPct, 1e-9)
 		assert.Equal(t, 100, q.FairAmerican)
+		assert.Equal(t, 1, q.BookCount)
 	})
 
 	t.Run("tier 2 median across lowvig and betonlineag beats tier 3", func(t *testing.T) {
@@ -560,4 +566,116 @@ func TestHasSharpBenchmark(t *testing.T) {
 		Side:       "OVER",
 	}))
 	assert.False(t, analyzer.HasSharpBenchmark(game, analyzer.Leg{Market: "ML", Team: "BUF"}))
+}
+
+func TestSharpMarketProb(t *testing.T) {
+	t.Parallel()
+
+	game := analyzer.Game{
+		ID: "g1",
+		Sharp: map[analyzer.SharpKey]analyzer.SharpQuote{
+			{MarketType: "ML", Team: "BUF", Side: "TEAM"}: {
+				FairProb:      0.61,
+				PowerFairProb: 0.625,
+			},
+			{MarketType: "TOTAL", Side: "OVER"}: {
+				Line:     new(47.5),
+				FairProb: 0.515,
+			},
+			{MarketType: "REC_YDS", Team: "BUF", PlayerName: "khalil shakir", Side: "OVER"}: {
+				Line:          new(62.5),
+				FairProb:      0.52,
+				PowerFairProb: 0.535,
+			},
+		},
+	}
+
+	p, ok := analyzer.SharpMarketProb(game, analyzer.Leg{Market: "MONEYLINE", Team: "buf"})
+	require.True(t, ok)
+	assert.InDelta(t, 0.625, p, 1e-12)
+
+	p, ok = analyzer.SharpMarketProb(game, analyzer.Leg{Market: "TOTAL", Team: "BUF", Side: "over", Line: new(47.5)})
+	require.True(t, ok)
+	assert.InDelta(t, 0.515, p, 1e-12)
+
+	_, ok = analyzer.SharpMarketProb(game, analyzer.Leg{Market: "TOTAL", Side: "OVER", Line: new(48.5)})
+	assert.False(t, ok)
+
+	p, ok = analyzer.SharpMarketProb(game, analyzer.Leg{
+		Market:     "REC_YDS",
+		Team:       "BUF",
+		PlayerName: "Khalil Shakir",
+		Side:       "OVER",
+		Line:       new(62.5),
+	})
+	require.True(t, ok)
+	assert.InDelta(t, 0.535, p, 1e-12)
+}
+
+func TestBuildSharpBenchmarksPowerVigAndBookCount(t *testing.T) {
+	t.Parallel()
+
+	t.Run("tier 1 multi-book aggregates PowerFairProb, VigPct, and BookCount", func(t *testing.T) {
+		t.Parallel()
+		rows := []db.Odds{
+			// Pinnacle: -400 / +300
+			{GameID: "g1", Book: "pinnacle", MarketType: "ML", Team: "BUF", Side: "TEAM", Price: -400},
+			{GameID: "g1", Book: "pinnacle", MarketType: "ML", Team: "MIA", Side: "TEAM", Price: 300},
+			// Circa: -380 / +290
+			{GameID: "g1", Book: "circa", MarketType: "ML", Team: "BUF", Side: "TEAM", Price: -380},
+			{GameID: "g1", Book: "circa", MarketType: "ML", Team: "MIA", Side: "TEAM", Price: 290},
+			// Bookmaker: -420 / +310
+			{GameID: "g1", Book: "bookmaker", MarketType: "ML", Team: "BUF", Side: "TEAM", Price: -420},
+			{GameID: "g1", Book: "bookmaker", MarketType: "ML", Team: "MIA", Side: "TEAM", Price: 310},
+		}
+
+		got := analyzer.BuildSharpBenchmarks(rows)
+		bufQ, ok := got["g1"][analyzer.SharpKey{MarketType: "ML", Team: "BUF", Side: "TEAM"}]
+		require.True(t, ok)
+		miaQ, ok := got["g1"][analyzer.SharpKey{MarketType: "ML", Team: "MIA", Side: "TEAM"}]
+		require.True(t, ok)
+
+		assert.Equal(t, 1, bufQ.Tier)
+		assert.Equal(t, "Pinnacle", bufQ.Source)
+		assert.Equal(t, 3, bufQ.BookCount)
+		assert.Equal(t, 3, miaQ.BookCount)
+
+		// Power de-vig allocates proportionally more vig to the longshot (+300),
+		// so favorite PowerFairProb > multiplicative FairProb and probabilities sum to 1.
+		assert.Greater(t, bufQ.PowerFairProb, bufQ.FairProb)
+		assert.Less(t, miaQ.PowerFairProb, miaQ.FairProb)
+		assert.InDelta(t, 1.0, bufQ.PowerFairProb+miaQ.PowerFairProb, 1e-9)
+
+		// Median vig of Pinnacle (0.05), Circa (~0.0480), Bookmaker (~0.0517) is 0.05.
+		wantVig, ok := parlay.VigPct(-400, 300)
+		require.True(t, ok)
+		assert.InDelta(t, wantVig, bufQ.VigPct, 1e-9)
+		assert.InDelta(t, bufQ.VigPct, miaQ.VigPct, 1e-9)
+	})
+
+	t.Run("tier 3 consensus BookCount counts matching-line books only", func(t *testing.T) {
+		t.Parallel()
+		rows := []db.Odds{
+			// 3 books on 47.5
+			{GameID: "g1", Book: "draftkings", MarketType: "TOTAL", Side: "OVER", Line: new(47.5), Price: -110},
+			{GameID: "g1", Book: "draftkings", MarketType: "TOTAL", Side: "UNDER", Line: new(47.5), Price: -110},
+			{GameID: "g1", Book: "fanduel", MarketType: "TOTAL", Side: "OVER", Line: new(47.5), Price: -112},
+			{GameID: "g1", Book: "fanduel", MarketType: "TOTAL", Side: "UNDER", Line: new(47.5), Price: -108},
+			{GameID: "g1", Book: "betmgm", MarketType: "TOTAL", Side: "OVER", Line: new(47.5), Price: -115},
+			{GameID: "g1", Book: "betmgm", MarketType: "TOTAL", Side: "UNDER", Line: new(47.5), Price: -105},
+			// 1 book on 48.0 (must not count toward the 47.5 bucket)
+			{GameID: "g1", Book: "caesars", MarketType: "TOTAL", Side: "OVER", Line: new(48.0), Price: -110},
+			{GameID: "g1", Book: "caesars", MarketType: "TOTAL", Side: "UNDER", Line: new(48.0), Price: -110},
+		}
+
+		got := analyzer.BuildSharpBenchmarks(rows)
+		overQ, ok := got["g1"][analyzer.SharpKey{MarketType: "TOTAL", Side: "OVER"}]
+		require.True(t, ok)
+		assert.Equal(t, 3, overQ.Tier)
+		assert.Equal(t, 3, overQ.BookCount)
+		wantPower, _, wantVig, ok := parlay.DevigTwoWayPower(-112, -108)
+		require.True(t, ok)
+		assert.InDelta(t, wantPower, overQ.PowerFairProb, 1e-9)
+		assert.InDelta(t, wantVig, overQ.VigPct, 1e-9)
+	})
 }

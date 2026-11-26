@@ -7,6 +7,7 @@ import (
 
 	"github.com/rs/zerolog"
 
+	"github.com/kalverra/parlay-club/internal/analyzer"
 	"github.com/kalverra/parlay-club/internal/bugs"
 	"github.com/kalverra/parlay-club/internal/db"
 	"github.com/kalverra/parlay-club/internal/eval"
@@ -46,18 +47,19 @@ type Refresher interface {
 // service leaves the slip screen in its placeholder state, which keeps the
 // shell's own tests small.
 type Dependencies struct {
-	Logger     zerolog.Logger
-	Renderer   *Renderer
-	UserFrom   UserFrom
-	GroupsFrom GroupsFrom
-	GroupFrom  GroupFrom
-	SetGroup   SetGroup
-	Store      *db.Store
-	Slips      *slips.Service
-	Bugs       *bugs.Service
-	Stream     *live.Stream
-	Refresh    Refresher
-	EvalCache  *eval.Cache
+	Logger        zerolog.Logger
+	Renderer      *Renderer
+	UserFrom      UserFrom
+	GroupsFrom    GroupsFrom
+	GroupFrom     GroupFrom
+	SetGroup      SetGroup
+	Store         *db.Store
+	Slips         *slips.Service
+	Bugs          *bugs.Service
+	Stream        *live.Stream
+	Refresh       Refresher
+	EvalCache     *eval.Cache
+	GradingEngine analyzer.GradingEngine
 	// Now supplies the app's clock. A nil Now uses time.Now; the sandbox passes
 	// its scenario clock so pickers, exports, and freshness agree with refresh.
 	Now func() time.Time

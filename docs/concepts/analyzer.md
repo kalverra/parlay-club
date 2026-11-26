@@ -2,8 +2,8 @@
 id: analyzer
 title: Analyzer
 type: concept
-summary: How the sharp-friend analyzer turns legs, games, weather, player stats, nfelo's model, and nflverse efficiency into plain-Go warnings and deterministic A–F grades.
-tags: [analyzer, warnings, grades, banner, severity, tone, slips, weather, rules, nfelo, nflverse, model, props, player-stats]
+summary: How the sharp-friend analyzer turns legs, games, weather, player stats, nfelo's model, and nflverse efficiency into plain-Go warnings and calibrated four-pillar A–F grades.
+tags: [analyzer, warnings, grades, pillars, copula, overlays, banner, severity, tone, slips, weather, rules, nfelo, nflverse, model, props, player-stats]
 ---
 
 # Analyzer
@@ -12,40 +12,47 @@ tags: [analyzer, warnings, grades, banner, severity, tone, slips, weather, rules
 
 The analyzer is the sharp-friend layer on every slip. It reads the picks people made and points out where they fight
 each other, the weather, key numbers, price, player history, nfelo's model, or nflverse team and usage trends. It also
-computes deterministic A–F quality grades for each leg and for the slip as a whole. It never blocks a pick: every leg
-stays allowed.
+computes deterministic calibrated A–F quality grades for each leg and for the slip as a whole. It never blocks a pick:
+every leg stays allowed.
 
-`internal/analyzer`'s rule and grading functions (`AnalyzeSlip`, `ScoreLeg`, `ScoreSlip`) are pure Go: no I/O, no clock,
-no network calls, and no LLM. They run on every slip and tray render, and their output is not stored. The same
-`ScoreLeg` and `ScoreSlip` engine also powers board-wide A-grade highlights on the hub and pick board using cached
-SQLite data only. The rule list, thresholds, and grading rubric live in
-[Analyzer rules](../reference/analyzer-rules.md).
+`internal/analyzer`'s rule and grading functions (`AnalyzeSlip`, `EvaluateSlip`, `ScoreLeg`, `ScoreSlip`) are pure Go:
+no I/O, no clock, no network calls, and no LLM. The active engine is `EngineV2` (the calibrated four-pillar model,
+with `EngineV1` kept for side-by-side comparison and offline evals). Grading runs on every slip and tray render, and
+the same engine powers board-wide A-grade highlights using cached SQLite data only. Exact thresholds, pillar weights,
+overlay rules, and the v1 rubric live in [Analyzer rules](../reference/analyzer-rules.md).
 
 ```mermaid
 flowchart LR
-  Inputs["Legs + Games (Weather, nfelo, nflverse EPA) + PlayerStats (ESPN Logs, nflverse Usage)"] --> Rules["AnalyzeSlip (Warnings)"]
-  Inputs --> Grades["ScoreLeg / ScoreSlip (A–F Grades + Factors)"]
+  Inputs["Legs + Games (Weather, nfelo, MarketScript, nflverse, Sharp) + PlayerStats"] --> Rules["AnalyzeSlip (16 Warnings)"]
+  Inputs --> ModelV2["modelv2 (GBDT Distributions + EB Shrinkage + Calibration)"]
+  Inputs --> Overlays["ContextOverlays (Injuries, Weather, Traps, ContextSignal)"]
+  ModelV2 --> EngineV2["EngineV2 (Four Pillars + QMC Gaussian Copula)"]
+  Overlays --> EngineV2
+  Rules --> EngineV2
   Board["Cached Board Rows + LoadBoardSignals"] --> Highlights["board.SelectHighlights (A-Grade Legs & Combos)"]
-  Grades --> Highlights
-  Rules --> UI["Slip Panel & Pick Tray"]
-  Grades --> UI
+  EngineV2 --> Highlights
+  Rules --> UI["Slip Panel & Pick Tray (375px Breakdown)"]
+  EngineV2 --> UI
   Highlights --> UI
   UI -->|"tap Why? or rubric"| Guide["GET /analyzer/guide"]
   Guide <-->|"results / how grading works"| Results["GET /analyzer/results"]
-  EngineDocs["RuleDocs() + GradeRubric()"] --> Guide
+  EngineDocs["RuleDocs() + DefaultV2Config + GradeRubric()"] --> Guide
   Cache["eval.Cache (Slips & Market)"] --> Results
 ```
 
 ## What the banner shows
 
-The slip panel renders the Analyzer section under the legs, with a `"How grading works"` link to `/analyzer/guide`:
+The slip panel renders the Analyzer section under the legs, with a "How grading works" link to `/analyzer/guide`:
 
 - **Overall slip grade**: a clickable A–F pill with a one-line sharp-friend summary. Tapping it opens an inline
-  `<details>` breakdown of slip-level factors (positive stacks, script conflicts, parlay drag, and extra chalk drag)
-  plus a "See full rubric" link to `/analyzer/guide#slip-grade`.
-- **Per-leg grade pills**: each graded leg row displays its A–F pill; tapping it opens an inline `<details>` breakdown
-  of that leg's exact score factors and a link to `/analyzer/guide#leg-grades`. Legs with market OTHER or an unmatched
-  game show no grade pill.
+  `<details>` breakdown formatted for 375px phone width: an optional "High uncertainty" badge, a copula Script
+  multiplier summary on multi-leg slips, the four 0–100 pillar meters (Price & Vig, Script Fit, Stability & Tail Risk,
+  Context & Traps), up to three plain-English "Why" bullets from the strongest drivers, and a "See full rubric" link to
+  `/analyzer/guide#slip-grade`. When `Pillars` is empty (such as under `EngineV1`), the popover falls back to the factor
+  list.
+- **Per-leg grade pills**: each graded leg row displays its A–F pill; tapping it opens the same compact four-pillar
+  breakdown for that leg and links to `/analyzer/guide#leg-grades`. Legs with market `OTHER` or an unmatched game show
+  no grade pill.
 - **Warning cards**: with no warnings it shows a green "Looks clean". Otherwise it shows one card per warning, sorted
   Danger, Warn, then Info and colored red, amber, and blue. Each card carries the message, the severity, a chip for
   every leg involved with its owner's name, and a "Why?" link to `/analyzer/guide#rule-<id>`.
@@ -57,187 +64,171 @@ new data. See [Live updates](live-updates.md).
 ## The pick dock's tray
 
 The pick board's fixed dock shows your count and the combined price of your legs. Its "Slip" button opens a sheet with
-`#pick-tray`, which renders the same clickable per-leg grade pills, overall slip grade breakdown, and the warnings that
-name one of your own legs. `internal/web/pick.go` runs the analyzer over the whole slip, then keeps a warning card when
-any leg it names belongs to the viewer. A heads-up about a friend's pick stays on the hub and out of your tray, where it
-would only be noise while you pick. A warning that names both your leg and theirs still appears, because it bears on the
-pick you are making.
+`#pick-tray`, which renders the same clickable per-leg grade pills, overall four-pillar slip breakdown, and the warnings
+that name one of your own legs. `internal/web/pick.go` runs the analyzer over the whole slip, then keeps a warning card
+when any leg it names belongs to the viewer. A heads-up about a friend's pick stays on the hub and out of your tray,
+where it would only be noise while you pick. A warning that names both your leg and theirs still appears, because it
+bears on the pick you are making.
 
 The dock and the tray inside its sheet refresh with the pick board on `tray-updated` and `slip-updated`, so a new leg or
 a fresh forecast brings its grade and warning without a reload. See [Slips](slips.md#the-pick-board).
 
-## Leg and slip grades
+## Calibrated four-pillar grading (v2)
 
-`ScoreLeg` starts every matched leg at a baseline of 75 (B) and applies adjustments across three capped categories:
+Instead of collapsing every signal into one flat additive checklist, `EngineV2` separates pricing, script correlation,
+distributional stability, and situational context into four 0–100 pillars. A coherent same-game stack with steep leg
+juice shows green Script Fit alongside red Price & Vig instead of hiding one inside the other.
 
-- **Form & usage (-20 to +15)**: recent L5 hit rate (+10), rising snap/target share (+5), teammate-out role bump (+5
-  when a same-position WR/TE/RB teammate is Out), L5 median trap (-15, softened to -5 with a same-position teammate
-  Out), and shrinking role (-15).
-- **Matchup & environment (-20 to +15)**: weak opposing EPA defense (+10), tough matchup (-12), wind (-8 or -18), QB
-  drag (-8), and fake weather (-3).
-- **Line & price (-20 to +15)**: nfelo spread cushion (+8), hook (-10, softened to -4 with cushion), total key number
-  (-5), heavy chalk (-10 to -18), and sharp-book line/price comparisons (+8/+6 from Tier 1/2 sharp books or +5/+4 from
-  market consensus when beating the line or de-vigged fair price; -8/-6 or -5/-4 when giving up line value or paying
-  steep juice).
+### Distributional prop models and market blending
 
-The clamped 0–100 score maps to A (85–100), B (73–84), C (60–72), D (48–59), or F (0–47).
+`internal/modelv2` loads a self-contained embedded JSON artifact built offline in `ml/` with zero runtime Python or
+external I/O. For each supported player prop market (passing yards, rushing yards, receiving yards, receptions, rush
+attempts, passing TDs, and anytime TD), flat gradient-boosted trees predict full outcome distribution parameters rather
+than a single point estimate:
 
-`ScoreSlip` averages the numeric scores of all graded legs, then applies slip-level adjustments: +8 per positive stack
-(shootout or clock-drain), -12 per Warn script conflict (blowout passing), -20 per Danger conflict (trailing RB, total
-contradiction), -3 per leg beyond 3 legs, and -5 per heavy chalk leg beyond the first.
+- **Continuous yardage** uses zero-adjusted Gamma (or Log-Normal) curves so alt lines and boom-or-bust skewness come
+  directly from the survival function.
+- **Discrete counts and touchdowns** use Negative Binomial, Poisson, or Bernoulli distributions.
+- **Early-season Empirical Bayes shrinkage**: during Weeks 1–5 (fewer than 5 prior games played), observed EWMA usage
+  and production features shrink smoothly toward role-archetype priors (QB, WR1, WR2, TE1, RB1, RB2) so small-sample
+  spikes do not overfit.
+- **Market anchor and post-hoc calibration**: survival probabilities blend with Power-devigged sharp or consensus market
+  probabilities (accounting for favorite-longshot bias better than multiplicative normalization), then pass through a
+  learned Platt or isotonic calibrator. Game lines (spread, moneyline, total, and team total) blend Power-devigged sharp
+  anchors with nfelo and cached `MarketScript` normal-model baselines.
+
+### Copula script scoring
+
+Multi-leg tickets score game-script fit using a deterministic Gaussian copula rather than hardcoded pair bonuses alone:
+
+- **Independent games multiply**: legs in different games multiply independently.
+- **Same-game legs share a latent correlation matrix**: the copula maps each leg to a canonical role-market node,
+  selects a regime matrix (heavy favorite, shootout, or neutral) from cached spread and total, applies within-player
+  overrides (such as receptions with receiving yards) and Under sign flips, and runs Cholesky decomposition.
+- **Zero-jitter determinism**: evaluating 8,192 precomputed quasi-Monte-Carlo (Sobol/Halton) normal vectors gives
+  sub-millisecond joint probabilities that never jitter across page reloads.
+- **Script multiplier and SGP tax**: the joint-to-independent ratio (`CorrMultiplier`) drives Script Fit on multi-leg
+  slips, while Price & Vig checks whether the book's combined SGP price already charges for that positive correlation.
+
+### Extensible context and injury overlays
+
+Weekly statistical features cannot see Sunday morning inactive reports, late weather shifts, or narrative recency traps.
+`EvaluateOverlays` runs an ordered slice of pure `ContextOverlay` checks on every leg without touching model weights:
+
+- **Retained v1 intelligence**: player injury status (Out, Doubtful, Questionable), same-position teammate-out volume
+  bumps, nfelo QB drag, wind headwinds, light-rain myths, spread hooks, total key numbers, shrinking snap/target roles,
+  and TD spike risk.
+- **New v2 trap checks**: a narrative streak trap (when a 5-game streak pushes the line past recent averages or leaves
+  fair odds under 50/50) and a model-vs-market divergence check (when model and sharp market odds disagree widely).
+- **Zero-retrain context seam**: `external_context_signals` consumes structured `ContextSignal` items attached to a game
+  or player stats (injuries, inactives, line moves, or news).
+
+When any active overlay flags heightened uncertainty (injuries, teammate-out bumps, shrinking roles, wide model-market
+gaps, or uncertain external signals), `EngineV2` shifts the market blend weight +15 percentage points toward the live
+market anchor (up to 95%) and surfaces the "High uncertainty" badge in the UI.
+
+### Rolling up the four pillars
+
+Legs combine Price & Vig (40%), Stability & Tail Risk (25%), and Context & Traps (35%) — or 30/15/25/30% when
+single-leg script alignment applies. Slips combine Price & Vig (35%), Script Fit (25%), Stability & Tail Risk (20%),
+and Context & Traps (20%). Severe Danger overlays, strong negative correlation (multiplier below 0.85), or extreme vig
+cap scores below B, while Warn conflicts or uncertainty cap slips below A. Scores map to A (85–100), B (73–84),
+C (60–72), D (48–59), and F (0–47).
 
 ## A-grade highlights
 
 While a slip is open and the viewer still needs picks, `board.SelectHighlights` (`internal/board/highlights.go`)
 surfaces top A-grade plays from cached SQLite odds without triggering any external API calls:
 
-- **Batched board signals**: `LoadBoardSignals` loads games, weather, nfelo, nflverse team EPA and usage, sharp-book
-  benchmarks, and player game logs for all matched players on the board in batched SQLite queries.
+- **Batched board signals**: `LoadBoardSignals` loads games, weather, nfelo, nflverse team EPA, role-defense profiles,
+  EWMA usage, `MarketScript` anchors, sharp-book benchmarks, and player game logs in batched SQLite queries.
 - **Leg selection**: `SelectHighlights` scores unpicked, non-OTHER board rows with `ScoreLeg`, keeps A-grade legs
   (score >= 85), ranks by score and payout, and caps at 1 leg per player (up to 3 legs by default).
-- **Bounded combo generation**: From a bounded pool of up to 12 top A-grade legs (plus up to 6 B-grade same-game stack
-  partners for shootout or clock-drain stacks), it evaluates conflict-free 2- and 3-leg combos with `ScoreSlip`, rejects
-  any combo with a Warn or Danger conflict, and keeps A-grade combos (up to 2 on the hub, or 1 same-game combo in
-  `#pick-detail`).
-- **Consistency**: Because highlights run through `ScoreLeg` and `ScoreSlip`, adding a highlighted leg or combo lands on
-  the slip with the exact same grade. When nothing reaches A, the strip hides cleanly.
+- **Bounded combo generation**: from up to 12 top A-grade legs (plus up to 6 B-grade same-game stack partners), it
+  evaluates conflict-free 2- and 3-leg combos with `ScoreSlip`, rejects any combo with a Warn or Danger conflict, and
+  keeps A-grade combos (up to 2 on the hub, or 1 same-game combo in `#pick-detail`).
+- **Consistency**: because highlights run through `ActiveEngine`, adding a highlighted leg or combo lands on the slip
+  with the exact same grade. When nothing reaches A, the strip hides cleanly.
 
-### Versioned rubrics and offline evals
+### Offline evals and engine comparison
 
-Scoring weights, category clamps, slip adjustments, and A–F cutoffs live in Rubric (`internal/analyzer/rubric.go`)
-rather than hardcoded constants. RubricV1 holds the baseline production weights, ActiveRubric selects the live rubric,
-and BuiltInRubrics exposes all registered rubrics in order. ScoreLeg, ScoreSlip, and GradeRubric all read from
-ActiveRubric, while ScoreLegWithRubric and ScoreSlipWithRubric accept any rubric value without mutating live state.
-
-To test weight changes against settled outcomes before promoting a new rubric, the eval package replays historical weeks
-read-only from SQLite. To prevent post-kickoff data leakage, the replayer reads nflverse rows strictly prior to the
-target week and reconstructs overwritten inputs (game logs, injury statuses, rosters, and odds) only from archived API
-responses recorded before kickoff, failing soft and reporting coverage counts when an archive entry is missing.
+Both `EngineV2` (active) and `EngineV1` (additive `RubricV1` baseline) stay registered in `BuiltInEngines` so offline
+evals and in-app results can compare them on identical pre-kickoff data. To prevent post-kickoff data leakage,
+`internal/eval` reads nflverse rows strictly prior to the target week and reconstructs overwritten inputs (game logs,
+injury statuses, rosters, and odds) only from pre-kickoff archive payloads, failing soft and reporting coverage counts
+when an archive entry is missing.
 
 Two shared signal reconstructions keep replay aligned with live scoring:
 
-- **Pre-kickoff sharp benchmarks**: Archived `odds:lines` and `odds:props:{gameID}` responses recorded before kickoff
-  are matched to each game (by `odds_event_id` or team names and kickoff) and resolved against pre-kickoff archived
-  rosters plus prior-week nflverse rows, then passed through BuildSharpBenchmarks to populate `Game.Sharp` (`WithSharp`
-  coverage).
-- **Prior-week nflverse L5 fallback**: When no pre-kickoff `espn:gamelog:{id}` archive exists for a player,
-  `PlayerStats.Games` falls back to strictly prior-week `nflverse_player_weeks` rows in the same season (and backfills
-  missing player positions), tracked separately as `WithL5Fallback` coverage alongside `WithGameLogs`.
+- **Pre-kickoff sharp benchmarks**: archived `odds:lines` and `odds:props:{gameID}` responses recorded before kickoff
+  are matched to each game, resolved against pre-kickoff rosters and prior-week nflverse rows, and passed through
+  `BuildSharpBenchmarks` to compute Power-devigged `SharpQuote` benchmarks.
+- **Prior-week nflverse L5 fallback**: when no pre-kickoff game-log archive exists for a player, `PlayerStats.Games`
+  falls back to strictly prior-week `nflverse_player_weeks` rows in the same season.
 
-Eval supports two replay modes:
-
-- **User slips (`ModeSlips`, default)**: Every leg on a graded slip—including unsettled legs on an early-busted
-  parlay—stays on the replayed slip so ScoreSlipWithRubric sees the full pre-kickoff slip (parlay drag, chalk drag,
-  stacks, and script conflicts), while leg calibration bands, leg factor attribution, and band migrations count only
-  settled legs.
-- **Market-wide (`ModeMarket`)**: For each `FINAL` game with pre-kickoff archived odds, `board.Build` (with an empty
-  home book) deduplicates multi-book quotes into one median-line, median-price candidate leg per selection side. Game
-  lines and team totals grade deterministically from `FINAL` scores via `grader.GradeLeg`; player props prefer
-  completed archived ESPN box scores (preserving true DNPs as `Void`) and fall back to same-week `nflverse_player_weeks`
-  rows when no completed box score is archived, dropping unmatched players (`NeedsGrading`) rather than emitting false
-  voids. `Evaluate` scores market candidates with ScoreLegWithRubric and populates leg bands, weekly progression, leg
-  factors, and leg band migrations while leaving slip-level bands and factors empty.
-
-Evaluation computes leg and slip calibration by band, lift over implied odds, flat ROI, Brier score, week-over-week
-progression, and both leg-level and slip-level factor attribution (`Factors` and `SlipFactors`, labeled via
-GradeRubricFor). EvaluateAll evaluates all built-in rubrics and compares subsequent rubrics against the baseline,
-matching leg outcomes by `(SlipID, LegID)` (or synthetic market-leg coordinates) to build the leg band migration matrix
-(with CompareRubrics as the dataset-driven comparison entry point). The eval CLI (`cmd/eval`) prints both leg and slip
-factor attribution in text, Markdown, and JSON outputs when present, omitting empty slip calibration and slip factor
-sections cleanly.
-
-In CI, `.github/workflows/ci.yml` runs the eval CLI against the synthetic fixture
-`internal/eval/testdata/benchmark_dataset.json` and appends the Markdown benchmark summary to the workflow job summary
-without accessing production data or credentials. See [Local development](../guides/local-dev.md#offline-grading-evals)
+Eval supports user slips (`ModeSlips`, default, keeping all pre-kickoff slip legs for copula/script evaluation while
+counting settled legs for calibration) and market-wide replay (`ModeMarket`, consensus pre-kickoff lines graded
+deterministically across final games). Evaluation computes proper scoring rules (Log Loss, Brier Score, Classwise ECE,
+10-bin reliability spread targeting at least 80% populated bins, Market Log Loss, and SGP Log Loss vs. naive
+independence) alongside A–F band calibration, lift, flat ROI, weekly progression, factor attribution, and band
+migrations. In CI, `.github/workflows/ci.yml` runs `cmd/eval` against the real 2025 Weeks 7–10 replay fixture
+`internal/eval/testdata/benchmark_dataset.json`. See [Local development](../guides/local-dev.md#offline-grading-evals)
 for CLI and `mise run eval-prod` usage.
 
 ## In-app grading guide and results
 
-`GET /analyzer/guide` renders the live rubric (GradeRubric) and every active warning rule (RuleDocs) directly from
-`internal/analyzer`, so the guide page cannot drift from the engine's thresholds. Stable anchors (`#leg-grades`,
-`#slip-grade`, `#suggestions`, `#rule-<id>`) let any warning card or grade breakdown link straight to its explanation,
-with a safe `?from=` back link to return to the slip or pick board, plus a "Grading results" link to
-`/analyzer/results`.
+`GET /analyzer/guide` renders the four v2 pillars, uncertainty badge behavior, active engine badge, live A–F bands,
+v1 rubric reference, and every warning rule (`RuleDocs`) directly from `internal/analyzer`, so the guide cannot drift
+from live thresholds. Stable anchors (`#pillars`, `#leg-grades`, `#slip-grade`, `#suggestions`, `#rule-<id>`) let any
+warning card or grade breakdown link straight to its explanation, with a safe `?from=` back link and a "Grading results"
+link to `/analyzer/results`.
 
-`GET /analyzer/results` shows live calibration in two views via `?source=slips|market`:
+`GET /analyzer/results` shows live calibration across `?source=slips|market` and `?engine=v2|v1`:
 
-- **User slips (`?source=slips`, default)**: Aggregates every group's settled slips to show A–F leg and slip bands
-  (record, hit %, implied %, lift, flat ROI), side-by-side rubric comparison when multiple built-in rubrics exist,
-  chronological week-over-week progression, ranked leg factor attribution, Slip Factor Attribution (sample count N, record
-  W-L, Hit %, Lift, and Avg Δ for parlay-level rules when non-empty), and pre-kickoff data coverage.
-- **Market-wide (`?source=market`)**: Replays pre-kickoff consensus lines across `FINAL` games, hides the slip-only
-  sections (`Slip Calibration` and `Slip Factor Attribution`, linking back to `User slips`), and adds `Sharp benchmarks`
-  and `nflverse L5 fallback` coverage tiles.
+- **Probability calibration & SGP lift**: displays Log Loss, Brier Score, Classwise ECE, 10-bin spread, market
+  baselines, a 10% reliability table, and SGP Correlation Lift comparing copula joint log loss against naive leg
+  multiplication on settled SGPs.
+- **User slips (`?source=slips`, default)**: aggregates settled slips across all groups for A–F leg and slip bands,
+  side-by-side Engine Comparison, engine diffs/migrations, weekly progression, leg and slip factor attribution, and
+  pre-kickoff data coverage.
+- **Market-wide (`?source=market`)**: replays pre-kickoff consensus lines across final games, hides slip-only sections,
+  and adds Sharp benchmarks and nflverse L5 fallback coverage tiles.
 
-To avoid replaying SQLite on every page load without persisting derived tables, `eval.Cache` (`internal/eval/cache.go`)
-memoizes each suite report in memory by `(mode, groupID, season)`. Normal settlement and re-grading in `internal/slips`
-invalidate the affected group's slip entries (and global `0` slip entries) after commit via `SetOnGradeChange` without
-evicting market entries; `refresh.Service.SetOnMarketDataChange` calls `InvalidateMarket` when `syncScoreboard` sees a
-game newly reach `FINAL` or `syncNFLverse` commits changes without evicting slip entries; and sandbox stage transitions
-or resets clear the whole cache.
+`eval.Cache` (`internal/eval/cache.go`) memoizes suite reports in memory by mode, group ID, and season. Settlement in
+`internal/slips` invalidates slip entries via `SetOnGradeChange` without evicting market entries;
+`refresh.Service.SetOnMarketDataChange` calls `InvalidateMarket` when games reach `FINAL` or `syncNFLverse` commits; and
+sandbox transitions clear the cache.
 
 ## Tone
 
-Warnings and grade summaries read like a sharp friend's heads-up: short, specific, and free of lectures. They name the
-people, the teams, and the numbers, and they suggest a better pick or a safer number. They never say "don't," and they
-never explain expected value—even sharp-book price notes cite the actual sharp line or fair American odds (such as
-"Strong price at +105 vs. LowVig fair price near -108.") rather than "+EV %". A warning on two people's legs names both
-owners, such as "Adam's BUF -7.5 + Sam's Josh Allen Over 245.5."
-
-The tone rules live in `plan/analyzer.md`. Every message is checked against them before an analyzer change ships.
+Warnings, pillar summaries, and "Why" bullets read like a sharp friend's heads-up: short, specific, and free of
+lectures. They name the people, teams, odds, and fair prices (for example, "Paying -130 vs. fair price near -105"),
+never say "don't", and never expose raw "+EV %" copy. The tone rules live in `plan/analyzer.md`.
 
 ## Inputs
 
-AnalyzeSlip, ScoreLeg, and ScoreSlip take three plain values:
+`AnalyzeSlip`, `EvaluateSlip`, `ScoreLeg`, and `ScoreSlip` take three plain values:
 
-| Input | Fields the rules and scorer read |
-| ----- | -------------------------------- |
-| legs  | owner name, game, market, team, player, side, line, American odds |
-| games | home and away teams, indoor flag, weather (wind, gusts, precipitation, temperature), nfelo model (spread, win probability, QB adjustments), nflverse team EPA & pace, merged team injuries, de-vigged sharp-book benchmarks |
-| stats | per-player ESPN game logs per market (most recent game first, this season only), ESPN position, and nflverse weekly snap/target/opportunity usage |
+| Input   | Fields the rules and scorer read |
+| ------- | -------------------------------- |
+| `legs`  | owner name, game, market, team, player, side, line, American odds |
+| `games` | teams, indoor flag, weather, nfelo model, nflverse team EPA & pace, role-specific defense allowed, consensus `MarketScript` (spread, total, implied totals), merged injuries, Power-devigged sharp benchmarks, and optional `ContextSignals` |
+| `stats` | per-player ESPN game logs per market (most recent first, this season), position, role archetype, nflverse usage, EWMA opportunity metrics, and optional `ContextSignals` |
 
-`internal/analyzer` (`LoadSlipSignals`) builds games and stats from the week's games, stored odds, player game logs,
-`roster_players`, `nfelo_games`, and nflverse tables when `internal/web` renders the panel or tray (with
-`LoadBoardSignals`, `LoadGameSignals`, and `LoadPlayerResearchSignals` serving highlights, the pick board, and player
-research). It keys the games map by the same GameID each leg carries, so no leg loses its game.
+`LoadSlipSignals`, `LoadBoardSignals`, `LoadGameSignals`, and `LoadPlayerResearchSignals` build these maps in batched
+SQLite queries. Team injuries merge `games.injuries_json` (primary) with key-position injuries from `roster_players`,
+and external models fail soft: nfelo requires a `SCHEDULED` game and under 72-hour freshness, nflverse requires under
+7-day freshness (including optional expected-opportunity rows), and sharp benchmarks pair two-way quotes across Tier 1
+(Pinnacle, Circa, Bookmaker), Tier 2 (LowVig, BetOnline), and Tier 3 (at least 3 traditional books, excluding DFS apps
+and exchanges) using Power de-vigging.
 
-For team injuries, `LoadSlipSignals` (via `MergeGameInjuries` and `espn.MergeTeamInjuries`) merges `games.injuries_json`
-from ESPN's game summary with key-position injuries from `roster_players.injury_status`. Summary entries stay primary
-for their richer detail and 15-minute game-day refresh, while roster injuries backfill any key-position player truncated
-past ESPN's 5-per-team summary cap. `ScoreLeg` uses the merged `Game.Injuries` list and `PlayerStats.Position` for
-deterministic teammate-out grading.
-
-stats maps ESPN athlete IDs to season game logs across markets (PASS_YDS, RUSH_YDS, REC_YDS, RECEPTIONS, PASS_TDS,
-RUSH_ATT, ANYTIME_TD, KICKER_PTS) and optional nflverse usage weeks. `internal/analyzer` loads player game logs and
-nflverse player weeks for every distinct matched PlayerID on the slip. An unmatched player, a missing game log, or a
-market/usage history with fewer than 3 games leaves player-stat and usage rules quiet.
-
-External models and efficiency data are optional inputs, not requirements:
-
-- **nfelo**: `internal/analyzer` attaches it only when the game is SCHEDULED and a successful nfelo projections fetch is
-  under 72 hours old. Otherwise the model is nil and QB drag / model sentences stay quiet.
-- **nflverse**: `internal/analyzer` attaches HomeEPA, AwayEPA, and Usage only when the season nflverse sync is under 7
-  days old. Missing or stale nflverse rows leave those fields nil so nflverse warnings and EPA/usage grade factors fail
-  soft.
-- **Sharp benchmarks**: LoadSlipSignals builds Game.Sharp in memory from current two-way odds rows in three tiers: Tier
-  1 (Pinnacle, Circa, Bookmaker), Tier 2 (LowVig, BetOnline), and Tier 3 (market consensus across at least 3 traditional
-  sportsbooks quoting the same line, excluding DFS pick'em apps and peer-to-peer exchanges). One-sided markets (like
-  anytime TD), unpaired quotes, and missing odds fail soft cleanly.
-
-The underlying rows come from [Data sources](../reference/data-sources.md) through [Data refresh](data-refresh.md).
-
-Legs the analyzer skips:
-
-- market OTHER;
-- an empty GameID;
-- a GameID missing from the games map.
-
-Output order is stable: severity first (Danger before Warn before Info), then the slip position of the first leg named.
-The same slip and data always produce the same warnings and grades.
+Legs with market `OTHER`, an empty `GameID`, or a `GameID` missing from `games` are skipped cleanly. Output order is
+deterministic and stable across reloads.
 
 ## Related
 
-- [Analyzer rules](../reference/analyzer-rules.md): every rule, its severity, trigger, example message, and the full
-  `A`–`F` grading rubric.
-- [Slips](slips.md): the legs and games the banner reads.
-- [Data refresh](data-refresh.md): where the weather, nfelo, and nflverse signals come from.
+- [Analyzer rules](../reference/analyzer-rules.md): every warning rule, trigger, four-pillar formula, model family,
+  copula threshold, overlay table, and v1 rubric reference.
+- [Odds math](../reference/odds-math.md): Power and Shin de-vigging, fair EV, and live progress math.
+- [Slips](slips.md): the legs, highlights, and games the banner reads.
+- [Data refresh](data-refresh.md): where weather, nfelo, nflverse, and expected-opportunity signals come from.

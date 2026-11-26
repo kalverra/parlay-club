@@ -2,8 +2,11 @@
 id: local-dev
 title: Local development
 type: guide
-summary: Start the app with hot reload, run the offline Sunday sandbox, set up the git hooks, and fall back to a plain server run when you need it.
-tags: [development, mise, air, tailwind, server, sandbox, offline]
+summary: Start the app with hot reload, run the offline Sunday sandbox, set up the git hooks, run offline evals, and retrain the v2 grading model.
+tags: [development, mise, air, tailwind, server, sandbox, offline, ml, train-v2]
+budget:
+  max_lines: 380
+  reason: Covers the full local developer workflow in one guide, including dev server, Sunday sandbox, profiling, offline evals, and v2 model training.
 ---
 
 # Local development
@@ -292,6 +295,79 @@ By default, `eval-prod` passes `--all` to `cmd/eval`. Pass custom `cmd/eval` fla
 ```sh
 LITESTREAM_BUCKET=<bucket> mise run eval-prod -- --mode market --all
 ```
+
+## Train the v2 grading model
+
+The v2 grading model trains offline in Python under `ml/` and exports flat decision trees, calibrators, and copula
+matrices as JSON embedded into the Go binary. The `ml/` workspace is excluded via `.dockerignore`, so Cloud Run stays a
+single static Go binary.
+
+### Prerequisites
+
+Install [uv](https://docs.astral.sh/uv/). Python 3.12 is pinned in `ml/.python-version` and dependencies are locked in
+`ml/uv.lock`.
+
+### Run `mise run train-v2`
+
+```sh
+mise run train-v2
+```
+
+That runs `uv run python export.py` in `ml/`. The first run downloads historical nflverse data (seasons 2019–2025 by
+default) and caches Parquet files under ml/cache (gitignored). Pass script flags after `--` to refresh cached data or
+change the season range and HPO budget:
+
+```sh
+mise run train-v2 -- --refresh --seasons 2019-2025 --trials 8
+```
+
+Before writing any artifact, `ml/train.py` runs expanding-window walk-forward validation across at least three held-out
+seasons, logs KS covariate-shift checks, drops collinear features with pairwise Spearman `> 0.7`, and enforces these
+gates:
+
+- At least 80% of calibration probability bins populated.
+- Walk-forward Log Loss and Brier Score at or below the de-vigged market baseline.
+- Copula SGP Log Loss below naive leg independence.
+- EWMA half-life `±1` week perturbation MAE `<= 0.05`.
+
+When all gates pass, `ml/export.py` writes three files:
+
+- `internal/modelv2/artifacts/v2.json.gz` — model bundle embedded into Go via `internal/modelv2`. Written minified and
+  gzipped (~150 KB instead of ~3 MB) because its ~12.5k tree nodes would otherwise span 100k+ lines and add 3 MB to git
+  history on every retrain; run `gunzip -c internal/modelv2/artifacts/v2.json.gz | jq .` to read it.
+- `internal/modelv2/testdata/parity_vectors.json` — leg and copula test vectors for Go/Python parity checks. Kept
+  indented, since a change to it is meaningful.
+- `ml/reports/latest.md` — walk-forward gate metrics, pruned features, and top KS shifts.
+
+Both generated artifacts are marked `linguist-generated` in `.gitattributes`, so GitHub collapses them in diffs.
+
+### Retraining cadence
+
+- **Pre-season (August):** run a full retrain across completed seasons before Week 1.
+- **Mid-season and pre-playoffs:** evaluate archived production slates with `mise run eval-prod`; retrain only if
+  covariate drift or Log Loss degrades enough to justify updating artifacts.
+- **Feature or schema changes:** retrain whenever features in `ml/features.py` or `internal/modelv2` change.
+
+### PR verification steps
+
+Before opening a PR that updates `ml/` or model artifacts, run the Python tests, Go parity tests, and standard repo
+checks:
+
+```sh
+(cd ml && uv run pytest -v)
+go test ./internal/modelv2
+golangci-lint run ./...
+go test -short -race ./...
+```
+
+When you have access to the production replica, compare v2 against archived slates:
+
+```sh
+LITESTREAM_BUCKET=<bucket> mise run eval-prod
+```
+
+Commit `internal/modelv2/artifacts/v2.json.gz`, `internal/modelv2/testdata/parity_vectors.json`, and `ml/reports/latest.md`
+together, and include the gate summary table from `ml/reports/latest.md` in the PR description.
 
 ## Check your work
 

@@ -166,18 +166,23 @@ type Row struct {
 // GameCard is one game on the slate: the matchup, its kickoff, the game lines
 // at a glance, and how many props it carries.
 type GameCard struct {
-	ID       string
-	Matchup  string
-	Venue    string
-	Away     string
-	Home     string
-	AwayLogo string
-	HomeLogo string
-	Kickoff  time.Time
-	Lines    GameLines
-	Props    int
-	HasProps bool
-	Unloaded bool
+	ID          string
+	Matchup     string
+	Venue       string
+	Indoor      bool
+	TempF       *float64
+	WindMPH     *float64
+	WindGustMPH *float64
+	PrecipIN    *float64
+	Away        string
+	Home        string
+	AwayLogo    string
+	HomeLogo    string
+	Kickoff     time.Time
+	Lines       GameLines
+	Props       int
+	HasProps    bool
+	Unloaded    bool
 }
 
 // Slate is the pick board's game-card view for one week's games, along with
@@ -739,16 +744,21 @@ func Slates(games []db.Game, rows []Row, roster []db.RosterPlayer, q Query) []Ga
 // cardFor shapes one game and its built rows into a slate card.
 func cardFor(game db.Game, rows []Row) GameCard {
 	card := GameCard{
-		ID:       game.ID,
-		Matchup:  game.AwayTeam + " @ " + game.HomeTeam,
-		Venue:    db.StringValue(game.VenueName),
-		Away:     game.AwayTeam,
-		Home:     game.HomeTeam,
-		AwayLogo: db.StringValue(game.AwayLogo),
-		HomeLogo: db.StringValue(game.HomeLogo),
-		Kickoff:  game.Kickoff,
-		Lines:    gameLines(game, rows),
-		Props:    propCount(rows),
+		ID:          game.ID,
+		Matchup:     game.AwayTeam + " @ " + game.HomeTeam,
+		Venue:       db.StringValue(game.VenueName),
+		Indoor:      game.Indoor,
+		TempF:       game.TempF,
+		WindMPH:     game.WindMPH,
+		WindGustMPH: game.WindGustMPH,
+		PrecipIN:    game.PrecipIN,
+		Away:        game.AwayTeam,
+		Home:        game.HomeTeam,
+		AwayLogo:    db.StringValue(game.AwayLogo),
+		HomeLogo:    db.StringValue(game.HomeLogo),
+		Kickoff:     game.Kickoff,
+		Lines:       gameLines(game, rows),
+		Props:       propCount(rows),
 	}
 	card.HasProps = card.Props > 0
 	card.Unloaded = !card.HasProps && len(rows) > 0
