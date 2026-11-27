@@ -127,7 +127,7 @@ export at phone width).
 Risk: medium (UI/template changes across multiple screens; handler tests verify rendered HTML, while phone visual check
 confirms layout density).
 
-- [ ] Render explicit DK vs. FD split lines (ordered with the viewer's `homeBook` first) in `web/templates/` and view
+- [x] Render explicit DK vs. FD split lines (ordered with the viewer's `homeBook` first) in `web/templates/` and view
       builders (`internal/web/pick.go`, `internal/web/research.go`, `internal/web/slips.go`) whenever `LinesDiffer` is
       true, with handler tests in `internal/web/pick_test.go` and `internal/web/research_test.go`.
 - [ ] Replace the free-text `home_book` input in `web/templates/profile.html` with a DraftKings / FanDuel / No

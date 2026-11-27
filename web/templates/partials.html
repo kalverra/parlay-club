@@ -232,6 +232,7 @@
                 <p class="truncate text-sm font-medium">{{.Selection}}</p>
                 <div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-ink-muted">
                 <span class="ui-odds">{{.Odds}}{{if .ImpliedChance}} <span class="font-normal text-ink-muted" title="Implied chance from odds">({{.ImpliedChance}})</span>{{end}}</span>
+                {{if .SplitLine}}<span class="rounded border border-line-strong bg-surface-2 px-1.5 py-0.5 font-mono text-[10px] font-medium tabular-nums text-ink">{{.SplitLine}}</span>{{end}}
                 {{if .ImpliedChance}}{{template "help-bubble" (dict "Href" (printf "/docs/glossary?from=/slips/%d#term-implied-prob" $.Slip.ID) "Label" "What implied chance means")}}{{end}}
                 {{if .Votes.Has}}
                   <span class="flex items-center gap-1" data-votes>
@@ -1300,6 +1301,9 @@
               </div>
             </div>
             <div class="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px]">
+              {{if .SplitLine}}
+                <span class="rounded border border-line-strong bg-surface-2 px-1.5 py-0.5 font-mono text-[10px] font-medium tabular-nums text-ink">{{.SplitLine}}</span>
+              {{end}}
               {{if .Badge}}
                 <span class="rounded-full border border-accent bg-accent-soft px-1.5 py-0.5 font-medium text-ink">{{.Badge}}</span>
               {{end}}
@@ -1768,6 +1772,7 @@
         >
           <span class="block truncate">{{.Text}}</span>
           <span class="mt-0.5 block text-xs font-normal opacity-85"><span class="ui-odds">{{.Price}}{{if .ImpliedChance}} <span title="Implied chance from odds">({{.ImpliedChance}})</span>{{end}}</span> &middot; tap to remove</span>
+          {{if .SplitLine}}<span class="mt-1 inline-block rounded border border-line-strong bg-surface px-1.5 py-0.5 font-mono text-[10px] font-medium tabular-nums text-ink">{{.SplitLine}}</span>{{end}}
           {{if .Badge}}<span class="mt-1 inline-block rounded-full border border-line-strong bg-surface px-1.5 py-0.5 text-[10px] font-medium text-ink">{{.Badge}}</span>{{end}}
         </button>
       </form>
@@ -1818,6 +1823,7 @@
       >
         <span class="block truncate">{{.Text}}</span>
         <span class="mt-0.5 block text-xs font-normal text-ink-muted"><span class="ui-odds">{{.Price}}{{if .ImpliedChance}} <span title="Implied chance from odds">({{.ImpliedChance}})</span>{{end}}</span> &middot; tap to switch</span>
+        {{if .SplitLine}}<span class="mt-1 inline-block rounded border border-line-strong bg-surface px-1.5 py-0.5 font-mono text-[10px] font-medium tabular-nums text-ink">{{.SplitLine}}</span>{{end}}
         {{if .Badge}}<span class="mt-1 inline-block rounded-full border border-accent bg-accent-soft px-1.5 py-0.5 text-[10px] font-medium text-ink">{{.Badge}}</span>{{end}}
       </button>
     </form>
@@ -1831,6 +1837,7 @@
     >
       <span class="block truncate">{{.Text}}</span>
       <span class="mt-0.5 block text-xs font-normal text-ink-muted"><span class="ui-odds">{{.Price}}{{if .ImpliedChance}} <span title="Implied chance from odds">({{.ImpliedChance}})</span>{{end}}</span> &middot; swap in</span>
+      {{if .SplitLine}}<span class="mt-1 inline-block rounded border border-line-strong bg-surface px-1.5 py-0.5 font-mono text-[10px] font-medium tabular-nums text-ink">{{.SplitLine}}</span>{{end}}
       {{if .Badge}}<span class="mt-1 inline-block rounded-full border border-accent bg-accent-soft px-1.5 py-0.5 text-[10px] font-medium text-ink">{{.Badge}}</span>{{end}}
     </button>
   {{else}}
@@ -1855,6 +1862,7 @@
       >
         <span class="block truncate">{{.Text}}</span>
         <span class="mt-0.5 block text-xs font-normal text-ink-muted"><span class="ui-odds">{{.Price}}{{if .ImpliedChance}} <span title="Implied chance from odds">({{.ImpliedChance}})</span>{{end}}</span> &middot; tap to add</span>
+        {{if .SplitLine}}<span class="mt-1 inline-block rounded border border-line-strong bg-surface px-1.5 py-0.5 font-mono text-[10px] font-medium tabular-nums text-ink">{{.SplitLine}}</span>{{end}}
         {{if .Badge}}<span class="mt-1 inline-block rounded-full border border-accent bg-accent-soft px-1.5 py-0.5 text-[10px] font-medium text-ink">{{.Badge}}</span>{{end}}
       </button>
     </form>
@@ -1994,6 +2002,12 @@
               {{if .Total}}<div class="min-w-0"><dt class="text-ink-subtle">Total</dt><dd class="truncate font-mono text-ink">{{.Total}}</dd></div>{{end}}
               {{if .Moneyline}}<div class="min-w-0"><dt class="text-ink-subtle">Moneyline</dt><dd class="truncate font-mono text-ink">{{.Moneyline}}</dd></div>{{end}}
             </dl>
+            {{if or .SpreadSplit .TotalSplit}}
+              <div class="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 font-mono text-[11px] tabular-nums text-ink-muted">
+                {{if .SpreadSplit}}<span>{{.SpreadSplit}}</span>{{end}}
+                {{if .TotalSplit}}<span>{{.TotalSplit}}</span>{{end}}
+              </div>
+            {{end}}
           {{end}}
           {{if .TopPlayersSummary}}
             <p class="mt-1.5 truncate text-xs text-ink-muted" data-game-top-players>
@@ -2247,6 +2261,7 @@
           <div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-ink-muted">
             <span class="ui-odds">{{.Odds}}{{if .ImpliedChance}} <span class="font-normal text-ink-muted" title="Implied chance from odds">({{.ImpliedChance}})</span>{{end}}</span>
             {{if .ImpliedChance}}{{template "help-bubble" (dict "Href" (printf "/docs/glossary?from=/slips/%d/pick#term-implied-prob" $.SlipID) "Label" "What implied chance means")}}{{end}}
+            {{if .SplitLine}}<span class="rounded border border-line-strong bg-surface-2 px-1.5 py-0.5 font-mono text-[10px] font-medium tabular-nums text-ink">{{.SplitLine}}</span>{{end}}
             {{if .Grade.Letter}}
               <details class="min-w-0" data-leg-grade data-help-popover>
                 <summary
@@ -2557,6 +2572,7 @@
                   </details>
                   <span class="ui-odds">{{.Price}}{{if .ImpliedChance}} <span class="font-normal text-ink-muted" title="Implied chance from odds">({{.ImpliedChance}})</span>{{end}}</span>
                   {{if .ImpliedChance}}{{template "help-bubble" (dict "Href" (printf "/docs/glossary?from=%s#term-implied-prob" $guideFrom) "Label" "What implied chance means")}}{{end}}
+                  {{if .SplitLine}}<span class="rounded border border-line-strong bg-surface px-1.5 py-0.5 font-mono text-[10px] font-medium tabular-nums text-ink">{{.SplitLine}}</span>{{end}}
                   {{if .Reason}}<span class="min-w-0 truncate text-ink-muted">{{.Reason}}</span>{{end}}
                 </div>
               </div>
@@ -2653,6 +2669,7 @@
                   <div class="min-w-0 flex-1">
                     <span class="truncate font-medium text-ink">{{.Text}}</span>
                     <span class="ui-odds ml-1.5">{{.Price}}{{if .ImpliedChance}} <span class="font-normal text-ink-muted" title="Implied chance from odds">({{.ImpliedChance}})</span>{{end}}</span>
+                    {{if .SplitLine}}<span class="ml-1 rounded border border-line-strong bg-surface px-1.5 py-0.5 font-mono text-[10px] font-medium tabular-nums text-ink">{{.SplitLine}}</span>{{end}}
                   </div>
                   <form
                     class="shrink-0"

@@ -162,6 +162,7 @@ type LegHighlightView struct {
 	ImpliedChance string
 	Text          string
 	Grade         GradeView
+	SplitLine     string
 	Reason        string
 }
 
@@ -271,6 +272,7 @@ type LegView struct {
 	Odds            string
 	ImpliedChance   string
 	Model           string // nfelo chip; "" when there is no fresh model
+	SplitLine       string
 	Grade           GradeView
 	Result          string
 	GradedBy        string
@@ -1940,6 +1942,18 @@ func (h *slipHandlers) slipPageData(ctx context.Context, slip db.Slip) (SlipPage
 		return SlipPage{}, err
 	}
 	viewerID := user.ID
+	homeBook := ""
+	if hasUser && user.HomeBook != nil {
+		homeBook = *user.HomeBook
+	}
+	var splitLines map[int64]string
+	if open && len(legs) > 0 && len(games) > 0 {
+		var err error
+		splitLines, err = h.slipLegSplitLines(ctx, slip.WeekID, games, legs, homeBook)
+		if err != nil {
+			return SlipPage{}, err
+		}
+	}
 	votesByLeg := voteViews(votes, viewerID)
 	legProgs, slipProg := evaluateSlipProgress(legs, allWeekGames)
 	legsByUser := legViews(
@@ -1954,6 +1968,7 @@ func (h *slipHandlers) slipPageData(ctx context.Context, slip db.Slip) (SlipPage
 		viewerID,
 		votesByLeg,
 		legProgs,
+		splitLines,
 	)
 
 	locked := 0
@@ -2026,6 +2041,43 @@ func (h *slipHandlers) slipPageData(ctx context.Context, slip db.Slip) (SlipPage
 	}, nil
 }
 
+func (h *slipHandlers) slipLegSplitLines(
+	ctx context.Context,
+	weekID int64,
+	games []db.Game,
+	legs []db.Leg,
+	homeBook string,
+) (map[int64]string, error) {
+	odds, err := h.deps.Store.OddsForWeek(ctx, weekID)
+	if err != nil {
+		return nil, err
+	}
+	if len(odds) == 0 {
+		return nil, nil
+	}
+	roster, err := h.deps.Store.RosterForTeams(ctx, weekTeams(games))
+	if err != nil {
+		return nil, err
+	}
+	rows := board.BuildDualBook(games, odds, roster, homeBook, legs, h.deps.now())
+	splitLines := make(map[int64]string, len(legs))
+	for _, row := range rows {
+		if !row.LinesDiffer {
+			continue
+		}
+		badge := splitLineBadge(row.Market, row.DK, row.FD, row.LinesDiffer, homeBook)
+		if badge == "" {
+			continue
+		}
+		for _, leg := range legs {
+			if row.MatchesLeg(leg) {
+				splitLines[leg.ID] = badge
+			}
+		}
+	}
+	return splitLines, nil
+}
+
 func (h *slipHandlers) slipHighlights(
 	ctx context.Context,
 	slip db.Slip,
@@ -2064,24 +2116,24 @@ func (h *slipHandlers) slipHighlights(
 	set := board.SelectHighlights(rows, boardGames, boardStats, board.HighlightOptions{
 		ExcludePicked: true,
 	})
-	view := highlightsView(set, remainingSlots)
+	view := highlightsView(set, remainingSlots, homeBook)
 	view.SlipID = slip.ID
 	return view, nil
 }
 
-func highlightsView(set board.HighlightSet, remainingSlots int) HighlightsView {
+func highlightsView(set board.HighlightSet, remainingSlots int, homeBook string) HighlightsView {
 	if len(set.Legs) == 0 && len(set.Parlays) == 0 {
 		return HighlightsView{}
 	}
 	legs := make([]LegHighlightView, 0, len(set.Legs))
 	for _, leg := range set.Legs {
-		legs = append(legs, legHighlightView(leg))
+		legs = append(legs, legHighlightView(leg, homeBook))
 	}
 	parlays := make([]ParlayHighlightView, 0, len(set.Parlays))
 	for _, p := range set.Parlays {
 		pLegs := make([]LegHighlightView, 0, len(p.Legs))
 		for _, leg := range p.Legs {
-			pLegs = append(pLegs, legHighlightView(leg))
+			pLegs = append(pLegs, legHighlightView(leg, homeBook))
 		}
 		parlays = append(parlays, ParlayHighlightView{
 			Legs:            pLegs,
@@ -2102,7 +2154,7 @@ func highlightsView(set board.HighlightSet, remainingSlots int) HighlightsView {
 	}
 }
 
-func legHighlightView(h board.LegHighlight) LegHighlightView {
+func legHighlightView(h board.LegHighlight, homeBook string) LegHighlightView {
 	line := ""
 	if h.Row.Line != nil {
 		line = formatFloat(*h.Row.Line)
@@ -2120,6 +2172,7 @@ func legHighlightView(h board.LegHighlight) LegHighlightView {
 		ImpliedChance: formatImpliedChance(parlay.ImpliedProb(h.Row.Odds)),
 		Text:          h.Row.Text,
 		Grade:         LegGradeView(h.Grade),
+		SplitLine:     splitLineBadge(h.Row.Market, h.Row.DK, h.Row.FD, h.Row.LinesDiffer, homeBook),
 		Reason:        h.Reason,
 	}
 }
@@ -2234,6 +2287,7 @@ func legViews(
 	viewerID int64,
 	votes map[int64]VoteView,
 	legProgs map[int64]progress.LegProgress,
+	splitLines map[int64]string,
 ) map[int64][]LegView {
 	byUser := make(map[int64][]LegView, len(names))
 	for _, leg := range legs {
@@ -2244,6 +2298,7 @@ func legViews(
 			Odds:          formatOdds(leg.Odds),
 			ImpliedChance: formatImpliedChance(parlay.ImpliedProb(leg.Odds)),
 			Model:         legModel(leg, games),
+			SplitLine:     splitLines[leg.ID],
 			Grade:         legGrades[leg.ID],
 			Result:        string(leg.Result),
 			GradedBy:      legGradedBy(leg.GradedBy),

@@ -52,6 +52,9 @@
           </div>
           <div class="mt-2 flex flex-wrap items-center gap-1.5 text-[11px]">
             <span class="rounded-full border border-line-strong bg-surface-2 px-1.5 py-0.5 text-ink-muted">{{.View.MarketLabel}}</span>
+            {{if .View.SplitLine}}
+              <span class="rounded border border-line-strong bg-surface-2 px-1.5 py-0.5 font-mono text-[10px] font-medium tabular-nums text-ink">{{.View.SplitLine}}</span>
+            {{end}}
             {{if .View.Badge}}
               <span class="rounded-full border border-accent bg-accent-soft px-1.5 py-0.5 font-medium text-ink">{{.View.Badge}}</span>
             {{end}}
@@ -332,6 +335,9 @@
                       <p class="mt-0.5 truncate text-[11px] text-ink-muted">
                         {{.Market}}{{if .Reason}} &middot; {{.Reason}}{{end}}
                       </p>
+                      {{if .SplitLine}}
+                        <p class="mt-1 font-mono text-[10px] tabular-nums text-ink-muted">{{.SplitLine}}</p>
+                      {{end}}
                     </div>
                     <div class="shrink-0 text-right">
                       <span class="inline-block rounded-full border px-1.5 py-0.5 text-[11px] font-semibold {{.GradeClass}}">{{if .GradeLetter}}{{.GradeLetter}}{{else}}&mdash;{{end}}</span>

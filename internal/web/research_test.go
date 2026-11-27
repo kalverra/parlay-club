@@ -2188,3 +2188,180 @@ func TestResearchBetAddToSlipPassesCSRF(t *testing.T) {
 	require.Equal(t, http.StatusOK, recHTMX.Code)
 	assert.Equal(t, betURL, recHTMX.Header().Get("Hx-Redirect"))
 }
+
+func TestResearchExploreAndBetRenderSplitLinesWithHomeBookFirst(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	game := addGame(t, fixture, gameKickoff())
+	now := time.Now().UTC()
+
+	_, err := fixture.store.UpsertOdds(t.Context(), []db.Odds{
+		{
+			GameID:     game.ID,
+			Book:       "draftkings",
+			MarketType: "SPREAD",
+			Team:       "BUF",
+			Side:       "TEAM",
+			Line:       new(-3.5),
+			Price:      -110,
+			FetchedAt:  now,
+		},
+		{
+			GameID:     game.ID,
+			Book:       "draftkings",
+			MarketType: "SPREAD",
+			Team:       "MIA",
+			Side:       "TEAM",
+			Line:       new(3.5),
+			Price:      -110,
+			FetchedAt:  now,
+		},
+		{
+			GameID:     game.ID,
+			Book:       "fanduel",
+			MarketType: "SPREAD",
+			Team:       "BUF",
+			Side:       "TEAM",
+			Line:       new(-3.0),
+			Price:      -115,
+			FetchedAt:  now,
+		},
+		{
+			GameID:     game.ID,
+			Book:       "fanduel",
+			MarketType: "SPREAD",
+			Team:       "MIA",
+			Side:       "TEAM",
+			Line:       new(3.0),
+			Price:      -105,
+			FetchedAt:  now,
+		},
+		{
+			GameID:     game.ID,
+			Book:       "draftkings",
+			MarketType: "TOTAL",
+			Side:       "OVER",
+			Line:       new(47.5),
+			Price:      -110,
+			FetchedAt:  now,
+		},
+		{
+			GameID:     game.ID,
+			Book:       "fanduel",
+			MarketType: "TOTAL",
+			Side:       "OVER",
+			Line:       new(47.5),
+			Price:      -110,
+			FetchedAt:  now,
+		},
+		{
+			GameID:     game.ID,
+			Book:       "draftkings",
+			MarketType: "TOTAL",
+			Side:       "UNDER",
+			Line:       new(47.5),
+			Price:      -110,
+			FetchedAt:  now,
+		},
+		{
+			GameID:     game.ID,
+			Book:       "fanduel",
+			MarketType: "TOTAL",
+			Side:       "UNDER",
+			Line:       new(47.5),
+			Price:      -110,
+			FetchedAt:  now,
+		},
+		{
+			GameID:     game.ID,
+			Book:       "draftkings",
+			MarketType: "PASS_YDS",
+			Team:       "BUF",
+			PlayerName: "Josh Allen",
+			Side:       "OVER",
+			Line:       new(265.5),
+			Price:      -110,
+			FetchedAt:  now,
+		},
+		{
+			GameID:     game.ID,
+			Book:       "fanduel",
+			MarketType: "PASS_YDS",
+			Team:       "BUF",
+			PlayerName: "Josh Allen",
+			Side:       "OVER",
+			Line:       new(263.5),
+			Price:      -115,
+			FetchedAt:  now,
+		},
+		{
+			GameID:     game.ID,
+			Book:       "draftkings",
+			MarketType: "PASS_YDS",
+			Team:       "BUF",
+			PlayerName: "Josh Allen",
+			Side:       "UNDER",
+			Line:       new(265.5),
+			Price:      -110,
+			FetchedAt:  now,
+		},
+		{
+			GameID:     game.ID,
+			Book:       "fanduel",
+			MarketType: "PASS_YDS",
+			Team:       "BUF",
+			PlayerName: "Josh Allen",
+			Side:       "UNDER",
+			Line:       new(263.5),
+			Price:      -105,
+			FetchedAt:  now,
+		},
+	})
+	require.NoError(t, err)
+
+	betURL := "/research/bet?" + url.Values{
+		"game_id":     {game.ID},
+		"market":      {"PASS_YDS"},
+		"side":        {"OVER"},
+		"team":        {"BUF"},
+		"player_name": {"Josh Allen"},
+	}.Encode()
+
+	// DraftKings viewer sees DK first on explorer cards and bet detail.
+	dkUser, err := fixture.store.SetUserHomeBook(t.Context(), fixture.user.ID, new("draftkings"))
+	require.NoError(t, err)
+	dkHandler := researchHandlerWithRefresher(t, fixture, dkUser, &researchTestRefresher{})
+
+	exploreDK := httptest.NewRecorder()
+	dkHandler.ServeHTTP(exploreDK, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/research", nil))
+	require.Equal(t, http.StatusOK, exploreDK.Code)
+	exploreDKBody := exploreDK.Body.String()
+	assert.Contains(t, exploreDKBody, "DK 265.5 (-110) · FD 263.5 (-115)")
+	assert.Contains(t, exploreDKBody, "DK -3.5 (-110) · FD -3 (-115)")
+	assert.NotContains(t, exploreDKBody, "DK 47.5")
+
+	betDK := httptest.NewRecorder()
+	dkHandler.ServeHTTP(betDK, httptest.NewRequestWithContext(t.Context(), http.MethodGet, betURL, nil))
+	require.Equal(t, http.StatusOK, betDK.Code)
+	betDKBody := betDK.Body.String()
+	assert.Contains(t, betDKBody, "DK 265.5 (-110) · FD 263.5 (-115)")
+
+	// FanDuel viewer sees FD first on explorer cards and bet detail.
+	fdUser, err := fixture.store.SetUserHomeBook(t.Context(), fixture.user.ID, new("fanduel"))
+	require.NoError(t, err)
+	fdHandler := researchHandlerWithRefresher(t, fixture, fdUser, &researchTestRefresher{})
+
+	exploreFD := httptest.NewRecorder()
+	fdHandler.ServeHTTP(exploreFD, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/research", nil))
+	require.Equal(t, http.StatusOK, exploreFD.Code)
+	exploreFDBody := exploreFD.Body.String()
+	assert.Contains(t, exploreFDBody, "FD 263.5 (-115) · DK 265.5 (-110)")
+	assert.Contains(t, exploreFDBody, "FD -3 (-115) · DK -3.5 (-110)")
+
+	betFD := httptest.NewRecorder()
+	fdHandler.ServeHTTP(betFD, httptest.NewRequestWithContext(t.Context(), http.MethodGet, betURL, nil))
+	require.Equal(t, http.StatusOK, betFD.Code)
+	betFDBody := betFD.Body.String()
+	assert.Contains(t, betFDBody, "FD 263.5 (-115) · DK 265.5 (-110)")
+}

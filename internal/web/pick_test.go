@@ -3855,3 +3855,193 @@ func TestPickBoardGameCardsCondenseLinesWeatherGradesAndPlayers(t *testing.T) {
 	assert.Contains(t, body, "Top props:")
 	assert.Contains(t, body, "J. Allen")
 }
+
+func TestPickBoardRendersSplitLinesWithHomeBookFirst(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	game := addGame(t, fixture, gameKickoff())
+	now := time.Now().UTC()
+
+	_, err := fixture.store.UpsertOdds(t.Context(), []db.Odds{
+		{
+			GameID:     game.ID,
+			Book:       "draftkings",
+			MarketType: "SPREAD",
+			Team:       "BUF",
+			Side:       "TEAM",
+			Line:       new(-3.5),
+			Price:      -110,
+			FetchedAt:  now,
+		},
+		{
+			GameID:     game.ID,
+			Book:       "draftkings",
+			MarketType: "SPREAD",
+			Team:       "MIA",
+			Side:       "TEAM",
+			Line:       new(3.5),
+			Price:      -110,
+			FetchedAt:  now,
+		},
+		{
+			GameID:     game.ID,
+			Book:       "fanduel",
+			MarketType: "SPREAD",
+			Team:       "BUF",
+			Side:       "TEAM",
+			Line:       new(-3.0),
+			Price:      -115,
+			FetchedAt:  now,
+		},
+		{
+			GameID:     game.ID,
+			Book:       "fanduel",
+			MarketType: "SPREAD",
+			Team:       "MIA",
+			Side:       "TEAM",
+			Line:       new(3.0),
+			Price:      -105,
+			FetchedAt:  now,
+		},
+		{
+			GameID:     game.ID,
+			Book:       "draftkings",
+			MarketType: "TOTAL",
+			Side:       "OVER",
+			Line:       new(48.5),
+			Price:      -110,
+			FetchedAt:  now,
+		},
+		{
+			GameID:     game.ID,
+			Book:       "fanduel",
+			MarketType: "TOTAL",
+			Side:       "OVER",
+			Line:       new(48.5),
+			Price:      -110,
+			FetchedAt:  now,
+		},
+		{
+			GameID:     game.ID,
+			Book:       "draftkings",
+			MarketType: "TOTAL",
+			Side:       "UNDER",
+			Line:       new(48.5),
+			Price:      -110,
+			FetchedAt:  now,
+		},
+		{
+			GameID:     game.ID,
+			Book:       "fanduel",
+			MarketType: "TOTAL",
+			Side:       "UNDER",
+			Line:       new(48.5),
+			Price:      -110,
+			FetchedAt:  now,
+		},
+		{
+			GameID:     game.ID,
+			Book:       "draftkings",
+			MarketType: "REC_YDS",
+			Team:       "BUF",
+			PlayerName: "Khalil Shakir",
+			Side:       "OVER",
+			Line:       new(68.5),
+			Price:      -111,
+			FetchedAt:  now,
+		},
+		{
+			GameID:     game.ID,
+			Book:       "fanduel",
+			MarketType: "REC_YDS",
+			Team:       "BUF",
+			PlayerName: "Khalil Shakir",
+			Side:       "OVER",
+			Line:       new(66.5),
+			Price:      -115,
+			FetchedAt:  now,
+		},
+		{
+			GameID:     game.ID,
+			Book:       "draftkings",
+			MarketType: "REC_YDS",
+			Team:       "BUF",
+			PlayerName: "Khalil Shakir",
+			Side:       "UNDER",
+			Line:       new(68.5),
+			Price:      -115,
+			FetchedAt:  now,
+		},
+		{
+			GameID:     game.ID,
+			Book:       "fanduel",
+			MarketType: "REC_YDS",
+			Team:       "BUF",
+			PlayerName: "Khalil Shakir",
+			Side:       "UNDER",
+			Line:       new(66.5),
+			Price:      -111,
+			FetchedAt:  now,
+		},
+	})
+	require.NoError(t, err)
+
+	dkUser, err := fixture.store.SetUserHomeBook(t.Context(), fixture.user.ID, new("draftkings"))
+	require.NoError(t, err)
+	fixture.as(dkUser)
+
+	// Add the split-line prop to the slip so tray and slip panel also render it.
+	addResp := postForm(t, fixture.handler, fmt.Sprintf("/slips/%d/legs", fixture.slip.ID), url.Values{
+		"quick":       {"1"},
+		"from":        {"board"},
+		"game_id":     {game.ID},
+		"market_type": {"REC_YDS"},
+		"team":        {"BUF"},
+		"player_name": {"Khalil Shakir"},
+		"player_id":   {"4685402"},
+		"side":        {"OVER"},
+		"line":        {"68.5"},
+		"odds":        {"-111"},
+	})
+	require.Equal(t, http.StatusOK, addResp.Code, addResp.Body.String())
+
+	get := func(path string) string {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
+		fixture.handler.ServeHTTP(rec, req)
+		require.Equal(t, http.StatusOK, rec.Code)
+		return html.UnescapeString(rec.Body.String())
+	}
+
+	// DraftKings viewer sees DK first on slate, detail, tray, and slip panel.
+	slateDK := get(fmt.Sprintf("/slips/%d/pick/slate", fixture.slip.ID))
+	assert.Contains(t, slateDK, "BUF DK -3.5 (-110) · FD -3 (-115)")
+	assert.NotContains(t, slateDK, "O/U DK")
+
+	detailDK := get(fmt.Sprintf("/slips/%d/pick/detail?game=%s&cat=receiving", fixture.slip.ID, game.ID))
+	assert.Contains(t, detailDK, "DK 68.5 (-111) · FD 66.5 (-115)")
+
+	trayDK := get(fmt.Sprintf("/slips/%d/tray", fixture.slip.ID))
+	assert.Contains(t, trayDK, "DK 68.5 (-111) · FD 66.5 (-115)")
+
+	panelDK := get(fmt.Sprintf("/slips/%d/panel", fixture.slip.ID))
+	assert.Contains(t, panelDK, "DK 68.5 (-111) · FD 66.5 (-115)")
+
+	// FanDuel viewer sees FD first on all surfaces.
+	fdUser, err := fixture.store.SetUserHomeBook(t.Context(), fixture.user.ID, new("fanduel"))
+	require.NoError(t, err)
+	fixture.as(fdUser)
+
+	slateFD := get(fmt.Sprintf("/slips/%d/pick/slate", fixture.slip.ID))
+	assert.Contains(t, slateFD, "BUF FD -3 (-115) · DK -3.5 (-110)")
+
+	detailFD := get(fmt.Sprintf("/slips/%d/pick/detail?game=%s&cat=receiving", fixture.slip.ID, game.ID))
+	assert.Contains(t, detailFD, "FD 66.5 (-115) · DK 68.5 (-111)")
+
+	trayFD := get(fmt.Sprintf("/slips/%d/tray", fixture.slip.ID))
+	assert.Contains(t, trayFD, "FD 66.5 (-115) · DK 68.5 (-111)")
+
+	panelFD := get(fmt.Sprintf("/slips/%d/panel", fixture.slip.ID))
+	assert.Contains(t, panelFD, "FD 66.5 (-115) · DK 68.5 (-111)")
+}

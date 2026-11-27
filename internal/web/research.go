@@ -130,6 +130,7 @@ type ResearchCardView struct {
 	GradeClass      string
 	Reason          string
 	Badge           string
+	SplitLine       string
 	BetHref         string
 	GameSheetHref   string
 	PlayerSheetHref string
@@ -155,6 +156,7 @@ type BetResearchView struct {
 	Position        string
 	Selection       string
 	Badge           string
+	SplitLine       string
 	Matchup         string
 	HomeTeam        string
 	AwayTeam        string
@@ -623,6 +625,7 @@ func (h *researchHandlers) buildBetResearch(ctx context.Context, r *http.Request
 	view.OddsText = formatOdds(bet.Odds)
 	view.Implied = formatImpliedChance(parlay.ImpliedProb(bet.Odds))
 	view.LineInput = researchLineText(bet.Line)
+	view.SplitLine = splitLineBadge(bet.Market, bet.DK, bet.FD, bet.LinesDiffer, homeBook)
 	view.Grade = LegGradeView(grade)
 	view.Reason = board.ExploreReason(grade)
 	view.Warnings = betWarnings(*bet, games, stats)
@@ -654,7 +657,7 @@ func (h *researchHandlers) buildBetResearch(ctx context.Context, r *http.Request
 		}
 	}
 
-	view.Related = relatedBetCards(game, rows, games, stats, *bet, view.BackHref)
+	view.Related = relatedBetCards(game, rows, games, stats, *bet, view.BackHref, homeBook)
 	view.AddSlips = preferBetSlip(h.betAddSlips(ctx, game), query.Get("slip_id"))
 	return view
 }
@@ -1184,6 +1187,7 @@ func relatedBetCards(
 	stats map[string]analyzer.PlayerStats,
 	current board.Row,
 	from string,
+	homeBook string,
 ) []ResearchCardView {
 	result := board.Explore(rows, games, stats, board.ExploreQuery{
 		GameID: game.ID,
@@ -1216,7 +1220,7 @@ func relatedBetCards(
 	if len(related) > maxRelated {
 		related = related[:maxRelated]
 	}
-	return researchCards([]db.Game{game}, related, from)
+	return researchCards([]db.Game{game}, related, from, homeBook)
 }
 
 // betAddSlips lists the viewer's open slips that are still in the pick step and
@@ -1588,7 +1592,7 @@ func (h *researchHandlers) buildExplore(
 		Signals:  signals,
 	})
 
-	view.Cards = researchCards(games, result.Rows, researchPushURL(queryFromExplore(view)))
+	view.Cards = researchCards(games, result.Rows, researchPushURL(queryFromExplore(view)), homeBook)
 	view.TotalMatched = result.TotalMatched
 	view.HasMore = result.HasMore
 	view.AllStarted = !view.NoGames && board.StartedCount(games, now) == len(games)
@@ -1739,7 +1743,7 @@ func (h *researchHandlers) researchSlipLegs(ctx context.Context, weekID int64) [
 
 // researchCards maps one explorer page to the candidate cards. from is the
 // explorer URL a card's per-bet page returns to.
-func researchCards(games []db.Game, rows []board.ScoredRow, from string) []ResearchCardView {
+func researchCards(games []db.Game, rows []board.ScoredRow, from, homeBook string) []ResearchCardView {
 	byID := make(map[string]db.Game, len(games))
 	for _, game := range games {
 		byID[game.ID] = game
@@ -1771,6 +1775,7 @@ func researchCards(games []db.Game, rows []board.ScoredRow, from string) []Resea
 			GradeClass:      gradeClass(scored.Grade.Letter),
 			Reason:          scored.Reason,
 			Badge:           row.Badge,
+			SplitLine:       splitLineBadge(row.Market, row.DK, row.FD, row.LinesDiffer, homeBook),
 			GameSheetHref:   "/research?game_id=" + url.QueryEscape(row.GameID),
 			AwayLogo:        db.StringValue(game.AwayLogo),
 			HomeLogo:        db.StringValue(game.HomeLogo),

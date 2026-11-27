@@ -87,7 +87,9 @@ type PickGameCardView struct {
 	KickoffISO        string
 	KickoffFallback   string
 	Spread            string
+	SpreadSplit       string
 	Total             string
+	TotalSplit        string
 	Moneyline         string
 	Props             int
 	HasProps          bool
@@ -179,6 +181,7 @@ type PickRowView struct {
 	AtLimit       bool
 	SwapURL       string
 	Badge         string
+	SplitLine     string
 	DriftNote     string
 	CanRefresh    bool
 }
@@ -207,6 +210,7 @@ type TrayLegView struct {
 	ImpliedChance string
 	Grade         GradeView
 	Locked        bool
+	SplitLine     string
 	DriftNote     string
 	Refresh       *LegRefreshView
 }
@@ -544,7 +548,7 @@ func (h *slipHandlers) pickPageData(
 	AddBoardTiming(ctx, time.Since(boardStart))
 
 	dockStart := time.Now()
-	dock, err := h.dockFrom(ctx, slip, legs, allGames, mine, rows)
+	dock, err := h.dockFrom(ctx, slip, legs, allGames, mine, rows, homeBook)
 	AddDBTiming(ctx, time.Since(dockStart))
 	if err != nil {
 		return PickPage{}, err
@@ -561,7 +565,7 @@ func (h *slipHandlers) pickPageData(
 		AddDBTiming(ctx, time.Since(sigStart))
 		insights = gameCardInsightsByGame(games, rows, boardGames, boardStats)
 	}
-	slate := buildPickSlate(slip, slateModel, q, insights)
+	slate := buildPickSlate(slip, slateModel, rows, homeBook, q, insights)
 	AddBoardTiming(ctx, time.Since(slateStart))
 	q.GameID = slateModel.ResolvedGameID
 
@@ -584,7 +588,7 @@ func (h *slipHandlers) pickPageData(
 		game := gamesByID[slateModel.OpenGame.ID]
 		detail := h.buildPickDetail(
 			ctx, slip, game, *slateModel.OpenGame, rows, legs, q, now,
-			atLimit, remainingSlots, boardGames, boardStats,
+			atLimit, remainingSlots, boardGames, boardStats, homeBook,
 		)
 		body.Detail = &detail
 		body.Category = detail.Category
@@ -644,7 +648,7 @@ func (h *slipHandlers) pickSlateData(
 		AddDBTiming(ctx, time.Since(sigStart))
 		insights = gameCardInsightsByGame(games, rows, boardGames, boardStats)
 	}
-	slate := buildPickSlate(slip, board.BuildSlate(games, rows, roster, q), q, insights)
+	slate := buildPickSlate(slip, board.BuildSlate(games, rows, roster, q), rows, homeBook, q, insights)
 	AddBoardTiming(ctx, time.Since(boardStart))
 	return slate, nil
 }
@@ -708,7 +712,7 @@ func (h *slipHandlers) pickDetailData(
 	}
 	detail := h.buildPickDetail(
 		ctx, slip, game, openCards[0], rows, legs, q, now,
-		atLimit, remainingSlots, boardGames, boardStats,
+		atLimit, remainingSlots, boardGames, boardStats, homeBook,
 	)
 	return detail, true, nil
 }
@@ -728,6 +732,8 @@ func (h *slipHandlers) pickViewer(ctx context.Context, q board.Query) (db.User, 
 func buildPickSlate(
 	slip db.Slip,
 	model board.Slate,
+	rows []board.Row,
+	homeBook string,
 	q board.Query,
 	insightsByGame map[string]gameCardInsights,
 ) PickSlateView {
@@ -749,8 +755,13 @@ func buildPickSlate(
 		CanRefresh: slip.Status == db.SlipOpen && !model.NoGames && !model.AllStarted,
 		Detail:     model.ResolvedGameID != "",
 	}
+	splitsByGame := gameCardSplitLines(model.Cards, rows, homeBook)
 	for _, card := range model.Cards {
 		view := pickGameCardView(slip.ID, card, q)
+		if split, ok := splitsByGame[card.ID]; ok {
+			view.SpreadSplit = split.spread
+			view.TotalSplit = split.total
+		}
 		if info, ok := insightsByGame[card.ID]; ok {
 			view.GradeBadges = info.Grades
 			view.TopPlayersSummary = info.TopPlayersSummary
@@ -758,6 +769,71 @@ func buildPickSlate(
 		slate.Cards = append(slate.Cards, view)
 	}
 	return slate
+}
+
+type gameCardSplit struct {
+	spread string
+	total  string
+}
+
+func gameCardSplitLines(cards []board.GameCard, rows []board.Row, homeBook string) map[string]gameCardSplit {
+	cardByID := make(map[string]board.GameCard, len(cards))
+	for _, card := range cards {
+		cardByID[card.ID] = card
+	}
+	out := make(map[string]gameCardSplit, len(cards))
+	for _, row := range rows {
+		if !row.LinesDiffer {
+			continue
+		}
+		card, ok := cardByID[row.GameID]
+		if !ok {
+			continue
+		}
+		split := out[row.GameID]
+		switch row.Market {
+		case "SPREAD":
+			if split.spread != "" {
+				continue
+			}
+			wantTeam := favoredSpreadTeam(card)
+			if wantTeam != "" && row.Team != wantTeam {
+				continue
+			}
+			if badge := splitLineBadge(row.Market, row.DK, row.FD, row.LinesDiffer, homeBook); badge != "" {
+				split.spread = row.Team + " " + badge
+			}
+		case "TOTAL":
+			if split.total != "" {
+				continue
+			}
+			if row.Side != "" && row.Side != "OVER" {
+				continue
+			}
+			if badge := splitLineBadge(row.Market, row.DK, row.FD, row.LinesDiffer, homeBook); badge != "" {
+				split.total = "O/U " + badge
+			}
+		}
+		out[row.GameID] = split
+	}
+	return out
+}
+
+func favoredSpreadTeam(card board.GameCard) string {
+	spread := card.Lines.Spread
+	if spread == nil {
+		return ""
+	}
+	if spread.HomeLine != "" && strings.HasPrefix(spread.HomeLine, "-") {
+		return card.Home
+	}
+	if spread.AwayLine != "" {
+		return card.Away
+	}
+	if spread.HomeLine != "" {
+		return card.Home
+	}
+	return ""
 }
 
 func (h *slipHandlers) buildPickDetail(
@@ -773,6 +849,7 @@ func (h *slipHandlers) buildPickDetail(
 	remainingSlots int,
 	boardGames map[string]analyzer.Game,
 	boardStats map[string]analyzer.PlayerStats,
+	homeBook string,
 ) PickDetailView {
 	dbStart := time.Now()
 	signals := h.boardSignalsForGame(ctx, slip.WeekID, game, legs, boardRowPlayerIDs(game.ID, rows))
@@ -793,9 +870,10 @@ func (h *slipHandlers) buildPickDetail(
 		atLimit,
 		card.Unloaded,
 		slip.Status == db.SlipOpen,
+		homeBook,
 	)
 	detail.CanRefresh = slip.Status == db.SlipOpen
-	detail.Highlights = gameHighlightsView(slip, game.ID, rows, remainingSlots, boardGames, boardStats)
+	detail.Highlights = gameHighlightsView(slip, game.ID, rows, remainingSlots, boardGames, boardStats, homeBook)
 	AddBoardTiming(ctx, time.Since(boardStart))
 	return detail
 }
@@ -809,6 +887,7 @@ func pickDetailView(
 	atLimit bool,
 	unloaded bool,
 	canRefresh bool,
+	homeBook string,
 ) PickDetailView {
 	linkQuery := q
 	linkQuery.Category = model.Category
@@ -844,7 +923,7 @@ func pickDetailView(
 	for _, group := range model.Lines {
 		view.Lines = append(
 			view.Lines,
-			pickLineGroupView(slipID, group, atLimit, linkQuery, false, canRefresh),
+			pickLineGroupView(slipID, group, atLimit, linkQuery, false, canRefresh, homeBook),
 		)
 	}
 	for _, player := range model.Players {
@@ -860,7 +939,7 @@ func pickDetailView(
 		for _, group := range player.Lines {
 			card.Lines = append(
 				card.Lines,
-				pickLineGroupView(slipID, group, atLimit, linkQuery, true, canRefresh),
+				pickLineGroupView(slipID, group, atLimit, linkQuery, true, canRefresh, homeBook),
 			)
 		}
 		view.Players = append(view.Players, card)
@@ -912,6 +991,7 @@ func pickLineGroupView(
 	q board.Query,
 	prop bool,
 	canRefresh bool,
+	homeBook string,
 ) PickLineGroupView {
 	view := PickLineGroupView{Label: lineGroupLabel(group)}
 	if len(group.Options) > 0 {
@@ -932,7 +1012,7 @@ func pickLineGroupView(
 		}
 	}
 	for _, row := range group.Options {
-		option := pickRowView(slipID, row, atLimit, q, canRefresh)
+		option := pickRowView(slipID, row, atLimit, q, canRefresh, homeBook)
 		if option.PickID == 0 && picked == 1 {
 			option.UpdateID = pickedID
 		}
@@ -1139,7 +1219,7 @@ func (h *slipHandlers) pickDockData(ctx context.Context, slip db.Slip) (PickDock
 		}
 		boardRows = board.BuildDualBook(games, odds, roster, homeBook, mine, q.Now)
 	}
-	return h.dockFrom(ctx, slip, legs, games, mine, boardRows)
+	return h.dockFrom(ctx, slip, legs, games, mine, boardRows, homeBook)
 }
 
 // dockFrom shapes the viewer's legs, their analyzer warnings, and the combined
@@ -1151,6 +1231,7 @@ func (h *slipHandlers) dockFrom(
 	games []db.Game,
 	mine []db.Leg,
 	boardRows []board.Row,
+	homeBook string,
 ) (PickDockView, error) {
 	members, err := h.deps.Store.SlipMembers(ctx, slip.ID)
 	if err != nil {
@@ -1200,10 +1281,13 @@ func (h *slipHandlers) dockFrom(
 			ImpliedChance: formatImpliedChance(parlay.ImpliedProb(leg.Odds)),
 			Locked:        locked,
 		}
-		if row, ok := rowByLegID[leg.ID]; ok && row.Drifted {
-			trayLeg.DriftNote = row.TrayDriftNote
-			if !locked && slip.Status == db.SlipOpen {
-				trayLeg.Refresh = refreshViewFromRow(row)
+		if row, ok := rowByLegID[leg.ID]; ok {
+			trayLeg.SplitLine = splitLineBadge(row.Market, row.DK, row.FD, row.LinesDiffer, homeBook)
+			if row.Drifted {
+				trayLeg.DriftNote = row.TrayDriftNote
+				if !locked && slip.Status == db.SlipOpen {
+					trayLeg.Refresh = refreshViewFromRow(row)
+				}
 			}
 		}
 		view.Legs = append(view.Legs, trayLeg)
@@ -1397,6 +1481,7 @@ func pickRowView(
 	atLimit bool,
 	q board.Query,
 	canRefresh bool,
+	homeBook string,
 ) PickRowView {
 	view := PickRowView{
 		SlipID:        slipID,
@@ -1413,6 +1498,7 @@ func pickRowView(
 		PickID:        row.Picked,
 		AtLimit:       atLimit,
 		Badge:         row.Badge,
+		SplitLine:     splitLineBadge(row.Market, row.DK, row.FD, row.LinesDiffer, homeBook),
 	}
 	if row.Line != nil {
 		view.Line = formatFloat(*row.Line)
@@ -1425,6 +1511,32 @@ func pickRowView(
 		view.SwapURL = swapURL(slipID, view, q)
 	}
 	return view
+}
+
+// splitLineBadge formats an explicit DK vs. FD split-line note ordered with
+// the viewer's homeBook first whenever both books quote different lines.
+func splitLineBadge(market string, dk, fd *board.BookQuote, linesDiffer bool, homeBook string) string {
+	if !linesDiffer || dk == nil || fd == nil {
+		return ""
+	}
+	dkPart := formatBookQuote("DK", market, dk)
+	fdPart := formatBookQuote("FD", market, fd)
+	if db.NormalizeBook(homeBook) == "fanduel" {
+		return fdPart + " · " + dkPart
+	}
+	return dkPart + " · " + fdPart
+}
+
+func formatBookQuote(label, market string, quote *board.BookQuote) string {
+	price := formatOdds(quote.Odds)
+	if quote.Line == nil {
+		return label + " " + price
+	}
+	lineText := formatFloat(*quote.Line)
+	if market == "SPREAD" && *quote.Line > 0 {
+		lineText = "+" + lineText
+	}
+	return fmt.Sprintf("%s %s (%s)", label, lineText, price)
 }
 
 // timeRFC3339 is the layout every time element uses.
@@ -1550,6 +1662,7 @@ func (h *slipHandlers) pickPairRow(
 			board.Query{},
 			isPlayerMarket(group.Market),
 			slip.Status == db.SlipOpen,
+			homeBook,
 		)
 	}
 	return fallback()
@@ -1851,6 +1964,7 @@ func gameHighlightsView(
 	remainingSlots int,
 	boardGames map[string]analyzer.Game,
 	boardStats map[string]analyzer.PlayerStats,
+	homeBook string,
 ) HighlightsView {
 	if slip.Status != db.SlipOpen || remainingSlots <= 0 || len(rows) == 0 || len(boardGames) == 0 {
 		return HighlightsView{}
@@ -1870,7 +1984,7 @@ func gameHighlightsView(
 		SameGameOnly:  true,
 		ExcludePicked: true,
 	})
-	view := highlightsView(set, remainingSlots)
+	view := highlightsView(set, remainingSlots, homeBook)
 	view.SlipID = slip.ID
 	view.FromBoard = true
 	return view
