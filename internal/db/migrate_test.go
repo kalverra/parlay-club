@@ -15,7 +15,7 @@ import (
 )
 
 // latestSchemaVersion is the version the last migration records.
-const latestSchemaVersion = 21
+const latestSchemaVersion = 22
 
 func TestMigrateFreshDatabase(t *testing.T) {
 	t.Parallel()
@@ -637,6 +637,97 @@ func TestMigration0019V2OpportunitySignals(t *testing.T) {
 	assert.Zero(t, expRecTDs)
 	assert.Zero(t, carryShare)
 	assert.Zero(t, cpoe)
+}
+
+func TestMigration0022PruneBulkArchive(t *testing.T) {
+	t.Parallel()
+
+	database := openTestDB(t)
+
+	// Apply migrations 0001 through 0021 manually.
+	entries, err := os.ReadDir("migrations")
+	require.NoError(t, err)
+	for _, entry := range entries {
+		if entry.Name() < "0022" && filepath.Ext(entry.Name()) == ".sql" {
+			content, err := os.ReadFile(filepath.Join("migrations", entry.Name()))
+			require.NoError(t, err)
+			_, err = database.ExecContext(t.Context(), string(content))
+			require.NoError(t, err)
+		}
+	}
+	_, err = database.ExecContext(t.Context(), "PRAGMA user_version = 21")
+	require.NoError(t, err)
+
+	// Seed api_bodies and api_responses across kept and pruned sources,
+	// including a shared body referenced by both espn and nfelo.
+	_, err = database.ExecContext(t.Context(), `
+		INSERT INTO api_bodies (sha256, encoding, size, body) VALUES
+			('sha-espn', 'gzip', 100, X'1f8b0800'),
+			('sha-odds', 'gzip', 120, X'1f8b0801'),
+			('sha-weather', 'gzip', 80, X'1f8b0802'),
+			('sha-shared', 'gzip', 50, X'1f8b0803'),
+			('sha-nflverse', 'gzip', 5000, X'1f8b0804'),
+			('sha-nfelo', 'gzip', 2000, X'1f8b0805');
+
+		INSERT INTO api_responses (
+			source, key, method, url, status, fetched_at, duration_ms, body_sha256
+		) VALUES
+			('espn', 'espn:summary:401', 'GET', 'https://site.api.espn.com/summary', 200, '2026-11-08T17:00:00Z', 40, 'sha-espn'),
+			('espn', 'espn:roster:buf', 'GET', 'https://site.api.espn.com/roster', 200, '2026-11-08T17:01:00Z', 35, 'sha-shared'),
+			('odds', 'odds:lines', 'GET', 'https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds', 200, '2026-11-08T17:02:00Z', 55, 'sha-odds'),
+			('weather', 'weather:buf', 'GET', 'https://api.open-meteo.com/v1/forecast', 200, '2026-11-08T17:03:00Z', 25, 'sha-weather'),
+			('nflverse', 'nflverse:player_stats:2026', 'GET', 'https://github.com/nflverse/nflverse-data/releases', 200, '2026-11-08T17:04:00Z', 300, 'sha-nflverse'),
+			('nfelo', 'nfelo:projections', 'GET', 'https://raw.githubusercontent.com/greerreNFL/nfelo/main/nfelo.csv', 200, '2026-11-08T17:05:00Z', 150, 'sha-nfelo'),
+			('nfelo', 'nfelo:dup', 'GET', 'https://raw.githubusercontent.com/greerreNFL/nfelo/main/dup.csv', 200, '2026-11-08T17:06:00Z', 90, 'sha-shared');
+	`)
+	require.NoError(t, err)
+
+	require.NoError(t, db.Migrate(t.Context(), database))
+	assert.Equal(t, latestSchemaVersion, schemaVersion(t, database))
+
+	// Pruned sources must be gone from api_responses.
+	var prunedCount int
+	require.NoError(t, database.QueryRowContext(t.Context(),
+		"SELECT count(*) FROM api_responses WHERE source IN ('nflverse', 'nfelo')").Scan(&prunedCount))
+	assert.Zero(t, prunedCount)
+
+	// Kept sources must survive intact.
+	var keptSources []string
+	rows, err := database.QueryContext(t.Context(),
+		"SELECT source || ':' || key || ':' || body_sha256 FROM api_responses ORDER BY id")
+	require.NoError(t, err)
+	defer func() { assert.NoError(t, rows.Close()) }()
+	for rows.Next() {
+		var entry string
+		require.NoError(t, rows.Scan(&entry))
+		keptSources = append(keptSources, entry)
+	}
+	require.NoError(t, rows.Err())
+	assert.Equal(t, []string{
+		"espn:espn:summary:401:sha-espn",
+		"espn:espn:roster:buf:sha-shared",
+		"odds:odds:lines:sha-odds",
+		"weather:weather:buf:sha-weather",
+	}, keptSources)
+
+	// Only unreferenced bodies are removed; shared body referenced by espn survives.
+	var keptBodies []string
+	bodyRows, err := database.QueryContext(t.Context(),
+		"SELECT sha256 FROM api_bodies ORDER BY sha256")
+	require.NoError(t, err)
+	defer func() { assert.NoError(t, bodyRows.Close()) }()
+	for bodyRows.Next() {
+		var sha string
+		require.NoError(t, bodyRows.Scan(&sha))
+		keptBodies = append(keptBodies, sha)
+	}
+	require.NoError(t, bodyRows.Err())
+	assert.Equal(t, []string{
+		"sha-espn",
+		"sha-odds",
+		"sha-shared",
+		"sha-weather",
+	}, keptBodies)
 }
 
 // schemaVersion reads PRAGMA user_version, the migration runner's record of the

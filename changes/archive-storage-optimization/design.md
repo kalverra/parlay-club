@@ -93,7 +93,7 @@ remains intact).
 - [x] Wire `nfelo.NewClient` and `nflverse.NewClient` in `cmd/server/main.go` with a non-archiving `*http.Client`
       (preserving timeout and `User-Agent`), and update `cmd/server/main_test.go` (`TestRefreshArchivesEveryIngestCall`)
       to assert that `espn`, `weather`, and `odds` are archived while `nflverse` and `nfelo` are not.
-- [ ] Add a SQLite migration in `internal/db/migrations/` to delete `source IN ('nflverse', 'nfelo')` from
+- [x] Add a SQLite migration in `internal/db/migrations/` to delete `source IN ('nflverse', 'nfelo')` from
       `api_responses` and orphaned rows from `api_bodies`, with a migration test in `internal/db/migrate_test.go`
       confirming ESPN and Odds archive rows survive intact.
 - [ ] Docs: update `docs/concepts/archive.md`, `docs/reference/data-sources.md`, and `docs/runbooks/archive-size.md` to
