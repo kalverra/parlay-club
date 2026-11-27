@@ -9,4 +9,5 @@
 - [Run Sunday prefill on first authenticated visit](../first-sunday-visit-prefill.md): Trigger the Sunday pre-fill from the background page-load refresh when a signed-in user visits on Sunday morning in Eastern time, guarded by persisted sync state so it runs at most once per Sunday.
 - [Parlay API for odds and props](../parlay-api.md): Switch the odds client from The Odds API to Parlay API and add bulk per-game prop fetching on the same client.
 - [Archive every external response](../raw-response-archive.md): Add one append-only archive of raw responses in SQLite, written by a single seam that every outside call passes through.
+- [Cut The Odds API spend with lock-only, market-scoped enrichment](../reduce-odds-api-reliance.md): Cut The Odds API spend with lock-only, market-scoped enrichment
 - [Sunday morning odds pre-fill and smart refresh](../sunday-odds-prefill.md): Warm the slate, game lines, and Parlay API bulk props via a Sunday 9:30 AM ET trigger, sync free sources more often, and refresh odds only during open-slip picking.
