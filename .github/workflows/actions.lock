@@ -9,7 +9,7 @@ workflows:
         - 'actions/setup-go@v7.1.0'
         - 'docker/build-push-action@v7.4.0'
         - 'docker/setup-buildx-action@v4.4.1'
-        - 'jdx/mise-action@v5.2.8'
+        - 'jdx/mise-action@v5.2.10'
     '.github/workflows/deploy.yml':
         - 'actions/checkout@v7.0.1'
         - 'docker/build-push-action@v7.4.0'
@@ -52,8 +52,8 @@ dependencies:
         commit: 'sha1-aa5489c8933f4cc7a4f7d45035b3b1440c9c10db'
         owner_id: 71461757
         repo_id: 219865964
-    'jdx/mise-action@v5.2.8':
-        ref: 'v5.2.8'
-        commit: 'sha1-d5574b52816a478f9d4e6529a3f6ff17a8a36785'
+    'jdx/mise-action@v5.2.10':
+        ref: 'v5.2.10'
+        commit: 'sha1-90f833d396d0cc3674b631d2d225e306476c303a'
         owner_id: 216188
         repo_id: 738284564
