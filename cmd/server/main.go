@@ -309,6 +309,19 @@ func newIngestClient(store *db.Store) *http.Client {
 	}
 }
 
+// newBulkClient builds a non-archiving HTTP client for large season datasets
+// (nflverse and nfelo) that upsert directly into their parsed tables.
+func newBulkClient(ingestClient *http.Client) *http.Client {
+	timeout := ingestTimeout
+	if ingestClient != nil && ingestClient.Timeout > 0 {
+		timeout = ingestClient.Timeout
+	}
+	return &http.Client{
+		Timeout:   timeout,
+		Transport: http.DefaultTransport,
+	}
+}
+
 // newProdServices constructs the shared slip service before the refresh service
 // so auto-grading and HTTP handlers share one instance and invalidate evalCache.
 func newProdServices(
@@ -323,14 +336,15 @@ func newProdServices(
 	if evalCache != nil {
 		slipService.SetOnGradeChange(evalCache.InvalidateGroup)
 	}
+	bulkClient := newBulkClient(ingestClient)
 	refresher := refresh.New(refresh.Deps{
 		Store:         store,
 		Scoreboard:    espn.NewClient("", ingestClient),
 		Forecast:      weather.NewClient("", ingestClient),
 		Lines:         odds.NewClient("", cfg.OddsAPIKey, ingestClient),
 		FallbackLines: odds.NewClient(odds.TheOddsAPIBaseURL, cfg.TheOddsAPIKey, ingestClient),
-		Projections:   nfelo.NewClient("", ingestClient),
-		NFLverse:      nflverse.NewClient("", ingestClient),
+		Projections:   nfelo.NewClient("", bulkClient),
+		NFLverse:      nflverse.NewClient("", bulkClient),
 		Slips:         slipService,
 		Publisher:     hub,
 		Logger:        logger,

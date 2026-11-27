@@ -26,6 +26,8 @@ import (
 	"github.com/kalverra/parlay-club/internal/groups"
 	"github.com/kalverra/parlay-club/internal/ingest/archive"
 	"github.com/kalverra/parlay-club/internal/ingest/espn"
+	"github.com/kalverra/parlay-club/internal/ingest/nfelo"
+	"github.com/kalverra/parlay-club/internal/ingest/nflverse"
 	"github.com/kalverra/parlay-club/internal/ingest/odds"
 	"github.com/kalverra/parlay-club/internal/ingest/weather"
 	"github.com/kalverra/parlay-club/internal/live"
@@ -636,13 +638,20 @@ func TestRefreshArchivesEveryIngestCall(t *testing.T) {
 	require.IsType(t, &archive.Transport{}, client.Transport, "the ingest client archives every call")
 	assert.Equal(t, ingestTimeout, client.Timeout)
 
+	bulkClient := newBulkClient(client)
+	_, bulkArchived := bulkClient.Transport.(*archive.Transport)
+	assert.False(t, bulkArchived, "the bulk client does not archive")
+	assert.Equal(t, ingestTimeout, bulkClient.Timeout)
+
 	service := refresh.New(refresh.Deps{
-		Store:      store,
-		Scoreboard: espn.NewClient(fakeESPN(t).URL, client),
-		Forecast:   weather.NewClient(fakeWeather(t).URL, client),
-		Lines:      odds.NewClient(fakeOdds(t).URL, archiveTestAPIKey, client),
-		Now:        func() time.Time { return ingestNow },
-		Logger:     zerolog.Nop(),
+		Store:       store,
+		Scoreboard:  espn.NewClient(fakeESPN(t).URL, client),
+		Forecast:    weather.NewClient(fakeWeather(t).URL, client),
+		Lines:       odds.NewClient(fakeOdds(t).URL, archiveTestAPIKey, client),
+		Projections: nfelo.NewClient(fakeNfelo(t).URL, bulkClient),
+		NFLverse:    nflverse.NewClient(fakeNFLverse(t).URL, bulkClient),
+		Now:         func() time.Time { return ingestNow },
+		Logger:      zerolog.Nop(),
 	})
 	require.NoError(t, service.RunOnce(t.Context()))
 
@@ -650,8 +659,17 @@ func TestRefreshArchivesEveryIngestCall(t *testing.T) {
 	summaryKey := refresh.SummarySource("401")
 	homeRosterKey := refresh.RosterSource("2")
 	awayRosterKey := refresh.RosterSource("15")
+	nflverseKey := refresh.NFLverseSource(2026)
 	waitForSyncStates(t, store,
-		refresh.ScoreboardSource, weatherKey, summaryKey, homeRosterKey, awayRosterKey, refresh.OddsLinesSource)
+		refresh.ScoreboardSource,
+		weatherKey,
+		summaryKey,
+		homeRosterKey,
+		awayRosterKey,
+		refresh.OddsLinesSource,
+		refresh.NfeloProjectionsSource,
+		nflverseKey,
+	)
 
 	rows, err := store.ListAPIResponses(t.Context(), db.APIResponseFilter{})
 	require.NoError(t, err)
@@ -723,11 +741,20 @@ func TestRefreshArchivesEveryIngestCall(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, parsedOdds, 2, "the archive does not duplicate or drop parsed odds rows")
 
-	for _, key := range []string{refresh.ScoreboardSource, weatherKey, refresh.OddsLinesSource} {
+	for _, key := range []string{
+		refresh.ScoreboardSource,
+		weatherKey,
+		refresh.OddsLinesSource,
+		refresh.NfeloProjectionsSource,
+		nflverseKey,
+	} {
 		state, err := store.SyncState(t.Context(), key)
 		require.NoError(t, err)
 		assert.Equal(t, ingestNow, state.FetchedAt, "the archive leaves %s's sync state alone", key)
 	}
+	teamWeeks, err := store.NFLverseTeamWeeksForSeason(t.Context(), 2026, nflverse.SeasonTypeRegular)
+	require.NoError(t, err)
+	assert.Len(t, teamWeeks, 1, "nflverse still populates its parsed table without archiving")
 	oddsState, err := store.SyncState(t.Context(), refresh.OddsLinesSource)
 	require.NoError(t, err)
 	require.NotNil(t, oddsState.OddsCreditsRemaining)
@@ -969,6 +996,57 @@ func fakeOdds(t *testing.T) *httptest.Server {
 			w.Header().Set("X-Requests-Last", "1")
 			_ = json.NewEncoder(w).Encode([]any{lines})
 		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	return server
+}
+
+// fakeNfelo serves a minimal nfelo projections CSV and checks User-Agent.
+func fakeNfelo(t *testing.T) *httptest.Server {
+	t.Helper()
+
+	const csvBody = "season,week,away_team,home_team,home_line_pre_regression,home_probability_nfelo,home_538_qb,away_538_qb,home_538_qb_adj,away_538_qb_adj\n" +
+		"2026,9,MIA,BUF,-3.5,0.62,Josh Allen,Tua Tagovailoa,0,0\n"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "parlay-club", r.Header.Get("User-Agent"))
+		assert.Equal(t, "/historic_projected_spreads.csv", r.URL.Path)
+		w.Header().Set("Content-Type", "text/csv")
+		_, _ = io.WriteString(w, csvBody)
+	}))
+	t.Cleanup(server.Close)
+	return server
+}
+
+// fakeNFLverse serves minimal nflverse CSVs for the 2026 season and checks User-Agent.
+func fakeNFLverse(t *testing.T) *httptest.Server {
+	t.Helper()
+
+	const (
+		playersCSV     = "gsis_id,pfr_id,espn_id,display_name,latest_team,position\n"
+		teamStatsCSV   = "season,week,season_type,team,opponent_team,passing_epa,rushing_epa,attempts,carries,passing_yards,rushing_yards\n2026,9,REG,BUF,MIA,0.2,0.1,30,25,260,110\n"
+		playerStatsCSV = "player_id,player_name,player_display_name,position,team,opponent_team,season,week,season_type,target_share,air_yards_share,wopr,passing_epa,rushing_epa,receiving_epa,targets,carries,attempts,receptions,receiving_yards,rushing_yards,passing_yards,passing_tds,rushing_tds,receiving_tds,fg_made,pat_made\n"
+		snapCountsCSV  = "pfr_player_id,player,team,season,game_type,week,offense_snaps,offense_pct\n"
+		opportunityCSV = "season,posteam,week,player_id,full_name,position,receptions_exp,pass_yards_gained_exp,rec_yards_gained_exp,rush_yards_gained_exp,pass_touchdown_exp,rec_touchdown_exp,rush_touchdown_exp\n"
+	)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "parlay-club", r.Header.Get("User-Agent"))
+		w.Header().Set("Content-Type", "text/csv")
+		switch r.URL.Path {
+		case "/players/players.csv":
+			_, _ = io.WriteString(w, playersCSV)
+		case "/stats_team/stats_team_week_2026.csv":
+			_, _ = io.WriteString(w, teamStatsCSV)
+		case "/stats_player/stats_player_week_2026.csv":
+			_, _ = io.WriteString(w, playerStatsCSV)
+		case "/snap_counts/snap_counts_2026.csv":
+			_, _ = io.WriteString(w, snapCountsCSV)
+		case "/ff_opportunity/ep_weekly_2026.csv":
+			_, _ = io.WriteString(w, opportunityCSV)
+		default:
+			t.Errorf("unexpected nflverse path %q", r.URL.Path)
 			http.NotFound(w, r)
 		}
 	}))

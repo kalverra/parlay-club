@@ -90,7 +90,7 @@ tests).
 Risk: low (no production route reads `api_bodies`, and automated server and eval tests verify ESPN and Odds archiving
 remains intact).
 
-- [ ] Wire `nfelo.NewClient` and `nflverse.NewClient` in `cmd/server/main.go` with a non-archiving `*http.Client`
+- [x] Wire `nfelo.NewClient` and `nflverse.NewClient` in `cmd/server/main.go` with a non-archiving `*http.Client`
       (preserving timeout and `User-Agent`), and update `cmd/server/main_test.go` (`TestRefreshArchivesEveryIngestCall`)
       to assert that `espn`, `weather`, and `odds` are archived while `nflverse` and `nfelo` are not.
 - [ ] Add a SQLite migration in `internal/db/migrations/` to delete `source IN ('nflverse', 'nfelo')` from
