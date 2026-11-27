@@ -73,21 +73,35 @@ func addSecondGameAt(
 	return game
 }
 
-// addPropOdds writes one prop row.
+// addPropOdds writes one prop row for both DraftKings and FanDuel.
 func addPropOdds(t *testing.T, store *db.Store, gameID, market, player string, line float64, price int) {
 	t.Helper()
 
-	_, err := store.UpsertOdds(t.Context(), []db.Odds{{
-		GameID:     gameID,
-		Book:       "draftkings",
-		MarketType: market,
-		Team:       "BUF",
-		PlayerName: player,
-		Side:       "OVER",
-		Line:       new(line),
-		Price:      price,
-		FetchedAt:  time.Date(2026, time.November, 7, 15, 42, 0, 0, time.UTC),
-	}})
+	fetched := time.Date(2026, time.November, 7, 15, 42, 0, 0, time.UTC)
+	_, err := store.UpsertOdds(t.Context(), []db.Odds{
+		{
+			GameID:     gameID,
+			Book:       "draftkings",
+			MarketType: market,
+			Team:       "BUF",
+			PlayerName: player,
+			Side:       "OVER",
+			Line:       new(line),
+			Price:      price,
+			FetchedAt:  fetched,
+		},
+		{
+			GameID:     gameID,
+			Book:       "fanduel",
+			MarketType: market,
+			Team:       "BUF",
+			PlayerName: player,
+			Side:       "OVER",
+			Line:       new(line),
+			Price:      price,
+			FetchedAt:  fetched,
+		},
+	})
 	require.NoError(t, err)
 }
 
@@ -95,16 +109,29 @@ func addPropOdds(t *testing.T, store *db.Store, gameID, market, player string, l
 func addSpreadOdds(t *testing.T, store *db.Store, gameID, team string) {
 	t.Helper()
 
-	_, err := store.UpsertOdds(t.Context(), []db.Odds{{
-		GameID:     gameID,
-		Book:       "draftkings",
-		MarketType: "SPREAD",
-		Team:       team,
-		Side:       "TEAM",
-		Line:       new(-3.0),
-		Price:      -110,
-		FetchedAt:  time.Date(2026, time.November, 7, 15, 42, 0, 0, time.UTC),
-	}})
+	fetched := time.Date(2026, time.November, 7, 15, 42, 0, 0, time.UTC)
+	_, err := store.UpsertOdds(t.Context(), []db.Odds{
+		{
+			GameID:     gameID,
+			Book:       "draftkings",
+			MarketType: "SPREAD",
+			Team:       team,
+			Side:       "TEAM",
+			Line:       new(-3.0),
+			Price:      -110,
+			FetchedAt:  fetched,
+		},
+		{
+			GameID:     gameID,
+			Book:       "fanduel",
+			MarketType: "SPREAD",
+			Team:       team,
+			Side:       "TEAM",
+			Line:       new(-3.0),
+			Price:      -110,
+			FetchedAt:  fetched,
+		},
+	})
 	require.NoError(t, err)
 }
 
@@ -400,7 +427,17 @@ func TestPickBoardKeepsEachGamesProps(t *testing.T) {
 			Line: new(245.5), Price: -110, FetchedAt: fetched,
 		},
 		{
+			GameID: first.ID, Book: "fanduel", MarketType: "PASS_YDS",
+			Team: "BUF", PlayerName: "Josh Allen", Side: "OVER",
+			Line: new(245.5), Price: -110, FetchedAt: fetched,
+		},
+		{
 			GameID: second.ID, Book: "draftkings", MarketType: "PASS_YDS",
+			Team: "CIN", PlayerName: "Joe Burrow", Side: "OVER",
+			Line: new(255.5), Price: -110, FetchedAt: fetched.Add(time.Hour),
+		},
+		{
+			GameID: second.ID, Book: "fanduel", MarketType: "PASS_YDS",
 			Team: "CIN", PlayerName: "Joe Burrow", Side: "OVER",
 			Line: new(255.5), Price: -110, FetchedAt: fetched.Add(time.Hour),
 		},
@@ -1185,20 +1222,33 @@ func pickDetail(t *testing.T, fixture *slipFixture, query string) *httptest.Resp
 	return recorder
 }
 
-// addTeamTotal writes one side of a team total.
+// addTeamTotal writes one side of a team total for both DraftKings and FanDuel.
 func addTeamTotal(t *testing.T, store *db.Store, gameID, team, side string, line float64) {
 	t.Helper()
 
-	_, err := store.UpsertOdds(t.Context(), []db.Odds{{
-		GameID:     gameID,
-		Book:       "draftkings",
-		MarketType: "TEAM_TOTAL",
-		Team:       team,
-		Side:       side,
-		Line:       new(line),
-		Price:      -110,
-		FetchedAt:  time.Date(2026, time.November, 7, 15, 42, 0, 0, time.UTC),
-	}})
+	fetched := time.Date(2026, time.November, 7, 15, 42, 0, 0, time.UTC)
+	_, err := store.UpsertOdds(t.Context(), []db.Odds{
+		{
+			GameID:     gameID,
+			Book:       "draftkings",
+			MarketType: "TEAM_TOTAL",
+			Team:       team,
+			Side:       side,
+			Line:       new(line),
+			Price:      -110,
+			FetchedAt:  fetched,
+		},
+		{
+			GameID:     gameID,
+			Book:       "fanduel",
+			MarketType: "TEAM_TOTAL",
+			Team:       team,
+			Side:       side,
+			Line:       new(line),
+			Price:      -110,
+			FetchedAt:  fetched,
+		},
+	})
 	require.NoError(t, err)
 }
 
@@ -1676,17 +1726,30 @@ func TestPickBoardRendersLogosAndPortraits(t *testing.T) {
 
 	addSpreadOdds(t, fixture.store, "401772001", "BUF")
 	addPropOdds(t, fixture.store, "401772001", "PASS_YDS", "Josh Allen", 255.5, -110)
-	_, err = fixture.store.UpsertOdds(t.Context(), []db.Odds{{
-		GameID:     "401772001",
-		Book:       "draftkings",
-		MarketType: "PASS_YDS",
-		Team:       "MIA",
-		PlayerName: "Tua Tagovailoa",
-		Side:       "OVER",
-		Line:       new(245.5),
-		Price:      -110,
-		FetchedAt:  time.Date(2026, time.November, 7, 15, 42, 0, 0, time.UTC),
-	}})
+	_, err = fixture.store.UpsertOdds(t.Context(), []db.Odds{
+		{
+			GameID:     "401772001",
+			Book:       "draftkings",
+			MarketType: "PASS_YDS",
+			Team:       "MIA",
+			PlayerName: "Tua Tagovailoa",
+			Side:       "OVER",
+			Line:       new(245.5),
+			Price:      -110,
+			FetchedAt:  time.Date(2026, time.November, 7, 15, 42, 0, 0, time.UTC),
+		},
+		{
+			GameID:     "401772001",
+			Book:       "fanduel",
+			MarketType: "PASS_YDS",
+			Team:       "MIA",
+			PlayerName: "Tua Tagovailoa",
+			Side:       "OVER",
+			Line:       new(245.5),
+			Price:      -110,
+			FetchedAt:  time.Date(2026, time.November, 7, 15, 42, 0, 0, time.UTC),
+		},
+	})
 	require.NoError(t, err)
 	require.NoError(t, fixture.store.UpsertRosterPlayers(t.Context(), []db.RosterPlayer{
 		{
@@ -2045,27 +2108,49 @@ func TestPickRefreshCooldownAndRepeatedSearchWithService(t *testing.T) {
 	}
 	linesClient := &fakePickLinesClient{
 		event: event,
-		lines: []odds.Line{{
-			EventID:    event.ID,
-			Book:       "draftkings",
-			MarketType: odds.MarketSpread,
-			Side:       odds.SideTeam,
-			Team:       game.AwayName,
-			Line:       new(-2.5),
-			Price:      -110,
-		}},
+		lines: []odds.Line{
+			{
+				EventID:    event.ID,
+				Book:       "draftkings",
+				MarketType: odds.MarketSpread,
+				Side:       odds.SideTeam,
+				Team:       game.AwayName,
+				Line:       new(-2.5),
+				Price:      -110,
+			},
+			{
+				EventID:    event.ID,
+				Book:       "fanduel",
+				MarketType: odds.MarketSpread,
+				Side:       odds.SideTeam,
+				Team:       game.AwayName,
+				Line:       new(-2.5),
+				Price:      -110,
+			},
+		},
 	}
 	propsClient := &fakePickPropsClient{
 		event: event,
-		props: []odds.Prop{{
-			EventID:    event.ID,
-			Book:       "draftkings",
-			MarketType: odds.MarketPassYds,
-			PlayerName: "Josh Allen",
-			Side:       odds.SideOver,
-			Line:       new(265.5),
-			Price:      -115,
-		}},
+		props: []odds.Prop{
+			{
+				EventID:    event.ID,
+				Book:       "draftkings",
+				MarketType: odds.MarketPassYds,
+				PlayerName: "Josh Allen",
+				Side:       odds.SideOver,
+				Line:       new(265.5),
+				Price:      -115,
+			},
+			{
+				EventID:    event.ID,
+				Book:       "fanduel",
+				MarketType: odds.MarketPassYds,
+				PlayerName: "Josh Allen",
+				Side:       odds.SideOver,
+				Line:       new(265.5),
+				Price:      -115,
+			},
+		},
 	}
 	svc := refresh.New(refresh.Deps{
 		Store:  fixture.store,
@@ -2207,16 +2292,32 @@ func TestPickBoardWiresSignalsBadgesSortAndHTMXSwaps(t *testing.T) {
 
 		_, err = fixture.store.UpsertOdds(t.Context(), []db.Odds{
 			{
+				GameID: game.ID, Book: "draftkings", MarketType: "REC_YDS", Team: "BUF",
+				PlayerName: "Khalil Shakir", Side: "OVER", Line: new(62.5), Price: -110, FetchedAt: syncedAt,
+			},
+			{
 				GameID: game.ID, Book: "fanduel", MarketType: "REC_YDS", Team: "BUF",
 				PlayerName: "Khalil Shakir", Side: "OVER", Line: new(62.5), Price: -110, FetchedAt: syncedAt,
+			},
+			{
+				GameID: game.ID, Book: "draftkings", MarketType: "REC_YDS", Team: "BUF",
+				PlayerName: "Khalil Shakir", Side: "UNDER", Line: new(62.5), Price: -110, FetchedAt: syncedAt,
 			},
 			{
 				GameID: game.ID, Book: "fanduel", MarketType: "REC_YDS", Team: "BUF",
 				PlayerName: "Khalil Shakir", Side: "UNDER", Line: new(62.5), Price: -110, FetchedAt: syncedAt,
 			},
 			{
+				GameID: game.ID, Book: "draftkings", MarketType: "REC_YDS", Team: "BUF",
+				PlayerName: "Keon Coleman", Side: "OVER", Line: new(44.5), Price: -110, FetchedAt: syncedAt,
+			},
+			{
 				GameID: game.ID, Book: "fanduel", MarketType: "REC_YDS", Team: "BUF",
 				PlayerName: "Keon Coleman", Side: "OVER", Line: new(44.5), Price: -110, FetchedAt: syncedAt,
+			},
+			{
+				GameID: game.ID, Book: "draftkings", MarketType: "REC_YDS", Team: "BUF",
+				PlayerName: "Keon Coleman", Side: "UNDER", Line: new(44.5), Price: -110, FetchedAt: syncedAt,
 			},
 			{
 				GameID: game.ID, Book: "fanduel", MarketType: "REC_YDS", Team: "BUF",
@@ -2604,7 +2705,27 @@ func TestPickBoardAndDetailReturnCachedRowsWhileAsyncRefreshPublishes(t *testing
 			},
 			{
 				GameID:     game.ID,
+				Book:       "fanduel",
+				MarketType: "SPREAD",
+				Team:       "BUF",
+				Side:       "TEAM",
+				Line:       new(-3.5),
+				Price:      -110,
+				FetchedAt:  clockNow.Add(-2 * time.Hour),
+			},
+			{
+				GameID:     game.ID,
 				Book:       "draftkings",
+				MarketType: "PASS_YDS",
+				PlayerName: "Josh Allen",
+				Side:       "OVER",
+				Line:       new(265.5),
+				Price:      -115,
+				FetchedAt:  clockNow.Add(-2 * time.Hour),
+			},
+			{
+				GameID:     game.ID,
+				Book:       "fanduel",
 				MarketType: "PASS_YDS",
 				PlayerName: "Josh Allen",
 				Side:       "OVER",
@@ -2624,29 +2745,51 @@ func TestPickBoardAndDetailReturnCachedRowsWhileAsyncRefreshPublishes(t *testing
 	}
 	linesClient := &blockingPickLinesClient{
 		event: event,
-		lines: []odds.Line{{
-			EventID:    event.ID,
-			Book:       "draftkings",
-			MarketType: odds.MarketSpread,
-			Side:       odds.SideTeam,
-			Team:       game.HomeName,
-			Line:       new(-4.5),
-			Price:      -110,
-		}},
+		lines: []odds.Line{
+			{
+				EventID:    event.ID,
+				Book:       "draftkings",
+				MarketType: odds.MarketSpread,
+				Side:       odds.SideTeam,
+				Team:       game.HomeName,
+				Line:       new(-4.5),
+				Price:      -110,
+			},
+			{
+				EventID:    event.ID,
+				Book:       "fanduel",
+				MarketType: odds.MarketSpread,
+				Side:       odds.SideTeam,
+				Team:       game.HomeName,
+				Line:       new(-4.5),
+				Price:      -110,
+			},
+		},
 		started: make(chan struct{}),
 		release: make(chan struct{}),
 	}
 	propsClient := &blockingPickPropsClient{
 		event: event,
-		props: []odds.Prop{{
-			EventID:    event.ID,
-			Book:       "draftkings",
-			MarketType: odds.MarketPassYds,
-			PlayerName: "Josh Allen",
-			Side:       odds.SideOver,
-			Line:       new(275.5),
-			Price:      -115,
-		}},
+		props: []odds.Prop{
+			{
+				EventID:    event.ID,
+				Book:       "draftkings",
+				MarketType: odds.MarketPassYds,
+				PlayerName: "Josh Allen",
+				Side:       odds.SideOver,
+				Line:       new(275.5),
+				Price:      -115,
+			},
+			{
+				EventID:    event.ID,
+				Book:       "fanduel",
+				MarketType: odds.MarketPassYds,
+				PlayerName: "Josh Allen",
+				Side:       odds.SideOver,
+				Line:       new(275.5),
+				Price:      -115,
+			},
+		},
 		started: make(chan struct{}),
 		release: make(chan struct{}),
 	}
@@ -2803,10 +2946,10 @@ func TestPickBoardCollapsesPlayerPropRowsAndSwapsAcrossLines(t *testing.T) {
 	body := html.UnescapeString(detail.Body.String())
 	assert.Equal(t, 1, strings.Count(body, `class="pick-line-group"`),
 		"all books and name spellings collapse into one pick-line-group row")
-	assert.Contains(t, body, "Over 73.5")
-	assert.Contains(t, body, "Under 73.5")
+	assert.Contains(t, body, "Over 72.5")
+	assert.Contains(t, body, "Under 72.5")
 
-	// Pick Over 73.5, then switch to Under 75.5 on the same player prop:
+	// Pick Over 72.5, then switch to Under 75.5 on the same player prop:
 	// sameBoardLine treats them as the same line so HTMX refreshes only that row.
 	createForm := url.Values{
 		"quick":       {"1"},
@@ -2816,8 +2959,8 @@ func TestPickBoardCollapsesPlayerPropRowsAndSwapsAcrossLines(t *testing.T) {
 		"player_name": {"Ollie Gordon"},
 		"player_id":   {"mia-ollie"},
 		"side":        {"OVER"},
-		"line":        {"73.5"},
-		"odds":        {"-115"},
+		"line":        {"72.5"},
+		"odds":        {"-110"},
 	}
 	createReq := httptest.NewRequestWithContext(
 		t.Context(),
@@ -2862,9 +3005,9 @@ func TestPickBoardCollapsesPlayerPropRowsAndSwapsAcrossLines(t *testing.T) {
 		"sameBoardLine should refresh only the prop's pair row, not trigger board-updated")
 	swapBody := html.UnescapeString(swapRec.Body.String())
 	assert.Contains(t, swapBody, `id="pick-line-`)
-	assert.Contains(t, swapBody, "Over 73.5")
+	assert.Contains(t, swapBody, "Over 72.5")
 	assert.Contains(t, swapBody, "tap to switch")
-	assert.Contains(t, swapBody, "Under 73.5")
+	assert.Contains(t, swapBody, "Under 72.5")
 	assert.Contains(t, swapBody, "tap to remove")
 }
 
@@ -3105,16 +3248,32 @@ func TestPickBoardDeleteAndSwapStayBoundWhenLineMoves(t *testing.T) {
 	fetchedAt := kickoff.Add(-2 * time.Hour)
 	_, err := fixture.store.UpsertOdds(t.Context(), []db.Odds{
 		{
+			GameID: game.ID, Book: "draftkings", MarketType: "RUSH_YDS", Team: "MIA",
+			PlayerName: "Ollie Gordon", Side: "OVER", Line: new(72.5), Price: -110, FetchedAt: fetchedAt,
+		},
+		{
 			GameID: game.ID, Book: "fanduel", MarketType: "RUSH_YDS", Team: "MIA",
 			PlayerName: "Ollie Gordon", Side: "OVER", Line: new(72.5), Price: -110, FetchedAt: fetchedAt,
+		},
+		{
+			GameID: game.ID, Book: "draftkings", MarketType: "RUSH_YDS", Team: "MIA",
+			PlayerName: "Ollie Gordon", Side: "UNDER", Line: new(72.5), Price: -110, FetchedAt: fetchedAt,
 		},
 		{
 			GameID: game.ID, Book: "fanduel", MarketType: "RUSH_YDS", Team: "MIA",
 			PlayerName: "Ollie Gordon", Side: "UNDER", Line: new(72.5), Price: -110, FetchedAt: fetchedAt,
 		},
 		{
+			GameID: game.ID, Book: "draftkings", MarketType: "TOTAL",
+			Side: "OVER", Line: new(47.5), Price: -110, FetchedAt: fetchedAt,
+		},
+		{
 			GameID: game.ID, Book: "fanduel", MarketType: "TOTAL",
 			Side: "OVER", Line: new(47.5), Price: -110, FetchedAt: fetchedAt,
+		},
+		{
+			GameID: game.ID, Book: "draftkings", MarketType: "TOTAL",
+			Side: "UNDER", Line: new(47.5), Price: -110, FetchedAt: fetchedAt,
 		},
 		{
 			GameID: game.ID, Book: "fanduel", MarketType: "TOTAL",
@@ -3158,16 +3317,32 @@ func TestPickBoardDeleteAndSwapStayBoundWhenLineMoves(t *testing.T) {
 	movedAt := kickoff.Add(-time.Hour)
 	_, err = fixture.store.UpsertOdds(t.Context(), []db.Odds{
 		{
+			GameID: game.ID, Book: "draftkings", MarketType: "RUSH_YDS", Team: "MIA",
+			PlayerName: "Ollie Gordon II", Side: "OVER", Line: new(73.5), Price: -115, FetchedAt: movedAt,
+		},
+		{
 			GameID: game.ID, Book: "fanduel", MarketType: "RUSH_YDS", Team: "MIA",
 			PlayerName: "Ollie Gordon II", Side: "OVER", Line: new(73.5), Price: -115, FetchedAt: movedAt,
+		},
+		{
+			GameID: game.ID, Book: "draftkings", MarketType: "RUSH_YDS", Team: "MIA",
+			PlayerName: "Ollie Gordon II", Side: "UNDER", Line: new(73.5), Price: -105, FetchedAt: movedAt,
 		},
 		{
 			GameID: game.ID, Book: "fanduel", MarketType: "RUSH_YDS", Team: "MIA",
 			PlayerName: "Ollie Gordon II", Side: "UNDER", Line: new(73.5), Price: -105, FetchedAt: movedAt,
 		},
 		{
+			GameID: game.ID, Book: "draftkings", MarketType: "TOTAL",
+			Side: "OVER", Line: new(48.5), Price: -110, FetchedAt: movedAt,
+		},
+		{
 			GameID: game.ID, Book: "fanduel", MarketType: "TOTAL",
 			Side: "OVER", Line: new(48.5), Price: -110, FetchedAt: movedAt,
+		},
+		{
+			GameID: game.ID, Book: "draftkings", MarketType: "TOTAL",
+			Side: "UNDER", Line: new(48.5), Price: -110, FetchedAt: movedAt,
 		},
 		{
 			GameID: game.ID, Book: "fanduel", MarketType: "TOTAL",
@@ -3249,8 +3424,16 @@ func TestPickBoardAndTrayShowDriftAndSyncLine(t *testing.T) {
 	movedAt := game.Kickoff.Add(-time.Hour)
 	_, err = fixture.store.UpsertOdds(t.Context(), []db.Odds{
 		{
+			GameID: game.ID, Book: "draftkings", MarketType: "PASS_YDS", Team: "BUF",
+			PlayerName: "Josh Allen", Side: "OVER", Line: new(252.5), Price: -115, FetchedAt: movedAt,
+		},
+		{
 			GameID: game.ID, Book: "fanduel", MarketType: "PASS_YDS", Team: "BUF",
 			PlayerName: "Josh Allen", Side: "OVER", Line: new(252.5), Price: -115, FetchedAt: movedAt,
+		},
+		{
+			GameID: game.ID, Book: "draftkings", MarketType: "PASS_YDS", Team: "BUF",
+			PlayerName: "Josh Allen", Side: "UNDER", Line: new(252.5), Price: -105, FetchedAt: movedAt,
 		},
 		{
 			GameID: game.ID, Book: "fanduel", MarketType: "PASS_YDS", Team: "BUF",
@@ -3412,8 +3595,16 @@ func TestPickBoardRoleBumpFromRosterInjury(t *testing.T) {
 
 	_, err = fixture.store.UpsertOdds(t.Context(), []db.Odds{
 		{
+			GameID: game.ID, Book: "draftkings", MarketType: "REC_YDS", Team: "BUF",
+			PlayerName: "Dawson Knox", Side: "OVER", Line: new(21.5), Price: -110, FetchedAt: now,
+		},
+		{
 			GameID: game.ID, Book: "fanduel", MarketType: "REC_YDS", Team: "BUF",
 			PlayerName: "Dawson Knox", Side: "OVER", Line: new(21.5), Price: -110, FetchedAt: now,
+		},
+		{
+			GameID: game.ID, Book: "draftkings", MarketType: "REC_YDS", Team: "BUF",
+			PlayerName: "Dawson Knox", Side: "UNDER", Line: new(21.5), Price: -110, FetchedAt: now,
 		},
 		{
 			GameID: game.ID, Book: "fanduel", MarketType: "REC_YDS", Team: "BUF",
@@ -3543,8 +3734,9 @@ func TestPickBoardTrayAndDockRenderImpliedChances(t *testing.T) {
 	fixture := newSlipFixture(t, 2)
 	game := addGame(t, fixture, gameKickoff())
 	addGameOdds(t, fixture.store, game.ID)
-	_, err := fixture.store.SetUserHomeBook(t.Context(), fixture.user.ID, new("draftkings"))
+	updated, err := fixture.store.SetUserHomeBook(t.Context(), fixture.user.ID, new("draftkings"))
 	require.NoError(t, err)
+	fixture.as(updated)
 
 	get := func(path string) *httptest.ResponseRecorder {
 		rec := httptest.NewRecorder()
@@ -3646,11 +3838,11 @@ func TestPickBoardGameCardsCondenseLinesWeatherGradesAndPlayers(t *testing.T) {
 	body := html.UnescapeString(pickBoard(t, fixture, "").Body.String())
 
 	// Lines are condensed: favorite spread only, O/U without -110 juice, compact ML.
-	assert.Contains(t, body, "BUF -3")
-	assert.NotContains(t, body, "MIA +3")
-	assert.Contains(t, body, "O/U 47.5")
+	assert.Contains(t, body, "BUF -3.5")
+	assert.NotContains(t, body, "MIA +3.5")
+	assert.Contains(t, body, "O/U 48.5")
 	assert.NotContains(t, body, "O -110 · U -110")
-	assert.Contains(t, body, "+130 / -150")
+	assert.Contains(t, body, "+125 / -145")
 
 	// Weather/dome badges appear on the cards.
 	assert.Contains(t, body, "💨 42°F · 18 mph")

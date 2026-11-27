@@ -581,7 +581,7 @@ func (h *researchHandlers) buildBetResearch(ctx context.Context, r *http.Request
 	}
 	roster, _ := h.deps.Store.RosterForTeams(ctx, []string{game.HomeTeam, game.AwayTeam})
 	homeBook := h.researchViewer(ctx)
-	rows := board.Build([]db.Game{game}, odds, roster, homeBook, nil, now)
+	rows := board.BuildDualBook([]db.Game{game}, odds, roster, homeBook, nil, now)
 
 	var bet *board.Row
 	for i := range rows {
@@ -1572,7 +1572,7 @@ func (h *researchHandlers) buildExplore(
 		return view
 	}
 
-	rows := board.Build(games, odds, roster, homeBook, nil, now)
+	rows := board.BuildDualBook(games, odds, roster, homeBook, nil, now)
 	signals := h.researchSignals(ctx, week.ID, now, games, roster, rows)
 	boardGames, boardStats := h.loadResearchBoardSignals(ctx, week.ID, now, games, rows)
 

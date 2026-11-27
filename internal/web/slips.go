@@ -2054,7 +2054,7 @@ func (h *slipHandlers) slipHighlights(
 	now := q.Now
 
 	boardStart := time.Now()
-	rows := board.Build(games, odds, roster, homeBook, mine, now)
+	rows := board.BuildDualBook(games, odds, roster, homeBook, mine, now)
 	AddBoardTiming(ctx, time.Since(boardStart))
 	if len(rows) == 0 {
 		return HighlightsView{}, nil

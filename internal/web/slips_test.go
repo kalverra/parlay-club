@@ -1877,7 +1877,29 @@ func seedAGradeBoardForHubTest(t *testing.T, fixture *slipFixture, game db.Game)
 		},
 		{
 			GameID:     game.ID,
+			Book:       "fanduel",
+			MarketType: "PASS_YDS",
+			Team:       "BUF",
+			PlayerName: "Josh Allen",
+			Side:       "OVER",
+			Line:       new(245.5),
+			Price:      -105,
+			FetchedAt:  now,
+		},
+		{
+			GameID:     game.ID,
 			Book:       "draftkings",
+			MarketType: "PASS_YDS",
+			Team:       "BUF",
+			PlayerName: "Josh Allen",
+			Side:       "UNDER",
+			Line:       new(245.5),
+			Price:      -115,
+			FetchedAt:  now,
+		},
+		{
+			GameID:     game.ID,
+			Book:       "fanduel",
 			MarketType: "PASS_YDS",
 			Team:       "BUF",
 			PlayerName: "Josh Allen",
@@ -1899,7 +1921,29 @@ func seedAGradeBoardForHubTest(t *testing.T, fixture *slipFixture, game db.Game)
 		},
 		{
 			GameID:     game.ID,
+			Book:       "fanduel",
+			MarketType: "RUSH_YDS",
+			Team:       "BUF",
+			PlayerName: "James Cook",
+			Side:       "OVER",
+			Line:       new(65.5),
+			Price:      -105,
+			FetchedAt:  now,
+		},
+		{
+			GameID:     game.ID,
 			Book:       "draftkings",
+			MarketType: "RUSH_YDS",
+			Team:       "BUF",
+			PlayerName: "James Cook",
+			Side:       "UNDER",
+			Line:       new(65.5),
+			Price:      -115,
+			FetchedAt:  now,
+		},
+		{
+			GameID:     game.ID,
+			Book:       "fanduel",
 			MarketType: "RUSH_YDS",
 			Team:       "BUF",
 			PlayerName: "James Cook",
@@ -2082,10 +2126,10 @@ func TestSlipHubHighlightsRenderImpliedChances(t *testing.T) {
 	body := rec.Body.String()
 	assert.Contains(t, body, "data-highlight-leg")
 	assert.Contains(t, body, "data-highlight-parlay")
-	// Single-leg highlights and combo leg items average Pinnacle (-155) and DraftKings (-105) -> -125 (56%).
-	assert.Contains(t, body, "(56%)")
-	// 2-leg combo of -125 and -125 is +224 -> (31%).
-	assert.Contains(t, body, "(31%)")
+	// Single-leg highlights and combo leg items use the dual-book price (-105 -> 51%).
+	assert.Contains(t, body, "(51%)")
+	// 2-leg combo of -105 and -105 is +281 -> (26%).
+	assert.Contains(t, body, "(26%)")
 }
 
 func TestSlipHubLiveProgressStates(t *testing.T) {

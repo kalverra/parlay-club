@@ -115,7 +115,7 @@ in `board_test.go` and `eval`).
       `internal/board/board.go` (never averaging differing lines into a median), keep an explicit all-book mode for
       `internal/eval/market.go`, and update `lineKey` pairing so split `TOTAL`/`TEAM_TOTAL` rows stay paired; add unit
       tests in `internal/board/board_test.go`.
-- [ ] Switch user-facing board callers in `internal/web/pick.go`, `internal/web/games.go`, `internal/web/research.go`,
+- [x] Switch user-facing board callers in `internal/web/pick.go`, `internal/web/games.go`, `internal/web/research.go`,
       and `internal/web/slips.go` to the dual-book board builder and verify `internal/eval` and `internal/analyzer`
       tests stay green.
 

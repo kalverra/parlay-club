@@ -133,7 +133,7 @@ func (h *gameHandlers) props(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := time.Time{}
-	built := board.Build([]db.Game{game}, rows, roster, homeBook, nil, now)
+	built := board.BuildDualBook([]db.Game{game}, rows, roster, homeBook, nil, now)
 	view.TeamTotals, view.Players = groupProps(game, built)
 
 	h.renderPartial(w, "game-props", view)
