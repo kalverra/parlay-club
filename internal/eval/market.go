@@ -24,7 +24,15 @@ func BuildMarketCandidates(
 
 	preKickoffGame := game
 	preKickoffGame.Status = db.GameScheduled
-	rows := board.Build([]db.Game{preKickoffGame}, gameOdds, preKickoffRoster, "", nil, time.Time{})
+	rows := board.BuildWithOptions(
+		[]db.Game{preKickoffGame},
+		gameOdds,
+		preKickoffRoster,
+		"",
+		nil,
+		time.Time{},
+		board.BuildOptions{DualBook: false},
+	)
 	if len(rows) == 0 {
 		return nil
 	}

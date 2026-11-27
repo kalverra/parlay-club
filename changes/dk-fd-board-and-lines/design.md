@@ -111,7 +111,7 @@ preserving all-book consensus for `internal/eval/market.go`).
 Risk: medium (changes core board-building behavior across pick, games, and research surfaces; strong unit test coverage
 in `board_test.go` and `eval`).
 
-- [ ] Add `BookQuote`, `Row.DK`, `Row.FD`, `Row.LinesDiffer`, and dual-book filtering (`draftkings` ∩ `fanduel`) in
+- [x] Add `BookQuote`, `Row.DK`, `Row.FD`, `Row.LinesDiffer`, and dual-book filtering (`draftkings` ∩ `fanduel`) in
       `internal/board/board.go` (never averaging differing lines into a median), keep an explicit all-book mode for
       `internal/eval/market.go`, and update `lineKey` pairing so split `TOTAL`/`TEAM_TOTAL` rows stay paired; add unit
       tests in `internal/board/board_test.go`.

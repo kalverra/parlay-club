@@ -1,6 +1,6 @@
 ---
 slug: dk-fd-board-and-lines
-status: designed
+status: implementing
 created: "2026-11-27"
 accepted_by:
     - Adam Hamrick

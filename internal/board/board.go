@@ -137,6 +137,20 @@ func (s Sort) Label() string {
 	}
 }
 
+// BookQuote is one sportsbook's line and American price for a selection.
+type BookQuote struct {
+	Book string
+	Line *float64
+	Odds int
+}
+
+// BuildOptions controls how Build filters and prices sportsbook quotes.
+type BuildOptions struct {
+	// DualBook requires both draftkings and fanduel quotes for a selection to
+	// appear and never averages differing lines into a median.
+	DualBook bool
+}
+
 // Row is one selection a person can add to their slip. The fields after Text
 // are what the add-leg form posts.
 type Row struct {
@@ -150,6 +164,9 @@ type Row struct {
 	Side           string
 	Line           *float64
 	Odds           int
+	DK             *BookQuote
+	FD             *BookQuote
+	LinesDiffer    bool
 	Category       Category
 	Window         Window
 	Kickoff        time.Time
@@ -312,6 +329,33 @@ func Build(
 	mine []db.Leg,
 	now time.Time,
 ) []Row {
+	return BuildWithOptions(games, odds, roster, homeBook, mine, now, BuildOptions{})
+}
+
+// BuildDualBook turns one week's games and odds into rows, keeping only
+// selections quoted by both DraftKings and FanDuel without averaging differing
+// lines into a median.
+func BuildDualBook(
+	games []db.Game,
+	odds []db.Odds,
+	roster []db.RosterPlayer,
+	homeBook string,
+	mine []db.Leg,
+	now time.Time,
+) []Row {
+	return BuildWithOptions(games, odds, roster, homeBook, mine, now, BuildOptions{DualBook: true})
+}
+
+// BuildWithOptions turns one week's games and odds into rows according to opts.
+func BuildWithOptions(
+	games []db.Game,
+	odds []db.Odds,
+	roster []db.RosterPlayer,
+	homeBook string,
+	mine []db.Leg,
+	now time.Time,
+	opts BuildOptions,
+) []Row {
 	byGame := make(map[string]db.Game, len(games))
 	for _, game := range games {
 		if !now.IsZero() && !now.Before(game.Kickoff) {
@@ -374,17 +418,33 @@ func Build(
 	for _, key := range order {
 		group := groups[key]
 		game := byGame[group.gameID]
-		line, price := selectionPrice(group.rows, homeBook)
+		dkRow := homeBookRow(group.rows, "draftkings")
+		fdRow := homeBookRow(group.rows, "fanduel")
+		if opts.DualBook && (dkRow == nil || fdRow == nil) {
+			continue
+		}
+
+		var line *float64
+		var price int
+		var primary *db.Odds
+		if opts.DualBook {
+			line, price, primary = dualBookPrice(dkRow, fdRow, homeBook)
+		} else {
+			line, price = selectionPrice(group.rows, homeBook)
+			primary = homeBookRow(group.rows, homeBook)
+		}
+
 		player := group.player
 		team := group.team
-		if home := homeBookRow(group.rows, homeBook); home != nil {
-			if home.PlayerName != "" {
-				player = home.PlayerName
+		if primary != nil {
+			if primary.PlayerName != "" {
+				player = primary.PlayerName
 			}
-			if home.Team != "" {
-				team = home.Team
+			if primary.Team != "" {
+				team = primary.Team
 			}
 		}
+
 		rows = append(rows, Row{
 			GameID:      group.gameID,
 			Market:      group.market,
@@ -396,6 +456,9 @@ func Build(
 			Side:        group.side,
 			Line:        line,
 			Odds:        price,
+			DK:          bookQuote("draftkings", dkRow),
+			FD:          bookQuote("fanduel", fdRow),
+			LinesDiffer: dkRow != nil && fdRow != nil && !db.SameLine(dkRow.Line, fdRow.Line),
 			Category:    categoryFor(group.market),
 			Window:      windowFor(game.Kickoff),
 			Kickoff:     game.Kickoff,
@@ -542,6 +605,36 @@ func windowFor(kickoff time.Time) Window {
 	default:
 		return WindowSundayNight
 	}
+}
+
+// dualBookPrice picks one book's line and price without averaging differing
+// lines. It prefers the viewer's homeBook when it is draftkings or fanduel,
+// defaulting to fanduel otherwise.
+func dualBookPrice(dkRow, fdRow *db.Odds, homeBook string) (*float64, int, *db.Odds) {
+	primary := fdRow
+	if strings.EqualFold(strings.TrimSpace(homeBook), "draftkings") {
+		primary = dkRow
+	}
+	return cloneLine(primary.Line), primary.Price, primary
+}
+
+func bookQuote(book string, row *db.Odds) *BookQuote {
+	if row == nil {
+		return nil
+	}
+	return &BookQuote{
+		Book: book,
+		Line: cloneLine(row.Line),
+		Odds: row.Price,
+	}
+}
+
+func cloneLine(line *float64) *float64 {
+	if line == nil {
+		return nil
+	}
+	v := *line
+	return &v
 }
 
 // selectionPrice picks one line and price for a selection, using the viewer's
@@ -940,14 +1033,13 @@ func rowsForGame(rows []Row, gameID string) []Row {
 	return gameRows
 }
 
-// Pair folds one game's built rows into one group per line. Spreads and
-// moneylines key on market alone, game totals key on market and number, team
-// totals key on market, team, and number, and player props key on market and
-// canonical player, so an Over and an Under for the same player prop sit on
-// one row even across differing book lines. Each group's options come back in
-// a fixed order: away before home for a spread or moneyline, Over before Under
-// for a total or prop, and the single Yes of an anytime touchdown. A line with
-// only one stored side keeps one option.
+// Pair folds one game's built rows into one group per line. Spreads,
+// moneylines, and game totals key on market alone, team totals key on market
+// and team, and player props key on market and canonical player, so Over and
+// Under stay on one row even across differing book lines. Each group's options
+// come back in a fixed order: away before home for a spread or moneyline, Over
+// before Under for a total or prop, and the single Yes of an anytime touchdown.
+// A line with only one stored side keeps one option.
 func Pair(game db.Game, rows []Row) []LineGroup {
 	groups := make([]LineGroup, 0, len(rows))
 	index := make(map[string]int, len(rows))
@@ -1005,15 +1097,15 @@ func lineKey(row Row) string {
 	return LineKey(row.Market, row.Team, row.PlayerName, row.Line)
 }
 
-// LineKey names the line a selection sits on. A spread or moneyline puts both
-// teams on one line, a total keys on its number, a team total keys on its team
-// and number, and a player prop keys on its market and canonical player.
+// LineKey names the line a selection sits on. A spread, moneyline, or total
+// puts both sides on one line, a team total keys on its market and team, and a
+// player prop keys on its market and canonical player.
 func LineKey(market, team, player string, line *float64) string {
 	switch market {
-	case "SPREAD", "ML":
+	case "SPREAD", "ML", "TOTAL":
 		return market
-	case "TOTAL":
-		return market + "|" + lineText(line)
+	case "TEAM_TOTAL":
+		return market + "|" + team
 	default:
 		if isPlayerMarket(market) || player != "" {
 			return market + "|" + canonicalPlayerKey("", player, team)

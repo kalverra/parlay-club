@@ -1028,17 +1028,23 @@ func TestLineKeyCanonicalPlayerPropsAndGameLines(t *testing.T) {
 		board.LineKey("RUSH_YDS", "MIA", "Ollie Gordon", new(72.5)),
 		board.LineKey("REC_YDS", "MIA", "Ollie Gordon", new(72.5)),
 	)
-	assert.NotEqual(
+	assert.Equal(
 		t,
 		board.LineKey("TOTAL", "", "", new(47.5)),
 		board.LineKey("TOTAL", "", "", new(48.5)),
-		"game totals still key on line value",
+		"game totals pair across differing book lines",
+	)
+	assert.Equal(
+		t,
+		board.LineKey("TEAM_TOTAL", "BUF", "", new(24.5)),
+		board.LineKey("TEAM_TOTAL", "BUF", "", new(25.5)),
+		"team totals for the same team pair across differing book lines",
 	)
 	assert.NotEqual(
 		t,
 		board.LineKey("TEAM_TOTAL", "BUF", "", new(24.5)),
-		board.LineKey("TEAM_TOTAL", "BUF", "", new(25.5)),
-		"team totals still key on line value",
+		board.LineKey("TEAM_TOTAL", "MIA", "", new(24.5)),
+		"team totals for different teams stay separate",
 	)
 	assert.Equal(
 		t,
@@ -1480,4 +1486,139 @@ func TestLineGroupForLegAndHoldsLeg(t *testing.T) {
 	}
 	_, ok = board.LineGroupForLeg(g, rows, missingLeg, signals)
 	assert.False(t, ok)
+}
+
+func TestBuildDualBookRequiresBothDKAndFD(t *testing.T) {
+	t.Parallel()
+
+	kickoff := at(t, 8, 13, 0)
+	g := game("401", kickoff)
+	games := []db.Game{g}
+	rows := []db.Odds{
+		// Both DK and FD: included.
+		odds("401", "draftkings", "ML", "BUF", "", "TEAM", nil, -145),
+		odds("401", "fanduel", "ML", "BUF", "", "TEAM", nil, -150),
+		// Only DK: excluded.
+		odds("401", "draftkings", "PASS_YDS", "BUF", "Josh Allen", "OVER", new(245.5), -110),
+		// Only FD: excluded.
+		odds("401", "fanduel", "RUSH_YDS", "BUF", "James Cook", "OVER", new(64.5), -115),
+		// Only third-party books (BetMGM, Bovada, PrizePicks): excluded.
+		odds("401", "betmgm", "REC_YDS", "BUF", "Khalil Shakir", "OVER", new(52.5), -110),
+		odds("401", "bovada", "REC_YDS", "BUF", "Khalil Shakir", "OVER", new(53.5), -110),
+		odds("401", "prizepicks", "ANYTIME_TD", "BUF", "James Cook", "YES", nil, 150),
+	}
+
+	built := board.BuildDualBook(games, rows, nil, "", nil, kickoff.Add(-time.Hour))
+	require.Len(t, built, 1)
+	assert.Equal(t, "ML", built[0].Market)
+	assert.Equal(t, "BUF", built[0].Team)
+}
+
+func TestBuildDualBookSplitLinesNeverAverageAndRespectHomeBook(t *testing.T) {
+	t.Parallel()
+
+	kickoff := at(t, 8, 13, 0)
+	g := game("401", kickoff)
+	games := []db.Game{g}
+	rows := []db.Odds{
+		// Differing lines: 2.5 on DK, 3.0 on FD (must never average to 2.75).
+		odds("401", "draftkings", "RECEPTIONS", "BUF", "Khalil Shakir", "OVER", new(2.5), -115),
+		odds("401", "fanduel", "RECEPTIONS", "BUF", "Khalil Shakir", "OVER", new(3.0), -110),
+		// Matching lines: 47.5 on both.
+		odds("401", "draftkings", "TOTAL", "", "", "OVER", new(47.5), -112),
+		odds("401", "fanduel", "TOTAL", "", "", "OVER", new(47.5), -108),
+	}
+
+	// Unset homeBook defaults deterministically to FanDuel.
+	defaultRows := board.BuildDualBook(games, rows, nil, "", nil, kickoff.Add(-time.Hour))
+	require.Len(t, defaultRows, 2)
+	byMarket := make(map[string]board.Row, len(defaultRows))
+	for _, r := range defaultRows {
+		byMarket[r.Market] = r
+	}
+
+	rec := byMarket["RECEPTIONS"]
+	require.NotNil(t, rec.DK)
+	require.NotNil(t, rec.FD)
+	assert.Equal(t, "draftkings", rec.DK.Book)
+	assert.InDelta(t, 2.5, *rec.DK.Line, 1e-9)
+	assert.Equal(t, -115, rec.DK.Odds)
+	assert.Equal(t, "fanduel", rec.FD.Book)
+	assert.InDelta(t, 3.0, *rec.FD.Line, 1e-9)
+	assert.Equal(t, -110, rec.FD.Odds)
+	assert.True(t, rec.LinesDiffer)
+	require.NotNil(t, rec.Line)
+	assert.InDelta(t, 3.0, *rec.Line, 1e-9, "never averages 2.5 and 3.0 into 2.75")
+	assert.Equal(t, -110, rec.Odds)
+
+	tot := byMarket["TOTAL"]
+	assert.False(t, tot.LinesDiffer)
+	require.NotNil(t, tot.DK)
+	require.NotNil(t, tot.FD)
+	assert.InDelta(t, 47.5, *tot.Line, 1e-9)
+	assert.Equal(t, -108, tot.Odds)
+
+	// homeBook = "draftkings" selects DraftKings line and price.
+	dkRows := board.BuildDualBook(games, rows, nil, "draftkings", nil, kickoff.Add(-time.Hour))
+	require.Len(t, dkRows, 2)
+	for _, r := range dkRows {
+		if r.Market == "RECEPTIONS" {
+			assert.True(t, r.LinesDiffer)
+			assert.InDelta(t, 2.5, *r.Line, 1e-9)
+			assert.Equal(t, -115, r.Odds)
+		}
+	}
+}
+
+func TestPairKeepsSplitTotalAndTeamTotalPaired(t *testing.T) {
+	t.Parallel()
+
+	g := game("401", at(t, 8, 13, 0))
+	paired := board.Pair(g, []board.Row{
+		{
+			GameID:      "401",
+			Market:      "TOTAL",
+			Side:        "UNDER",
+			Line:        new(48.0),
+			LinesDiffer: true,
+			DK:          &board.BookQuote{Book: "draftkings", Line: new(47.5), Odds: -110},
+			FD:          &board.BookQuote{Book: "fanduel", Line: new(48.0), Odds: -115},
+		},
+		{
+			GameID:      "401",
+			Market:      "TOTAL",
+			Side:        "OVER",
+			Line:        new(47.5),
+			LinesDiffer: true,
+			DK:          &board.BookQuote{Book: "draftkings", Line: new(47.5), Odds: -110},
+			FD:          &board.BookQuote{Book: "fanduel", Line: new(48.0), Odds: -105},
+		},
+		{
+			GameID:      "401",
+			Market:      "TEAM_TOTAL",
+			Team:        "BUF",
+			Side:        "UNDER",
+			Line:        new(25.0),
+			LinesDiffer: true,
+			DK:          &board.BookQuote{Book: "draftkings", Line: new(24.5), Odds: -110},
+			FD:          &board.BookQuote{Book: "fanduel", Line: new(25.0), Odds: -110},
+		},
+		{
+			GameID:      "401",
+			Market:      "TEAM_TOTAL",
+			Team:        "BUF",
+			Side:        "OVER",
+			Line:        new(24.5),
+			LinesDiffer: true,
+			DK:          &board.BookQuote{Book: "draftkings", Line: new(24.5), Odds: -110},
+			FD:          &board.BookQuote{Book: "fanduel", Line: new(25.0), Odds: -110},
+		},
+	})
+
+	require.Len(t, paired, 2)
+	total := pairGroup(t, paired, "TOTAL", "", "")
+	assert.Equal(t, []string{"OVER", "UNDER"}, optionSides(total))
+
+	teamTotal := pairGroup(t, paired, "TEAM_TOTAL", "BUF", "")
+	assert.Equal(t, []string{"OVER", "UNDER"}, optionSides(teamTotal))
 }
