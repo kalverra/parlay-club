@@ -6,6 +6,7 @@
 
 - [Unify player identity across sportsbooks](../canonical-player-identity.md): Normalize and resolve player names against team rosters once during prop ingest so stored odds, board cards, and saved legs share one canonical player ID, name, and team.
 - [Deepen pick-board read assembly and current-odds filtering](../deepen-pick-board.md): Filter superseded odds rows at the storage seam and deepen the board module to own scoped board assembly, signal attachment on paired line groups, and picked-leg drift state across full-page and partial views.
+- [DK and FD dual-book board and split-line display](../dk-fd-board-and-lines.md): DK and FD dual-book board and split-line display
 - [Track prop selections dynamically when lines move](../dynamic-line-tracking.md): Key prop selections by game, canonical player, market, and side rather than quoted odds so board matching, leg updates, and sportsbook export track moved lines dynamically.
 - [Game-first pick board](../game-first-board.md): Rebuild the pick board as a game-first master-detail screen with a game slate, category tabs, paired over/under line rows grouped by player, and a pick dock.
 - [Team Logos and Player Portraits](../logos-and-portraits.md): Capture official team logo and player headshot URLs from the existing ESPN scoreboard and roster syncs, store them alongside our game and roster records, and surface them in view models for screens where visual identity aids scanning.
