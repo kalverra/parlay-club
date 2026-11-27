@@ -148,6 +148,6 @@ verification after deploy).
 - [x] Lower `TheOddsAPIEnrichFloor` to `40` and extend `syncSlipExportEnrich` in `internal/refresh/refresh.go` to detect
       and enrich both game-line legs and prop legs that lack DraftKings links or carry non-`42` FanDuel `marketId`
       prefixes, with unit tests in `internal/refresh/pick_test.go`.
-- [ ] Docs: update `docs/concepts/export.md`, `docs/concepts/data-refresh.md`, and `docs/reference/data-sources.md` to
+- [x] Docs: update `docs/concepts/export.md`, `docs/concepts/data-refresh.md`, and `docs/reference/data-sources.md` to
       document link-preserving upserts, FanDuel jurisdiction prefix handling, the updated enrichment floor, and the
       5-case phone verification matrix.

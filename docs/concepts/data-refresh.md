@@ -106,12 +106,14 @@ syncs:
 - **Prop load and research:** Tapping "Load them" on the pick board calls `SyncGameProps(ctx, gameID)`. Research sheets,
   the explorer, and `/research/bet` read cached SQLite only and never sync; the `Load props` tap on a targeted game is
   their one paid path.
-- **Slip-lock prop enrichment:** When `POST /slips/{id}/lock` transitions a slip to `LOCKED`, `slipHandlers.lockIn`
+- **Slip-lock export enrichment:** When `POST /slips/{id}/lock` transitions a slip to `LOCKED`, `slipHandlers.lockIn`
   calls `KickSlipExportEnrich(ctx, slipID)`. It runs in the background (`context.WithoutCancel`, tracked in `s.wg`,
-  30-second timeout), finds unique upcoming games on the slip with at least one prop leg missing a DraftKings or FanDuel
-  deep link, and runs `odds:props:enrich:{gameID}` (`oddsPropsEnrichSource`) via `singleflight`. When enrichment writes
-  new links, `publishWeek` emits `slip-updated` over SSE so `#slip-export` refreshes automatically.
-  (`GET /slips/{id}/export` stays strictly read-only.)
+  30-second timeout) and inspects both game-line legs (`SPREAD`, `ML`, `TOTAL`) and prop legs on upcoming games for
+  missing DraftKings or FanDuel links or non-`42` FanDuel `marketId` prefixes. If any upcoming game-line leg needs
+  links, it runs a one-shot `odds:lines:enrich` (`OddsLinesEnrichSource`) pass; for prop legs, it runs
+  `odds:props:enrich:{gameID}` (`oddsPropsEnrichSource`) per unique game. Both run via `singleflight` at or above
+  `TheOddsAPIEnrichFloor` (40 credits). When enrichment writes new links, `publishWeek` emits `slip-updated` over SSE so
+  `#slip-export` refreshes automatically. (`GET /slips/{id}/export` stays strictly read-only.)
 
 ## One pass
 
@@ -161,6 +163,7 @@ Each source records its last successful sync in `sync_state.fetched_at`. A sourc
 | `espn:scoreboard`  | Latest week's slate, scores, and status | 2 min while any game is live; 5 min on a scheduled game day; 15 min otherwise                                           | Never                                                              |
 | `weather:{gameID}` | Kickoff-window forecast for one game    | 15 min within 6 h of kickoff; 30 min otherwise                                                                          | Indoor, unknown venue, more than 48 h before kickoff, or kicked off |
 | `odds:lines`       | The week's game lines                   | `RunOnce`: 45 min with 2+ upcoming non-`FINAL` games today in ET; 3 h with 1 upcoming non-`FINAL` game today; 12 h when tomorrow ET has games; 24 h otherwise. Pick-time (`SyncPickLines`/`SyncPickGame`): 15 min when today has upcoming non-`FINAL` games or within 2 h of an upcoming kickoff; 2 h otherwise. (15 min idempotency in `RunPrefill`; 2 min cooldown in `ForcePickRefresh`) | No games, or every game has kicked off |
+| `odds:lines:enrich`| One-shot The Odds API game-line link enrichment | Same pick-time window as `odds:lines` (15 min on game day / within 2 h of kickoff; 2 h otherwise), or whenever older than `odds:lines` | Every game has kicked off, or The Odds API is unconfigured |
 | `odds:props:{gameID}` | Game prop odds                       | 30 min on the game's Eastern date or within 6 h of kickoff; 2 h otherwise (15 min idempotency in `RunPrefill`; 2 min cooldown in `ForcePickRefresh`) | Once game has kicked off               |
 | `odds:props:enrich:{gameID}` | Per-game The Odds API prop link enrichment | 30 min on the game's Eastern date or within 6 h of kickoff; 2 h otherwise (2 min cooldown in `ForcePickRefresh`), or whenever older than `odds:props:{gameID}` | Once game has kicked off, The Odds API is unconfigured, or `odds:props:{gameID}` has not synced yet |
 | `espn:roster:{teamID}`| NFL team roster                      | 2 h on game days; 6 h otherwise                                                                                         | Never (skipped for `FINAL` games in `Kick()`/`RunPrefill()`/`RunOnce()`) |
@@ -225,12 +228,14 @@ Parlay API is primary and The Odds API enriches it or serves as fallback. The bu
 2. Store the primary balance under `odds:lines` and The Odds API balance under `odds:theoddsapi`.
 3. Below 50 Parlay API credits, skip its paid `/odds` call and log a warning. Cached rows keep serving. This is not a
    failure, so it does not trigger backoff.
-4. The Odds API buys lines when Parlay API bought them and The Odds API has at least 100 credits. It also buys them when
-   Parlay API is unconfigured, failed, or below its floor, provided The Odds API has at least 25. Otherwise it stops
-   after the free event list.
-5. Merge the rows. A primary row with no link adopts The Odds API's link, sid, and event sid; when the linked line
-   differs, it also adopts the linked line and price. A linked primary row keeps its line, price, and link. Secondary
-   rows that fill a missing book or market are appended.
+4. The Odds API buys lines when Parlay API bought them and The Odds API has at least 40 credits
+   (`TheOddsAPIEnrichFloor`). It also buys them when Parlay API is unconfigured, failed, or below its floor, provided
+   The Odds API has at least 25 (`TheOddsAPIFallbackFloor`). Otherwise it stops after the free event list.
+5. Merge the rows. A primary row with no link—or a FanDuel row with a non-`42` `marketId` prefix when The Odds API
+   supplies a `42.*` link—adopts The Odds API's link, sid, and event sid; when the linked line differs, it also adopts
+   the linked line and price. A primary row that already has a valid `42.*` link keeps its line, price, and link.
+   Secondary rows that fill a missing book or market are appended, and `Store.UpsertOdds` preserves stored links on
+   unchanged lines if a later Parlay-only refresh sends `NULL`.
 6. Record the primary fetch and write the merged rows in one transaction. A fallback event ID fills
    `games.odds_event_id` only when the game has no stored ID, so a transient primary failure does not churn it.
 
@@ -254,19 +259,19 @@ games on page load: each tap or game selection targets at most that one game.
   otherwise (15-minute idempotency window in `RunPrefill`; 2-minute manual cooldown in `ForcePickRefresh`), skipped once
   kickoff has passed. Before matching players, it syncs rosters (`espn:roster:{teamID}`) for both teams. It enforces the
   Parlay API 150-credit floor (`OddsPropsFloor`). In `SyncGameProps`, `SyncPickGame`, and `ForcePickRefresh`, when The
-  Odds API is configured and Parlay API bought props, it calls `EventProps` at or above 100 credits
-  (`TheOddsAPIEnrichFloor`), merges via `odds.MergeProps` to populate DraftKings prop deep links, and records
-  `odds:props:enrich:{gameID}` in the same transaction; if Parlay API is unconfigured, errors, returns no props, or sits
-  below 150 credits, it falls back to The Odds API when at least 25 credits remain (`TheOddsAPIFallbackFloor`). During
-  `RunPrefill`, bulk props are Parlay-only and scoped to today's upcoming non-`FINAL` games in `America/New_York`
-  (falling back to all upcoming week games only when invoked manually with no upcoming games today), skipping The Odds
-  API `EventProps` enrichment/fallback and leaving `odds:props:enrich:{gameID}` unset. Prop players are canonicalized
-  via batch resolution against `player_matches` and `roster_players`.
+  Odds API is configured and Parlay API bought props, it calls `EventProps` at or above 40 credits
+  (`TheOddsAPIEnrichFloor`), merges via `odds.MergeProps` to populate DraftKings prop deep links and prefer `42.*`
+  FanDuel links, and records `odds:props:enrich:{gameID}` in the same transaction; if Parlay API is unconfigured,
+  errors, returns no props, or sits below 150 credits, it falls back to The Odds API when at least 25 credits remain
+  (`TheOddsAPIFallbackFloor`). During `RunPrefill`, bulk props are Parlay-only and scoped to today's upcoming
+  non-`FINAL` games in `America/New_York` (falling back to all upcoming week games only when invoked manually with no
+  upcoming games today), skipping The Odds API `EventProps` enrichment/fallback and leaving `odds:props:enrich:{gameID}`
+  unset. Prop players are canonicalized via batch resolution against `player_matches` and `roster_players`.
 - `odds:props:enrich:{gameID}` (`OddsPropsEnrichSource`): Enrichment-only prop sync (`enrichGameProps`) that runs in
   `SyncGameProps`, `SyncPickGame`, `ForcePickRefresh`, and `KickSlipExportEnrich` when `odds:props:{gameID}` is already
   fresh (for example, after Parlay-only `RunPrefill`) and `odds:props:enrich:{gameID}` is missing, older than
   `odds:props:{gameID}`, or stale. It calls The Odds API `EventProps` only (never Parlay API) at or above
-  `TheOddsAPIEnrichFloor` (100 credits), merges against the game's existing current prop rows, stamps every merged row
+  `TheOddsAPIEnrichFloor` (40 credits), merges against the game's existing current prop rows, stamps every merged row
   with a unified `FetchedAt = now` so `db.CurrentOdds` keeps Parlay-only rows alongside newly enriched DraftKings and
   FanDuel rows, and updates both `odds:props:{gameID}` and `odds:props:enrich:{gameID}` in one transaction.
 - `espn:roster:{teamID}`: Stale after 2 hours on game days and 6 hours otherwise. Upserts team roster players into
