@@ -116,21 +116,55 @@ func (c *Client) Props(ctx context.Context, eventID string) ([]Prop, Credits, er
 	return parseProps(eventID, raw), credits, nil
 }
 
+// apiMarketKeys maps each app market type to its canonical Odds API market key.
+var apiMarketKeys = map[string]string{
+	MarketML:         marketH2H,
+	MarketSpread:     marketSpreads,
+	MarketTotal:      marketTotals,
+	MarketTeamTotal:  "team_totals",
+	MarketPassYds:    "player_pass_yds",
+	MarketPassTds:    "player_pass_tds",
+	MarketRushYds:    "player_rush_yds",
+	MarketRushAtt:    "player_rush_attempts",
+	MarketRecYds:     "player_reception_yds",
+	MarketReceptions: "player_receptions",
+	MarketAnytimeTD:  "player_anytime_td",
+	MarketKickerPts:  "player_kicking_points",
+}
+
+// APIMarketKey translates an app market type (e.g. "SPREAD", "PASS_YDS") to
+// its Odds API market key (e.g. "spreads", "player_pass_yds").
+func APIMarketKey(marketType string) (string, bool) {
+	key, ok := apiMarketKeys[strings.TrimSpace(marketType)]
+	return key, ok
+}
+
 // EventProps fetches one event's prop board from The Odds API's per-event odds
 // endpoint and maps it into one row per priced selection. The endpoint bills one
 // credit per market returned, so the request asks only for the prop markets.
 func (c *Client) EventProps(ctx context.Context, eventID string) ([]Prop, Credits, error) {
+	return c.EventPropsForMarkets(ctx, eventID, strings.Split(propsMarkets, ","), nil)
+}
+
+// EventPropsForMarkets fetches the requested prop markets for one event from
+// The Odds API's per-event odds endpoint, scoped to bookmakers (falling back to
+// regions=us when bookmakers is empty), and maps them into one row per priced
+// selection.
+func (c *Client) EventPropsForMarkets(
+	ctx context.Context,
+	eventID string,
+	markets []string,
+	bookmakers []string,
+) ([]Prop, Credits, error) {
 	eventID = strings.TrimSpace(eventID)
 	if eventID == "" {
 		return nil, Credits{}, errors.New("event props: event ID is empty")
 	}
 
-	query := url.Values{}
-	query.Set("regions", "us")
-	query.Set("markets", propsMarkets)
-	query.Set("oddsFormat", "american")
-	query.Set("includeLinks", "true")
-	query.Set("includeSids", "true")
+	query, ok := buildOddsQuery(markets, bookmakers)
+	if !ok {
+		return nil, Credits{}, errors.New("event props: markets is empty")
+	}
 
 	var raw eventResponse
 	path := eventsPath + "/" + url.PathEscape(eventID) + oddsPath

@@ -1192,3 +1192,141 @@ func TestHasPreferredFanDuelPrefix(t *testing.T) {
 	))
 	assert.False(t, odds.HasPreferredFanDuelPrefix("https://%zz"))
 }
+
+func TestAPIMarketKey(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]string{
+		odds.MarketML:         "h2h",
+		odds.MarketSpread:     "spreads",
+		odds.MarketTotal:      "totals",
+		odds.MarketTeamTotal:  "team_totals",
+		odds.MarketPassYds:    "player_pass_yds",
+		odds.MarketPassTds:    "player_pass_tds",
+		odds.MarketRushYds:    "player_rush_yds",
+		odds.MarketRushAtt:    "player_rush_attempts",
+		odds.MarketRecYds:     "player_reception_yds",
+		odds.MarketReceptions: "player_receptions",
+		odds.MarketAnytimeTD:  "player_anytime_td",
+		odds.MarketKickerPts:  "player_kicking_points",
+	}
+	for marketType, want := range cases {
+		got, ok := odds.APIMarketKey(marketType)
+		assert.True(t, ok, "expected mapping for %s", marketType)
+		assert.Equal(t, want, got)
+	}
+
+	for _, unknown := range []string{"", "  ", "UNKNOWN", "player_pass_yds"} {
+		got, ok := odds.APIMarketKey(unknown)
+		assert.False(t, ok, "unexpected mapping for %q", unknown)
+		assert.Empty(t, got)
+	}
+}
+
+func TestEventPropsForMarketsSendsScopedMarketsAndBookmakers(t *testing.T) {
+	t.Parallel()
+
+	const eventID = "evt-1"
+	wantQuery := apiKeyQuery()
+	wantQuery.Set("bookmakers", "draftkings,fanduel")
+	wantQuery.Set("markets", "player_pass_yds")
+	wantQuery.Set("oddsFormat", "american")
+	wantQuery.Set("includeLinks", "true")
+	wantQuery.Set("includeSids", "true")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/events/"+eventID+"/odds", r.URL.Path)
+		assert.Equal(t, wantQuery, r.URL.Query())
+		assert.False(t, r.URL.Query().Has("regions"))
+		w.Header().Set("X-Requests-Remaining", "495")
+		w.Header().Set("X-Requests-Used", "5")
+		w.Header().Set("X-Requests-Last", "1")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"evt-1",
+			"bookmakers":[{
+				"key":"draftkings",
+				"sid":"34118128",
+				"markets":[{
+					"key":"player_pass_yds",
+					"outcomes":[{
+						"name":"Over","description":"Josh Allen","price":-115,"point":275.5,
+						"link":"https://draftkings.test/over","sid":"over-1"
+					}]
+				}]
+			}]
+		}`))
+	}))
+	t.Cleanup(server.Close)
+
+	props, credits, err := odds.NewClient(server.URL, testAPIKey, server.Client()).
+		EventPropsForMarkets(
+			t.Context(),
+			eventID,
+			[]string{"player_pass_yds", "player_pass_yds"},
+			[]string{"draftkings", "fanduel"},
+		)
+	require.NoError(t, err)
+	assert.Equal(t, odds.Credits{Remaining: 495, Used: 5, Last: 1}, credits)
+	assert.Equal(t, []odds.Prop{{
+		EventID:    eventID,
+		Book:       "draftkings",
+		MarketType: odds.MarketPassYds,
+		PlayerName: "Josh Allen",
+		Side:       odds.SideOver,
+		Line:       new(275.5),
+		Price:      -115,
+		Link:       "https://draftkings.test/over",
+		Sid:        "over-1",
+		EventSid:   "34118128",
+	}}, props)
+}
+
+func TestEventPropsForMarketsFallsBackToRegionsWhenBookmakersEmpty(t *testing.T) {
+	t.Parallel()
+
+	const eventID = "evt-1"
+	wantQuery := apiKeyQuery()
+	wantQuery.Set("regions", "us")
+	wantQuery.Set("markets", "player_anytime_td")
+	wantQuery.Set("oddsFormat", "american")
+	wantQuery.Set("includeLinks", "true")
+	wantQuery.Set("includeSids", "true")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/events/"+eventID+"/odds", r.URL.Path)
+		assert.Equal(t, wantQuery, r.URL.Query())
+		assert.False(t, r.URL.Query().Has("bookmakers"))
+		w.Header().Set("X-Requests-Remaining", "494")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"evt-1","bookmakers":[]}`))
+	}))
+	t.Cleanup(server.Close)
+
+	props, _, err := odds.NewClient(server.URL, testAPIKey, server.Client()).
+		EventPropsForMarkets(t.Context(), eventID, []string{"player_anytime_td"}, nil)
+	require.NoError(t, err)
+	assert.Empty(t, props)
+}
+
+func TestEventPropsForMarketsValidatesEventIDAndMarkets(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		t.Error("request sent with invalid arguments")
+		http.Error(w, "unexpected", http.StatusInternalServerError)
+	}))
+	t.Cleanup(server.Close)
+
+	client := odds.NewClient(server.URL, testAPIKey, server.Client())
+
+	_, _, err := client.EventPropsForMarkets(t.Context(), "  ", []string{"player_pass_yds"}, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "event ID")
+
+	for _, markets := range [][]string{nil, {}, {"  ", ""}} {
+		_, _, err := client.EventPropsForMarkets(t.Context(), "evt-1", markets, []string{"draftkings"})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "markets")
+	}
+}

@@ -3,8 +3,10 @@ package odds
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
+	"strings"
 )
 
 // Market types this client maps into odds rows. The strings match the app's
@@ -55,12 +57,17 @@ type Line struct {
 // is missing its price, or its point on a spread or total, is skipped rather
 // than failing the whole slate.
 func (c *Client) Lines(ctx context.Context) ([]Line, Credits, error) {
-	query := url.Values{}
-	query.Set("regions", "us")
-	query.Set("markets", "h2h,spreads,totals")
-	query.Set("oddsFormat", "american")
-	query.Set("includeLinks", "true")
-	query.Set("includeSids", "true")
+	return c.LinesForMarkets(ctx, []string{marketH2H, marketSpreads, marketTotals}, nil)
+}
+
+// LinesForMarkets fetches the requested game-line markets (e.g. h2h, spreads,
+// totals) for the requested bookmakers (falling back to regions=us when
+// bookmakers is empty) and maps them into one row per priced selection.
+func (c *Client) LinesForMarkets(ctx context.Context, markets, bookmakers []string) ([]Line, Credits, error) {
+	query, ok := buildOddsQuery(markets, bookmakers)
+	if !ok {
+		return nil, Credits{}, errors.New("lines: markets is empty")
+	}
 
 	var raw []eventResponse
 	credits, err := c.get(ctx, oddsPath, query, &raw)
@@ -73,6 +80,50 @@ func (c *Client) Lines(ctx context.Context) ([]Line, Credits, error) {
 		return nil, Credits{}, fmt.Errorf("lines: %w", err)
 	}
 	return lines, credits, nil
+}
+
+// buildOddsQuery builds the common query parameters for /odds and
+// /events/{id}/odds requests. When bookmakers is empty, it falls back to
+// regions=us.
+func buildOddsQuery(markets, bookmakers []string) (url.Values, bool) {
+	cleanedMarkets := cleanCSVTerms(markets)
+	if len(cleanedMarkets) == 0 {
+		return nil, false
+	}
+
+	query := url.Values{}
+	if cleanedBooks := cleanCSVTerms(bookmakers); len(cleanedBooks) > 0 {
+		query.Set("bookmakers", strings.Join(cleanedBooks, ","))
+	} else {
+		query.Set("regions", "us")
+	}
+	query.Set("markets", strings.Join(cleanedMarkets, ","))
+	query.Set("oddsFormat", "american")
+	query.Set("includeLinks", "true")
+	query.Set("includeSids", "true")
+	return query, true
+}
+
+// cleanCSVTerms trims whitespace, drops empty entries, and deduplicates while
+// preserving order.
+func cleanCSVTerms(items []string) []string {
+	if len(items) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(items))
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		trimmed := strings.TrimSpace(item)
+		if trimmed == "" {
+			continue
+		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		out = append(out, trimmed)
+	}
+	return out
 }
 
 // ParseLinesJSON decodes raw Parlay API or Odds API game-lines JSON into

@@ -121,7 +121,7 @@ tests).
 
 Risk: low (additive methods on `*odds.Client`; existing `Lines` and `EventProps` signatures remain unchanged).
 
-- [ ] Add `APIMarketKey`, `LinesForMarkets`, and `EventPropsForMarkets` in `internal/ingest/odds/lines.go` and
+- [x] Add `APIMarketKey`, `LinesForMarkets`, and `EventPropsForMarkets` in `internal/ingest/odds/lines.go` and
   `internal/ingest/odds/props.go` (supporting `markets` and `bookmakers` query params), with unit tests in
   `internal/ingest/odds/lines_test.go` and `internal/ingest/odds/props_test.go`.
 
