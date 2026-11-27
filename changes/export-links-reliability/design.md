@@ -134,7 +134,7 @@ Risk: medium (changes core `UpsertOdds` SQL and merge precedence; unit tests ver
 - [x] Add FanDuel `marketId` prefix parsing and preference (`42.*` preferred over non-`42` prefixes like `734.*` /
   `717.*`) in `internal/ingest/odds/props.go` (`MergeProps`) and `internal/refresh/sources.go` (`mergeOdds`), plus
   regression tests using Week 12 mixed-prefix payloads.
-- [ ] Update `fanDuelCombiner.Combine` in `internal/export/export.go` to refuse combining legs with mismatched FanDuel
+- [x] Update `fanDuelCombiner.Combine` in `internal/export/export.go` to refuse combining legs with mismatched FanDuel
   `marketId` prefixes (falling back to per-leg taps), with unit tests in `internal/export/export_test.go`.
 
 ### Phase 2: Extend lock-time enrichment to game lines and tune credit floor

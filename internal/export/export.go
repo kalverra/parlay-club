@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/kalverra/parlay-club/internal/db"
+	"github.com/kalverra/parlay-club/internal/ingest/odds"
 )
 
 // The books the export offers, spelled as Parlay API keys.
@@ -278,11 +279,13 @@ const fanDuelBetslip = "https://sportsbook.fanduel.com/addToBetslip"
 // fanDuelCombiner builds one betslip URL for two or more FanDuel selections.
 // The market ID lives only in the stored per-leg link, so it is read from
 // there; the selection ID comes from the stored sid. If any linked leg lacks
-// either, the plan falls back to per-leg taps rather than dropping a pick.
+// either, or if legs carry mismatched FanDuel marketId jurisdiction prefixes
+// (e.g. 42.* mixed with 734.* or 717.*), the plan falls back to per-leg taps
+// rather than sending a broken combined link or dropping a pick.
 type fanDuelCombiner struct{}
 
 // Combine returns FanDuel's indexed betslip URL, or false when every linked leg
-// cannot take part.
+// cannot take part or legs carry mismatched marketId jurisdiction prefixes.
 func (fanDuelCombiner) Combine(linked []LegLink) (string, bool) {
 	if len(linked) < 2 {
 		return "", false
@@ -291,12 +294,19 @@ func (fanDuelCombiner) Combine(linked []LegLink) (string, bool) {
 	var b strings.Builder
 	b.WriteString(fanDuelBetslip)
 	separator := "?"
+	var sharedPrefix string
 	for i, leg := range linked {
 		if leg.Sid == nil || strings.TrimSpace(*leg.Sid) == "" {
 			return "", false
 		}
 		marketID, ok := fanDuelMarketID(leg.URL)
 		if !ok {
+			return "", false
+		}
+		prefix, _ := odds.FanDuelMarketPrefix(leg.URL)
+		if i == 0 {
+			sharedPrefix = prefix
+		} else if prefix != sharedPrefix {
 			return "", false
 		}
 		b.WriteString(separator)
@@ -311,6 +321,13 @@ func (fanDuelCombiner) Combine(linked []LegLink) (string, bool) {
 		b.WriteString(url.QueryEscape(strings.TrimSpace(*leg.Sid)))
 	}
 	return b.String(), true
+}
+
+// HasPreferredFanDuelPrefix reports whether link carries the preferred US
+// FanDuel marketId jurisdiction prefix (42.*).
+func HasPreferredFanDuelPrefix(link string) bool {
+	prefix, ok := odds.FanDuelMarketPrefix(link)
+	return ok && prefix == odds.PreferredFanDuelMarketPrefix
 }
 
 // fanDuelMarketID pulls the market ID out of the per-leg link Parlay API

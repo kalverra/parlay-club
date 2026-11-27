@@ -839,6 +839,178 @@ func TestPlanKeepsFanDuelPerLegWhenACombinedLinkCannotBeBuilt(t *testing.T) {
 
 		assert.Contains(t, plan.Combined, "selectionId%5B1%5D=a%23b+c")
 	})
+
+	t.Run("mismatched marketId prefixes fall back to per-leg taps", func(t *testing.T) {
+		t.Parallel()
+
+		prop := makeLeg(83, &upcoming, "PASS_YDS", "ATL", "Michael Penix Jr.", "OVER", new(225.5))
+		tests := map[string]struct {
+			legs []export.Leg
+			odds []db.Odds
+		}{
+			"42 and 734": {
+				legs: []export.Leg{ml, under},
+				odds: []db.Odds{
+					base[0],
+					row(
+						game,
+						export.FanDuel,
+						"TOTAL",
+						"",
+						"",
+						"UNDER",
+						new(52.5),
+						-110,
+						"https://sportsbook.fanduel.com/addToBetslip?marketId=734.199156488&selectionId=7017917",
+						"7017917",
+					),
+				},
+			},
+			"734 and 717": {
+				legs: []export.Leg{ml, under},
+				odds: []db.Odds{
+					row(
+						game,
+						export.FanDuel,
+						"ML",
+						"ATL",
+						"",
+						"TEAM",
+						nil,
+						140,
+						"https://sportsbook.fanduel.com/addToBetslip?marketId=734.199156485&selectionId=50199",
+						"50199",
+					),
+					row(
+						game,
+						export.FanDuel,
+						"TOTAL",
+						"",
+						"",
+						"UNDER",
+						new(52.5),
+						-110,
+						"https://sportsbook.fanduel.com/addToBetslip?marketId=717.881234567&selectionId=7017917",
+						"7017917",
+					),
+				},
+			},
+			"42, 734, and 717": {
+				legs: []export.Leg{ml, under, prop},
+				odds: []db.Odds{
+					base[0],
+					row(
+						game,
+						export.FanDuel,
+						"TOTAL",
+						"",
+						"",
+						"UNDER",
+						new(52.5),
+						-110,
+						"https://sportsbook.fanduel.com/addToBetslip?marketId=734.199156488&selectionId=7017917",
+						"7017917",
+					),
+					row(
+						game,
+						export.FanDuel,
+						"PASS_YDS",
+						"ATL",
+						"Michael Penix Jr.",
+						"OVER",
+						new(225.5),
+						-115,
+						"https://sportsbook.fanduel.com/addToBetslip?marketId=717.881234567&selectionId=991122",
+						"991122",
+					),
+				},
+			},
+			"42 and unprefixed marketId": {
+				legs: []export.Leg{ml, under},
+				odds: []db.Odds{
+					base[0],
+					row(
+						game,
+						export.FanDuel,
+						"TOTAL",
+						"",
+						"",
+						"UNDER",
+						new(52.5),
+						-110,
+						"https://sportsbook.fanduel.com/addToBetslip?marketId=578189648&selectionId=7017917",
+						"7017917",
+					),
+				},
+			},
+		}
+
+		for name, tc := range tests {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				plan := export.Plan(lockedSlip(), tc.legs, tc.odds, export.FanDuel, testNow)
+				assert.Empty(t, plan.Combined)
+				assert.Empty(t, plan.Manual)
+				require.Len(t, plan.Linked, len(tc.legs))
+			})
+		}
+	})
+
+	t.Run("matching non-42 marketId prefixes still combine", func(t *testing.T) {
+		t.Parallel()
+
+		odds := []db.Odds{
+			row(
+				game,
+				export.FanDuel,
+				"ML",
+				"ATL",
+				"",
+				"TEAM",
+				nil,
+				140,
+				"https://sportsbook.fanduel.com/addToBetslip?marketId=734.199156485&selectionId=50199",
+				"50199",
+			),
+			row(
+				game,
+				export.FanDuel,
+				"TOTAL",
+				"",
+				"",
+				"UNDER",
+				new(52.5),
+				-110,
+				"https://sportsbook.fanduel.com/addToBetslip?marketId=734.199156488&selectionId=7017917",
+				"7017917",
+			),
+		}
+		plan := export.Plan(lockedSlip(), []export.Leg{ml, under}, odds, export.FanDuel, testNow)
+
+		assert.Equal(t, "https://sportsbook.fanduel.com/addToBetslip"+
+			"?marketId%5B0%5D=734.199156485&selectionId%5B0%5D=50199"+
+			"&marketId%5B1%5D=734.199156488&selectionId%5B1%5D=7017917",
+			plan.Combined)
+	})
+}
+
+func TestHasPreferredFanDuelPrefix(t *testing.T) {
+	t.Parallel()
+
+	assert.True(t, export.HasPreferredFanDuelPrefix(
+		"https://sportsbook.fanduel.com/addToBetslip?marketId=42.578189645&selectionId=50199",
+	))
+	assert.False(t, export.HasPreferredFanDuelPrefix(
+		"https://sportsbook.fanduel.com/addToBetslip?marketId=734.199156488&selectionId=7017917",
+	))
+	assert.False(t, export.HasPreferredFanDuelPrefix(
+		"https://sportsbook.fanduel.com/addToBetslip?marketId=717.881234567&selectionId=991122",
+	))
+	assert.False(t, export.HasPreferredFanDuelPrefix(
+		"https://sportsbook.fanduel.com/addToBetslip?marketId=578189648&selectionId=7017917",
+	))
+	assert.False(t, export.HasPreferredFanDuelPrefix("https://%zz"))
 }
 
 // TestPlanOnlyCoversALockedSlip checks that an open or graded slip gets no
