@@ -217,12 +217,53 @@ func mapPropOutcome(
 	return prop, true
 }
 
+// PreferredFanDuelMarketPrefix is the US FanDuel jurisdiction prefix for
+// addToBetslip marketId values.
+const PreferredFanDuelMarketPrefix = "42"
+
+// FanDuelMarketPrefix extracts the numeric jurisdiction prefix before '.' from
+// a FanDuel addToBetslip link's marketId query parameter (e.g. "42" from
+// "...?marketId=42.578189645&...").
+func FanDuelMarketPrefix(link string) (string, bool) {
+	parsed, err := url.Parse(strings.TrimSpace(link))
+	if err != nil {
+		return "", false
+	}
+	marketID := strings.TrimSpace(parsed.Query().Get("marketId"))
+	prefix, rest, ok := strings.Cut(marketID, ".")
+	if !ok || prefix == "" || rest == "" {
+		return "", false
+	}
+	for _, r := range prefix {
+		if r < '0' || r > '9' {
+			return "", false
+		}
+	}
+	return prefix, true
+}
+
+// PreferFanDuelLink reports whether candidateLink should replace currentLink
+// for a FanDuel selection because candidateLink carries the preferred US
+// jurisdiction prefix (42.*) and currentLink does not.
+func PreferFanDuelLink(book, currentLink, candidateLink string) bool {
+	if book != "fanduel" || candidateLink == "" {
+		return false
+	}
+	candPrefix, ok := FanDuelMarketPrefix(candidateLink)
+	if !ok || candPrefix != PreferredFanDuelMarketPrefix {
+		return false
+	}
+	currPrefix, ok := FanDuelMarketPrefix(currentLink)
+	return !ok || currPrefix != PreferredFanDuelMarketPrefix
+}
+
 // MergeProps combines a primary prop board with a secondary one. Rows are keyed
 // by book, market, subject, and side, so one book's row gains another's deep
 // link, selection ID, and event ID without duplicating the selection. A row that
-// gains a link also adopts the linked line and price when they differ, keeping
-// the stored line consistent with the deep link. Selections present only in
-// secondary are appended.
+// gains a link (including replacing a non-42 FanDuel marketId prefix with a
+// preferred 42.* link) also adopts the linked line and price when they differ,
+// keeping the stored line consistent with the deep link. Selections present
+// only in secondary are appended.
 func MergeProps(primary, secondary []Prop) []Prop {
 	if len(primary) == 0 {
 		return append([]Prop(nil), secondary...)
@@ -263,7 +304,7 @@ func MergeProps(primary, secondary []Prop) []Prop {
 
 		prim := merged[i]
 		switch {
-		case prim.Link == "" && sec.Link != "":
+		case (prim.Link == "" && sec.Link != "") || PreferFanDuelLink(prim.Book, prim.Link, sec.Link):
 			prim.Link = sec.Link
 			prim.Sid = sec.Sid
 			if sec.EventSid != "" {
@@ -593,10 +634,17 @@ func expandPropQuote(q propQuote) []Prop {
 }
 
 // betterSingleSideProp breaks ties when MergeProps sees duplicate rows for the
-// same (book, market, subject, side): linked rows win, then prices closest to -110.
+// same (book, market, subject, side): linked rows win, preferred FanDuel 42.*
+// links beat non-42 links, then prices closest to -110.
 func betterSingleSideProp(a, b Prop) bool {
 	if (a.Link != "") != (b.Link != "") {
 		return a.Link != ""
+	}
+	if PreferFanDuelLink(a.Book, b.Link, a.Link) {
+		return true
+	}
+	if PreferFanDuelLink(b.Book, a.Link, b.Link) {
+		return false
 	}
 	return absInt(a.Price+110) < absInt(b.Price+110)
 }

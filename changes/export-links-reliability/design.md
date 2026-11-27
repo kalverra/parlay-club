@@ -131,7 +131,7 @@ Risk: medium (changes core `UpsertOdds` SQL and merge precedence; unit tests ver
 - [x] Update `Store.UpsertOdds` in `internal/db/odds.go` to preserve stored `link`, `sid`, and `event_sid` when an
       incoming row has `NULL` on an unchanged line, and clear stale `link`/`sid` (while keeping `event_sid`) when the
       line moves, with unit tests in `internal/db/odds_test.go`.
-- [ ] Add FanDuel `marketId` prefix parsing and preference (`42.*` preferred over non-`42` prefixes like `734.*` /
+- [x] Add FanDuel `marketId` prefix parsing and preference (`42.*` preferred over non-`42` prefixes like `734.*` /
   `717.*`) in `internal/ingest/odds/props.go` (`MergeProps`) and `internal/refresh/sources.go` (`mergeOdds`), plus
   regression tests using Week 12 mixed-prefix payloads.
 - [ ] Update `fanDuelCombiner.Combine` in `internal/export/export.go` to refuse combining legs with mismatched FanDuel

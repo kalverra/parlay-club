@@ -601,3 +601,95 @@ func TestOddsSourceBelowTheFloorStillUsesTheFreeEventList(t *testing.T) {
 	require.NotNil(t, state.OddsCreditsRemaining)
 	assert.Equal(t, low, *state.OddsCreditsRemaining)
 }
+
+func TestMergeOddsPrefersFanDuel42OverNon42Week12(t *testing.T) {
+	t.Parallel()
+
+	now := novemberTime(26, 11, 0)
+	primary := []db.Odds{
+		{
+			GameID: "401", Book: "fanduel", MarketType: odds.MarketML,
+			Team: "DET", Side: odds.SideTeam, Price: -420,
+			Link:      new("https://sportsbook.fanduel.com/addToBetslip?marketId=734.199156488&selectionId=73401"),
+			Sid:       new("73401"),
+			FetchedAt: now,
+		},
+		{
+			GameID: "401", Book: "fanduel", MarketType: odds.MarketSpread,
+			Team: "DET", Side: odds.SideTeam, Line: new(-9.5), Price: -115,
+			Link:      new("https://sportsbook.fanduel.com/addToBetslip?marketId=717.199156499&selectionId=71701"),
+			Sid:       new("71701"),
+			FetchedAt: now,
+		},
+		{
+			GameID: "401", Book: "fanduel", MarketType: odds.MarketTotal,
+			Side: odds.SideOver, Line: new(48.5), Price: -110,
+			Link:      new("https://sportsbook.fanduel.com/addToBetslip?marketId=42.627958600&selectionId=42000"),
+			Sid:       new("42000"),
+			FetchedAt: now,
+		},
+	}
+
+	secondary := []db.Odds{
+		{
+			GameID: "401", Book: "fanduel", MarketType: odds.MarketML,
+			Team: "DET", Side: odds.SideTeam, Price: -410,
+			Link:      new("https://sportsbook.fanduel.com/addToBetslip?marketId=42.627958622&selectionId=42001"),
+			Sid:       new("42001"),
+			EventSid:  new("35609999"),
+			FetchedAt: now,
+		},
+		{
+			GameID: "401", Book: "fanduel", MarketType: odds.MarketSpread,
+			Team: "DET", Side: odds.SideTeam, Line: new(-10.5), Price: -108,
+			Link:      new("https://sportsbook.fanduel.com/addToBetslip?marketId=42.627958633&selectionId=42002"),
+			Sid:       new("42002"),
+			EventSid:  new("35609999"),
+			FetchedAt: now,
+		},
+		{
+			GameID: "401", Book: "fanduel", MarketType: odds.MarketTotal,
+			Side: odds.SideOver, Line: new(48.5), Price: -112,
+			Link:      new("https://sportsbook.fanduel.com/addToBetslip?marketId=734.199156511&selectionId=73409"),
+			Sid:       new("73409"),
+			EventSid:  new("35609999"),
+			FetchedAt: now,
+		},
+	}
+
+	rows := mergeOdds(primary, secondary)
+	require.Len(t, rows, 3)
+
+	byKey := make(map[string]db.Odds, len(rows))
+	for _, row := range rows {
+		byKey[row.MarketType+"|"+row.Team+"|"+row.Side] = row
+	}
+
+	ml := byKey["ML|DET|TEAM"]
+	assert.Equal(t, new("https://sportsbook.fanduel.com/addToBetslip?marketId=42.627958622&selectionId=42001"), ml.Link)
+	assert.Equal(t, new("42001"), ml.Sid)
+	assert.Equal(t, new("35609999"), ml.EventSid)
+	assert.Equal(t, -420, ml.Price)
+
+	spread := byKey["SPREAD|DET|TEAM"]
+	assert.Equal(
+		t,
+		new("https://sportsbook.fanduel.com/addToBetslip?marketId=42.627958633&selectionId=42002"),
+		spread.Link,
+	)
+	assert.Equal(t, new("42002"), spread.Sid)
+	assert.Equal(t, new("35609999"), spread.EventSid)
+	assert.Equal(t, new(-10.5), spread.Line, "adopts secondary line when replacing non-42 link on moved line")
+	assert.Equal(t, -108, spread.Price)
+
+	total := byKey["TOTAL||OVER"]
+	assert.Equal(
+		t,
+		new("https://sportsbook.fanduel.com/addToBetslip?marketId=42.627958600&selectionId=42000"),
+		total.Link,
+		"existing 42.* link is never replaced by a non-42 link",
+	)
+	assert.Equal(t, new("42000"), total.Sid)
+	assert.Equal(t, new("35609999"), total.EventSid)
+	assert.Equal(t, -110, total.Price)
+}

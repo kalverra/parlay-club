@@ -977,6 +977,181 @@ func TestMergePropsMatchesNormalizedPlayerNames(t *testing.T) {
 	}
 }
 
+func TestFanDuelMarketPrefixAndPreference(t *testing.T) {
+	t.Parallel()
+
+	prefixTests := map[string]struct {
+		link       string
+		wantPrefix string
+		wantOK     bool
+	}{
+		"US 42 prefix": {
+			link:       "https://sportsbook.fanduel.com/addToBetslip?marketId=42.627958622&selectionId=101",
+			wantPrefix: "42",
+			wantOK:     true,
+		},
+		"non-42 734 prefix": {
+			link:       "https://sportsbook.fanduel.com/addToBetslip?marketId=734.199156488&selectionId=102",
+			wantPrefix: "734",
+			wantOK:     true,
+		},
+		"non-42 717 prefix": {
+			link:       "https://sportsbook.fanduel.com/addToBetslip?marketId=717.199156499&selectionId=103",
+			wantPrefix: "717",
+			wantOK:     true,
+		},
+		"missing dot": {
+			link:   "https://sportsbook.fanduel.com/addToBetslip?marketId=42&selectionId=104",
+			wantOK: false,
+		},
+		"non-numeric prefix": {
+			link:   "https://sportsbook.fanduel.com/addToBetslip?marketId=us.12345&selectionId=105",
+			wantOK: false,
+		},
+		"empty marketId suffix": {
+			link:   "https://sportsbook.fanduel.com/addToBetslip?marketId=42.&selectionId=106",
+			wantOK: false,
+		},
+		"no marketId param": {
+			link:   "https://sportsbook.fanduel.com/buf",
+			wantOK: false,
+		},
+	}
+
+	for name, tc := range prefixTests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			got, ok := odds.FanDuelMarketPrefix(tc.link)
+			assert.Equal(t, tc.wantOK, ok)
+			assert.Equal(t, tc.wantPrefix, got)
+		})
+	}
+
+	fd42 := "https://sportsbook.fanduel.com/addToBetslip?marketId=42.627958622&selectionId=101"
+	fd734 := "https://sportsbook.fanduel.com/addToBetslip?marketId=734.199156488&selectionId=102"
+	fd717 := "https://sportsbook.fanduel.com/addToBetslip?marketId=717.199156499&selectionId=103"
+
+	assert.True(t, odds.PreferFanDuelLink("fanduel", fd734, fd42))
+	assert.True(t, odds.PreferFanDuelLink("fanduel", fd717, fd42))
+	assert.False(t, odds.PreferFanDuelLink("fanduel", fd42, fd734))
+	assert.False(t, odds.PreferFanDuelLink("fanduel", fd42, fd42))
+	assert.False(t, odds.PreferFanDuelLink("fanduel", fd734, fd717))
+	assert.False(t, odds.PreferFanDuelLink("draftkings", fd734, fd42))
+}
+
+func TestMergePropsPrefersFanDuel42OverNon42Week12(t *testing.T) {
+	t.Parallel()
+
+	// Week 12 mixed-prefix FanDuel payload: Parlay API returns 734.* / 717.*
+	// marketIds while The Odds API carries 42.* marketIds.
+	primary := []odds.Prop{
+		{
+			EventID:    "evt-wk12",
+			Book:       "fanduel",
+			MarketType: odds.MarketRushYds,
+			PlayerName: "Jahmyr Gibbs",
+			Side:       odds.SideOver,
+			Line:       new(74.5),
+			Price:      -114,
+			Link:       "https://sportsbook.fanduel.com/addToBetslip?marketId=734.199156488&selectionId=73401",
+			Sid:        "73401",
+		},
+		{
+			EventID:    "evt-wk12",
+			Book:       "fanduel",
+			MarketType: odds.MarketRecYds,
+			PlayerName: "Amon-Ra St. Brown",
+			Side:       odds.SideOver,
+			Line:       new(81.5),
+			Price:      -115,
+			Link:       "https://sportsbook.fanduel.com/addToBetslip?marketId=717.199156499&selectionId=71701",
+			Sid:        "71701",
+		},
+		{
+			EventID:    "evt-wk12",
+			Book:       "fanduel",
+			MarketType: odds.MarketAnytimeTD,
+			PlayerName: "David Montgomery",
+			Side:       odds.SideYES,
+			Price:      -125,
+			Link:       "https://sportsbook.fanduel.com/addToBetslip?marketId=42.627958600&selectionId=42000",
+			Sid:        "42000",
+		},
+	}
+
+	secondary := []odds.Prop{
+		{
+			EventID:    "evt-wk12",
+			Book:       "fanduel",
+			MarketType: odds.MarketRushYds,
+			PlayerName: "Jahmyr Gibbs",
+			Side:       odds.SideOver,
+			Line:       new(74.5),
+			Price:      -112,
+			Link:       "https://sportsbook.fanduel.com/addToBetslip?marketId=42.627958622&selectionId=42001",
+			Sid:        "42001",
+			EventSid:   "35609999",
+		},
+		{
+			EventID:    "evt-wk12",
+			Book:       "fanduel",
+			MarketType: odds.MarketRecYds,
+			PlayerName: "Amon-Ra St. Brown",
+			Side:       odds.SideOver,
+			Line:       new(82.5),
+			Price:      -110,
+			Link:       "https://sportsbook.fanduel.com/addToBetslip?marketId=42.627958633&selectionId=42002",
+			Sid:        "42002",
+			EventSid:   "35609999",
+		},
+		{
+			EventID:    "evt-wk12",
+			Book:       "fanduel",
+			MarketType: odds.MarketAnytimeTD,
+			PlayerName: "David Montgomery",
+			Side:       odds.SideYES,
+			Price:      -130,
+			Link:       "https://sportsbook.fanduel.com/addToBetslip?marketId=734.199156511&selectionId=73409",
+			Sid:        "73409",
+			EventSid:   "35609999",
+		},
+	}
+
+	merged := odds.MergeProps(primary, secondary)
+	require.Len(t, merged, 3)
+
+	gibbs := findProp(t, merged, "fanduel", odds.MarketRushYds, "Jahmyr Gibbs", odds.SideOver)
+	assert.Equal(t, "https://sportsbook.fanduel.com/addToBetslip?marketId=42.627958622&selectionId=42001", gibbs.Link)
+	assert.Equal(t, "42001", gibbs.Sid)
+	assert.Equal(t, "35609999", gibbs.EventSid)
+	assert.Equal(t, new(74.5), gibbs.Line)
+	assert.Equal(t, -114, gibbs.Price)
+
+	stBrown := findProp(t, merged, "fanduel", odds.MarketRecYds, "Amon-Ra St. Brown", odds.SideOver)
+	assert.Equal(t, "https://sportsbook.fanduel.com/addToBetslip?marketId=42.627958633&selectionId=42002", stBrown.Link)
+	assert.Equal(t, "42002", stBrown.Sid)
+	assert.Equal(t, "35609999", stBrown.EventSid)
+	assert.Equal(t, new(82.5), stBrown.Line, "adopts secondary line when replacing non-42 link on moved line")
+	assert.Equal(t, -110, stBrown.Price)
+
+	montgomery := findProp(t, merged, "fanduel", odds.MarketAnytimeTD, "David Montgomery", odds.SideYES)
+	assert.Equal(
+		t,
+		"https://sportsbook.fanduel.com/addToBetslip?marketId=42.627958600&selectionId=42000",
+		montgomery.Link,
+		"existing 42.* link is never replaced by a non-42 link",
+	)
+	assert.Equal(t, "42000", montgomery.Sid)
+	assert.Equal(t, "35609999", montgomery.EventSid)
+	assert.Equal(t, -125, montgomery.Price)
+
+	// Duplicate primary rows for the same selection prefer 42.* over 734.*.
+	deduped := odds.MergeProps([]odds.Prop{primary[0], secondary[0]}, nil)
+	require.Len(t, deduped, 1)
+	assert.Equal(t, "https://sportsbook.fanduel.com/addToBetslip?marketId=42.627958622&selectionId=42001",
+		deduped[0].Link)
+}
+
 // findProp returns the one merged row matching a selection, failing the test
 // when it is missing or duplicated.
 func findProp(

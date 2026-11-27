@@ -489,10 +489,11 @@ type gameBook struct {
 }
 
 // mergeOdds merges a secondary provider's rows into the primary provider's
-// rows. A primary row with no link adopts the secondary row's link and IDs; if
-// the line differs, it also adopts the secondary line and price so the stored
-// line matches the deep link. A linked primary row keeps its line, price, and
-// link. Secondary-only selections are appended.
+// rows. A primary row with no link (or a FanDuel row with a non-42 marketId
+// prefix when secondary carries a preferred 42.* link) adopts the secondary
+// row's link and IDs; if the line differs, it also adopts the secondary line and
+// price so the stored line matches the deep link. A linked primary row keeps
+// its line, price, and link. Secondary-only selections are appended.
 func mergeOdds(primary, secondary []db.Odds) []db.Odds {
 	if len(primary) == 0 {
 		return append([]db.Odds(nil), secondary...)
@@ -533,8 +534,15 @@ func mergeOdds(primary, secondary []db.Odds) []db.Odds {
 		}
 
 		prim := &rows[i]
+		primLink, secLink := "", ""
+		if prim.Link != nil {
+			primLink = *prim.Link
+		}
+		if sec.Link != nil {
+			secLink = *sec.Link
+		}
 		switch {
-		case prim.Link == nil && sec.Link != nil:
+		case (prim.Link == nil && sec.Link != nil) || odds.PreferFanDuelLink(prim.Book, primLink, secLink):
 			prim.Link = sec.Link
 			prim.Sid = sec.Sid
 			if sec.EventSid != nil {
