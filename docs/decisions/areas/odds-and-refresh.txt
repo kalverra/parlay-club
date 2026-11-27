@@ -4,6 +4,7 @@
 
 ## Live
 
+- [Trim raw archive bloat from nflverse and nfelo](../archive-storage-optimization.md): Exclude bulk static/season datasets (`nflverse` and `nfelo`) from `api_bodies` archiving (keeping their parsed tables updated in place) and run a one-time cleanup/vacuum of historical `nflverse` and `nfelo` archive rows.
 - [The Odds API fallback and enrichment](../draftkings-links.md): Wrap Parlay API and The Odds API behind a composite odds provider that coordinates enrichment and fallback while keeping the rest of the refresh and export pipeline unchanged.
 - [Run Sunday prefill on first authenticated visit](../first-sunday-visit-prefill.md): Trigger the Sunday pre-fill from the background page-load refresh when a signed-in user visits on Sunday morning in Eastern time, guarded by persisted sync state so it runs at most once per Sunday.
 - [Parlay API for odds and props](../parlay-api.md): Switch the odds client from The Odds API to Parlay API and add bulk per-game prop fetching on the same client.
