@@ -487,12 +487,12 @@ func (s *Service) syncOddsProps(ctx context.Context, game db.Game, now time.Time
 	// 2. Primary Parlay API props.
 	primary := s.fetchParlayProps(ctx, &game)
 
-	// 3. Secondary The Odds API enrichment or fallback.
-	fallbackFloor := TheOddsAPIFallbackFloor
-	if primary.bought && len(primary.props) > 0 {
-		fallbackFloor = TheOddsAPIEnrichFloor
+	// 3. Secondary The Odds API fallback when Parlay API is unconfigured,
+	// failed, below its floor, or returned zero props.
+	fallback := propsFetch{disabled: true}
+	if !primary.bought || len(primary.props) == 0 {
+		fallback = s.fetchFallbackProps(ctx, game, TheOddsAPIFallbackFloor, now)
 	}
-	fallback := s.fetchFallbackProps(ctx, game, fallbackFloor, now)
 
 	// 4. Combine props.
 	var finalProps []odds.Prop

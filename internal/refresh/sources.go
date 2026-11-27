@@ -362,10 +362,10 @@ func rowsForLines(
 	return rows, nil
 }
 
-// syncOdds matches each provider's free event list to the week's games, buys
-// lines when the balance permits, and merges the rows. Parlay API is primary;
-// The Odds API enriches it with missing links and markets, and serves the whole
-// week when the primary is unconfigured, fails, or sits below its floor.
+// syncOdds matches Parlay API's free event list to the week's games and buys
+// lines when the balance permits. The Odds API is only called as a fallback
+// when Parlay API is unconfigured, fails, sits below its floor, or returns
+// zero rows.
 func (s *Service) syncOdds(ctx context.Context, games []db.Game, now time.Time) (bool, error) {
 	if len(games) == 0 || allKickedOff(games, now) {
 		return false, nil
@@ -391,18 +391,15 @@ func (s *Service) syncOdds(ctx context.Context, games []db.Game, now time.Time) 
 		now,
 	)
 
-	fallback := oddsFetch{disabled: s.fallbackLines == nil}
-	if !fallback.disabled {
-		floor := TheOddsAPIFallbackFloor
-		if primary.err == nil && primary.linesBought {
-			floor = TheOddsAPIEnrichFloor
-		}
+	fallback := oddsFetch{disabled: true}
+	needsFallback := primary.disabled || primary.err != nil || !primary.linesBought || len(primary.rows) == 0
+	if s.fallbackLines != nil && needsFallback {
 		fallbackCtx := archive.WithKey(ctx, TheOddsAPISource)
 		fallback = s.fetchOdds(
 			fallbackCtx,
 			s.fallbackLines,
 			"fallback odds",
-			floor,
+			TheOddsAPIFallbackFloor,
 			games,
 			byID,
 			func(credits odds.Credits) error {

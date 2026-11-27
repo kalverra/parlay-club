@@ -56,6 +56,7 @@ type fakeLines struct {
 	events        []odds.Event
 	eventsCredits odds.Credits
 	eventsErr     error
+	eventsCalls   int
 	lines         []odds.Line
 	lineCredits   odds.Credits
 	linesErr      error
@@ -64,6 +65,7 @@ type fakeLines struct {
 
 // Events returns the prepared event list.
 func (f *fakeLines) Events(context.Context) ([]odds.Event, odds.Credits, error) {
+	f.eventsCalls++
 	return f.events, f.eventsCredits, f.eventsErr
 }
 
@@ -692,4 +694,60 @@ func TestMergeOddsPrefersFanDuel42OverNon42Week12(t *testing.T) {
 	assert.Equal(t, new("42000"), total.Sid)
 	assert.Equal(t, new("35609999"), total.EventSid)
 	assert.Equal(t, -110, total.Price)
+}
+
+func TestSyncOddsSkipsFallbackWhenParlaySucceedsAndFallsBackOnZeroRows(t *testing.T) {
+	t.Parallel()
+
+	now := novemberTime(7, 11, 0)
+	store := openTestStore(t)
+	week, err := store.UpsertWeek(t.Context(), 2026, 2, 9)
+	require.NoError(t, err)
+	game, err := store.UpsertGame(t.Context(), storedGame(week.ID, now))
+	require.NoError(t, err)
+
+	primary := &fakeLines{
+		events: []odds.Event{{
+			ID: "parlay-1", HomeTeam: "Buffalo Bills", AwayTeam: "Miami Dolphins",
+			CommenceTime: game.Kickoff,
+		}},
+		eventsCredits: odds.Credits{Remaining: 400},
+		lines: []odds.Line{{
+			EventID: "parlay-1", Book: "draftkings", MarketType: odds.MarketML,
+			Team: "Buffalo Bills", Side: odds.SideTeam, Price: -150,
+		}},
+		lineCredits: odds.Credits{Remaining: 397},
+	}
+	fallback := &fakeLines{
+		events: []odds.Event{{
+			ID: "toa-1", HomeTeam: "Buffalo Bills", AwayTeam: "Miami Dolphins",
+			CommenceTime: game.Kickoff,
+		}},
+		eventsCredits: odds.Credits{Remaining: 320},
+		lines: []odds.Line{{
+			EventID: "toa-1", Book: "draftkings", MarketType: odds.MarketML,
+			Team: "Buffalo Bills", Side: odds.SideTeam, Price: -155,
+			Link: "https://sportsbook.draftkings.com/?outcomes=dk-buf",
+		}},
+		lineCredits: odds.Credits{Remaining: 317},
+	}
+
+	service := New(Deps{
+		Store: store, Lines: primary, FallbackLines: fallback, Logger: zerolog.Nop(),
+	})
+
+	changed, err := service.syncOdds(t.Context(), []db.Game{game}, now)
+	require.NoError(t, err)
+	assert.True(t, changed)
+	assert.Equal(t, 1, primary.lineCalls)
+	assert.Zero(t, fallback.eventsCalls, "The Odds API Events must not be called when Parlay succeeds")
+	assert.Zero(t, fallback.lineCalls, "The Odds API Lines must not be called when Parlay succeeds")
+
+	// If Parlay returns zero rows for the week's games, The Odds API fallback runs.
+	primary.lines = nil
+	changed, err = service.syncOdds(t.Context(), []db.Game{game}, now.Add(time.Minute))
+	require.NoError(t, err)
+	assert.True(t, changed)
+	assert.Equal(t, 1, fallback.eventsCalls)
+	assert.Equal(t, 1, fallback.lineCalls)
 }

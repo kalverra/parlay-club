@@ -3,6 +3,7 @@ package refresh
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -59,6 +60,7 @@ type fakePropsClient struct {
 	eventsCalls   int
 	props         map[string][]odds.Prop
 	propsCredits  odds.Credits
+	propsErr      error
 	propsCalls    int
 }
 
@@ -73,6 +75,9 @@ func (f *fakePropsClient) Props(_ context.Context, eventID string) ([]odds.Prop,
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.propsCalls++
+	if f.propsErr != nil {
+		return nil, odds.Credits{}, f.propsErr
+	}
 	return f.props[eventID], f.propsCredits, nil
 }
 
@@ -303,7 +308,7 @@ func TestParlayAPICreditFloorAndFallback(t *testing.T) {
 	assert.Equal(t, new("https://sportsbook.draftkings.com/event/toa-401"), oddsRows[0].Link)
 }
 
-func TestTheOddsAPIEnrichment(t *testing.T) {
+func TestSyncGamePropsSkipsTheOddsAPIWhenParlaySucceeds(t *testing.T) {
 	t.Parallel()
 
 	store := openTestStore(t)
@@ -328,13 +333,12 @@ func TestTheOddsAPIEnrichment(t *testing.T) {
 					Side:       odds.SideOver,
 					Line:       new(250.5),
 					Price:      -110,
-					// No link on primary
 				},
 			},
 		},
 		propsCredits: odds.Credits{Remaining: 197},
 	}
-	// The Odds API has 150 credits (>= 100 enrichment floor).
+	// The Odds API has plenty of credits, but must not be called when Parlay succeeds.
 	fallbackProps := &fakeFallbackPropsClient{
 		events: []odds.Event{
 			{ID: "toa-401", HomeTeam: "Buffalo Bills", AwayTeam: "Miami Dolphins", CommenceTime: kickoff},
@@ -374,19 +378,89 @@ func TestTheOddsAPIEnrichment(t *testing.T) {
 	propsClient.mu.Unlock()
 
 	fallbackProps.mu.Lock()
-	assert.Equal(t, 1, fallbackProps.eventPropsCalls, "enrichment with The Odds API occurred")
+	assert.Equal(t, 0, fallbackProps.eventsCalls, "The Odds API Events must not be called when Parlay succeeds")
+	assert.Equal(t, 0, fallbackProps.eventPropsCalls, "The Odds API EventProps must not be called when Parlay succeeds")
 	fallbackProps.mu.Unlock()
 
 	oddsRows, err := store.OddsForGame(t.Context(), "401")
 	require.NoError(t, err)
 	require.Len(t, oddsRows, 1)
-	assert.Equal(
-		t,
-		new("https://sportsbook.draftkings.com/event/toa-401"),
-		oddsRows[0].Link,
-		"DraftKings link enriched",
-	)
-	assert.Equal(t, new("dk-sid-1"), oddsRows[0].Sid)
+	assert.Nil(t, oddsRows[0].Link)
+}
+
+func TestSyncOddsPropsFallsBackOnParlayErrorAndZeroProps(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name      string
+		propsErr  error
+		propsList []odds.Prop
+	}{
+		{name: "parlay error", propsErr: errors.New("parlay timeout")},
+		{name: "zero parlay props", propsList: nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			store := openTestStore(t)
+			t0 := novemberTime(8, 10, 0)
+			clock := &fakeClock{now: t0}
+			kickoff := novemberTime(8, 13, 0)
+			game := setupTestGame(t, store, kickoff, db.GameScheduled)
+
+			propsClient := &fakePropsClient{
+				events: []odds.Event{
+					{ID: "parlay-401", HomeTeam: "Buffalo Bills", AwayTeam: "Miami Dolphins", CommenceTime: kickoff},
+				},
+				eventsCredits: odds.Credits{Remaining: 200},
+				propsErr:      tc.propsErr,
+				props: map[string][]odds.Prop{
+					"parlay-401": tc.propsList,
+				},
+				propsCredits: odds.Credits{Remaining: 197},
+			}
+			fallbackProps := &fakeFallbackPropsClient{
+				events: []odds.Event{
+					{ID: "toa-401", HomeTeam: "Buffalo Bills", AwayTeam: "Miami Dolphins", CommenceTime: kickoff},
+				},
+				eventsCredits: odds.Credits{Remaining: 50},
+				eventProps: map[string][]odds.Prop{
+					"toa-401": {{
+						EventID:    "toa-401",
+						Book:       "draftkings",
+						MarketType: odds.MarketPassYds,
+						PlayerName: "Josh Allen",
+						Side:       odds.SideOver,
+						Line:       new(245.5),
+						Price:      -115,
+						Link:       "https://sportsbook.draftkings.com/event/toa-401",
+					}},
+				},
+				eventPropsCredits: odds.Credits{Remaining: 49},
+			}
+
+			service := New(Deps{
+				Store:         store,
+				Props:         propsClient,
+				FallbackProps: fallbackProps,
+				Now:           clock.Now,
+				Logger:        zerolog.Nop(),
+			})
+
+			changed, err := service.syncOddsProps(t.Context(), game, t0)
+			require.NoError(t, err)
+			assert.True(t, changed)
+
+			fallbackProps.mu.Lock()
+			assert.Equal(t, 1, fallbackProps.eventPropsCalls)
+			fallbackProps.mu.Unlock()
+
+			oddsRows, err := store.OddsForGame(t.Context(), "401")
+			require.NoError(t, err)
+			require.Len(t, oddsRows, 1)
+			assert.Equal(t, new("https://sportsbook.draftkings.com/event/toa-401"), oddsRows[0].Link)
+		})
+	}
 }
 
 func TestSyncGameResearchInjuriesAndRosters(t *testing.T) {

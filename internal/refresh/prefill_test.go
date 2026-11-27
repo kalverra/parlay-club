@@ -811,58 +811,21 @@ func TestRunPrefillThenPickEnrichment(t *testing.T) {
 	_, err = store.SyncState(t.Context(), OddsPropsEnrichSource("401"))
 	require.ErrorIs(t, err, db.ErrSyncStateNotFound)
 
-	// 5 minutes later, SyncPickGame sees fresh odds:props:401 so it skips Parlay API
-	// and runs enrichment-only via The Odds API.
+	// 5 minutes later, SyncPickGame sees fresh odds:props:401 so it skips both
+	// Parlay API and The Odds API.
 	clock.Advance(5 * time.Minute)
-	t1 := clock.Now()
 	require.NoError(t, service.SyncPickGame(t.Context(), report.WeekID, "401"))
 
 	assert.Equal(t, 1, propsClient.propsCalls, "Parlay API Props() must not be called again")
-	assert.Equal(t, 1, fallbackProps.eventPropsCalls, "The Odds API EventProps() must run once")
+	assert.Equal(t, 0, fallbackProps.eventsCalls, "The Odds API Events() must not run on browse")
+	assert.Equal(t, 0, fallbackProps.eventPropsCalls, "The Odds API EventProps() must not run on browse")
 
-	enrichState, err := store.SyncState(t.Context(), OddsPropsEnrichSource("401"))
-	require.NoError(t, err)
-	assert.True(t, enrichState.FetchedAt.Equal(t1))
-
-	propsState, err := store.SyncState(t.Context(), OddsPropsSource("401"))
-	require.NoError(t, err)
-	assert.True(t, propsState.FetchedAt.Equal(t1))
+	_, err = store.SyncState(t.Context(), OddsPropsEnrichSource("401"))
+	require.ErrorIs(t, err, db.ErrSyncStateNotFound)
 
 	storedOdds, err := store.OddsForGame(t.Context(), "401")
 	require.NoError(t, err)
-
-	var dkPass, parlayOnly, fdRush *db.Odds
-	for i := range storedOdds {
-		row := &storedOdds[i]
-		switch {
-		case row.Book == "draftkings" && row.MarketType == odds.MarketPassYds:
-			dkPass = row
-		case row.Book == "espnbet" && row.MarketType == odds.MarketPassTds:
-			parlayOnly = row
-		case row.Book == "fanduel" && row.MarketType == odds.MarketRushAtt:
-			fdRush = row
-		}
-	}
-	require.NotNil(t, dkPass, "DraftKings PASS_YDS row should exist")
-	require.NotNil(t, dkPass.Link)
-	assert.Equal(t, "https://sportsbook.draftkings.com/event/dk-evt-401?outcomes=dk-sid-1", *dkPass.Link)
-	require.NotNil(t, dkPass.Sid)
-	assert.Equal(t, "dk-sid-1", *dkPass.Sid)
-	require.NotNil(t, dkPass.EventSid)
-	assert.Equal(t, "dk-evt-401", *dkPass.EventSid)
-	assert.True(t, dkPass.FetchedAt.Equal(t1))
-
-	require.NotNil(t, parlayOnly, "Parlay-only prop row must remain visible under CurrentOdds")
-	assert.True(t, parlayOnly.FetchedAt.Equal(t1), "Parlay-only row must be stamped at unified FetchedAt")
-
-	require.NotNil(t, fdRush, "TOA-only FanDuel RUSH_ATT row should be added")
-	require.NotNil(t, fdRush.Link)
-	assert.True(t, fdRush.FetchedAt.Equal(t1))
-
-	// Repeating SyncPickGame immediately makes zero upstream prop calls.
-	require.NoError(t, service.SyncPickGame(t.Context(), report.WeekID, "401"))
-	assert.Equal(t, 1, propsClient.propsCalls)
-	assert.Equal(t, 1, fallbackProps.eventPropsCalls)
+	assert.Len(t, storedOdds, 3, "Parlay-only line and prop rows remain intact")
 }
 
 type recordingPropsClient struct {

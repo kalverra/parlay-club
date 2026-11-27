@@ -185,7 +185,7 @@ func TestMergeOddsReturnsTheProviderThatHasRows(t *testing.T) {
 	assert.Empty(t, mergeOdds(nil, nil))
 }
 
-func TestSyncOddsEnrichesParlayLinesWithTheOddsAPI(t *testing.T) {
+func TestSyncOddsSkipsTheOddsAPIWhenParlaySucceeds(t *testing.T) {
 	t.Parallel()
 
 	now := novemberTime(7, 11, 0)
@@ -199,7 +199,8 @@ func TestSyncOddsEnrichesParlayLinesWithTheOddsAPI(t *testing.T) {
 	changed, err := service.syncOdds(t.Context(), []db.Game{game}, now)
 	require.NoError(t, err)
 	assert.True(t, changed)
-	assert.Equal(t, 1, fallback.lineCalls, "a healthy primary still allows enrichment")
+	assert.Zero(t, fallback.eventsCalls, "healthy primary skips The Odds API events")
+	assert.Zero(t, fallback.lineCalls, "healthy primary skips The Odds API lines")
 
 	stored, err := store.GameByID(t.Context(), game.ID)
 	require.NoError(t, err)
@@ -207,29 +208,7 @@ func TestSyncOddsEnrichesParlayLinesWithTheOddsAPI(t *testing.T) {
 
 	rows, err := store.OddsForGame(t.Context(), game.ID)
 	require.NoError(t, err)
-	require.Len(t, rows, 4, "the betmgm market exists only in The Odds API")
-
-	bySelection := make(map[string]db.Odds, len(rows))
-	for _, row := range rows {
-		bySelection[row.Book+"|"+row.MarketType+"|"+row.Team+"|"+row.Side] = row
-	}
-
-	fanDuel := bySelection["fanduel|ML|BUF|TEAM"]
-	assert.Equal(t, -155, fanDuel.Price)
-	assert.Equal(t, new("https://sportsbook.fanduel.com/buf"), fanDuel.Link)
-	assert.Equal(t, new("fd-buf"), fanDuel.Sid)
-
-	draftKingsML := bySelection["draftkings|ML|BUF|TEAM"]
-	assert.Equal(t, -150, draftKingsML.Price, "a same-line link keeps the primary price")
-	assert.Equal(t, new("https://sportsbook.draftkings.com/?outcomes=dk-buf"), draftKingsML.Link)
-	assert.Equal(t, new("dk-buf"), draftKingsML.Sid)
-	assert.Equal(t, new("34118128"), draftKingsML.EventSid)
-
-	draftKingsTotal := bySelection["draftkings|TOTAL||OVER"]
-	assert.Equal(t, new(46.0), draftKingsTotal.Line)
-	assert.Equal(t, new("https://sportsbook.draftkings.com/?outcomes=dk-over"), draftKingsTotal.Link)
-
-	assert.Equal(t, new("mgm-mia"), bySelection["betmgm|ML|MIA|TEAM"].Sid)
+	require.Len(t, rows, 3, "only primary rows land")
 
 	linesState, err := store.SyncState(t.Context(), OddsLinesSource)
 	require.NoError(t, err)
@@ -237,11 +216,8 @@ func TestSyncOddsEnrichesParlayLinesWithTheOddsAPI(t *testing.T) {
 	assert.Equal(t, 397, *linesState.OddsCreditsRemaining)
 	assert.Equal(t, now, linesState.FetchedAt)
 
-	fallbackState, err := store.SyncState(t.Context(), TheOddsAPISource)
-	require.NoError(t, err)
-	require.NotNil(t, fallbackState.OddsCreditsRemaining)
-	assert.Equal(t, 317, *fallbackState.OddsCreditsRemaining)
-	assert.Equal(t, now, fallbackState.FetchedAt)
+	_, err = store.SyncState(t.Context(), TheOddsAPISource)
+	require.ErrorIs(t, err, db.ErrSyncStateNotFound)
 }
 
 func TestSyncOddsArchivesEachProvidersCallsUnderItsOwnKey(t *testing.T) {
@@ -250,7 +226,7 @@ func TestSyncOddsArchivesEachProvidersCallsUnderItsOwnKey(t *testing.T) {
 	now := novemberTime(7, 11, 0)
 	store, game := oddsTestStore(t, now)
 
-	server := func(eventID string) *httptest.Server {
+	server := func(eventID string, emptyLines bool) *httptest.Server {
 		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("X-Requests-Remaining", "300")
 			if r.URL.Path == "/events" {
@@ -260,6 +236,10 @@ func TestSyncOddsArchivesEachProvidersCallsUnderItsOwnKey(t *testing.T) {
 					"home_team": "Buffalo Bills",
 					"away_team": "Miami Dolphins"
 				}]`, eventID)
+				return
+			}
+			if emptyLines {
+				_, _ = w.Write([]byte(`[]`))
 				return
 			}
 			_, _ = fmt.Fprintf(w, `[{
@@ -278,9 +258,9 @@ func TestSyncOddsArchivesEachProvidersCallsUnderItsOwnKey(t *testing.T) {
 			}]`, eventID)
 		}))
 	}
-	primaryServer := server("evt-primary")
+	primaryServer := server("evt-primary", true)
 	t.Cleanup(primaryServer.Close)
-	fallbackServer := server("evt-fallback")
+	fallbackServer := server("evt-fallback", false)
 	t.Cleanup(fallbackServer.Close)
 
 	httpClient := &http.Client{Transport: archive.NewTransport(http.DefaultTransport, store, nil)}
@@ -307,30 +287,32 @@ func TestSyncOddsArchivesEachProvidersCallsUnderItsOwnKey(t *testing.T) {
 	assert.Equal(t, map[string]int{OddsLinesSource: 2, TheOddsAPISource: 2}, counts)
 }
 
-func TestSyncOddsSkipsEnrichmentBelowTheOddsAPIEnrichFloor(t *testing.T) {
+func TestSyncOddsSkipsFallbackBelowTheOddsAPIFallbackFloor(t *testing.T) {
 	t.Parallel()
 
 	now := novemberTime(7, 11, 0)
 	store, game := oddsTestStore(t, now)
 	primary := primaryOdds(game)
+	primary.eventsCredits = odds.Credits{Remaining: OddsLinesFloor - 1}
 	fallback := secondaryOdds(game)
-	fallback.eventsCredits = odds.Credits{Remaining: TheOddsAPIEnrichFloor - 20}
+	fallback.eventsCredits = odds.Credits{Remaining: TheOddsAPIFallbackFloor - 1}
 	service := New(Deps{
 		Store: store, Lines: primary, FallbackLines: fallback, Logger: zerolog.Nop(),
 	})
 
 	_, err := service.syncOdds(t.Context(), []db.Game{game}, now)
 	require.NoError(t, err)
-	assert.Zero(t, fallback.lineCalls, "enrichment waits for a healthy reserve")
+	assert.Zero(t, primary.lineCalls, "primary stays under its floor")
+	assert.Zero(t, fallback.lineCalls, "fallback waits for a healthy reserve")
 
 	rows, err := store.OddsForGame(t.Context(), game.ID)
 	require.NoError(t, err)
-	require.Len(t, rows, 3, "primary rows still land")
+	require.Empty(t, rows)
 
 	fallbackState, err := store.SyncState(t.Context(), TheOddsAPISource)
 	require.NoError(t, err)
 	require.NotNil(t, fallbackState.OddsCreditsRemaining)
-	assert.Equal(t, TheOddsAPIEnrichFloor-20, *fallbackState.OddsCreditsRemaining,
+	assert.Equal(t, TheOddsAPIFallbackFloor-1, *fallbackState.OddsCreditsRemaining,
 		"the free event list still refreshes the fallback balance")
 	assert.Equal(t, now, fallbackState.FetchedAt)
 }

@@ -614,7 +614,7 @@ func TestKickPickGameAsyncSingleFlightAndPublish(t *testing.T) {
 	assert.Empty(t, publisher.seen())
 }
 
-func TestSyncGamePropsEnrichesPrefilledPropsAndEnforcesEnrichFloor(t *testing.T) {
+func TestSyncGamePropsSkipsTheOddsAPIWhenPrefilledPropsAreFresh(t *testing.T) {
 	t.Parallel()
 
 	store := openTestStore(t)
@@ -662,7 +662,7 @@ func TestSyncGamePropsEnrichesPrefilledPropsAndEnforcesEnrichFloor(t *testing.T)
 			HomeTeam:     "Buffalo Bills",
 			AwayTeam:     "Miami Dolphins",
 		}},
-		eventsCredits: odds.Credits{Remaining: TheOddsAPIEnrichFloor - 1},
+		eventsCredits: odds.Credits{Remaining: 250},
 		eventProps: map[string][]odds.Prop{
 			"toa-401": {{
 				EventID:    "toa-401",
@@ -677,7 +677,7 @@ func TestSyncGamePropsEnrichesPrefilledPropsAndEnforcesEnrichFloor(t *testing.T)
 				EventSid:   "dk-evt-401",
 			}},
 		},
-		eventPropsCredits: odds.Credits{Remaining: TheOddsAPIEnrichFloor - 2},
+		eventPropsCredits: odds.Credits{Remaining: 249},
 	}
 
 	svc := New(Deps{
@@ -688,42 +688,16 @@ func TestSyncGamePropsEnrichesPrefilledPropsAndEnforcesEnrichFloor(t *testing.T)
 		Logger:        zerolog.Nop(),
 	})
 
-	// Below TheOddsAPIEnrichFloor: EventProps is skipped and no failure backoff is recorded.
+	// While odds:props:{gameID} is fresh, SyncGameProps makes zero upstream calls
+	// to either Parlay API or The Odds API.
 	clock.Advance(5 * time.Minute)
 	require.NoError(t, svc.SyncGameProps(t.Context(), game.ID))
 	assert.Equal(t, int32(0), props.calls.Load())
+	assert.Equal(t, 0, fallbackProps.eventsCalls)
 	assert.Equal(t, 0, fallbackProps.eventPropsCalls)
-	assert.False(t, svc.paused(OddsPropsEnrichSource(game.ID), clock.Now()))
 
 	_, err := store.SyncState(t.Context(), OddsPropsEnrichSource(game.ID))
 	require.ErrorIs(t, err, db.ErrSyncStateNotFound)
-
-	// Once credits meet TheOddsAPIEnrichFloor, calling immediately (without advancing past
-	// failureBackoff) enriches existing props and stamps a unified FetchedAt.
-	fallbackProps.eventsCredits = odds.Credits{Remaining: TheOddsAPIEnrichFloor}
-	t1 := clock.Now()
-	require.NoError(t, svc.SyncGameProps(t.Context(), game.ID))
-	assert.Equal(t, int32(0), props.calls.Load())
-	assert.Equal(t, 1, fallbackProps.eventPropsCalls)
-
-	enrichState, err := store.SyncState(t.Context(), OddsPropsEnrichSource(game.ID))
-	require.NoError(t, err)
-	assert.True(t, enrichState.FetchedAt.Equal(t1))
-
-	storedOdds, err := store.OddsForGame(t.Context(), game.ID)
-	require.NoError(t, err)
-	require.Len(t, storedOdds, 2)
-	for _, row := range storedOdds {
-		assert.True(t, row.FetchedAt.Equal(t1), "all current prop rows share unified FetchedAt")
-		if row.Book == "draftkings" {
-			require.NotNil(t, row.Link)
-			assert.Equal(t, "https://sportsbook.draftkings.com/event/dk-evt-401?outcomes=dk-sid-1", *row.Link)
-		}
-	}
-
-	// Repeating SyncGameProps while fresh makes zero upstream calls.
-	require.NoError(t, svc.SyncGameProps(t.Context(), game.ID))
-	assert.Equal(t, 1, fallbackProps.eventPropsCalls)
 }
 
 func TestSyncOddsPropsRecordsEnrichFreshnessWhenFallbackBought(t *testing.T) {
@@ -750,21 +724,17 @@ func TestSyncOddsPropsRecordsEnrichFreshnessWhenFallbackBought(t *testing.T) {
 			Line:       new(-3.5),
 			Price:      -110,
 		}},
-		lineCredits: odds.Credits{Remaining: 397},
+		lineCredits: odds.Credits{Remaining: OddsPropsFloor - 1},
 	}
+	// Parlay sits below OddsPropsFloor so SyncPickGame falls back to The Odds API.
 	props := &blockingPropsClient{
-		props: map[string][]odds.Prop{
-			"evt-401": {{
-				EventID:    "evt-401",
-				Book:       "draftkings",
-				MarketType: odds.MarketPassYds,
-				PlayerName: "Josh Allen",
-				Side:       odds.SideOver,
-				Line:       new(255.5),
-				Price:      -115,
-			}},
-		},
-		propsCredits: odds.Credits{Remaining: 394},
+		events: []odds.Event{{
+			ID:           "evt-401",
+			HomeTeam:     "Buffalo Bills",
+			AwayTeam:     "Miami Dolphins",
+			CommenceTime: kickoff,
+		}},
+		eventsCredits: odds.Credits{Remaining: OddsPropsFloor - 1},
 	}
 	fallbackProps := &fakeFallbackPropsClient{
 		events: []odds.Event{{
@@ -802,7 +772,7 @@ func TestSyncOddsPropsRecordsEnrichFreshnessWhenFallbackBought(t *testing.T) {
 	})
 
 	require.NoError(t, svc.SyncPickGame(t.Context(), game.WeekID, game.ID))
-	assert.Equal(t, int32(1), props.calls.Load())
+	assert.Equal(t, int32(0), props.calls.Load())
 	assert.Equal(t, 1, fallbackProps.eventPropsCalls)
 
 	enrichState, err := store.SyncState(t.Context(), OddsPropsEnrichSource(game.ID))
@@ -1121,7 +1091,9 @@ func TestEnrichGamePropsMergesUnresolvedVariantPlayerName(t *testing.T) {
 	})
 
 	clock.Advance(5 * time.Minute)
-	require.NoError(t, svc.SyncGameProps(t.Context(), game.ID))
+	changed, err := svc.enrichGameProps(t.Context(), game, clock.Now())
+	require.NoError(t, err)
+	assert.True(t, changed)
 	assert.Equal(t, 1, fallbackProps.eventPropsCalls)
 
 	stored, err := store.OddsForGame(t.Context(), game.ID)
@@ -1465,19 +1437,7 @@ func TestKickSlipExportEnrichSkipsAfterEnrichedSyncOdds(t *testing.T) {
 			HomeTeam:     "Buffalo Bills",
 			AwayTeam:     "Miami Dolphins",
 		}},
-		eventsCredits: odds.Credits{Remaining: 200},
-		lines: []odds.Line{{
-			EventID:    "parlay-301",
-			Book:       "fanduel",
-			MarketType: odds.MarketSpread,
-			Side:       odds.SideTeam,
-			Team:       "Buffalo Bills",
-			Line:       new(-3.5),
-			Price:      -110,
-			Link:       "https://sportsbook.fanduel.com/addToBetslip?marketId=42.3001&selectionId=fd-buf",
-			Sid:        "fd-buf",
-		}},
-		lineCredits: odds.Credits{Remaining: 199},
+		eventsCredits: odds.Credits{Remaining: OddsLinesFloor - 1},
 	}
 	fallbackLines := &blockingLinesClient{
 		events: []odds.Event{{
@@ -1509,11 +1469,11 @@ func TestKickSlipExportEnrichSkipsAfterEnrichedSyncOdds(t *testing.T) {
 		Logger:        zerolog.Nop(),
 	})
 
-	// Enriched syncOdds buys both providers and must stamp OddsLinesEnrichSource.
+	// Fallback syncOdds buys The Odds API and must stamp OddsLinesEnrichSource.
 	changed, err := svc.syncOdds(t.Context(), []db.Game{game}, clock.Now())
 	require.NoError(t, err)
 	assert.True(t, changed)
-	assert.Equal(t, int32(1), primaryLines.calls.Load())
+	assert.Equal(t, int32(0), primaryLines.calls.Load())
 	assert.Equal(t, int32(1), fallbackLines.calls.Load())
 
 	enrichState, err := store.SyncState(t.Context(), OddsLinesEnrichSource)

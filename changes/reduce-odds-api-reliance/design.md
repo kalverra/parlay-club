@@ -133,7 +133,7 @@ and props while preserving Parlay-outage fallback and unified `FetchedAt` mergin
 Risk: medium (changes when The Odds API runs; fallback and lock-time SSE refresh must be thoroughly verified in refresh
 tests).
 
-- [ ] Update `syncOdds` (`internal/refresh/sources.go`), `syncOddsProps` (`internal/refresh/research.go`), and
+- [x] Update `syncOdds` (`internal/refresh/sources.go`), `syncOddsProps` (`internal/refresh/research.go`), and
   `SyncGameProps` / `syncPickProps` (`internal/refresh/refresh.go`) to skip The Odds API enrichment when Parlay API
   succeeds while preserving outage and credit-floor fallback, updating `sources_test.go`, `research_test.go`, and
   `pick_test.go`.

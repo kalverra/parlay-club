@@ -958,20 +958,7 @@ func (s *Service) SyncGameProps(ctx context.Context, gameID string) error {
 	}
 
 	now := s.now()
-	propsRan := false
-	src := s.oddsPropsSource(game, now)
-	origRun := src.run
-	src.run = func(ctx context.Context) (bool, error) {
-		propsRan = true
-		return origRun(ctx)
-	}
-	if err := s.refreshSync(ctx, src, now); err != nil {
-		return err
-	}
-	if propsRan {
-		return nil
-	}
-	return s.refreshSync(ctx, s.oddsPropsEnrichSource(game, now, false), now)
+	return s.refreshSync(ctx, s.oddsPropsSource(game, now), now)
 }
 
 // SyncGameResearch syncs injuries, rosters, and props for one game if stale.
@@ -1324,7 +1311,6 @@ func (s *Service) syncPickProps(ctx context.Context, weekID int64, gameID string
 	if !now.Before(game.Kickoff) {
 		return nil
 	}
-	propsRan := false
 	src := source{
 		key: OddsPropsSource(game.ID),
 		due: func(_ context.Context, state db.SyncState) (bool, error) {
@@ -1334,18 +1320,10 @@ func (s *Service) syncPickProps(ctx context.Context, weekID int64, gameID string
 			return oddsPropsStale(state.FetchedAt, now, game), nil
 		},
 		run: func(ctx context.Context) (bool, error) {
-			propsRan = true
 			return s.syncOddsProps(ctx, game, now)
 		},
 	}
 	err = s.refreshSync(ctx, src, now)
-	if errors.Is(err, odds.ErrNoAPIKey) {
-		return nil
-	}
-	if err != nil || propsRan {
-		return err
-	}
-	err = s.refreshSync(ctx, s.oddsPropsEnrichSource(game, now, force), now)
 	if errors.Is(err, odds.ErrNoAPIKey) {
 		return nil
 	}
