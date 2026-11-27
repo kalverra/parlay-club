@@ -1960,7 +1960,8 @@ func (h *slipHandlers) slipPageData(ctx context.Context, slip db.Slip) (SlipPage
 	}
 
 	open := slip.Status == db.SlipOpen
-	gamesByID, playerStats := analyzer.LoadSlipSignals(ctx, h.deps.Store, h.deps.now(), slip.WeekID, games, legs)
+	now := h.deps.now()
+	gamesByID, playerStats := analyzer.LoadSlipSignals(ctx, h.deps.Store, now, slip.WeekID, games, legs)
 	analysis, legGrades := analyzerView(legs, gamesByID, playerStats, names, h.deps.GradingEngine)
 	media, err := h.legMedia(ctx, legs, allWeekGames)
 	if err != nil {
@@ -1971,13 +1972,27 @@ func (h *slipHandlers) slipPageData(ctx context.Context, slip db.Slip) (SlipPage
 	if hasUser && user.HomeBook != nil {
 		homeBook = *user.HomeBook
 	}
-	var splitLines map[int64]string
-	if open && len(legs) > 0 && len(games) > 0 {
-		var err error
-		splitLines, err = h.slipLegSplitLines(ctx, slip.WeekID, games, legs, homeBook)
+	next := slips.NextStep(slip, members, legs, games, viewerID, now)
+	var boardRows []board.Row
+	if open && len(games) > 0 && (len(legs) > 0 || next.Step == slips.StepPick) {
+		odds, err := h.deps.Store.OddsForWeek(ctx, slip.WeekID)
 		if err != nil {
 			return SlipPage{}, err
 		}
+		if len(odds) > 0 {
+			roster, err := h.deps.Store.RosterForTeams(ctx, weekTeams(games))
+			if err != nil {
+				return SlipPage{}, err
+			}
+			mine := legsForUser(legs, viewerID)
+			boardStart := time.Now()
+			boardRows = board.BuildDualBook(games, odds, roster, homeBook, mine, now)
+			AddBoardTiming(ctx, time.Since(boardStart))
+		}
+	}
+	var splitLines map[int64]string
+	if open && len(legs) > 0 && len(boardRows) > 0 {
+		splitLines = slipLegSplitLines(boardRows, legs, homeBook)
 	}
 	votesByLeg := voteViews(votes, viewerID)
 	legProgs, slipProg := evaluateSlipProgress(legs, allWeekGames)
@@ -2047,14 +2062,9 @@ func (h *slipHandlers) slipPageData(ctx context.Context, slip db.Slip) (SlipPage
 		Siblings:      siblings,
 	}
 
-	next := slips.NextStep(slip, members, legs, games, viewerID, h.deps.now())
 	var highlights HighlightsView
-	if open && next.Step == slips.StepPick {
-		var err error
-		highlights, err = h.slipHighlights(ctx, slip, games, legs, viewerID, next.Need)
-		if err != nil {
-			return SlipPage{}, err
-		}
+	if open && next.Step == slips.StepPick && len(boardRows) > 0 {
+		highlights = h.slipHighlights(ctx, slip, games, boardRows, homeBook, now, next.Need)
 	}
 	return SlipPage{
 		Page:       h.page(nil, slip.Name),
@@ -2066,25 +2076,7 @@ func (h *slipHandlers) slipPageData(ctx context.Context, slip db.Slip) (SlipPage
 	}, nil
 }
 
-func (h *slipHandlers) slipLegSplitLines(
-	ctx context.Context,
-	weekID int64,
-	games []db.Game,
-	legs []db.Leg,
-	homeBook string,
-) (map[int64]string, error) {
-	odds, err := h.deps.Store.OddsForWeek(ctx, weekID)
-	if err != nil {
-		return nil, err
-	}
-	if len(odds) == 0 {
-		return nil, nil
-	}
-	roster, err := h.deps.Store.RosterForTeams(ctx, weekTeams(games))
-	if err != nil {
-		return nil, err
-	}
-	rows := board.BuildDualBook(games, odds, roster, homeBook, legs, h.deps.now())
+func slipLegSplitLines(rows []board.Row, legs []db.Leg, homeBook string) map[int64]string {
 	splitLines := make(map[int64]string, len(legs))
 	for _, row := range rows {
 		if !row.LinesDiffer {
@@ -2100,41 +2092,20 @@ func (h *slipHandlers) slipLegSplitLines(
 			}
 		}
 	}
-	return splitLines, nil
+	return splitLines
 }
 
 func (h *slipHandlers) slipHighlights(
 	ctx context.Context,
 	slip db.Slip,
 	games []db.Game,
-	legs []db.Leg,
-	viewerID int64,
+	rows []board.Row,
+	homeBook string,
+	now time.Time,
 	remainingSlots int,
-) (HighlightsView, error) {
-	if len(games) == 0 || remainingSlots <= 0 {
-		return HighlightsView{}, nil
-	}
-	odds, err := h.deps.Store.OddsForWeek(ctx, slip.WeekID)
-	if err != nil {
-		return HighlightsView{}, err
-	}
-	if len(odds) == 0 {
-		return HighlightsView{}, nil
-	}
-	roster, err := h.deps.Store.RosterForTeams(ctx, weekTeams(games))
-	if err != nil {
-		return HighlightsView{}, err
-	}
-
-	_, homeBook, q := h.pickViewer(ctx, board.Query{})
-	mine := legsForUser(legs, viewerID)
-	now := q.Now
-
-	boardStart := time.Now()
-	rows := board.BuildDualBook(games, odds, roster, homeBook, mine, now)
-	AddBoardTiming(ctx, time.Since(boardStart))
-	if len(rows) == 0 {
-		return HighlightsView{}, nil
+) HighlightsView {
+	if len(games) == 0 || len(rows) == 0 || remainingSlots <= 0 {
+		return HighlightsView{}
 	}
 
 	boardGames, boardStats := h.loadBoardSignalsForRows(ctx, now, slip.WeekID, games, rows)
@@ -2143,7 +2114,7 @@ func (h *slipHandlers) slipHighlights(
 	})
 	view := highlightsView(set, remainingSlots, homeBook)
 	view.SlipID = slip.ID
-	return view, nil
+	return view
 }
 
 func highlightsView(set board.HighlightSet, remainingSlots int, homeBook string) HighlightsView {

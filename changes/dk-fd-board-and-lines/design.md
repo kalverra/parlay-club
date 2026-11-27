@@ -136,3 +136,7 @@ confirms layout density).
   `internal/web/export_test.go`.
 - [x] Docs: update `docs/concepts/pick-board.md` (or board/research concept docs) and `docs/concepts/export.md` to
   document the DK ∩ FD pickable filter, split-line display, and DK/FD home-book UX.
+
+## Reviews
+
+- [x] Final review: agy@gemini-4-neon-medium

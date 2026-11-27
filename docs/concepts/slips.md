@@ -341,7 +341,7 @@ picked opens "Swap which pick?" and lists the viewer's legs that are not kickoff
 `PUT /legs/{old}` with the new pick's fields; a line that already holds a pick switches sides in place and needs no free
 slot.
 
-When a saved non-`OTHER` leg's `Line` or `Odds` differ from the current board row (`board.Row.Drifted`), `board.Build`
+When a saved non-`OTHER` leg's `Line` or `Odds` differ from the current board row (`board.Row.Drifted`), `board.BuildDualBook`
 populates `BoardDriftNote` (`Slip ... · now ...`) and `TrayDriftNote` (`Now ...`) so both the board option and the pick
 tray show a drift notice. While the slip is `OPEN` and the leg is not kickoff-locked (and the viewer is not locked in on
 the board), a one-tap **Sync line** form (`PUT /legs/{id}` with `from=board` or `from=tray`) updates the leg's `line`,

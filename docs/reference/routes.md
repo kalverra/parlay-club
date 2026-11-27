@@ -245,8 +245,9 @@ bar in the header with links to each sibling slip and their status summaries (`(
 `GET /slips/{id}/pick` is the hub's pick action. It filters the week's games for the slip via
 `slips.FilterGamesForSlip`, so games outside the slip's scope or `slip_games` are omitted from the slate, window chips,
 and detail drilldowns. It reads the filtered games, one `OddsForWeek` read, the week's rosters, and the viewer's legs,
-then hands them to `internal/board`. `board.Build` folds one row per selection, using the viewer's home-book price when
-it carries the pick and the median across books otherwise, and drops games that have kicked off. `board.Slates` turns
+then hands them to `internal/board`. `board.BuildDualBook` filters to selections quoted by both DraftKings and FanDuel,
+folds one row per selection using the viewer's home book (`draftkings` or `fanduel`, or FanDuel when unset) with no
+median line averaging, and drops games that have kicked off. `board.Slates` turns
 the same rows into one card per upcoming game for the slate, `board.StartedCount` counts the games that already kicked
 off for the empty state, and `board.Detail` shapes the open game's header, tabs, and the active tab's lines or player
 cards. A card is marked unloaded when its game has lines but no prop rows. The handler sets `Page.Wide`, so the header
@@ -359,7 +360,7 @@ Requested with `Hx-Request` and a `player_id` but no `game_id`, it renders the p
 it renders the game sheet partial.
 
 The explorer reads one week of cached games, odds, and rosters (`GamesForWeek`, `OddsForWeek`, `RosterForTeams`), folds
-them with `board.Build`, and scores each row with `analyzer.ScoreLeg` before `board.Explore` filters and sorts. It never
+them with `board.BuildDualBook` (requiring both DraftKings and FanDuel quotes, with no median line averaging), and scores each row with `analyzer.ScoreLeg` before `board.Explore` filters and sorts. It never
 syncs odds, injuries, or game logs, so searching, filtering, and sorting spend no Odds API or Parlay API credits.
 
 | Parameter | Meaning |
