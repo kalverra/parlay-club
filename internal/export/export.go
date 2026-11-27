@@ -323,13 +323,6 @@ func (fanDuelCombiner) Combine(linked []LegLink) (string, bool) {
 	return b.String(), true
 }
 
-// HasPreferredFanDuelPrefix reports whether link carries the preferred US
-// FanDuel marketId jurisdiction prefix (42.*).
-func HasPreferredFanDuelPrefix(link string) bool {
-	prefix, ok := odds.FanDuelMarketPrefix(link)
-	return ok && prefix == odds.PreferredFanDuelMarketPrefix
-}
-
 // fanDuelMarketID pulls the market ID out of the per-leg link Parlay API
 // stored. A link without one cannot take part in a combined link.
 func fanDuelMarketID(link string) (string, bool) {

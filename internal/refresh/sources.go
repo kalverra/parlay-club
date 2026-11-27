@@ -449,7 +449,7 @@ func (s *Service) syncOdds(ctx context.Context, games []db.Game, now time.Time) 
 	}
 
 	rows := mergeOdds(primary.rows, fallback.rows)
-	changed, err := s.publishOdds(ctx, weekID, matches, rows, primary.remaining, now)
+	changed, err := s.publishOdds(ctx, weekID, matches, rows, primary.remaining, now, fallback.linesBought)
 	s.logger.Info().
 		Float64("duration_ms", durationMS(time.Since(start))).
 		Int64("week_id", weekID).
@@ -692,8 +692,9 @@ func (s *Service) publishOdds(
 	rows []db.Odds,
 	remaining *int,
 	now time.Time,
+	enriched bool,
 ) (bool, error) {
-	changed, err := s.writeOdds(ctx, matches, rows, remaining, now)
+	changed, err := s.writeOdds(ctx, matches, rows, remaining, now, enriched)
 	if err != nil {
 		return changed, err
 	}
@@ -705,13 +706,15 @@ func (s *Service) publishOdds(
 
 // writeOdds records the event matches, the priced rows, and the fetch in one
 // transaction. A nil rows slice is the below-floor case: matches are free and
-// still stored, but no lines were bought.
+// still stored, but no lines were bought. When enriched is true, it also
+// records OddsLinesEnrichSource in the same transaction.
 func (s *Service) writeOdds(
 	ctx context.Context,
 	matches map[string]string,
 	rows []db.Odds,
 	remaining *int,
 	now time.Time,
+	enriched bool,
 ) (bool, error) {
 	changed := false
 	err := s.store.Tx(ctx, func(tx *db.Store) error {
@@ -729,7 +732,13 @@ func (s *Service) writeOdds(
 		}
 		changed = changed || rowsChanged
 
-		return tx.RecordSync(ctx, OddsLinesSource, now, remaining)
+		if err := tx.RecordSync(ctx, OddsLinesSource, now, remaining); err != nil {
+			return err
+		}
+		if enriched {
+			return tx.RecordSync(ctx, OddsLinesEnrichSource, now, nil)
+		}
+		return nil
 	})
 	if err != nil {
 		return changed, err

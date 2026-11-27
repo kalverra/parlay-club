@@ -231,11 +231,8 @@ Parlay API is primary and The Odds API enriches it or serves as fallback. The bu
 4. The Odds API buys lines when Parlay API bought them and The Odds API has at least 40 credits
    (`TheOddsAPIEnrichFloor`). It also buys them when Parlay API is unconfigured, failed, or below its floor, provided
    The Odds API has at least 25 (`TheOddsAPIFallbackFloor`). Otherwise it stops after the free event list.
-5. Merge the rows. A primary row with no link—or a FanDuel row with a non-`42` `marketId` prefix when The Odds API
-   supplies a `42.*` link—adopts The Odds API's link, sid, and event sid; when the linked line differs, it also adopts
-   the linked line and price. A primary row that already has a valid `42.*` link keeps its line, price, and link.
-   Secondary rows that fill a missing book or market are appended, and `Store.UpsertOdds` preserves stored links on
-   unchanged lines if a later Parlay-only refresh sends `NULL`.
+5. Merge the rows and upsert them, preferring The Odds API's DraftKings and `42.*` FanDuel links and preserving stored
+   links on unchanged lines; see [Data sources](../reference/data-sources.md#enrichment-and-fallback).
 6. Record the primary fetch and write the merged rows in one transaction. A fallback event ID fills
    `games.odds_event_id` only when the game has no stored ID, so a transient primary failure does not churn it.
 

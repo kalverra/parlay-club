@@ -1419,3 +1419,111 @@ func TestKickSlipExportEnrichNonPreferredFanDuelAndGameLines(t *testing.T) {
 	assert.Equal(t, 1, fallbackProps.eventPropsCalls)
 	assert.Empty(t, publisher.seen())
 }
+
+func TestKickSlipExportEnrichSkipsAfterEnrichedSyncOdds(t *testing.T) {
+	t.Parallel()
+
+	store, week, slip := publishTestStore(t)
+	t0 := novemberTime(8, 10, 0)
+	clock := &fakeClock{now: t0}
+
+	game, err := store.UpsertGame(t.Context(), db.Game{
+		ID:        "401772301",
+		WeekID:    week.ID,
+		HomeTeam:  "BUF",
+		AwayTeam:  "MIA",
+		HomeName:  "Buffalo Bills",
+		AwayName:  "Miami Dolphins",
+		Kickoff:   novemberTime(8, 13, 0),
+		Status:    db.GameScheduled,
+		UpdatedAt: novemberTime(4, 12, 0),
+	})
+	require.NoError(t, err)
+
+	members, err := store.SlipMembers(t.Context(), slip.ID)
+	require.NoError(t, err)
+	require.NotEmpty(t, members)
+
+	_, err = store.CreateLeg(t.Context(), db.Leg{
+		SlipID:     slip.ID,
+		UserID:     members[0].User.ID,
+		GameID:     new(game.ID),
+		MarketType: odds.MarketSpread,
+		Team:       new("BUF"),
+		Side:       new(odds.SideTeam),
+		Line:       new(-3.5),
+		Selection:  "BUF -3.5",
+		Odds:       -110,
+	})
+	require.NoError(t, err)
+	require.NoError(t, store.SetSlipStatus(t.Context(), slip.ID, db.SlipLocked))
+
+	primaryLines := &blockingLinesClient{
+		events: []odds.Event{{
+			ID:           "parlay-301",
+			CommenceTime: game.Kickoff,
+			HomeTeam:     "Buffalo Bills",
+			AwayTeam:     "Miami Dolphins",
+		}},
+		eventsCredits: odds.Credits{Remaining: 200},
+		lines: []odds.Line{{
+			EventID:    "parlay-301",
+			Book:       "fanduel",
+			MarketType: odds.MarketSpread,
+			Side:       odds.SideTeam,
+			Team:       "Buffalo Bills",
+			Line:       new(-3.5),
+			Price:      -110,
+			Link:       "https://sportsbook.fanduel.com/addToBetslip?marketId=42.3001&selectionId=fd-buf",
+			Sid:        "fd-buf",
+		}},
+		lineCredits: odds.Credits{Remaining: 199},
+	}
+	fallbackLines := &blockingLinesClient{
+		events: []odds.Event{{
+			ID:           "toa-301",
+			CommenceTime: game.Kickoff,
+			HomeTeam:     "Buffalo Bills",
+			AwayTeam:     "Miami Dolphins",
+		}},
+		eventsCredits: odds.Credits{Remaining: 100},
+		lines: []odds.Line{{
+			EventID:    "toa-301",
+			Book:       "fanduel",
+			MarketType: odds.MarketSpread,
+			Side:       odds.SideTeam,
+			Team:       "Buffalo Bills",
+			Line:       new(-3.5),
+			Price:      -110,
+			Link:       "https://sportsbook.fanduel.com/addToBetslip?marketId=42.3001&selectionId=fd-buf",
+			Sid:        "fd-buf",
+		}},
+		lineCredits: odds.Credits{Remaining: 97},
+	}
+
+	svc := New(Deps{
+		Store:         store,
+		Lines:         primaryLines,
+		FallbackLines: fallbackLines,
+		Now:           clock.Now,
+		Logger:        zerolog.Nop(),
+	})
+
+	// Enriched syncOdds buys both providers and must stamp OddsLinesEnrichSource.
+	changed, err := svc.syncOdds(t.Context(), []db.Game{game}, clock.Now())
+	require.NoError(t, err)
+	assert.True(t, changed)
+	assert.Equal(t, int32(1), primaryLines.calls.Load())
+	assert.Equal(t, int32(1), fallbackLines.calls.Load())
+
+	enrichState, err := store.SyncState(t.Context(), OddsLinesEnrichSource)
+	require.NoError(t, err)
+	assert.Equal(t, t0, enrichState.FetchedAt)
+
+	// Even though DraftKings still has no link for the game-line leg,
+	// KickSlipExportEnrich must not re-buy lines right after an enriched syncOdds.
+	clock.Advance(time.Minute)
+	svc.KickSlipExportEnrich(t.Context(), slip.ID)
+	svc.wait()
+	assert.Equal(t, int32(1), fallbackLines.calls.Load())
+}

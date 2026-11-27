@@ -304,8 +304,8 @@ team abbreviations, then merges the rows. Provider event IDs never need to agree
   API's line and price, so the stored line matches the deep link. A primary row that already has a valid `42.*` link
   keeps its line, price, and link; a missing sid backfills only when the lines match, and a missing event sid always
   backfills. Selections only The Odds API quotes are appended, filling missing books and markets. `Store.UpsertOdds`
-  preserves stored `link`, `sid`, and `event_sid` when a later Parlay-only refresh upserts `NULL` on an unchanged line
-  (`odds.line IS excluded.line`), and clears stale `link`/`sid` (while preserving `event_sid`) if the line moves.
+  preserves stored `link`, `sid`, and `event_sid` when a later Parlay-only refresh upserts `NULL` on an unchanged line,
+  and clears stale `link`/`sid` (while preserving `event_sid`) if the line moves.
 - **Fallback.** When Parlay API is unconfigured, errors, or sits below its 50-credit floor, The Odds API serves the
   whole week if it has at least 25 credits. Its event IDs fill `games.odds_event_id` only for games that have no stored
   ID, so a transient primary failure does not churn an existing ID.

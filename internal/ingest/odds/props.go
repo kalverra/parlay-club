@@ -242,6 +242,13 @@ func FanDuelMarketPrefix(link string) (string, bool) {
 	return prefix, true
 }
 
+// HasPreferredFanDuelPrefix reports whether link carries the preferred US
+// FanDuel marketId jurisdiction prefix (42.*).
+func HasPreferredFanDuelPrefix(link string) bool {
+	prefix, ok := FanDuelMarketPrefix(link)
+	return ok && prefix == PreferredFanDuelMarketPrefix
+}
+
 // PreferFanDuelLink reports whether candidateLink should replace currentLink
 // for a FanDuel selection because candidateLink carries the preferred US
 // jurisdiction prefix (42.*) and currentLink does not.
@@ -249,12 +256,7 @@ func PreferFanDuelLink(book, currentLink, candidateLink string) bool {
 	if book != "fanduel" || candidateLink == "" {
 		return false
 	}
-	candPrefix, ok := FanDuelMarketPrefix(candidateLink)
-	if !ok || candPrefix != PreferredFanDuelMarketPrefix {
-		return false
-	}
-	currPrefix, ok := FanDuelMarketPrefix(currentLink)
-	return !ok || currPrefix != PreferredFanDuelMarketPrefix
+	return HasPreferredFanDuelPrefix(candidateLink) && !HasPreferredFanDuelPrefix(currentLink)
 }
 
 // MergeProps combines a primary prop board with a secondary one. Rows are keyed

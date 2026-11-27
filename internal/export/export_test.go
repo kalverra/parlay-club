@@ -995,24 +995,6 @@ func TestPlanKeepsFanDuelPerLegWhenACombinedLinkCannotBeBuilt(t *testing.T) {
 	})
 }
 
-func TestHasPreferredFanDuelPrefix(t *testing.T) {
-	t.Parallel()
-
-	assert.True(t, export.HasPreferredFanDuelPrefix(
-		"https://sportsbook.fanduel.com/addToBetslip?marketId=42.578189645&selectionId=50199",
-	))
-	assert.False(t, export.HasPreferredFanDuelPrefix(
-		"https://sportsbook.fanduel.com/addToBetslip?marketId=734.199156488&selectionId=7017917",
-	))
-	assert.False(t, export.HasPreferredFanDuelPrefix(
-		"https://sportsbook.fanduel.com/addToBetslip?marketId=717.881234567&selectionId=991122",
-	))
-	assert.False(t, export.HasPreferredFanDuelPrefix(
-		"https://sportsbook.fanduel.com/addToBetslip?marketId=578189648&selectionId=7017917",
-	))
-	assert.False(t, export.HasPreferredFanDuelPrefix("https://%zz"))
-}
-
 // TestPlanOnlyCoversALockedSlip checks that an open or graded slip gets no
 // export at all.
 func TestPlanOnlyCoversALockedSlip(t *testing.T) {

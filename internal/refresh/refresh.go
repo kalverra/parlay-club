@@ -1254,11 +1254,8 @@ func legNeedsExportEnrich(leg db.Leg, oddsRows []db.Odds) bool {
 		if !ok || row.Link == nil || strings.TrimSpace(*row.Link) == "" {
 			return true
 		}
-		if book == "fanduel" {
-			prefix, hasPrefix := odds.FanDuelMarketPrefix(*row.Link)
-			if !hasPrefix || prefix != odds.PreferredFanDuelMarketPrefix {
-				return true
-			}
+		if book == "fanduel" && !odds.HasPreferredFanDuelPrefix(*row.Link) {
+			return true
 		}
 	}
 	return false

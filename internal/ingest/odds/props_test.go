@@ -1174,3 +1174,21 @@ func findProp(
 	require.Len(t, found, 1, "%s %s %s %s", book, marketType, subject, side)
 	return found[0]
 }
+
+func TestHasPreferredFanDuelPrefix(t *testing.T) {
+	t.Parallel()
+
+	assert.True(t, odds.HasPreferredFanDuelPrefix(
+		"https://sportsbook.fanduel.com/addToBetslip?marketId=42.578189645&selectionId=50199",
+	))
+	assert.False(t, odds.HasPreferredFanDuelPrefix(
+		"https://sportsbook.fanduel.com/addToBetslip?marketId=734.199156488&selectionId=7017917",
+	))
+	assert.False(t, odds.HasPreferredFanDuelPrefix(
+		"https://sportsbook.fanduel.com/addToBetslip?marketId=717.881234567&selectionId=991122",
+	))
+	assert.False(t, odds.HasPreferredFanDuelPrefix(
+		"https://sportsbook.fanduel.com/addToBetslip?marketId=578189648&selectionId=7017917",
+	))
+	assert.False(t, odds.HasPreferredFanDuelPrefix("https://%zz"))
+}

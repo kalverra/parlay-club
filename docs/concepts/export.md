@@ -33,23 +33,11 @@ selection ID (`sid`), and each bookmaker block carries its own event ID (`event_
 fresh as the price beside it. A book that returns no link stores NULL, which is normal. See
 [Data sources](../reference/data-sources.md) and [Database schema](../reference/schema.md).
 
-Parlay API populates validated links and sids on FanDuel only, and only while a matching native quote is open, but
-its FanDuel `marketId` values can carry non-US jurisdiction prefixes (such as 734.* or 717.*). DraftKings and other
-books omit links on Parlay API. The Odds API enrichment fills those gaps and supplies US 42.* FanDuel links
-(`odds.PreferredFanDuelMarketPrefix`):
-
-- **Merge preference (`mergeOdds` and `odds.MergeProps`):** A DraftKings row gains its `link`, `sid`, and `event_sid`. A
-  FanDuel row missing a link—or carrying a non-42 `marketId` prefix when The Odds API offers a 42.* link—adopts the
-  42.* link, sid, and `event_sid`. When the enrichment's line differs from the unlinked or non-42 primary row, refresh
-  stores the linked line and price so the row and its deep link agree. A primary row that already has a valid 42.* link
-  keeps Parlay API's line, price, and link. A book or market only The Odds API quotes is stored as well.
-- **Link-preserving upserts (`Store.UpsertOdds`):** A later Parlay-only refresh sends NULL for DraftKings links (and
-  may omit links on other rows). When the line has not moved (`odds.line IS excluded.line`), UpsertOdds preserves the
-  stored `link`, `sid`, and `event_sid` instead of overwriting them with NULL. When the line moves, stale link and sid
-  are cleared so the card never serves a deep link for an old number, while `event_sid` (which belongs to the game, not
-  the line) is preserved.
-
-See [Data refresh](data-refresh.md) for when enrichment pauses at its credit floor.
+Parlay API populates FanDuel links when a matching native quote is open, though its `marketId` values can carry non-US
+jurisdiction prefixes (such as 734.* or 717.*), while DraftKings and other books omit links on Parlay API. The Odds API
+enrichment fills DraftKings links, supplies preferred US 42.* FanDuel links, and preserves stored links on unchanged
+lines across later Parlay-only refreshes; see [Data sources](../reference/data-sources.md#enrichment-and-fallback) for
+the merge and upsert rules, and [Data refresh](data-refresh.md) for when enrichment pauses at its credit floor.
 
 FanDuel single and combined links work unchanged because its combiner reads the market ID from each leg's stored link
 and pairs it with `odds.sid`; it never uses `event_sid`. DraftKings uses both the stored selection ID and the
@@ -130,8 +118,7 @@ A `Combiner` returns `ok = false` when it cannot build the whole URL, which leav
 links in place. That happens when a linked leg has no stored `sid`, or, for FanDuel, its stored link has no `marketId`
 or the legs do not share a single `marketId` jurisdiction prefix (checked via `odds.FanDuelMarketPrefix` so mixed
 42.*/734.*/717.* legs never combine into a broken URL), or, for DraftKings, the legs do not all share one stored
-event ID. (`export.HasPreferredFanDuelPrefix` checks whether a link carries the preferred 42.* prefix.) The card
-never drops a pick to make a combined link work.
+event ID. The card never drops a pick to make a combined link work.
 
 ### Verified formats
 
