@@ -3,7 +3,7 @@ id: adr-local-sunday-sandbox
 title: Local Sunday Sandbox
 type: decision
 summary: Add a development-only scenario mode to the existing dev task rather than a separate mock app.
-last_verified: "2026-11-11"
+area: infra-and-dev
 ---
 
 # Local Sunday Sandbox

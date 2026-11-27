@@ -3,7 +3,7 @@ id: adr-groups
 title: Groups and solo play
 type: decision
 summary: Make the group the boundary for everything people share.
-last_verified: "2026-11-07"
+area: auth-and-groups
 ---
 
 # Groups and solo play

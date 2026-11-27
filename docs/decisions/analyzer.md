@@ -3,7 +3,7 @@ id: adr-analyzer
 title: Sharp-friend analyzer
 type: decision
 summary: Add a deterministic rules engine that reviews the whole slip and shows friendly, non-blocking heads-ups to everyone, including pairings across two people's legs.
-last_verified: "2026-11-08"
+area: analyzer
 ---
 
 # Sharp-friend analyzer

@@ -2,7 +2,8 @@
 id: adr-deepen-signal-loader
 title: Deepen analyzer and board signal loading
 type: decision
-summary: Deepen analyzer and board signal loading
+summary: Move signal loading, source freshness checks, 32-team EPA rankings, and rolling player usage math out of HTTP handlers into a shared domain seam with batch queries.
+area: analyzer
 ---
 
 # Deepen analyzer and board signal loading

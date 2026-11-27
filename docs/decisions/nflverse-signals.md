@@ -2,7 +2,8 @@
 id: adr-nflverse-signals
 title: nflverse signals for leg suggestions and grading
 type: decision
-summary: 'Add `nflverse` as a free, weekly lazy-synced source alongside `nfelo`, then feed its team-defense EPA, player usage, and snap-share signals into two pure, deterministic layers: sharp-friend **leg and slip grades** in the analyzer, and **matchup/script badges** on the pick board.'
+summary: Sync weekly nflverse team-defense EPA, player usage, and snap-share CSVs into SQLite and feed them into deterministic analyzer grades and pick-board matchup badges.
+area: analyzer
 ---
 
 # nflverse signals for leg suggestions and grading

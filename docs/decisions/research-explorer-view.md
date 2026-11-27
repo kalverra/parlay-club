@@ -2,7 +2,7 @@
 id: adr-research-explorer-view
 title: Dedicated research view for picking legs
 type: decision
-summary: Dedicated research view for picking legs
+summary: Promote Research to a primary navigation tab with a dual-mode bet explorer for search or slate-wide filtering by bet type, grade, and player plus per-bet detail.
 touched:
     - internal/board
     - internal/refresh
@@ -13,6 +13,7 @@ related:
     - data-refresh
     - routes
     - slips
+area: board-and-research
 ---
 
 # Dedicated research view for picking legs
@@ -126,15 +127,15 @@ flowchart TB
   end
 ```
 
-Every GET on the research surface reads cached SQLite. `SyncGameProps` behind the explicit props button is the only
-paid call, and the web layer's `Refresher` port no longer even exposes the two research sync methods.
+Every GET on the research surface reads cached SQLite. `SyncGameProps` behind the explicit props button is the only paid
+call, and the web layer's `Refresher` port no longer even exposes the two research sync methods.
 
 ## Consequences
 
 - `Easier:` Bet discovery no longer needs an open slip or a game-first drilldown. A user can scan the whole week by bet
   type, grade, or signal, or jump straight to a game or player.
-- `Easier:` Browsing costs nothing. `board.Explore` is pure, the handlers batch their cached loads, and the zero-refresher
-  tests plus the narrowed `Refresher` interface keep accidental syncs from coming back.
+- `Easier:` Browsing costs nothing. `board.Explore` is pure, the handlers batch their cached loads, and the
+  zero-refresher tests plus the narrowed `Refresher` interface keep accidental syncs from coming back.
 - `Easier:` One owner for explorer rules. `board.Explore`, `ExploreReason`, and `DefaultExploreLimit` drive the cards,
   the facet counts, the sorts, and the bet page, so the list and the detail view agree.
 - `Easier:` Shared links survive line drift. Bet links carry `db.SameSelection` identity and keep the explorer URL in
@@ -163,9 +164,9 @@ paid call, and the web layer's `Refresher` port no longer even exposes the two r
   controls. A dropdown page has no bet list to filter, and bolting one on leaves no room for facet counts or sorts.
 - **Precompute a scored candidate table in SQLite.** Rejected: a week's odds fold to a few hundred rows that score in
   milliseconds in memory. A table would add migrations and cache-invalidation bugs for no measurable win.
-- **Put per-bet research in an inline accordion on the explorer.** Rejected: pricing tables, a hit-rate chart, EPA ranks,
-  weather, and injuries are too dense for an accordion at 375px. A dedicated page keeps scanning and deep research
-  readable.
+- **Put per-bet research in an inline accordion on the explorer.** Rejected: pricing tables, a hit-rate chart, EPA
+  ranks, weather, and injuries are too dense for an accordion at 375px. A dedicated page keeps scanning and deep
+  research readable.
 - **Make the whole candidate card the per-bet tap target.** Rejected: users still want direct entry to the game and
   player sheets, so the card keeps those links and adds a separate `Research bet →`.
 - **List the other side of the same market under related bets.** Rejected: a hedge is not a useful related leg. Related

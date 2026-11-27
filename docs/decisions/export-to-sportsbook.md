@@ -3,7 +3,7 @@ id: adr-export-to-sportsbook
 title: Export locked slips to DraftKings and FanDuel
 type: decision
 summary: Once a slip is fully locked in, the slip page shows an export panel with a button for each sportsbook.
-last_verified: "2026-11-07"
+area: export
 ---
 
 # Export locked slips to DraftKings and FanDuel

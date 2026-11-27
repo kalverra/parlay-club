@@ -2,7 +2,7 @@
 id: adr-faq-docs-view
 title: FAQ and docs primary view
 type: decision
-summary: FAQ and docs primary view
+summary: "Promote a unified FAQ & Docs hub to the primary navigation bar and wire inline help bubbles onto grades and badges to link straight to each explanation."
 touched:
     - internal/refresh
     - internal/web
@@ -13,6 +13,7 @@ related:
     - docs-hub
     - routes
     - slips
+area: ui-and-notifications
 ---
 
 # FAQ and docs primary view
@@ -111,7 +112,8 @@ flowchart TD
   Switch --> Evals["/docs/evals<br/>calibration reports"]
   Aliases["/analyzer/guide<br/>/analyzer/results"] --> Grading
   Aliases --> Evals
-  Anno["Grade, warning, odds, nfelo,<br/>live-chance, badge annotations"] -->|"tap: this item's breakdown"| Pop["Grade breakdown popover"]
+  Anno["Grade, warning, odds, nfelo,<br/>live-chance, badge annotations"]
+  Anno -->|"tap: this item's breakdown"| Pop["Grade breakdown popover"]
   Pop -->|"? bubble with ?from=#anchor"| Switch
   Anno -->|"? bubble"| Switch
 ```
@@ -149,8 +151,8 @@ chance.
 ## Alternatives considered
 
 - **HTTP redirects for `/analyzer/guide` and `/analyzer/results`.** Rejected: redirects can drop `#fragment` anchors and
-  break handler tests that expect `200 OK`. Registering both paths on one handler keeps bookmarks, anchors, and the
-  Docs tab intact.
+  break handler tests that expect `200 OK`. Registering both paths on one handler keeps bookmarks, anchors, and the Docs
+  tab intact.
 - **Parsing `docs/*.md` into the user-facing hub.** Rejected: repo docs are written for engineers with package names,
   table names, and handler signatures. Static Go structs keep the public copy plain and let unit tests check unique
   slugs and anchors.
@@ -167,12 +169,12 @@ chance.
 
 ## Implementation notes
 
-- Phase 1 necessarily shipped a temporary state: the switcher's grading and eval entries pointed at
-  `/analyzer/guide` and `/analyzer/results` until Phase 2 registered `/docs/grading` and `/docs/evals`. The final state
-  has no legacy links left in the analyzer or docs templates.
+- Phase 1 necessarily shipped a temporary state: the switcher's grading and eval entries pointed at `/analyzer/guide`
+  and `/analyzer/results` until Phase 2 registered `/docs/grading` and `/docs/evals`. The final state has no legacy
+  links left in the analyzer or docs templates.
 - The design budgeted a pick-board bubble on the badges themselves; that was impossible inside `<button>`, so only the
-  detail header carries the `#suggestions` bubble. If a reader expects a bubble next to every badge row, it is not
-  there by design.
+  detail header carries the `#suggestions` bubble. If a reader expects a bubble next to every badge row, it is not there
+  by design.
 - The grading screen keeps its own anchors (`#leg-grades`, `#slip-grade`, `#suggestions`, `#rule-<id>`) on both the
   `/docs/grading` and `/analyzer/guide` paths, so templates can deep-link without knowing which URL the user came from.
   `/docs/evals` is the canonical eval screen; `/analyzer/results` renders the same page.

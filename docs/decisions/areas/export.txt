@@ -4,4 +4,6 @@
 
 ## Live
 
+- [Fix DraftKings and FanDuel export links](../export-deep-links.md): Separate Odds API deep-link enrichment from pre-fill freshness on picked or locked games and combine multi-leg DraftKings links where the book URL format allows.
 - [Reliable DraftKings and FanDuel export deep links](../export-links-reliability.md): Reliable DraftKings and FanDuel export deep links
+- [Export locked slips to DraftKings and FanDuel](../export-to-sportsbook.md): Once a slip is fully locked in, the slip page shows an export panel with a button for each sportsbook.

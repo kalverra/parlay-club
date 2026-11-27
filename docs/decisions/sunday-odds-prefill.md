@@ -2,7 +2,8 @@
 id: adr-sunday-odds-prefill
 title: Sunday morning odds pre-fill and smart refresh
 type: decision
-summary: Add an authenticated Sunday 9:30 AM Eastern pre-fill trigger that warms the slate, game lines, and Parlay API bulk props for all upcoming games, sync free news and roster sources much more often, and move post-prefill odds and prop refreshes strictly to when players are selecting a line on an open slip.
+summary: "Warm the slate, game lines, and Parlay API bulk props via a Sunday 9:30 AM ET trigger, sync free sources more often, and refresh odds only during open-slip picking."
+area: odds-and-refresh
 ---
 
 # Sunday morning odds pre-fill and smart refresh

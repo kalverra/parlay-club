@@ -33,6 +33,33 @@ require_accept = false
 [docs]
 root = "docs"
 
+[docs.areas.slips]
+summary = "Shared parlay slips, weekly and dynamic game-day schedules, slip creation UX, live progress, and the Record Book."
+
+[docs.areas.board-and-research]
+summary = "Game-first pick board, prop filtering, player and selection identity, moved-line tracking, and research explorer views."
+
+[docs.areas.analyzer]
+summary = "Deterministic slip analyzer, sharp-friend warnings, signal loading, injury and sharp-book scoring, v2 grading model, and A-grade highlights."
+
+[docs.areas.evals]
+summary = "Leak-free historical replay, rubric calibration evals, market-wide backtesting, eval caching, and the in-app Grading Results view."
+
+[docs.areas.odds-and-refresh]
+summary = "Odds and prop API providers, raw response archiving, morning pre-fill triggers, and refresh scheduling."
+
+[docs.areas.export]
+summary = "Sportsbook bet-slip export and DraftKings or FanDuel deep-link enrichment."
+
+[docs.areas.auth-and-groups]
+summary = "App bootstrap, Google OAuth sign-in, and group boundaries for solo and shared play."
+
+[docs.areas.ui-and-notifications]
+summary = "Installable PWA shell, Web Push reminders, semantic site themes, FAQ and Docs hub, and in-app bug reports."
+
+[docs.areas.infra-and-dev]
+summary = "Cloud Run deployment, GCP cost controls, hot-reload local dev, and the offline Sunday sandbox."
+
 # Per-turn checks: fast, deterministic, offline. Fixers run before readers.
 [[implement.verify.checks]]
 name = "generate"

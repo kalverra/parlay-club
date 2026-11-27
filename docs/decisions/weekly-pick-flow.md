@@ -3,7 +3,7 @@ id: adr-weekly-pick-flow
 title: Make the weekly pick flow the center of the app
 type: decision
 summary: Land on your groups, see what the week needs on the hub, pick on a searchable board, lock in, vote, and export.
-last_verified: "2026-11-11"
+area: slips
 ---
 
 # Make the weekly pick flow the center of the app

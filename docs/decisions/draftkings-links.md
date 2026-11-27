@@ -3,7 +3,7 @@ id: adr-draftkings-links
 title: The Odds API fallback and enrichment
 type: decision
 summary: Wrap Parlay API and The Odds API behind a composite odds provider that coordinates enrichment and fallback while keeping the rest of the refresh and export pipeline unchanged.
-last_verified: "2026-11-09"
+area: odds-and-refresh
 ---
 
 # The Odds API fallback and enrichment

@@ -3,7 +3,7 @@ id: adr-nfelo-signals
 title: nfelo signals in the analyzer
 type: decision
 summary: Treat nfelo as one more free, lazily synced source, beside ESPN and Open-Meteo.
-last_verified: "2026-11-09"
+area: analyzer
 ---
 
 # nfelo signals in the analyzer

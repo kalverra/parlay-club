@@ -2,8 +2,8 @@
 id: adr-game-first-board
 title: Game-first pick board
 type: decision
-summary: '```mermaid flowchart LR W[Week: every side of every line] --> C[Chips] C --> R[One flat row list] R --> T[Tray rail or below the list] ``` ```mermaid flowchart LR S[Game slate] -->|choose a game| G[Game detail] G --> P[Category tabs] P --> L[Paired line rows] L --> D[Pick dock: count and odds] ``` Rebuild the pick board as a game-first master-detail screen.'
-last_verified: "2026-11-12"
+summary: Rebuild the pick board as a game-first master-detail screen with a game slate, category tabs, paired over/under line rows grouped by player, and a pick dock.
+area: board-and-research
 ---
 
 # Game-first pick board

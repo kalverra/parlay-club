@@ -3,7 +3,7 @@ id: adr-raw-response-archive
 title: Archive every external response
 type: decision
 summary: Add one append-only archive of raw responses in SQLite, written by a single seam that every outside call passes through.
-last_verified: "2026-11-07"
+area: odds-and-refresh
 ---
 
 # Archive every external response

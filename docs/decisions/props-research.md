@@ -3,7 +3,7 @@ id: adr-props-research
 title: Props and research
 type: decision
 summary: Load player props for a game when someone opens it, within the Odds API budget.
-last_verified: "2026-11-10"
+area: board-and-research
 ---
 
 # Props and research

@@ -3,6 +3,7 @@ id: adr-grading-record-book
 title: Auto-grading and Record Book
 type: decision
 summary: Grade legs automatically from ESPN box scores once games end, with hand overrides.
+area: slips
 ---
 
 # Auto-grading and Record Book

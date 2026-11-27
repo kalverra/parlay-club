@@ -3,7 +3,7 @@ id: adr-deploy-readiness
 title: Deployment readiness and hardening
 type: decision
 summary: Harden the server lifecycle, startup checks, proxy URL handling, and deploy pipeline in one focused pass before the first production launch.
-last_verified: "2026-11-13"
+area: infra-and-dev
 ---
 
 # Deployment readiness and hardening

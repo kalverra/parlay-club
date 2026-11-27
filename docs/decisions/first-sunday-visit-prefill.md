@@ -3,6 +3,7 @@ id: adr-first-sunday-visit-prefill
 title: Run Sunday prefill on first authenticated visit
 type: decision
 summary: Trigger the Sunday pre-fill from the background page-load refresh when a signed-in user visits on Sunday morning in Eastern time, guarded by persisted sync state so it runs at most once per Sunday.
+area: odds-and-refresh
 ---
 
 # Run Sunday prefill on first authenticated visit

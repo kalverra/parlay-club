@@ -3,7 +3,7 @@ id: adr-hot-reload-dev
 title: Hot reload local dev
 type: decision
 summary: Add [air](https://github.com/air-verse/air) as the dev runner, pinned in `mise.toml` from the mise registry.
-last_verified: "2026-11-05"
+area: infra-and-dev
 ---
 
 # Hot reload local dev

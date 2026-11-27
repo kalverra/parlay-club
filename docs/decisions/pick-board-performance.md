@@ -2,7 +2,8 @@
 id: adr-pick-board-performance
 title: Speed up pick board and page loads
 type: decision
-summary: Pre-index roster lookups once per board build instead of scanning and normalizing the full roster for every selection, move pick-time odds refreshes off the synchronous request path so clicks always render from stored data and push live updates over SSE, and allow concurrent SQLite WAL readers so reads do not stall behind background sync writes.
+summary: Pre-index roster lookups per board build, move pick-time odds refreshes off the request path via SSE, and enable concurrent SQLite WAL readers so page loads stay fast.
+area: board-and-research
 ---
 
 # Speed up pick board and page loads

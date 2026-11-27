@@ -3,6 +3,7 @@ id: adr-deepen-pick-board
 title: Deepen pick-board read assembly and current-odds filtering
 type: decision
 summary: Filter superseded odds rows at the storage seam and deepen the board module to own scoped board assembly, signal attachment on paired line groups, and picked-leg drift state across full-page and partial views.
+area: board-and-research
 ---
 
 # Deepen pick-board read assembly and current-odds filtering

@@ -3,7 +3,7 @@ id: adr-thursday-and-multi-slips
 title: Thursday Night Games and Multi-Slip Events
 type: decision
 summary: Extend the game slate to ingest Thursday night football games.
-last_verified: "2026-11-12"
+area: slips
 ---
 
 # Thursday Night Games and Multi-Slip Events

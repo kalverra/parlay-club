@@ -4,5 +4,12 @@
 
 ## Areas
 
-- [Export](areas/export.txt): Sportsbook bet-slip export and DraftKings or FanDuel deep-link enrichment. 1 live.
-- [Unsorted](areas/unsorted.txt): Decisions that name no area yet. 35 live.
+- [Analyzer](areas/analyzer.txt): Deterministic slip analyzer, sharp-friend warnings, signal loading, injury and sharp-book scoring, v2 grading model, and A-grade highlights. 9 live.
+- [Auth-and-groups](areas/auth-and-groups.txt): App bootstrap, Google OAuth sign-in, and group boundaries for solo and shared play. 3 live.
+- [Board-and-research](areas/board-and-research.txt): Game-first pick board, prop filtering, player and selection identity, moved-line tracking, and research explorer views. 12 live.
+- [Evals](areas/evals.txt): Leak-free historical replay, rubric calibration evals, market-wide backtesting, eval caching, and the in-app Grading Results view. 6 live.
+- [Export](areas/export.txt): Sportsbook bet-slip export and DraftKings or FanDuel deep-link enrichment. 3 live.
+- [Infra-and-dev](areas/infra-and-dev.txt): Cloud Run deployment, GCP cost controls, hot-reload local dev, and the offline Sunday sandbox. 5 live.
+- [Odds-and-refresh](areas/odds-and-refresh.txt): Odds and prop API providers, raw response archiving, morning pre-fill triggers, and refresh scheduling. 5 live.
+- [Slips](areas/slips.txt): Shared parlay slips, weekly and dynamic game-day schedules, slip creation UX, live progress, and the Record Book. 10 live.
+- [Ui-and-notifications](areas/ui-and-notifications.txt): Installable PWA shell, Web Push reminders, semantic site themes, FAQ and Docs hub, and in-app bug reports. 4 live.

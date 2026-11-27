@@ -3,7 +3,7 @@ id: adr-google-oauth
 title: Google sign-in
 type: decision
 summary: Replace the passcode and the name picker with Google's OpenID Connect sign-in.
-last_verified: "2026-11-13"
+area: auth-and-groups
 ---
 
 # Google sign-in
@@ -68,9 +68,8 @@ building an admin screen. That is deliberate for a private club, but it puts acc
 deploy.
 
 Google is now part of startup and sign-in. The server discovers Google's OIDC document at boot, retrying a failed
-attempt three times over about a second, so a brief Google blip does not stop an instance from starting. A longer
-outage still does. Prod requires four Google values plus `SESSION_KEY`; a missing one fails startup with every problem
-listed.
+attempt three times over about a second, so a brief Google blip does not stop an instance from starting. A longer outage
+still does. Prod requires four Google values plus `SESSION_KEY`; a missing one fails startup with every problem listed.
 
 The users table was rebuilt in migration `0002` to drop `UNIQUE(name)` and add the Google columns. That runs on real
 data on the first prod deploy, so the deploy needs a Litestream snapshot first.

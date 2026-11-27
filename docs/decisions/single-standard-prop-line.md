@@ -2,7 +2,8 @@
 id: adr-single-standard-prop-line
 title: Show one standard line per player prop
 type: decision
-summary: Filter prop feeds to standard lines at ingest (rejecting `goblin`/`demon` tags and picking each book's primary balanced line when a book returns multiple unlabeled alternates) and pair board rows by canonical player + market + side rather than raw player name and line number.
+summary: Filter alternate, goblin, and demon prop feeds at ingest to one primary line per book and pair board rows by canonical player, market, and side.
+area: board-and-research
 ---
 
 # Show one standard line per player prop

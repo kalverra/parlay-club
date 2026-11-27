@@ -38,6 +38,7 @@ related:
     - routes
     - schema
     - slips
+area: ui-and-notifications
 ---
 
 # Installable app with push notifications
@@ -206,8 +207,8 @@ text in the revision config.
 
 - **FCM or OneSignal.** Rejected: it adds an SDK, a vendor account, and a second identity system. Plain Web Push reaches
   Android and installed iOS apps with no third party beyond the browser's push service.
-- **A native app or Capacitor wrapper.** Rejected: app store review and two build pipelines are a poor trade for a
-  small group app that already works in a browser.
+- **A native app or Capacitor wrapper.** Rejected: app store review and two build pipelines are a poor trade for a small
+  group app that already works in a browser.
 - **A background queue for sends, or always-on CPU.** Rejected: Cloud Run throttles CPU after the response, so a
   background send stalls until the next request, and always-on CPU costs money all week. Sending inside the request was
   the cheap, honest choice.
@@ -258,10 +259,10 @@ text in the revision config.
   id per subscription, so rotation does not require every device to turn notifications off and on.
 - **Provision push in one step.** Have `deploy/setup.sh` create the VAPID and reminder secrets, the queue, and the
   `REMINDER_QUEUE` repository variable, or add a small provisioning command, so a fresh project is not runbook-only.
-- **Age out reminder state.** Delete `reminder_tasks` rows for closed slips and add a delete path for superseded
-  starts, so the table and the queue do not grow without bound.
-- **Make `/push/test` honest.** Answer a distinct status (and a card message) when the caller has no stored device, so
-  a stale browser does not see a success toast for a message nobody got.
+- **Age out reminder state.** Delete `reminder_tasks` rows for closed slips and add a delete path for superseded starts,
+  so the table and the queue do not grow without bound.
+- **Make `/push/test` honest.** Answer a distinct status (and a card message) when the caller has no stored device, so a
+  stale browser does not see a success toast for a message nobody got.
 - **Decide on per-category notifications** if the volume gets old. The current shape is one switch per device, and the
   tags already group per slip.
 - **Consider scheduled grading.** A scheduled grading pass would let "cashed" pushes go out without waiting for someone

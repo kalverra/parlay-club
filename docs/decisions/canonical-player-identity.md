@@ -2,7 +2,8 @@
 id: adr-canonical-player-identity
 title: Unify player identity across sportsbooks
 type: decision
-summary: Normalize and resolve player identity once during prop ingest (stripping trailing `(TEAM)` tags, normalizing punctuation/suffixes/casing, and matching against team rosters) so stored odds and board grouping share one canonical player ID, name, and team rather than raw provider strings.
+summary: Normalize and resolve player names against team rosters once during prop ingest so stored odds, board cards, and saved legs share one canonical player ID, name, and team.
+area: board-and-research
 ---
 
 # Unify player identity across sportsbooks

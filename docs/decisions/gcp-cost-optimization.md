@@ -2,7 +2,8 @@
 id: adr-gcp-cost-optimization
 title: Reduce Cloud Run and storage costs
 type: decision
-summary: 'Tighten live SSE stream lifetimes and client idle behavior alongside Litestream replication and GCS bucket retention settings: - Skip opening live streams on already-graded slips, shorten server idle/live stream caps (with seamless reconnect on activity or focus), and pause the browser''s stream after a few minutes of no user interaction (reconnecting and refreshing immediately when the user returns).'
+summary: Cap server and browser SSE stream lifetimes on idle or graded slips, batch Litestream replication intervals, and disable GCS soft-delete retention on the replica bucket.
+area: infra-and-dev
 ---
 
 # Reduce Cloud Run and storage costs

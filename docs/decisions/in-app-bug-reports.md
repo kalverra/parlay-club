@@ -3,7 +3,7 @@ id: adr-in-app-bug-reports
 title: In-App Bug Reports
 type: decision
 summary: Add a bug report button to the shared app layout so it appears on every screen.
-last_verified: "2026-11-12"
+area: ui-and-notifications
 ---
 
 # In-App Bug Reports

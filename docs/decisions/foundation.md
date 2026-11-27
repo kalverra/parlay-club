@@ -3,7 +3,7 @@ id: adr-foundation
 title: Foundation
 type: decision
 summary: Build a bootable web server with a local database, a shared group passcode, and a "who are you?" picker that remembers each friend on their device.
-last_verified: "2026-11-05"
+area: auth-and-groups
 ---
 
 # Foundation

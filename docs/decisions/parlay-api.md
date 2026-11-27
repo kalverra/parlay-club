@@ -3,7 +3,7 @@ id: adr-parlay-api
 title: Parlay API for odds and props
 type: decision
 summary: Switch the odds client from The Odds API to Parlay API and add bulk per-game prop fetching on the same client.
-last_verified: "2026-11-09"
+area: odds-and-refresh
 ---
 
 # Parlay API for odds and props

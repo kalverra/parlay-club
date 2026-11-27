@@ -3,7 +3,7 @@ id: adr-slate-and-lines
 title: Slate, weather, and lines
 type: decision
 summary: Pull the Sunday and Monday slate from ESPN, stadium weather from Open-Meteo, and game lines from The Odds API, fetched only when someone opens the app and the data is stale.
-last_verified: "2026-11-07"
+area: board-and-research
 ---
 
 # Slate, weather, and lines

@@ -3,7 +3,7 @@ id: adr-history-and-deploy
 title: History, manual grading, and deploy
 type: decision
 summary: Deploy to Cloud Run inside the free tier, with the database backed up to Cloud Storage and deploys blocked during game windows.
-last_verified: "2026-11-09"
+area: infra-and-dev
 ---
 
 # History, manual grading, and deploy

@@ -2,7 +2,8 @@
 id: adr-dynamic-line-tracking
 title: Track prop selections dynamically when lines move
 type: decision
-summary: Separate selection identity (`game`, `canonical player`, `market`, `side`) from the quoted `line` and `odds`, so board matching, leg updates, and sportsbook export look up the target selection dynamically and resolve each book's current line, price, and deep-link selection ID.
+summary: Key prop selections by game, canonical player, market, and side rather than quoted odds so board matching, leg updates, and sportsbook export track moved lines dynamically.
+area: board-and-research
 ---
 
 # Track prop selections dynamically when lines move

@@ -3,6 +3,7 @@ id: adr-selection-player-identity
 title: Consolidate selection and player identity
 type: decision
 summary: Consolidate canonical player resolution, selection and line-group identity, and selection text formatting into one deep domain module that every ingest, board, slip, research, export, and grading path calls.
+area: board-and-research
 ---
 
 # Consolidate selection and player identity

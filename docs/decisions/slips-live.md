@@ -3,7 +3,7 @@ id: adr-slips-live
 title: Live shared slips
 type: decision
 summary: 'Add shared slips: each week has one or more slips, each slip has members, and every member adds the same number of legs.'
-last_verified: "2026-11-07"
+area: slips
 ---
 
 # Live shared slips

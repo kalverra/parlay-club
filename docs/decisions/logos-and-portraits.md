@@ -3,7 +3,7 @@ id: adr-logos-and-portraits
 title: Team Logos and Player Portraits
 type: decision
 summary: Capture official team logo and player headshot URLs from the existing ESPN scoreboard and roster syncs, store them alongside our game and roster records, and surface them in view models for screens where visual identity aids scanning.
-last_verified: "2026-11-12"
+area: board-and-research
 ---
 
 # Team Logos and Player Portraits
