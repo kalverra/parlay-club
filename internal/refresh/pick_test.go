@@ -883,7 +883,7 @@ func TestKickSlipExportEnrich(t *testing.T) {
 				Side:       odds.SideOver,
 				Line:       new(65.5),
 				Price:      -112,
-				Link:       new("https://sportsbook.fanduel.com/addToBetslip?marketId=1&selectionId=fd-1"),
+				Link:       new("https://sportsbook.fanduel.com/addToBetslip?marketId=42.1&selectionId=fd-1"),
 				Sid:        new("fd-1"),
 				FetchedAt:  t0,
 			},
@@ -1008,7 +1008,7 @@ func TestKickSlipExportEnrich(t *testing.T) {
 					Side:       odds.SideOver,
 					Line:       new(255.5),
 					Price:      -115,
-					Link:       "https://sportsbook.fanduel.com/addToBetslip?marketId=2&selectionId=fd-allen",
+					Link:       "https://sportsbook.fanduel.com/addToBetslip?marketId=42.2&selectionId=fd-allen",
 					Sid:        "fd-allen",
 				},
 			},
@@ -1139,4 +1139,283 @@ func TestEnrichGamePropsMergesUnresolvedVariantPlayerName(t *testing.T) {
 	require.True(t, ok)
 	require.NotNil(t, matched.Link)
 	assert.Equal(t, "https://sportsbook.draftkings.com/event/dk-evt-401?outcomes=dk-moore", *matched.Link)
+}
+
+func TestKickSlipExportEnrichNonPreferredFanDuelAndGameLines(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, 40, TheOddsAPIEnrichFloor)
+
+	store, week, slip := publishTestStore(t)
+	t0 := novemberTime(8, 10, 0)
+	clock := &fakeClock{now: t0}
+
+	lineGame, err := store.UpsertGame(t.Context(), db.Game{
+		ID:        "401772201",
+		WeekID:    week.ID,
+		HomeTeam:  "BUF",
+		AwayTeam:  "MIA",
+		HomeName:  "Buffalo Bills",
+		AwayName:  "Miami Dolphins",
+		Kickoff:   novemberTime(8, 13, 0),
+		Status:    db.GameScheduled,
+		UpdatedAt: novemberTime(4, 12, 0),
+	})
+	require.NoError(t, err)
+
+	propGame, err := store.UpsertGame(t.Context(), db.Game{
+		ID:        "401772202",
+		WeekID:    week.ID,
+		HomeTeam:  "KC",
+		AwayTeam:  "DEN",
+		HomeName:  "Kansas City Chiefs",
+		AwayName:  "Denver Broncos",
+		Kickoff:   novemberTime(8, 16, 0),
+		Status:    db.GameScheduled,
+		UpdatedAt: novemberTime(4, 12, 0),
+	})
+	require.NoError(t, err)
+
+	// Seed Parlay-only game lines (missing DK link, non-42 FD prefix) and
+	// prop rows (DK linked, non-42 FD prefix).
+	require.NoError(t, store.Tx(t.Context(), func(tx *db.Store) error {
+		_, err := tx.UpsertOdds(t.Context(), []db.Odds{
+			{
+				GameID:     lineGame.ID,
+				Book:       "draftkings",
+				MarketType: odds.MarketSpread,
+				Team:       "BUF",
+				Side:       odds.SideTeam,
+				Line:       new(-3.5),
+				Price:      -110,
+				FetchedAt:  t0,
+			},
+			{
+				GameID:     lineGame.ID,
+				Book:       "fanduel",
+				MarketType: odds.MarketSpread,
+				Team:       "BUF",
+				Side:       odds.SideTeam,
+				Line:       new(-3.5),
+				Price:      -110,
+				Link:       new("https://sportsbook.fanduel.com/addToBetslip?marketId=717.1001&selectionId=fd-buf"),
+				Sid:        new("fd-buf"),
+				FetchedAt:  t0,
+			},
+			{
+				GameID:     propGame.ID,
+				Book:       "draftkings",
+				MarketType: odds.MarketPassYds,
+				PlayerName: "Patrick Mahomes",
+				Side:       odds.SideOver,
+				Line:       new(275.5),
+				Price:      -110,
+				Link:       new("https://sportsbook.draftkings.com/event/dk-kc?outcomes=dk-mahomes"),
+				Sid:        new("dk-mahomes"),
+				EventSid:   new("dk-kc"),
+				FetchedAt:  t0,
+			},
+			{
+				GameID:     propGame.ID,
+				Book:       "fanduel",
+				MarketType: odds.MarketPassYds,
+				PlayerName: "Patrick Mahomes",
+				Side:       odds.SideOver,
+				Line:       new(275.5),
+				Price:      -115,
+				Link: new(
+					"https://sportsbook.fanduel.com/addToBetslip?marketId=734.199156488&selectionId=fd-mahomes",
+				),
+				Sid:       new("fd-mahomes"),
+				FetchedAt: t0,
+			},
+		})
+		if err != nil {
+			return err
+		}
+		if err := tx.RecordSync(t.Context(), OddsLinesSource, t0, nil); err != nil {
+			return err
+		}
+		return tx.RecordSync(t.Context(), OddsPropsSource(propGame.ID), t0, nil)
+	}))
+
+	members, err := store.SlipMembers(t.Context(), slip.ID)
+	require.NoError(t, err)
+	require.NotEmpty(t, members)
+	ownerID := members[0].User.ID
+
+	_, err = store.CreateLeg(t.Context(), db.Leg{
+		SlipID:     slip.ID,
+		UserID:     ownerID,
+		GameID:     new(lineGame.ID),
+		MarketType: odds.MarketSpread,
+		Team:       new("BUF"),
+		Side:       new(odds.SideTeam),
+		Line:       new(-3.5),
+		Selection:  "BUF -3.5",
+		Odds:       -110,
+	})
+	require.NoError(t, err)
+	_, err = store.CreateLeg(t.Context(), db.Leg{
+		SlipID:     slip.ID,
+		UserID:     ownerID,
+		GameID:     new(propGame.ID),
+		MarketType: odds.MarketPassYds,
+		PlayerName: new("Patrick Mahomes"),
+		Side:       new(odds.SideOver),
+		Line:       new(275.5),
+		Selection:  "Patrick Mahomes Over 275.5 Pass Yds",
+		Odds:       -110,
+	})
+	require.NoError(t, err)
+	require.NoError(t, store.SetSlipStatus(t.Context(), slip.ID, db.SlipLocked))
+
+	primaryLines := &blockingLinesClient{}
+	fallbackLines := &blockingLinesClient{
+		events: []odds.Event{{
+			ID:           "toa-201",
+			CommenceTime: lineGame.Kickoff,
+			HomeTeam:     "Buffalo Bills",
+			AwayTeam:     "Miami Dolphins",
+		}},
+		eventsCredits: odds.Credits{Remaining: TheOddsAPIEnrichFloor - 1},
+		lines: []odds.Line{
+			{
+				EventID:    "toa-201",
+				Book:       "draftkings",
+				MarketType: odds.MarketSpread,
+				Side:       odds.SideTeam,
+				Team:       "Buffalo Bills",
+				Line:       new(-3.5),
+				Price:      -110,
+				Link:       "https://sportsbook.draftkings.com/event/dk-buf?outcomes=dk-buf-spread",
+				Sid:        "dk-buf-spread",
+				EventSid:   "dk-buf",
+			},
+			{
+				EventID:    "toa-201",
+				Book:       "fanduel",
+				MarketType: odds.MarketSpread,
+				Side:       odds.SideTeam,
+				Team:       "Buffalo Bills",
+				Line:       new(-3.5),
+				Price:      -110,
+				Link:       "https://sportsbook.fanduel.com/addToBetslip?marketId=42.2001&selectionId=fd-buf-42",
+				Sid:        "fd-buf-42",
+			},
+		},
+		lineCredits: odds.Credits{Remaining: TheOddsAPIEnrichFloor - 4},
+	}
+
+	primaryProps := &blockingPropsClient{}
+	fallbackProps := &fakeFallbackPropsClient{
+		events: []odds.Event{{
+			ID:           "toa-202",
+			CommenceTime: propGame.Kickoff,
+			HomeTeam:     "Kansas City Chiefs",
+			AwayTeam:     "Denver Broncos",
+		}},
+		eventsCredits: odds.Credits{Remaining: TheOddsAPIEnrichFloor - 1},
+		eventProps: map[string][]odds.Prop{
+			"toa-202": {
+				{
+					EventID:    "toa-202",
+					Book:       "fanduel",
+					MarketType: odds.MarketPassYds,
+					PlayerName: "Patrick Mahomes",
+					Side:       odds.SideOver,
+					Line:       new(275.5),
+					Price:      -112,
+					Link:       "https://sportsbook.fanduel.com/addToBetslip?marketId=42.627958622&selectionId=fd-mahomes-42",
+					Sid:        "fd-mahomes-42",
+				},
+			},
+		},
+		eventPropsCredits: odds.Credits{Remaining: TheOddsAPIEnrichFloor - 2},
+	}
+
+	publisher := &recordingPublisher{}
+	svc := New(Deps{
+		Store:         store,
+		Lines:         primaryLines,
+		FallbackLines: fallbackLines,
+		Props:         primaryProps,
+		FallbackProps: fallbackProps,
+		Publisher:     publisher,
+		Now:           clock.Now,
+		Logger:        zerolog.Nop(),
+	})
+
+	// Below TheOddsAPIEnrichFloor (39 < 40): neither lines nor props are bought,
+	// and no enrich sync_state or failure backoff is recorded.
+	clock.Advance(time.Minute)
+	svc.KickSlipExportEnrich(t.Context(), slip.ID)
+	svc.wait()
+	assert.Equal(t, int32(0), primaryLines.calls.Load())
+	assert.Equal(t, int32(0), fallbackLines.calls.Load())
+	assert.Equal(t, int32(0), primaryProps.calls.Load())
+	assert.Equal(t, 0, fallbackProps.eventPropsCalls)
+	_, err = store.SyncState(t.Context(), OddsLinesEnrichSource)
+	require.ErrorIs(t, err, db.ErrSyncStateNotFound)
+	_, err = store.SyncState(t.Context(), OddsPropsEnrichSource(propGame.ID))
+	require.ErrorIs(t, err, db.ErrSyncStateNotFound)
+
+	// At TheOddsAPIEnrichFloor (40): both game-line and prop legs are enriched.
+	fallbackLines.eventsCredits = odds.Credits{Remaining: TheOddsAPIEnrichFloor}
+	fallbackProps.eventsCredits = odds.Credits{Remaining: TheOddsAPIEnrichFloor}
+	svc.KickSlipExportEnrich(t.Context(), slip.ID)
+	svc.wait()
+
+	assert.Equal(t, int32(0), primaryLines.calls.Load())
+	assert.Equal(t, int32(1), fallbackLines.calls.Load())
+	assert.Equal(t, int32(0), primaryProps.calls.Load())
+	assert.Equal(t, 1, fallbackProps.eventPropsCalls)
+	wantTopics := append(weekTopics(week.ID, slip.ID), weekTopics(week.ID, slip.ID)...)
+	assert.ElementsMatch(t, wantTopics, publisher.seen())
+
+	_, err = store.SyncState(t.Context(), OddsLinesEnrichSource)
+	require.NoError(t, err)
+	_, err = store.SyncState(t.Context(), OddsPropsEnrichSource(propGame.ID))
+	require.NoError(t, err)
+
+	lineOdds, err := store.OddsForGame(t.Context(), lineGame.ID)
+	require.NoError(t, err)
+	require.Len(t, lineOdds, 2)
+	for _, row := range lineOdds {
+		require.NotNil(t, row.Link)
+		if row.Book == "draftkings" {
+			assert.Equal(t, "https://sportsbook.draftkings.com/event/dk-buf?outcomes=dk-buf-spread", *row.Link)
+		} else {
+			assert.Equal(
+				t,
+				"https://sportsbook.fanduel.com/addToBetslip?marketId=42.2001&selectionId=fd-buf-42",
+				*row.Link,
+			)
+		}
+	}
+
+	propOdds, err := store.OddsForGame(t.Context(), propGame.ID)
+	require.NoError(t, err)
+	require.Len(t, propOdds, 2)
+	for _, row := range propOdds {
+		require.NotNil(t, row.Link)
+		if row.Book == "draftkings" {
+			assert.Equal(t, "https://sportsbook.draftkings.com/event/dk-kc?outcomes=dk-mahomes", *row.Link)
+		} else {
+			assert.Equal(
+				t,
+				"https://sportsbook.fanduel.com/addToBetslip?marketId=42.627958622&selectionId=fd-mahomes-42",
+				*row.Link,
+			)
+		}
+	}
+
+	// Repeating KickSlipExportEnrich once both books have DK links and 42.* FD
+	// prefixes makes 0 upstream calls.
+	publisher.reset()
+	svc.KickSlipExportEnrich(t.Context(), slip.ID)
+	svc.wait()
+	assert.Equal(t, int32(1), fallbackLines.calls.Load())
+	assert.Equal(t, 1, fallbackProps.eventPropsCalls)
+	assert.Empty(t, publisher.seen())
 }

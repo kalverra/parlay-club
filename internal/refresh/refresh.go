@@ -39,6 +39,9 @@ const (
 	// TheOddsAPISource is The Odds API's event list, lines, and props. Its
 	// "odds:" prefix makes the archive label its responses as odds.
 	TheOddsAPISource = "odds:theoddsapi"
+	// OddsLinesEnrichSource is the sync_state key for game-line link enrichment
+	// from The Odds API.
+	OddsLinesEnrichSource = "odds:lines:enrich"
 	// NfeloProjectionsSource is nfelo's model spreads and QB adjustments.
 	NfeloProjectionsSource = "nfelo:projections"
 	// GradeSource is the sync_state key for auto-grading pending legs on final games.
@@ -140,7 +143,7 @@ const (
 	OddsPropsFloor = 150
 	// TheOddsAPIEnrichFloor is the least remaining The Odds API balance that
 	// permits enrichment while Parlay API supplied the week's lines or game props.
-	TheOddsAPIEnrichFloor = 100
+	TheOddsAPIEnrichFloor = 40
 	// TheOddsAPIFallbackFloor is the least remaining The Odds API balance that
 	// lets it serve the week's lines or game props when Parlay API is unavailable.
 	TheOddsAPIFallbackFloor = 25
@@ -1098,12 +1101,12 @@ func (s *Service) KickPickGame(ctx context.Context, weekID int64, gameID string)
 	})
 }
 
-// KickSlipExportEnrich starts a background prop-link enrichment pass for a
-// locked slip's upcoming games that still have unlinked prop legs. Concurrent
-// callers share upstream fetches via singleflight, and Shutdown waits for or
-// cancels in-flight work.
+// KickSlipExportEnrich starts a background export-link enrichment pass for a
+// locked slip's upcoming game-line and prop legs that lack DraftKings links or
+// carry non-42 FanDuel marketId prefixes. Concurrent callers share upstream
+// fetches via singleflight, and Shutdown waits for or cancels in-flight work.
 func (s *Service) KickSlipExportEnrich(ctx context.Context, slipID int64) {
-	if slipID == 0 || s.fallbackProps == nil {
+	if slipID == 0 || (s.fallbackProps == nil && s.fallbackLines == nil) {
 		return
 	}
 	s.kickAsync(
@@ -1191,18 +1194,23 @@ func (s *Service) syncSlipExportEnrich(ctx context.Context, slipID int64) error 
 
 	now := s.now()
 	oddsByGame := make(map[string][]db.Odds)
-	seen := make(map[string]bool)
-	var toEnrich []db.Game
+	seenPropGames := make(map[string]bool)
+	var propsToEnrich []db.Game
+	needsLinesEnrich := false
 	for _, leg := range legs {
-		if leg.GameID == nil || *leg.GameID == "" || !db.IsPropLeg(leg) {
+		if leg.GameID == nil || *leg.GameID == "" {
 			continue
 		}
 		gameID := *leg.GameID
-		if seen[gameID] {
-			continue
-		}
 		game, ok := gameByID[gameID]
 		if !ok || !now.Before(game.Kickoff) {
+			continue
+		}
+		isProp := db.IsPropLeg(leg)
+		if isProp && seenPropGames[gameID] {
+			continue
+		}
+		if !isProp && needsLinesEnrich {
 			continue
 		}
 		oddsRows, loaded := oddsByGame[gameID]
@@ -1213,14 +1221,25 @@ func (s *Service) syncSlipExportEnrich(ctx context.Context, slipID int64) error 
 			}
 			oddsByGame[gameID] = oddsRows
 		}
-		if legNeedsExportEnrich(leg, oddsRows) {
-			seen[gameID] = true
-			toEnrich = append(toEnrich, game)
+		if !legNeedsExportEnrich(leg, oddsRows) {
+			continue
+		}
+		if isProp {
+			seenPropGames[gameID] = true
+			propsToEnrich = append(propsToEnrich, game)
+		} else {
+			needsLinesEnrich = true
 		}
 	}
 
 	var errs []error
-	for _, game := range toEnrich {
+	if needsLinesEnrich {
+		err := s.refreshSync(ctx, s.oddsLinesEnrichSource(slip.WeekID, games, now), now)
+		if err != nil && !errors.Is(err, odds.ErrNoAPIKey) {
+			errs = append(errs, err)
+		}
+	}
+	for _, game := range propsToEnrich {
 		err := s.refreshSync(ctx, s.oddsPropsEnrichSource(game, now, false), now)
 		if err != nil && !errors.Is(err, odds.ErrNoAPIKey) {
 			errs = append(errs, err)
@@ -1234,6 +1253,12 @@ func legNeedsExportEnrich(leg db.Leg, oddsRows []db.Odds) bool {
 		row, ok := db.MatchBookOdds(leg, oddsRows, book)
 		if !ok || row.Link == nil || strings.TrimSpace(*row.Link) == "" {
 			return true
+		}
+		if book == "fanduel" {
+			prefix, hasPrefix := odds.FanDuelMarketPrefix(*row.Link)
+			if !hasPrefix || prefix != odds.PreferredFanDuelMarketPrefix {
+				return true
+			}
 		}
 	}
 	return false
