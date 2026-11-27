@@ -98,3 +98,7 @@ remains intact).
       confirming ESPN and Odds archive rows survive intact.
 - [x] Docs: update `docs/concepts/archive.md`, `docs/reference/data-sources.md`, and `docs/runbooks/archive-size.md` to
   document the bulk-source exclusion and post-deploy `VACUUM` step.
+
+## Reviews
+
+- [x] Final review: agy@gemini-4-neon-low

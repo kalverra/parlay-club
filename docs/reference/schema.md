@@ -27,7 +27,8 @@ opponent, player name, position, passing/rushing/receiving/kicking stat columns,
 to `nflverse_player_weeks`. `0018_live_game_state.sql` adds nullable `period`, `clock`, and `boxscore_json` columns to
 `games`. `0019_v2_opportunity_signals.sql` adds expected opportunity, `carry_share`, and `cpoe` columns to
 `nflverse_player_weeks`. `0020_push.sql` adds `push_subscriptions` and `push_log`. `0021_reminder_tasks.sql` adds
-`reminder_tasks`.
+`reminder_tasks`. `0022_prune_bulk_archive.sql` deletes historical `nflverse` and `nfelo` rows from `api_responses` and
+prunes orphaned `api_bodies` rows.
 
 ## Connection settings
 
@@ -59,7 +60,7 @@ writer handle.
 - `db.Migrate` applies every file whose number is greater than `PRAGMA user_version`, in number order.
 - Each file runs in its own transaction. The migration's statements and its `user_version` bump commit together, so a
   failed migration leaves neither behind.
-- A fresh database ends at version 21 with every table below.
+- A fresh database ends at version 22 with every table below.
 - `0001_init.sql` creates `groups`, `group_members`, and `slips.group_id`. A database created before groups existed has
   the old `slips` shape, so delete it and let the migrations rebuild.
 - `0002_google_identity.sql` rebuilds `users` in its transaction with the SQLite 12-step method and
@@ -100,7 +101,9 @@ writer handle.
   existing table.
 - `0021_reminder_tasks.sql` creates `reminder_tasks`, one row per slip whose kickoff reminder was enqueued. It changes no
   existing table.
-- Never edit an applied file. Add `0022_name.sql` and up.
+- `0022_prune_bulk_archive.sql` deletes historical `nflverse` and `nfelo` rows from `api_responses` and deletes orphaned
+  `api_bodies` rows (`sha256 NOT IN (SELECT body_sha256 FROM api_responses)`).
+- Never edit an applied file. Add `0023_name.sql` and up.
 - `PRAGMA user_version` on the database file is the only record of what ran.
 
 ## Tables
