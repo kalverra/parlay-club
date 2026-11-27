@@ -169,8 +169,10 @@ in arrives over `slip-updated` without a reload.
 The card shows, in order:
 
 - the prices note, "Prices may have moved since <time>", from the newest `odds.fetched_at` among the slip's games;
-- one block per book. When `MultiGameNote` is true, DraftKings shows a heads-up under its heading: "DraftKings links load
-  one game at a time — tap each game below to add its legs."
+- one block per book, ordered with the viewer's `homeBook` first when set on Profile (`GET /me` offers DraftKings,
+  FanDuel, or No preference, defaulting to DraftKings first when unset or legacy-unknown). When `MultiGameNote` is true,
+  DraftKings shows a heads-up under its heading: "DraftKings links load one game at a time — tap each game below to add
+  its legs."
   - With a `Combined` URL it is one "Open in DraftKings" or "Open in FanDuel" button, followed by any `LineMoved` drift
     callouts ("<Selection>: Book at <live> · slip <saved>").
   - Without `Combined`, when `Groups` has at least one combined game group, each game renders in order: games with two or

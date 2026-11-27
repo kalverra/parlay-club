@@ -240,9 +240,13 @@ page. The dock is only on this screen; the hub keeps its panel and banner.
 `internal/board` turns the week's stored odds into rows. It reads nothing itself. Before building rows and cards, the
 pick board filters the week's games for the active slip using `slips.FilterGamesForSlip`. Games outside
 the slip's scope are omitted from the slate, window chips, and detail drilldowns. `db.CurrentOdds` (applied by
-`Store.OddsForWeek` and `Store.OddsForGame`) drops rows from older odds syncs at the storage seam, then `board.Build`
-folds one row per selection, using the viewer's home book when it prices the selection and the median across every book
-otherwise. A game that has kicked off is left out and counted. Each row carries its game, market, team, player, the
+`Store.OddsForWeek` and `Store.OddsForGame`) drops rows from older odds syncs at the storage seam, then `board.BuildDualBook`
+folds one row per selection, keeping only selections quoted by **both** DraftKings and FanDuel so every pickable line
+is exportable on both books. Rather than averaging differing lines into a median, it populates `DK` and `FD` quotes and
+sets `LinesDiffer` when their lines differ, using the viewer's `homeBook` (DraftKings or FanDuel, defaulting to FanDuel
+when unset) for the primary line and price. When `LinesDiffer` is true, slate cards, option buttons, the pick tray, slip
+legs, and A-grade highlights render an explicit DK vs. FD split-line badge ordered with the viewer's `homeBook` first
+(e.g., DK 68.5 (-111) · FD 66.5 (-115)). A game that has kicked off is left out and counted. Each row carries its game, market, team, player, the
 roster athlete ID and position, side, line, price, display text, a category, and a kickoff window, plus picked-leg drift
 fields (`PickedLine`, `PickedOdds`, `Drifted`, `BoardDriftNote`, `TrayDriftNote`) when bound to a viewer leg.
 
@@ -319,9 +323,9 @@ to its board row with remove and swap controls even if the consensus or home-boo
 
 `board.Pair` is the one pairing rule, shared by the detail and every refreshed row (`board.LineGroupForLeg` applies
 `BoardSignals`, pairs the game's rows, and locates the matching `LineGroup` via `LineGroup.HoldsLeg`). It folds rows
-that share a line into one group: a spread or moneyline keys on the market alone so both teams sit together, a game total
-on the market and number, a team total on its market, team, and number, and a player prop on its market and canonical
-player. `board.LineKey` names that identity, so the row's element id and the update path agree. Options come back in a
+that share a line into one group: `SPREAD`, `ML`, and `TOTAL` key on the market alone so both sides stay together even
+when DK and FD differ by half a point, `TEAM_TOTAL` keys on its market and team, and a player prop keys on its market
+and canonical player. `board.LineKey` names that identity, so the row's element id and the update path agree. Options come back in a
 fixed order, never in input order: away then home on a spread or moneyline, Over then Under on a total or prop, and the
 single Yes on an anytime touchdown. A line with no stored price on one side keeps one option, and a line with both sides
 picked, which the custom form can produce, paints both and lets either be removed.
@@ -398,10 +402,7 @@ for the Record Book.
 Research (`GET /research`) is a primary tab: a slate-wide explorer of every cached bet this week, with a targeted game or
 player sheet below it when a link names one.
 
-- **Explorer and per-bet view:** `board.Build` and `board.Explore` score cached rows with `analyzer.ScoreLeg`, so browsing,
-  searching, filtering, and sorting spend no paid API credits. Each card opens `/research/bet`, which keys on
-  `db.SameSelection` rather than line or price, so shared links survive drift. An `OPEN` slip in the `pick` step offers
-  `+ Add to slip`, which posts the normal add-leg route; filters and sorts are in [the routes](../reference/routes.md#research).
+- **Explorer and per-bet view:** `board.BuildDualBook` and `board.Explore` filter cached rows to selections quoted by both DraftKings and FanDuel and score them with `analyzer.ScoreLeg`, so browsing, searching, filtering, and sorting spend no paid API credits. When DK and FD lines differ, explorer cards and `/research/bet` render the split-line badge with the viewer's `homeBook` first. Each card opens `/research/bet`, which keys on `db.SameSelection` rather than line or price, so shared links survive drift. An open slip in the `pick` step offers `+ Add to slip`, which posts the normal add-leg route; filters and sorts are in [the routes](../reference/routes.md#research).
 - **Sheets:** `GET /research/games/{id}` reads cached injuries and fixes unmatched prop names;
   `GET /research/players/{espnID}` reads the cached game log and shows the matchup strip, L5 and season hit rates, the
   last-5 range and median, and the opposing-defense chart. Logos and portraits fall back to initials or text, and Research

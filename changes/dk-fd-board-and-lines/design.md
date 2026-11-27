@@ -134,5 +134,5 @@ confirms layout density).
   preference selector, validate `home_book` in `internal/web/slips.go`, and order the export card's books in
   `internal/web/export.go` with the viewer's `homeBook` first, with tests in `internal/web/slips_test.go` and
   `internal/web/export_test.go`.
-- [ ] Docs: update `docs/concepts/pick-board.md` (or board/research concept docs) and `docs/concepts/export.md` to
+- [x] Docs: update `docs/concepts/pick-board.md` (or board/research concept docs) and `docs/concepts/export.md` to
   document the DK ∩ FD pickable filter, split-line display, and DK/FD home-book UX.

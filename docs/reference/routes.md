@@ -490,7 +490,7 @@ fetches nothing. See [Docs hub](../concepts/docs-hub.md).
 | Method + path                  | Purpose                                                   | Response |
 | ------------------------------ | --------------------------------------------------------- | -------- |
 | `GET /me`                      | Profile: home book, the group member list, and the per-device notifications card | Full page |
-| `POST /me`                     | Save `home_book`; blank means the median price             | 303 to `/me` |
+| `POST /me`                     | Save `home_book` (`draftkings`, `fanduel`, or blank for No preference); 422 on other values | 303 to `/me` |
 | `POST /users/{id}/active`      | Turn a group member on or off from `active`                | 303 to `/me` |
 | `POST /push/subscription`      | Store or reassign this device's Web Push subscription (`endpoint`, `keys.p256dh`, `keys.auth`) | 204; 400 for bad JSON or a refused endpoint; 404 when VAPID is off |
 | `DELETE /push/subscription`    | Remove this device's endpoint when it belongs to the caller (`endpoint`) | 204; 404 when VAPID is off |
