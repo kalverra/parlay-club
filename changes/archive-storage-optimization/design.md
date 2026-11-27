@@ -96,5 +96,5 @@ remains intact).
 - [x] Add a SQLite migration in `internal/db/migrations/` to delete `source IN ('nflverse', 'nfelo')` from
       `api_responses` and orphaned rows from `api_bodies`, with a migration test in `internal/db/migrate_test.go`
       confirming ESPN and Odds archive rows survive intact.
-- [ ] Docs: update `docs/concepts/archive.md`, `docs/reference/data-sources.md`, and `docs/runbooks/archive-size.md` to
+- [x] Docs: update `docs/concepts/archive.md`, `docs/reference/data-sources.md`, and `docs/runbooks/archive-size.md` to
   document the bulk-source exclusion and post-deploy `VACUUM` step.

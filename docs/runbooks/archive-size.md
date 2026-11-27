@@ -4,8 +4,6 @@ title: Archive size check
 type: runbook
 summary: Measure the raw response archive and the SQLite file, know the number to act at, and prune old responses without losing the parsed tables.
 tags: [archive, sqlite, size, growth, litestream, runbook]
-sources: [internal/db/archive.go, internal/db/archive_read.go, internal/db/migrations/0003_api_archive.sql, cmd/server/main.go]
-last_verified: 2026-11-07
 ---
 
 # Archive size check
@@ -14,7 +12,9 @@ last_verified: 2026-11-07
 
 Keep the raw response archive from filling the one SQLite file that Litestream replicates and that the Cloud Run
 instance holds in memory. The archive is the only part of the database that grows without a cap: `api_responses` gains a
-row per outside call, and `api_bodies` gains a body whenever the bytes change.
+row per archived outside call (`espn`, `weather`, `odds`), and `api_bodies` gains a body whenever the bytes change.
+Bulk season datasets (`nflverse` and `nfelo`) are excluded from the raw archive and upsert directly into their parsed
+tables.
 
 ## When
 
@@ -29,13 +29,13 @@ bodies have landed. The check is cheap and reads only the database.
 
 ## Steps
 
-Run the queries against the app's database file, `DB_PATH` (`/data/parlay.db` in prod, `./data/parlay.db` in dev). Use a
-copy or a Litestream restore when you can, so the live instance keeps its single writer.
+Run the queries against the app's database file, `DB_PATH` (`/data/parlay.db` in prod, or the local `data/parlay.db`
+file in dev). Use a copy or a Litestream restore when you can, so the live instance keeps its single writer.
 
 1. Measure the archive in uncompressed bytes:
 
-   ```sql
-   SELECT sum(size) AS uncompressed_bytes, count(*) AS bodies FROM api_bodies;
+   ```sh
+   sqlite3 "$DB_PATH" "SELECT sum(size) AS uncompressed_bytes, count(*) AS bodies FROM api_bodies;"
    ```
 
    `size` is the uncompressed body, not the gzipped blob on disk. JSON compresses roughly 10x, so divide by about ten to
@@ -49,12 +49,13 @@ copy or a Litestream restore when you can, so the live instance keeps its single
 
 3. Break the archive down by source key to see what is growing:
 
-   ```sql
+   ```sh
+   sqlite3 "$DB_PATH" "
    SELECT r.key, count(*) AS calls, sum(b.size) AS uncompressed_bytes
    FROM api_responses r
    JOIN api_bodies b ON b.sha256 = r.body_sha256
    GROUP BY r.key
-   ORDER BY uncompressed_bytes DESC;
+   ORDER BY uncompressed_bytes DESC;"
    ```
 
 ## Numbers
@@ -77,11 +78,12 @@ is the early warning, because gzip hides most of its size.
    - Prune the archive in a planned maintenance window, keeping the parsed rows. Stop the service first, back up the
      file, then run this in one `sqlite3` session:
 
-     ```sql
+     ```sh
+     sqlite3 "$DB_PATH" "
      PRAGMA foreign_keys = ON;
      DELETE FROM api_responses WHERE fetched_at < '2026-09-01T00:00:00Z';
      DELETE FROM api_bodies WHERE sha256 NOT IN (SELECT body_sha256 FROM api_responses);
-     VACUUM;
+     VACUUM;"
      ```
 
      Delete responses before bodies. `VACUUM` needs free space about the size of the file and holds the write lock for
@@ -90,6 +92,25 @@ is the early warning, because gzip hides most of its size.
    - Open a change that adds retention or moves the archive to its own database. The app deliberately has no delete or
      retention job today, so this is the honest long-term fix if the archive keeps growing.
 3. Record the new size and date in the change or the deploy notes. The point of the check is the trend, not one reading.
+
+## Post-deploy `VACUUM` after bulk-archive migration
+
+Migration `internal/db/migrations/0022_prune_bulk_archive.sql` deletes historical `nflverse` and `nfelo` rows from
+`api_responses` and their unreferenced rows from `api_bodies`. Because SQLite `VACUUM` cannot run inside a migration
+transaction, those deletions leave freed pages in the database file for reuse without shrinking the file on disk or
+Litestream snapshots until `VACUUM` runs.
+
+During a quiet maintenance window after deploying `0022_prune_bulk_archive.sql`:
+
+1. Stop the service and back up `$DB_PATH`.
+2. Run `VACUUM` against the live `$DB_PATH` (not a restored copy, so Litestream replicates the compacted file):
+
+   ```sh
+   sqlite3 "$DB_PATH" "VACUUM;"
+   ```
+
+   `VACUUM` requires free disk space roughly equal to the database file size and holds the write lock until it finishes.
+3. Restart the service and confirm `$DB_PATH` shrank and Litestream replicated the smaller snapshot.
 
 ## Rollback
 

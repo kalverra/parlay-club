@@ -4,33 +4,42 @@ title: Response archive
 type: concept
 summary: How every successful external API response is kept raw in SQLite, how the source key labels it, and how to read the stored metadata and gzipped bodies.
 tags: [archive, raw-responses, api, sqlite, http, transport, gzip, sha256, labels, odds, credits]
-sources: [internal/ingest/archive/transport.go, internal/ingest/archive/labels.go, internal/ingest/archive/redact.go, internal/db/archive.go, internal/db/archive_read.go, internal/db/migrations/0003_api_archive.sql]
-last_verified: 2026-11-09
+budget:
+  max_spans_per_100_lines: 85
+  reason: Names the archive tables, column names, source keys, and Go read/context helpers inline instead of duplicating them in code fences.
 ---
 
 # Response archive
 
-## Summary
+## Overview
 
-Every successful call to ESPN, Open-Meteo, or Parlay API is saved before the client parses it. The archive keeps the
-raw bytes, not a guess at which fields a model will want later. It lives in the same SQLite file as the rest of the app,
-so Litestream backs it up with everything else.
+Every successful call to ESPN, Open-Meteo, Parlay API, or The Odds API is saved before the client parses it. The
+archive keeps the raw bytes, not a guess at which fields a model will want later. It lives in the same SQLite file as
+the rest of the app, so Litestream backs it up with everything else.
+
+Bulk season datasets (`nfelo` and `nflverse`) are excluded from the raw archive. Refresh parses them and upserts them
+directly into their parsed tables, and offline eval replay reads them from those tables rather than `api_bodies`.
+
+```mermaid
+flowchart LR
+  Refresh["refresh"] --> Ingest["ingest client (archive.Transport)"]
+  Refresh --> Bulk["bulk client (plain transport)"]
+  Ingest -->|"2xx <= 8 MiB"| Archive[("api_responses + api_bodies")]
+  Ingest --> ArchivedAPIs["ESPN / Weather / Odds"]
+  Bulk --> BulkAPIs["nfelo / nflverse"]
+```
 
 ## Where it sits
 
 `archive.Transport` is an `http.RoundTripper` that wraps the ingest HTTP client's base transport in `cmd/server`. The
 clients in `internal/ingest/{espn,weather,odds}` do not know it exists and still never touch the database.
 
-```text
-refresh → ingest client → archive.Transport → network → outside API
-                               ↓ 2xx
-                       api_responses + api_bodies
-```
-
 The transport reads a successful body into memory, puts the same bytes back for the client, and hands one `Record` to
-`Store.SaveAPIResponse`. It must wrap the base transport, not sit beside it, so no client can forget a call.
+`Store.SaveAPIResponse`. It must wrap the base transport, not sit beside it, so no archived client can forget a call.
 
-`internal/auth` builds its own client and stays unwrapped. OAuth tokens never reach the archive.
+`nfelo.NewClient` and `nflverse.NewClient` receive a separate plain `*http.Client` (`newBulkClient` in `cmd/server/main.go`)
+without `archive.Transport`, so large season CSVs are never buffered for archiving or written to `api_responses` /
+`api_bodies`. `internal/auth` also builds its own client and stays unwrapped so OAuth tokens never reach the archive.
 
 ## What is kept
 
@@ -69,12 +78,8 @@ Rows are append-only. The app never updates or deletes an archived response or b
 
 ## Labels
 
-The transport cannot tell `odds:props:401` from `odds:lines` by looking at the URL, so `refresh` puts the key in the
-request context:
-
-```go
-ctx = archive.WithKey(ctx, "odds:props:401")
-```
+The transport cannot tell `odds:props:401` from `odds:lines` by looking at the URL, so `refresh` attaches the key to
+the request context via `archive.WithKey(ctx, key)`.
 
 The key is the same string `sync_state.source` uses. `source` comes from the part before the first colon, lowercased.
 Without a label, the transport falls back to `host + path` and derives `source` from the host: `espn.com`,
@@ -96,51 +101,13 @@ Nothing in a page, route, or request path reads the archive. The read API exists
 - `APIResponseBody(ctx, sha)` returns one body decompressed and checks it against the stored uncompressed size. A
   missing hash wraps `db.ErrAPIBodyNotFound`.
 
-```go
-list, err := store.ListAPIResponses(ctx, db.APIResponseFilter{
-    KeyPrefix: "odds:props:",
-    Since:     weekStart,
-    Until:     weekEnd,
-})
-body, err := store.APIResponseBody(ctx, list[0].BodySHA256)
-```
-
-Plain SQL works too, and is the easiest path for analysis against a Litestream restore. List the metadata without
-touching bodies:
-
-```sql
-SELECT id, source, key, url, status, fetched_at, duration_ms,
-       credits_remaining, credits_used, body_sha256
-FROM api_responses
-WHERE key LIKE 'odds:props:%'
-  AND fetched_at >= '2026-11-01T00:00:00Z'
-ORDER BY fetched_at;
-```
-
-Join in the stored size to see what a slice of history costs:
-
-```sql
-SELECT r.key, count(*) AS calls, sum(b.size) AS uncompressed_bytes
-FROM api_responses r
-JOIN api_bodies b ON b.sha256 = r.body_sha256
-GROUP BY r.key
-ORDER BY uncompressed_bytes DESC;
-```
-
-Bodies are gzip blobs. In Go, use `APIResponseBody` so the decoding and size check happen for you. From a shell, write
-the blob to a file and decompress it:
-
-```sh
-sqlite3 -noheader app.db \
-  "SELECT body FROM api_bodies WHERE sha256 = 'the-hash'" > body.gz
-gunzip -c body.gz > response.json
-```
-
-The stored body is the exact bytes the source returned, so it can be replayed through the same client parser.
+Plain SQL against a Litestream restore works too; see the [archive size check](../runbooks/archive-size.md) for the
+`sqlite3` queries that measure `api_responses` and `api_bodies` by source key. Because `api_bodies.body` holds raw
+gzipped bytes, `APIResponseBody` is the safest way to read and replay stored responses in Go.
 
 ## Growth
 
-Bodies are gzipped and deduplicated, so a season of lines, props, and weather should stay in the low hundreds of MB.
-Watch `SELECT sum(size) FROM api_bodies` and the database file size at the end of the first season. The
-[archive size check](../runbooks/archive-size.md) has the thresholds and the prune steps. The archive rides the
-replicated database file, so any growth is also replication traffic.
+Bodies are gzipped and deduplicated, and bulk season datasets (`nfelo` and `nflverse`) are excluded from the archive, so
+a season of lines, props, and weather stays small. Watch `SELECT sum(size) FROM api_bodies` and the database file size
+at the end of the first season. The [archive size check](../runbooks/archive-size.md) has the thresholds and the prune
+and `VACUUM` steps. The archive rides the replicated database file, so any growth is also replication traffic.

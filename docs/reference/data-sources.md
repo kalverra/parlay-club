@@ -16,8 +16,11 @@ the database. The caller decides when to fetch and writes results through the `S
 
 ## Response archive
 
-Every successful call to these sources is saved raw before the client parses it. The ingest `*http.Client` built in
-`cmd/server` has `archive.Transport` as its transport, so the clients stay database-free and cannot forget a call.
+Every successful call to ESPN, Open-Meteo, Parlay API, and The Odds API is saved raw before the client parses it. The
+ingest `*http.Client` built in `cmd/server` has `archive.Transport` as its transport, so those clients stay
+database-free and cannot forget a call. Bulk season dataset clients (`nfelo` and `nflverse`) are excluded: `cmd/server`
+wires them with a separate plain `*http.Client` (`newBulkClient`) without `archive.Transport`, because they upsert
+directly into their parsed tables.
 
 - A 2xx response of at most 8 MiB is kept. The uncompressed bytes go in `api_bodies`, gzipped and keyed by their
   SHA-256, so an unchanged payload stores one body row. Each call adds one `api_responses` row with the source, key,
@@ -372,8 +375,8 @@ an empty required cell is dropped, and a non-numeric number is an error.
 - The file has no played flag. A played game keeps its last pre-game projection.
 
 Refresh writes the current regular-season week's matching rows into `nfelo_games`; see
-[Data refresh](../concepts/data-refresh.md). The CSV is archived under the `nfelo:projections` key with
-`source = "nfelo"`, so a format change leaves the raw bytes in the archive. The real file saved on 2026-11-09 is
+[Data refresh](../concepts/data-refresh.md). Bulk `nfelo` responses are not archived in `api_responses` or
+`api_bodies`; refresh upserts them directly into the parsed table. The real file saved on 2026-11-09 is
 `internal/ingest/nfelo/testdata/historic_projected_spreads.csv`.
 
 ## nflverse (free, no auth)
@@ -403,8 +406,8 @@ when present.
   and `nflverse_player_weeks` under `nflverse:season:{year}`, deriving `carry_share` (`carries / team_carries`),
   copying `passing_cpoe` to `cpoe`, and merging `FFOpportunity` expected yards, receptions, and touchdowns onto
   `espn_id` (or logging a warning and continuing without expected opportunity on error); see
-  [Data refresh](../concepts/data-refresh.md). Responses up to 8 MiB are archived under `nflverse:season:{year}`
-  (larger responses pass through unrecorded). Real 2026 fixtures saved on 2026-11-15 (and `ep_weekly_2026.csv` saved on
+  [Data refresh](../concepts/data-refresh.md). Bulk `nflverse` responses are not archived in `api_responses` or
+  `api_bodies`. Real 2026 fixtures saved on 2026-11-15 (and `ep_weekly_2026.csv` saved on
   2026-11-25) live in `internal/ingest/nflverse/testdata/`.
 
 ## Player matching

@@ -11,6 +11,7 @@
 
 - [Access](concepts/access.md): How Google sign-in, open sign-up, and signed session and group cookies decide who is using the app and which group they see.
 - [Analyzer](concepts/analyzer.md): How the sharp-friend analyzer turns legs, games, weather, player stats, nfelo's model, and nflverse efficiency into plain-Go warnings and calibrated four-pillar A–F grades.
+- [Response archive](concepts/archive.md): How every successful external API response is kept raw in SQLite, how the source key labels it, and how to read the stored metadata and gzipped bodies.
 - [Data refresh](concepts/data-refresh.md): How page loads, per-game-day pre-fill, and on-demand views sync slate, weather, odds, props, rosters, injuries, projections, and auto-grading with staleness windows, credit floors, and shutdown drain.
 - [Docs hub](concepts/docs-hub.md): How the Docs tab explains grading, odds, badges, live progress, autograding, sources, and export, and how every inline `?` help bubble reaches the matching section.
 - [Export](concepts/export.md): How a locked slip turns stored sportsbook deep links into a one-tap combined DraftKings or FanDuel link, with per-leg taps, a manual list, and copy text for every pick that has no link.
@@ -41,6 +42,7 @@
 
 ## Runbook
 
+- [Archive size check](runbooks/archive-size.md): Measure the raw response archive and the SQLite file, know the number to act at, and prune old responses without losing the parsed tables.
 - [Database recovery](runbooks/database-recovery.md): Recover from a corrupt Litestream replica by finding the last good transaction, seeding a fresh replica, and repointing Cloud Run without losing user data.
 - [Deploy](runbooks/deploy.md): How a commit reaches Cloud Run, why deploys pause during game windows, how to force one, and how to verify, roll back, and read the spend.
 - [Push setup](runbooks/push-setup.md): Generate a VAPID key pair, turn Web Push on in local dev and production, set up the Cloud Tasks reminder queue, and confirm delivery with Send test and the first-week check.
