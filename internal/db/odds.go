@@ -334,8 +334,10 @@ const oddsColumns = `
 	sid, event_sid, fetched_at`
 
 // UpsertOdds writes each row and reports whether any row changed. A row whose
-// values are identical apart from nothing is left alone; a new fetch time is a
-// real change because the board shows how fresh the lines are.
+// values are identical is left alone; a new fetch time is a real change because
+// the board shows how fresh the lines are. Incoming NULL link/sid/event_sid
+// values preserve stored values when the line has not moved; when the line
+// moves, stale link and sid are cleared while event_sid is preserved.
 func (s *Store) UpsertOdds(ctx context.Context, rows []Odds) (bool, error) {
 	if len(rows) == 0 {
 		return false, nil
@@ -352,15 +354,23 @@ func (s *Store) UpsertOdds(ctx context.Context, rows []Odds) (bool, error) {
 			DO UPDATE SET
 				line = excluded.line,
 				price = excluded.price,
-				link = excluded.link,
-				sid = excluded.sid,
-				event_sid = excluded.event_sid,
+				link = CASE
+					WHEN excluded.link IS NOT NULL THEN excluded.link
+					WHEN odds.line IS excluded.line THEN odds.link
+					ELSE NULL
+				END,
+				sid = CASE
+					WHEN excluded.sid IS NOT NULL THEN excluded.sid
+					WHEN odds.line IS excluded.line THEN odds.sid
+					ELSE NULL
+				END,
+				event_sid = COALESCE(excluded.event_sid, odds.event_sid),
 				fetched_at = excluded.fetched_at
 			WHERE odds.line IS NOT excluded.line
 				OR odds.price IS NOT excluded.price
-				OR odds.link IS NOT excluded.link
-				OR odds.sid IS NOT excluded.sid
-				OR odds.event_sid IS NOT excluded.event_sid
+				OR (excluded.link IS NOT NULL AND odds.link IS NOT excluded.link)
+				OR (excluded.sid IS NOT NULL AND odds.sid IS NOT excluded.sid)
+				OR (excluded.event_sid IS NOT NULL AND odds.event_sid IS NOT excluded.event_sid)
 				OR odds.fetched_at IS NOT excluded.fetched_at`)
 		if err != nil {
 			return fmt.Errorf("prepare upsert odds: %w", err)

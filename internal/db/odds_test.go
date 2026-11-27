@@ -665,3 +665,154 @@ func TestStoreOddsForGameAndWeekFilterCurrentOdds(t *testing.T) {
 	assert.Equal(t, "Josh Allen", forWeek[1].PlayerName)
 	assert.Equal(t, "Patrick Mahomes", forWeek[2].PlayerName)
 }
+
+func TestStoreUpsertOddsLinkPreservation(t *testing.T) {
+	t.Parallel()
+
+	store, _ := openTestStore(t)
+	week := createTestWeek(t, store, 12)
+	game := testSlateGame(week)
+	_, err := store.UpsertGame(t.Context(), game)
+	require.NoError(t, err)
+
+	t1 := time.Date(2026, time.November, 22, 10, 0, 0, 0, time.UTC)
+	t2 := time.Date(2026, time.November, 22, 11, 0, 0, 0, time.UTC)
+	t3 := time.Date(2026, time.November, 22, 12, 0, 0, 0, time.UTC)
+	t4 := time.Date(2026, time.November, 22, 13, 0, 0, 0, time.UTC)
+
+	seed := []db.Odds{
+		{
+			GameID:     game.ID,
+			Book:       "draftkings",
+			MarketType: "PASS_YDS",
+			PlayerName: "Josh Allen",
+			Side:       "OVER",
+			Line:       new(250.5),
+			Price:      -110,
+			Link:       new("https://sportsbook.draftkings.com/event/1?outcomes=s1"),
+			Sid:        new("s1"),
+			EventSid:   new("ev1"),
+			FetchedAt:  t1,
+		},
+		{
+			GameID:     game.ID,
+			Book:       "draftkings",
+			MarketType: "ML",
+			Team:       "BUF",
+			Price:      -140,
+			Link:       new("https://sportsbook.draftkings.com/event/1?outcomes=ml1"),
+			Sid:        new("ml1"),
+			EventSid:   new("ev1"),
+			FetchedAt:  t1,
+		},
+	}
+
+	changed, err := store.UpsertOdds(t.Context(), seed)
+	require.NoError(t, err)
+	assert.True(t, changed)
+
+	// Re-upserting NULL links on an unchanged line with the same timestamp is a no-op.
+	changed, err = store.UpsertOdds(t.Context(), []db.Odds{
+		{
+			GameID:     game.ID,
+			Book:       "draftkings",
+			MarketType: "PASS_YDS",
+			PlayerName: "Josh Allen",
+			Side:       "OVER",
+			Line:       new(250.5),
+			Price:      -110,
+			FetchedAt:  t1,
+		},
+	})
+	require.NoError(t, err)
+	assert.False(t, changed)
+
+	// Re-upserting NULL links on an unchanged line with a newer timestamp preserves
+	// link, sid, and event_sid for both numeric-line and nil-line markets.
+	changed, err = store.UpsertOdds(t.Context(), []db.Odds{
+		{
+			GameID:     game.ID,
+			Book:       "draftkings",
+			MarketType: "PASS_YDS",
+			PlayerName: "Josh Allen",
+			Side:       "OVER",
+			Line:       new(250.5),
+			Price:      -115,
+			FetchedAt:  t2,
+		},
+		{
+			GameID:     game.ID,
+			Book:       "draftkings",
+			MarketType: "ML",
+			Team:       "BUF",
+			Price:      -145,
+			FetchedAt:  t2,
+		},
+	})
+	require.NoError(t, err)
+	assert.True(t, changed)
+
+	got, err := store.OddsForGame(t.Context(), game.ID)
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+	assert.Equal(t, -145, got[0].Price)
+	assert.Equal(t, new("https://sportsbook.draftkings.com/event/1?outcomes=ml1"), got[0].Link)
+	assert.Equal(t, new("ml1"), got[0].Sid)
+	assert.Equal(t, new("ev1"), got[0].EventSid)
+
+	assert.Equal(t, -115, got[1].Price)
+	assert.Equal(t, new("https://sportsbook.draftkings.com/event/1?outcomes=s1"), got[1].Link)
+	assert.Equal(t, new("s1"), got[1].Sid)
+	assert.Equal(t, new("ev1"), got[1].EventSid)
+
+	// Moving the line with NULL link/sid/event_sid clears stale link and sid while
+	// preserving event_sid.
+	changed, err = store.UpsertOdds(t.Context(), []db.Odds{
+		{
+			GameID:     game.ID,
+			Book:       "draftkings",
+			MarketType: "PASS_YDS",
+			PlayerName: "Josh Allen",
+			Side:       "OVER",
+			Line:       new(255.5),
+			Price:      -110,
+			FetchedAt:  t3,
+		},
+	})
+	require.NoError(t, err)
+	assert.True(t, changed)
+
+	got, err = store.OddsForGame(t.Context(), game.ID)
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+	assert.Equal(t, new(255.5), got[1].Line)
+	assert.Nil(t, got[1].Link)
+	assert.Nil(t, got[1].Sid)
+	assert.Equal(t, new("ev1"), got[1].EventSid)
+
+	// Incoming non-null links overwrite stored values.
+	changed, err = store.UpsertOdds(t.Context(), []db.Odds{
+		{
+			GameID:     game.ID,
+			Book:       "draftkings",
+			MarketType: "PASS_YDS",
+			PlayerName: "Josh Allen",
+			Side:       "OVER",
+			Line:       new(255.5),
+			Price:      -110,
+			Link:       new("https://sportsbook.draftkings.com/event/1?outcomes=s2"),
+			Sid:        new("s2"),
+			EventSid:   new("ev2"),
+			FetchedAt:  t4,
+		},
+	})
+	require.NoError(t, err)
+	assert.True(t, changed)
+
+	got, err = store.OddsForGame(t.Context(), game.ID)
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+	assert.Equal(t, new("https://sportsbook.draftkings.com/event/1?outcomes=s2"), got[1].Link)
+	assert.Equal(t, new("s2"), got[1].Sid)
+	assert.Equal(t, new("ev2"), got[1].EventSid)
+}

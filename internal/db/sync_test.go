@@ -319,15 +319,30 @@ func TestUpsertOddsStoresAndRefreshesLinksWithPrices(t *testing.T) {
 	rows[0].EventSid = nil
 	changed, err = store.UpsertOdds(t.Context(), rows)
 	require.NoError(t, err)
-	assert.True(t, changed, "losing a link is a change")
+	assert.False(t, changed, "null links on an unchanged line are preserved")
 
 	stored, err = store.OddsForGame(t.Context(), game.ID)
 	require.NoError(t, err)
 	for _, row := range stored {
 		if row.Book == "draftkings" {
-			assert.Nil(t, row.Link, "a vanished link becomes NULL")
-			assert.Nil(t, row.Sid)
-			assert.Nil(t, row.EventSid, "a vanished event id becomes NULL")
+			assert.Equal(t, new("https://sportsbook.draftkings.com/?outcomes=0HC1P250_2"), row.Link)
+			assert.Equal(t, new("0HC1P250_2"), row.Sid)
+			assert.Equal(t, new("34118129"), row.EventSid)
+		}
+	}
+
+	rows[0].Line = new(-3.5)
+	changed, err = store.UpsertOdds(t.Context(), rows)
+	require.NoError(t, err)
+	assert.True(t, changed, "moving the line is a change")
+
+	stored, err = store.OddsForGame(t.Context(), game.ID)
+	require.NoError(t, err)
+	for _, row := range stored {
+		if row.Book == "draftkings" {
+			assert.Nil(t, row.Link, "a moved line clears stale link")
+			assert.Nil(t, row.Sid, "a moved line clears stale sid")
+			assert.Equal(t, new("34118129"), row.EventSid, "a moved line preserves event id")
 		}
 	}
 }
