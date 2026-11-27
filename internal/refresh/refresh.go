@@ -205,6 +205,23 @@ type FallbackPropsClient interface {
 	EventProps(ctx context.Context, eventID string) ([]odds.Prop, odds.Credits, error)
 }
 
+type marketLinesClient interface {
+	LinesForMarkets(ctx context.Context, markets, bookmakers []string) ([]odds.Line, odds.Credits, error)
+}
+
+type marketPropsClient interface {
+	EventPropsForMarkets(
+		ctx context.Context,
+		eventID string,
+		markets []string,
+		bookmakers []string,
+	) ([]odds.Prop, odds.Credits, error)
+}
+
+// enrichBookmakers scopes lock-time Odds API enrichment to the two books
+// whose deep links are needed for slip export.
+var enrichBookmakers = []string{"draftkings", "fanduel"}
+
 // ProjectionsClient is the slice of *nfelo.Client refresh needs.
 type ProjectionsClient interface {
 	Projections(ctx context.Context) ([]nfelo.Projection, error)
@@ -1174,16 +1191,72 @@ func (s *Service) syncSlipExportEnrich(ctx context.Context, slipID int64) error 
 	if err != nil {
 		return fmt.Errorf("week %d games: %w", slip.WeekID, err)
 	}
+
+	now := s.now()
+	lineMarkets, propGames, propMarketsByGame, err := s.collectMissingExportMarkets(ctx, legs, games, now)
+	if err != nil {
+		return err
+	}
+
+	linesSrc, runLines, duePropGames, propSrcByGame, err := s.dueExportEnrichTargets(
+		ctx, slip.WeekID, games, lineMarkets, propGames, now,
+	)
+	if err != nil || (!runLines && len(duePropGames) == 0) {
+		return err
+	}
+
+	matches, ok, err := s.fetchEnrichMatches(ctx, games, runLines, now)
+	if err != nil || !ok {
+		return err
+	}
+
+	var errs []error
+	if runLines {
+		err := s.runFlightEnrich(ctx, linesSrc, now, func(runCtx context.Context) (bool, error) {
+			return s.enrichWeekLinesForMarkets(runCtx, slip.WeekID, games, matches, lineMarkets, now)
+		})
+		if err != nil && !errors.Is(err, odds.ErrNoAPIKey) {
+			errs = append(errs, err)
+		}
+	}
+	for _, game := range duePropGames {
+		toaEventID, hasToa := matches[game.ID]
+		if !hasToa {
+			s.logger.Warn().
+				Str("game_id", game.ID).
+				Msg("fallback props skipped: no fallback event matched")
+			continue
+		}
+		src := propSrcByGame[game.ID]
+		markets := propMarketsByGame[game.ID]
+		err := s.runFlightEnrich(ctx, src, now, func(runCtx context.Context) (bool, error) {
+			return s.enrichGamePropsForMarkets(runCtx, game, toaEventID, markets, now)
+		})
+		if err != nil && !errors.Is(err, odds.ErrNoAPIKey) {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func (s *Service) collectMissingExportMarkets(
+	ctx context.Context,
+	legs []db.Leg,
+	games []db.Game,
+	now time.Time,
+) ([]string, []db.Game, map[string][]string, error) {
 	gameByID := make(map[string]db.Game, len(games))
 	for _, game := range games {
 		gameByID[game.ID] = game
 	}
 
-	now := s.now()
 	oddsByGame := make(map[string][]db.Odds)
-	seenPropGames := make(map[string]bool)
-	var propsToEnrich []db.Game
-	needsLinesEnrich := false
+	var lineMarkets []string
+	seenLineMarket := make(map[string]bool)
+	propMarketsByGame := make(map[string][]string)
+	seenPropMarket := make(map[string]map[string]bool)
+	var propGames []db.Game
+
 	for _, leg := range legs {
 		if leg.GameID == nil || *leg.GameID == "" {
 			continue
@@ -1193,46 +1266,152 @@ func (s *Service) syncSlipExportEnrich(ctx context.Context, slipID int64) error 
 		if !ok || !now.Before(game.Kickoff) {
 			continue
 		}
-		isProp := db.IsPropLeg(leg)
-		if isProp && seenPropGames[gameID] {
-			continue
-		}
-		if !isProp && needsLinesEnrich {
-			continue
-		}
 		oddsRows, loaded := oddsByGame[gameID]
 		if !loaded {
+			var err error
 			oddsRows, err = s.store.OddsForGame(ctx, gameID)
 			if err != nil {
-				return fmt.Errorf("game %s odds: %w", gameID, err)
+				return nil, nil, nil, fmt.Errorf("game %s odds: %w", gameID, err)
 			}
 			oddsByGame[gameID] = oddsRows
 		}
 		if !legNeedsExportEnrich(leg, oddsRows) {
 			continue
 		}
-		if isProp {
-			seenPropGames[gameID] = true
-			propsToEnrich = append(propsToEnrich, game)
-		} else {
-			needsLinesEnrich = true
+		marketKey, ok := odds.APIMarketKey(leg.MarketType)
+		if !ok {
+			continue
+		}
+		if db.IsPropLeg(leg) {
+			if seenPropMarket[gameID] == nil {
+				seenPropMarket[gameID] = make(map[string]bool)
+				propGames = append(propGames, game)
+			}
+			if !seenPropMarket[gameID][marketKey] {
+				seenPropMarket[gameID][marketKey] = true
+				propMarketsByGame[gameID] = append(propMarketsByGame[gameID], marketKey)
+			}
+		} else if !seenLineMarket[marketKey] {
+			seenLineMarket[marketKey] = true
+			lineMarkets = append(lineMarkets, marketKey)
 		}
 	}
 
-	var errs []error
-	if needsLinesEnrich {
-		err := s.refreshSync(ctx, s.oddsLinesEnrichSource(slip.WeekID, games, now), now)
-		if err != nil && !errors.Is(err, odds.ErrNoAPIKey) {
-			errs = append(errs, err)
+	return lineMarkets, propGames, propMarketsByGame, nil
+}
+
+func (s *Service) dueExportEnrichTargets(
+	ctx context.Context,
+	weekID int64,
+	games []db.Game,
+	lineMarkets []string,
+	propGames []db.Game,
+	now time.Time,
+) (source, bool, []db.Game, map[string]source, error) {
+	var linesSrc source
+	runLines := false
+	if len(lineMarkets) > 0 && s.fallbackLines != nil {
+		linesSrc = s.oddsLinesEnrichSource(weekID, games, now)
+		if !s.paused(linesSrc.key, now) {
+			due, err := s.shouldRun(archive.WithKey(ctx, linesSrc.key), linesSrc)
+			if err != nil {
+				return source{}, false, nil, nil, err
+			}
+			runLines = due
 		}
 	}
-	for _, game := range propsToEnrich {
-		err := s.refreshSync(ctx, s.oddsPropsEnrichSource(game, now, false), now)
-		if err != nil && !errors.Is(err, odds.ErrNoAPIKey) {
-			errs = append(errs, err)
+
+	var duePropGames []db.Game
+	propSrcByGame := make(map[string]source, len(propGames))
+	if s.fallbackProps != nil {
+		for _, game := range propGames {
+			src := s.oddsPropsEnrichSource(game, now, false)
+			if s.paused(src.key, now) {
+				continue
+			}
+			due, err := s.shouldRun(archive.WithKey(ctx, src.key), src)
+			if err != nil {
+				return source{}, false, nil, nil, err
+			}
+			if due {
+				duePropGames = append(duePropGames, game)
+				propSrcByGame[game.ID] = src
+			}
 		}
 	}
-	return errors.Join(errs...)
+
+	return linesSrc, runLines, duePropGames, propSrcByGame, nil
+}
+
+func (s *Service) fetchEnrichMatches(
+	ctx context.Context,
+	games []db.Game,
+	runLines bool,
+	now time.Time,
+) (map[string]string, bool, error) {
+	eventsClient := s.enrichEventsClient(runLines)
+	if eventsClient == nil {
+		return nil, false, nil
+	}
+	fallbackCtx := archive.WithKey(ctx, TheOddsAPISource)
+	events, credits, err := eventsClient.Events(fallbackCtx)
+	if errors.Is(err, odds.ErrNoAPIKey) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("fallback events: %w", err)
+	}
+	remaining := credits.Remaining
+	if err := s.store.RecordSync(fallbackCtx, TheOddsAPISource, now, &remaining); err != nil {
+		return nil, false, err
+	}
+	if credits.Remaining < TheOddsAPIEnrichFloor {
+		s.logger.Warn().
+			Int("remaining", credits.Remaining).
+			Int("floor", TheOddsAPIEnrichFloor).
+			Msg("odds enrich paused below credit floor")
+		return nil, false, nil
+	}
+	matches, _ := odds.MatchEvents(events, matchGames(games))
+	return matches, true, nil
+}
+
+func (s *Service) enrichEventsClient(runLines bool) interface {
+	Events(context.Context) ([]odds.Event, odds.Credits, error)
+} {
+	if runLines && s.fallbackLines != nil {
+		return s.fallbackLines
+	}
+	if s.fallbackProps != nil {
+		return s.fallbackProps
+	}
+	return s.fallbackLines
+}
+
+func (s *Service) runFlightEnrich(
+	parent context.Context,
+	src source,
+	now time.Time,
+	run func(context.Context) (bool, error),
+) error {
+	ctx := archive.WithKey(parent, src.key)
+	_, err, _ := s.flight.Do(src.key, func() (any, error) {
+		due, err := s.shouldRun(ctx, src)
+		if err != nil || !due {
+			return false, err
+		}
+		return run(ctx)
+	})
+	if err != nil {
+		if s.stopping() {
+			return err
+		}
+		s.logger.Error().Err(err).Str("source", src.key).Msg("refresh failed")
+		s.backOff(src.key, now)
+		return err
+	}
+	s.clearBackoff(src.key)
+	return nil
 }
 
 func legNeedsExportEnrich(leg db.Leg, oddsRows []db.Odds) bool {

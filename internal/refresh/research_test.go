@@ -81,6 +81,12 @@ func (f *fakePropsClient) Props(_ context.Context, eventID string) ([]odds.Prop,
 	return f.props[eventID], f.propsCredits, nil
 }
 
+type scopedPropReq struct {
+	eventID    string
+	markets    []string
+	bookmakers []string
+}
+
 type fakeFallbackPropsClient struct {
 	mu                sync.Mutex
 	events            []odds.Event
@@ -89,6 +95,8 @@ type fakeFallbackPropsClient struct {
 	eventProps        map[string][]odds.Prop
 	eventPropsCredits odds.Credits
 	eventPropsCalls   int
+	scopedCalls       int
+	propMarketReqs    []scopedPropReq
 }
 
 func (f *fakeFallbackPropsClient) Events(context.Context) ([]odds.Event, odds.Credits, error) {
@@ -102,6 +110,24 @@ func (f *fakeFallbackPropsClient) EventProps(_ context.Context, eventID string) 
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.eventPropsCalls++
+	return f.eventProps[eventID], f.eventPropsCredits, nil
+}
+
+func (f *fakeFallbackPropsClient) EventPropsForMarkets(
+	_ context.Context,
+	eventID string,
+	markets []string,
+	bookmakers []string,
+) ([]odds.Prop, odds.Credits, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.eventPropsCalls++
+	f.scopedCalls++
+	f.propMarketReqs = append(f.propMarketReqs, scopedPropReq{
+		eventID:    eventID,
+		markets:    append([]string(nil), markets...),
+		bookmakers: append([]string(nil), bookmakers...),
+	})
 	return f.eventProps[eventID], f.eventPropsCredits, nil
 }
 

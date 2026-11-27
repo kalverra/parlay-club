@@ -523,9 +523,89 @@ func (s *Service) enrichWeekLines(ctx context.Context, weekID int64, games []db.
 		return false, nil
 	}
 
+	changed, mergedCount, err := s.commitWeekLinesEnrich(ctx, weekID, byID, fallback.matches, fallback.rows, now)
+	if err != nil {
+		return changed, err
+	}
+	s.logger.Info().
+		Float64("duration_ms", durationMS(time.Since(start))).
+		Int64("week_id", weekID).
+		Int("rows", mergedCount).
+		Bool("changed", changed).
+		Msg("refresh enrich week lines")
+	return changed, nil
+}
+
+// enrichWeekLinesForMarkets fetches only the requested game-line markets from
+// The Odds API for draftkings and fanduel using pre-matched event IDs, then
+// merges them into the week's existing current game-line rows.
+func (s *Service) enrichWeekLinesForMarkets(
+	ctx context.Context,
+	weekID int64,
+	games []db.Game,
+	matches map[string]string,
+	markets []string,
+	now time.Time,
+) (bool, error) {
+	if s.fallbackLines == nil || len(games) == 0 || len(markets) == 0 || allKickedOff(games, now) {
+		return false, nil
+	}
+	start := time.Now()
+
+	byID := make(map[string]db.Game, len(games))
+	for _, game := range games {
+		byID[game.ID] = game
+	}
+
+	fallbackCtx := archive.WithKey(ctx, TheOddsAPISource)
+	var (
+		lines       []odds.Line
+		lineCredits odds.Credits
+		err         error
+	)
+	if scoped, ok := s.fallbackLines.(marketLinesClient); ok {
+		lines, lineCredits, err = scoped.LinesForMarkets(fallbackCtx, markets, enrichBookmakers)
+	} else {
+		lines, lineCredits, err = s.fallbackLines.Lines(fallbackCtx)
+	}
+	if err != nil {
+		return false, fmt.Errorf("fallback odds lines: %w", err)
+	}
+	remaining := lineCredits.Remaining
+	if err := s.store.RecordSync(fallbackCtx, TheOddsAPISource, now, &remaining); err != nil {
+		return false, err
+	}
+
+	rows, err := rowsForLines(lines, matches, byID, now)
+	if err != nil {
+		return false, fmt.Errorf("fallback odds: %w", err)
+	}
+
+	changed, mergedCount, err := s.commitWeekLinesEnrich(ctx, weekID, byID, matches, rows, now)
+	if err != nil {
+		return changed, err
+	}
+	s.logger.Info().
+		Float64("duration_ms", durationMS(time.Since(start))).
+		Int64("week_id", weekID).
+		Strs("markets", markets).
+		Int("rows", mergedCount).
+		Bool("changed", changed).
+		Msg("refresh enrich week lines")
+	return changed, nil
+}
+
+func (s *Service) commitWeekLinesEnrich(
+	ctx context.Context,
+	weekID int64,
+	byID map[string]db.Game,
+	matches map[string]string,
+	rows []db.Odds,
+	now time.Time,
+) (bool, int, error) {
 	existingOdds, err := s.store.OddsForWeek(ctx, weekID)
 	if err != nil {
-		return false, fmt.Errorf("load existing lines for week %d: %w", weekID, err)
+		return false, 0, fmt.Errorf("load existing lines for week %d: %w", weekID, err)
 	}
 	var existingLines []db.Odds
 	for _, row := range existingOdds {
@@ -534,14 +614,14 @@ func (s *Service) enrichWeekLines(ctx context.Context, weekID int64, games []db.
 		}
 	}
 
-	merged := mergeOdds(existingLines, fallback.rows)
+	merged := mergeOdds(existingLines, rows)
 	for i := range merged {
 		merged[i].FetchedAt = now
 	}
 
 	changed := false
 	err = s.store.Tx(ctx, func(tx *db.Store) error {
-		for gameID, eventID := range fallback.matches {
+		for gameID, eventID := range matches {
 			game, ok := byID[gameID]
 			if !ok || game.OddsEventID != nil {
 				continue
@@ -562,18 +642,12 @@ func (s *Service) enrichWeekLines(ctx context.Context, weekID int64, games []db.
 		return tx.RecordSync(ctx, OddsLinesEnrichSource, now, nil)
 	})
 	if err != nil {
-		return changed, err
+		return changed, len(merged), err
 	}
 	if changed {
 		s.publishWeek(ctx, weekID)
 	}
-	s.logger.Info().
-		Float64("duration_ms", durationMS(time.Since(start))).
-		Int64("week_id", weekID).
-		Int("rows", len(merged)).
-		Bool("changed", changed).
-		Msg("refresh enrich week lines")
-	return changed, nil
+	return changed, len(merged), nil
 }
 
 // oddsKey identifies one book's price for one selection across providers.

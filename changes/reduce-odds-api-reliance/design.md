@@ -137,7 +137,7 @@ tests).
   `SyncGameProps` / `syncPickProps` (`internal/refresh/refresh.go`) to skip The Odds API enrichment when Parlay API
   succeeds while preserving outage and credit-floor fallback, updating `sources_test.go`, `research_test.go`, and
   `pick_test.go`.
-- [ ] Update `syncSlipExportEnrich` in `internal/refresh/refresh.go` to batch one free `Events` check and run
+- [x] Update `syncSlipExportEnrich` in `internal/refresh/refresh.go` to batch one free `Events` check and run
   market-scoped `LinesForMarkets` and per-game `EventPropsForMarkets` calls (`draftkings,fanduel` only) for missing
   locked-slip links, with unit tests in `internal/refresh/pick_test.go`.
 - [ ] Docs: update `docs/concepts/data-refresh.md`, `docs/concepts/export.md`, and `docs/reference/data-sources.md` to
