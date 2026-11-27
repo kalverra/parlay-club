@@ -11,14 +11,28 @@ import (
 	"github.com/kalverra/parlay-club/internal/export"
 )
 
-// exportBooks are the books the export card offers, in the order it draws
-// them. The API keys come from internal/export.
-var exportBooks = []struct {
+type exportBookSpec struct {
 	key   string
 	label string
-}{
+}
+
+// exportBooks are the books the export card offers, in the default order it
+// draws them. The API keys come from internal/export.
+var exportBooks = []exportBookSpec{
 	{export.DraftKings, "DraftKings"},
 	{export.FanDuel, "FanDuel"},
+}
+
+// exportBooksForHomeBook orders the export card's sportsbooks with the viewer's
+// homeBook first when set.
+func exportBooksForHomeBook(homeBook string) []exportBookSpec {
+	if db.NormalizeBook(homeBook) == export.FanDuel {
+		return []exportBookSpec{
+			{export.FanDuel, "FanDuel"},
+			{export.DraftKings, "DraftKings"},
+		}
+	}
+	return exportBooks
 }
 
 // ExportView is the export card on a locked slip. Locked is false on an open
@@ -152,8 +166,13 @@ func (h *slipHandlers) exportView(ctx context.Context, slip db.Slip) (ExportView
 		exportLegs = append(exportLegs, item)
 	}
 
+	homeBook := ""
+	if user, ok := h.user(ctx); ok && user.HomeBook != nil {
+		homeBook = *user.HomeBook
+	}
+
 	now := h.deps.now()
-	for _, book := range exportBooks {
+	for _, book := range exportBooksForHomeBook(homeBook) {
 		plan := export.Plan(slip, exportLegs, oddsRows, book.key, now)
 		view.Books = append(view.Books, exportBookView(plan, book.label, matchups))
 	}

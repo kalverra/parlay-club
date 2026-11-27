@@ -204,8 +204,59 @@ func TestProfilePageRendersTheHomeBookForm(t *testing.T) {
 	require.Equal(t, http.StatusOK, recorder.Code)
 	body := recorder.Body.String()
 	assert.Contains(t, body, `<h1 class="text-xl font-semibold">Profile</h1>`)
+	assert.Contains(t, body, `type="radio"`)
 	assert.Contains(t, body, `name="home_book"`)
+	assert.Contains(t, body, `value="draftkings"`)
+	assert.Contains(t, body, `value="fanduel"`)
+	assert.Contains(t, body, `value=""`)
+	assert.Contains(t, body, "DraftKings")
+	assert.Contains(t, body, "FanDuel")
+	assert.Contains(t, body, "No preference")
+	assert.NotContains(t, body, `type="text"`)
 	assert.Contains(t, body, fixture.user.Name)
+}
+
+func TestUpdateProfileValidatesHomeBookAndNormalizesLegacyKeys(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+
+	// Legacy unknown key in DB falls back to "No preference" checked on GET /me.
+	legacyUser, err := fixture.store.SetUserHomeBook(t.Context(), fixture.user.ID, new("betmgm"))
+	require.NoError(t, err)
+	fixture.as(legacyUser)
+	getLegacy := httptest.NewRecorder()
+	fixture.handler.ServeHTTP(getLegacy, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/me", nil))
+	require.Equal(t, http.StatusOK, getLegacy.Code)
+	assert.Contains(t, getLegacy.Body.String(), `value=""`+"\n          checked")
+
+	// Reject unknown bookmaker keys on POST /me.
+	bad := postForm(t, fixture.handler, "/me", url.Values{"home_book": {"betmgm"}})
+	assert.Equal(t, http.StatusUnprocessableEntity, bad.Code)
+	assert.Contains(t, bad.Body.String(), "DraftKings, FanDuel, or No preference")
+
+	// Accept draftkings, fanduel, and empty string ("No preference").
+	for _, tc := range []struct {
+		input string
+		want  *string
+	}{
+		{input: "draftkings", want: new("draftkings")},
+		{input: "FanDuel", want: new("fanduel")},
+		{input: "", want: nil},
+	} {
+		resp := postForm(t, fixture.handler, "/me", url.Values{"home_book": {tc.input}})
+		require.Equal(t, http.StatusOK, resp.Code, resp.Body.String())
+		assert.Equal(t, "/me", resp.Header().Get("Hx-Redirect"))
+
+		user, err := fixture.store.UserByID(t.Context(), fixture.user.ID)
+		require.NoError(t, err)
+		if tc.want == nil {
+			assert.Nil(t, user.HomeBook)
+		} else {
+			require.NotNil(t, user.HomeBook)
+			assert.Equal(t, *tc.want, *user.HomeBook)
+		}
+	}
 }
 
 func TestSlipPageAdvertisesTheLiveStream(t *testing.T) {

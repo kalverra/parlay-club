@@ -985,3 +985,45 @@ func TestExportCardUnquotedPropVsUnsyncedGame(t *testing.T) {
 	)
 	assert.Contains(t, body, "Heads up: FanDuel has no line for this pick yet, so add it by hand.")
 }
+
+func TestExportCardOrdersBooksWithHomeBookFirst(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	game := addGame(t, fixture, gameKickoff())
+	exportRows(t, fixture.store, game.ID)
+
+	addExportLeg(t, fixture, url.Values{
+		"game_id":     {game.ID},
+		"market_type": {"ML"},
+		"team":        {"BUF"},
+		"side":        {"TEAM"},
+		"selection":   {"BUF ML"},
+		"odds":        {"-110"},
+	})
+	lockSlip(t, fixture)
+
+	// FanDuel homeBook puts FanDuel before DraftKings.
+	fdUser, err := fixture.store.SetUserHomeBook(t.Context(), fixture.user.ID, new("fanduel"))
+	require.NoError(t, err)
+	fixture.as(fdUser)
+
+	fdBody := html.UnescapeString(getExport(t, fixture.handler, fixture.slip.ID).Body.String())
+	fdIdx := strings.Index(fdBody, ">FanDuel</h3>")
+	dkIdx := strings.Index(fdBody, ">DraftKings</h3>")
+	require.NotEqual(t, -1, fdIdx)
+	require.NotEqual(t, -1, dkIdx)
+	assert.Less(t, fdIdx, dkIdx)
+
+	// DraftKings homeBook (or unset) puts DraftKings before FanDuel.
+	dkUser, err := fixture.store.SetUserHomeBook(t.Context(), fixture.user.ID, new("draftkings"))
+	require.NoError(t, err)
+	fixture.as(dkUser)
+
+	dkBody := html.UnescapeString(getExport(t, fixture.handler, fixture.slip.ID).Body.String())
+	fdIdx = strings.Index(dkBody, ">FanDuel</h3>")
+	dkIdx = strings.Index(dkBody, ">DraftKings</h3>")
+	require.NotEqual(t, -1, fdIdx)
+	require.NotEqual(t, -1, dkIdx)
+	assert.Less(t, dkIdx, fdIdx)
+}

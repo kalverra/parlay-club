@@ -130,7 +130,7 @@ confirms layout density).
 - [x] Render explicit DK vs. FD split lines (ordered with the viewer's `homeBook` first) in `web/templates/` and view
       builders (`internal/web/pick.go`, `internal/web/research.go`, `internal/web/slips.go`) whenever `LinesDiffer` is
       true, with handler tests in `internal/web/pick_test.go` and `internal/web/research_test.go`.
-- [ ] Replace the free-text `home_book` input in `web/templates/profile.html` with a DraftKings / FanDuel / No
+- [x] Replace the free-text `home_book` input in `web/templates/profile.html` with a DraftKings / FanDuel / No
   preference selector, validate `home_book` in `internal/web/slips.go`, and order the export card's books in
   `internal/web/export.go` with the viewer's `homeBook` first, with tests in `internal/web/slips_test.go` and
   `internal/web/export_test.go`.

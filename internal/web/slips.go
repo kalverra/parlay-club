@@ -1335,7 +1335,7 @@ func (h *slipHandlers) profile(w http.ResponseWriter, r *http.Request) {
 
 	homeBook := ""
 	if user.HomeBook != nil {
-		homeBook = *user.HomeBook
+		homeBook = normalizeSelectableHomeBook(*user.HomeBook)
 	}
 	card := PushCard{}
 	if h.deps.Push.Enabled() {
@@ -1361,7 +1361,11 @@ func (h *slipHandlers) updateProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	homeBook := strings.TrimSpace(r.PostForm.Get("home_book"))
+	homeBook, valid := validateHomeBook(r.PostForm.Get("home_book"))
+	if !valid {
+		h.writeFormError(w, "Choose DraftKings, FanDuel, or No preference.")
+		return
+	}
 	var book *string
 	if homeBook != "" {
 		book = &homeBook
@@ -1371,6 +1375,27 @@ func (h *slipHandlers) updateProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.redirect(w, r, "/me")
+}
+
+// validateHomeBook accepts "", "draftkings", or "fanduel" (case-insensitive).
+func validateHomeBook(raw string) (string, bool) {
+	key := db.NormalizeBook(raw)
+	switch key {
+	case "", "draftkings", "fanduel":
+		return key, true
+	default:
+		return "", false
+	}
+}
+
+// normalizeSelectableHomeBook maps legacy unknown keys to "" so the Profile
+// selector falls back to "No preference" on display.
+func normalizeSelectableHomeBook(raw string) string {
+	key, ok := validateHomeBook(raw)
+	if !ok {
+		return ""
+	}
+	return key
 }
 
 // toggleActive turns a group member on or off. An empty value toggles.

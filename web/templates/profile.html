@@ -19,20 +19,47 @@
   >
     <div>
       <h2 class="text-sm font-semibold text-ink">Home book</h2>
-      <p class="mt-1 text-xs text-ink-subtle">Quick adds use your book's price. Blank falls back to the median.</p>
+      <p class="mt-1 text-xs text-ink-subtle">Used first on the pick board, split lines, and export card.</p>
     </div>
-    <label class="block text-sm text-ink-muted">
-      Bookmaker key
-      <input
-        type="text"
-        name="home_book"
-        value="{{.HomeBook}}"
-        placeholder="draftkings"
-        autocomplete="off"
-        autocapitalize="none"
-        class="mt-1 w-full rounded-md border border-line-strong bg-surface-2 px-3 py-2 text-ink placeholder:text-ink-subtle focus:border-accent focus:outline-none"
-      >
-    </label>
+    <fieldset class="grid grid-cols-3 gap-2">
+      <legend class="sr-only">Home book</legend>
+      <label class="cursor-pointer">
+        <input
+          type="radio"
+          name="home_book"
+          value="draftkings"
+          {{if eq .HomeBook "draftkings"}}checked{{end}}
+          class="peer sr-only"
+        >
+        <span class="flex min-h-[40px] items-center justify-center rounded-lg border border-line-strong bg-surface-2 px-2 py-2 text-center text-xs font-medium text-ink transition-colors peer-checked:border-accent peer-checked:bg-accent peer-checked:font-semibold peer-checked:text-accent-ink">
+          DraftKings
+        </span>
+      </label>
+      <label class="cursor-pointer">
+        <input
+          type="radio"
+          name="home_book"
+          value="fanduel"
+          {{if eq .HomeBook "fanduel"}}checked{{end}}
+          class="peer sr-only"
+        >
+        <span class="flex min-h-[40px] items-center justify-center rounded-lg border border-line-strong bg-surface-2 px-2 py-2 text-center text-xs font-medium text-ink transition-colors peer-checked:border-accent peer-checked:bg-accent peer-checked:font-semibold peer-checked:text-accent-ink">
+          FanDuel
+        </span>
+      </label>
+      <label class="cursor-pointer">
+        <input
+          type="radio"
+          name="home_book"
+          value=""
+          {{if eq .HomeBook ""}}checked{{end}}
+          class="peer sr-only"
+        >
+        <span class="flex min-h-[40px] items-center justify-center rounded-lg border border-line-strong bg-surface-2 px-2 py-2 text-center text-xs font-medium text-ink transition-colors peer-checked:border-accent peer-checked:bg-accent peer-checked:font-semibold peer-checked:text-accent-ink">
+          No preference
+        </span>
+      </label>
+    </fieldset>
     <p
       data-form-error
       class="hidden rounded-lg border border-danger bg-danger-soft px-3 py-2 text-sm text-danger-ink"
