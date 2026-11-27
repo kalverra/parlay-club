@@ -35,9 +35,10 @@ fresh as the price beside it. A book that returns no link stores NULL, which is 
 
 Parlay API populates FanDuel links when a matching native quote is open, though its `marketId` values can carry non-US
 jurisdiction prefixes (such as 734.* or 717.*), while DraftKings and other books omit links on Parlay API. The Odds API
-enrichment fills DraftKings links, supplies preferred US 42.* FanDuel links, and preserves stored links on unchanged
-lines across later Parlay-only refreshes; see [Data sources](../reference/data-sources.md#enrichment-and-fallback) for
-the merge and upsert rules, and [Data refresh](data-refresh.md) for when enrichment pauses at its credit floor.
+enrichment runs only on slip lock—fetching only the missing markets for `draftkings` and `fanduel`—to fill DraftKings
+links, supply preferred US 42.* FanDuel links, and preserve stored links on unchanged lines across later Parlay-only
+refreshes; see [Data sources](../reference/data-sources.md#enrichment-and-fallback) for the merge and upsert rules, and
+[Data refresh](data-refresh.md) for when enrichment pauses at its credit floor.
 
 FanDuel single and combined links work unchanged because its combiner reads the market ID from each leg's stored link
 and pairs it with `odds.sid`; it never uses `event_sid`. DraftKings uses both the stored selection ID and the
@@ -107,7 +108,7 @@ decides.
 one, so a slip with two or more linked legs at a book gets a single "Open in ..." button. Fewer than two linked legs
 keep the per-leg list, because one tap is already one tap.
 
-The Odds API enrichment supplies the DraftKings links, so a locked slip with two or more linked DraftKings legs on one
+The Odds API lock-time enrichment supplies the DraftKings links, so a locked slip with two or more linked DraftKings legs on one
 game gets a single event-page URL in `Combined`. When linked DraftKings legs span multiple games, `Combined` stays empty,
 `MultiGameNote` is set to true, and `draftKingsCombiner` groups the linked legs by event (in first-appearance slip order)
 into `BookPlan.Groups`. Any game group with two or more linked legs that share an `event_sid` and carry `sid`s gets a
@@ -158,7 +159,8 @@ Verify both DraftKings and FanDuel on iOS and Android across these five cases af
 ## The card
 
 Only a locked slip draws the card. `GET /slips/{id}/export` returns the same card, and the wrapper listens for
-`slip-updated` and swaps itself, so an unlock makes the card disappear on the next event.
+`slip-updated` and swaps itself, so an unlock makes the card disappear on the next event and background lock-time link
+enrichment updates the card in place without a reload once its links commit.
 
 In the slip's export step the card is the primary action, so the hub draws it above the step banner and the picks. The
 wrapper sits first in the page at every step and renders empty until the slip locks, which keeps that order when a lock

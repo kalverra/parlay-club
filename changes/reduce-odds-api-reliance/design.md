@@ -140,5 +140,5 @@ tests).
 - [x] Update `syncSlipExportEnrich` in `internal/refresh/refresh.go` to batch one free `Events` check and run
   market-scoped `LinesForMarkets` and per-game `EventPropsForMarkets` calls (`draftkings,fanduel` only) for missing
   locked-slip links, with unit tests in `internal/refresh/pick_test.go`.
-- [ ] Docs: update `docs/concepts/data-refresh.md`, `docs/concepts/export.md`, and `docs/reference/data-sources.md` to
+- [x] Docs: update `docs/concepts/data-refresh.md`, `docs/concepts/export.md`, and `docs/reference/data-sources.md` to
   document Parlay-only browsing and lock-only, market-scoped Odds API enrichment.

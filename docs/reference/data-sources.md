@@ -173,10 +173,11 @@ shaped like an `odds` row:
   so a missing link is normal and the row stores NULL.
 - On Parlay API, only FanDuel outcomes currently carry a validated `link` and `sid`, and only while a matching native
   quote is open; those FanDuel `marketId` values can carry non-US jurisdiction prefixes (such as `734.*` or `717.*`).
-  DraftKings and other books omit them. The Odds API enrichment fills DraftKings links, any missing FanDuel link, and
-  preferred `42.*` FanDuel links in the same sync; see [Enrichment and fallback](#enrichment-and-fallback). A later
-  Parlay-only refresh with `NULL` links preserves stored links on unchanged lines via `Store.UpsertOdds`. A week whose
-  enrichment has paused keeps the primary rows, and an unlinked leg renders as a manual `no link` entry in export.
+  DraftKings and other books omit them. Lock-time The Odds API enrichment fills DraftKings links, any missing FanDuel
+  link, and preferred `42.*` FanDuel links for missing markets on locked slips; see
+  [Enrichment and fallback](#enrichment-and-fallback). A later Parlay-only refresh with `NULL` links preserves stored
+  links on unchanged lines via `Store.UpsertOdds`. A week whose enrichment has paused keeps the primary rows, and an
+  unlinked leg renders as a manual `no link` entry in export.
 - A market key the client does not read produces no rows, so the same client can serve prop requests.
 - A book that omits a market produces no rows for it. Some books omit the moneyline on future games.
 - A `regions=us` response includes exchanges and DFS books that may quote only one side of a two-way market. An outcome
@@ -262,14 +263,14 @@ Parlay API rows carry validated prop links and sids on FanDuel only today. `odds
 game day while upcoming non-`FINAL` games remain on that date via `prefill:gameday` in `sync_state`, scoped to that
 date's upcoming games—or all upcoming week games when invoked manually via the optional `POST /internal/prefill`
 fallback on a non-game day—with 15-minute idempotency) and runs on demand when someone opens an upcoming game on an
-`OPEN` slip's pick board, taps "Load them" or "Refresh odds", or opens a research view. After a Parlay-only
-`RunPrefill`, subsequent `SyncGameProps`, `SyncPickGame`, `ForcePickRefresh`, or `KickSlipExportEnrich` calls run
-enrichment-only via `odds:props:enrich:{game}` without re-calling Parlay API. `odds:props:{game}` is stale after 30
-minutes on the game's Eastern date or within 6 hours of kickoff, and 2 hours otherwise (subject to a 2-minute cooldown
-on manual refresh), and is skipped once kickoff has passed. Before matching players, it syncs rosters for both teams
-(`espn:roster:{team}`). It checks the Parlay API 150-credit floor (`OddsPropsFloor`), calls `Client.Props`, maps
-`TEAM_TOTAL` to the game's team abbreviation, and canonicalizes player names and teams via batch resolution against
-`player_matches` and `roster_players`.
+`OPEN` slip's pick board, taps "Load them" or "Refresh odds", or opens a research view. Browsing (`RunPrefill`,
+`SyncGameProps`, `SyncPickGame`, `ForcePickRefresh`, and research views) stays Parlay-only whenever Parlay API succeeds
+with props; `KickSlipExportEnrich` runs lock-only, market-scoped enrichment via `odds:props:enrich:{game}` without
+re-calling Parlay API. `odds:props:{game}` is stale after 30 minutes on the game's Eastern date or within 6 hours of
+kickoff, and 2 hours otherwise (subject to a 2-minute cooldown on manual refresh), and is skipped once kickoff has
+passed. Before matching players, it syncs rosters for both teams (`espn:roster:{team}`). It checks the Parlay API
+150-credit floor (`OddsPropsFloor`), calls `Client.Props`, maps `TEAM_TOTAL` to the game's team abbreviation, and
+canonicalizes player names and teams via batch resolution against `player_matches` and `roster_players`.
 
 ## The Odds API (free tier: 500 credits/month)
 
@@ -288,30 +289,35 @@ archive record these responses as `source = "odds"` and fill their credit column
 
 ```text
 GET /odds?regions=us&markets=h2h,spreads,totals&oddsFormat=american&includeLinks=true&includeSids=true
+GET /odds?bookmakers=draftkings,fanduel&markets={missing markets}&oddsFormat=american&includeLinks=true&includeSids=true
 ```
 
-The call costs 3 credits. The Odds API bills by `markets × regions`, not by bookmaker count, so asking for all of
-`regions=us` costs the same 3 credits as filtering to one book. Its rows map through the same `Line` table above.
-DraftKings and FanDuel outcomes carry `link` and `sid`, and each bookmaker block carries its own event `sid`, so a
-DraftKings combined export link has both IDs it needs.
+The full fallback call (`Client.Lines`) costs 3 credits (all three markets across `regions=us`). Lock-time enrichment
+uses `Client.LinesForMarkets(ctx, markets, bookmakers)` with `bookmakers=draftkings,fanduel` and only the deduplicated
+missing game-line markets from `odds.APIMarketKey`, costing 1 credit per requested market. DraftKings and FanDuel
+outcomes carry `link` and `sid`, and each bookmaker block carries its own event `sid`, so a DraftKings combined export
+link has both IDs it needs.
 
 ### Enrichment and fallback
 
-Refresh matches each provider's free `/events` list to the week's games on its own, maps its rows to ESPN game IDs and
-team abbreviations, then merges the rows. Provider event IDs never need to agree.
+Refresh keeps browsing, pre-fill, and pick-time syncs Parlay-only whenever Parlay API succeeds. The Odds API runs only
+on lock-time enrichment or as fallback:
 
-- **Enrichment.** When Parlay API buys the week's lines and The Odds API has at least 40 credits
-  (`refresh.TheOddsAPIEnrichFloor`), the sync also buys The Odds API lines. A primary row with no link—or a FanDuel row
-  with a non-`42` `marketId` prefix (`odds.PreferredFanDuelMarketPrefix = "42"`) when The Odds API carries a `42.*`
-  link—adopts The Odds API's `link`, `sid`, and `event_sid`. If the linked line differs, the row also adopts The Odds
-  API's line and price, so the stored line matches the deep link. A primary row that already has a valid `42.*` link
-  keeps its line, price, and link; a missing sid backfills only when the lines match, and a missing event sid always
-  backfills. Selections only The Odds API quotes are appended, filling missing books and markets. `Store.UpsertOdds`
-  preserves stored `link`, `sid`, and `event_sid` when a later Parlay-only refresh upserts `NULL` on an unchanged line,
-  and clears stale `link`/`sid` (while preserving `event_sid`) if the line moves.
-- **Fallback.** When Parlay API is unconfigured, errors, or sits below its 50-credit floor, The Odds API serves the
-  whole week if it has at least 25 credits. Its event IDs fill `games.odds_event_id` only for games that have no stored
-  ID, so a transient primary failure does not churn an existing ID.
+- **Enrichment (lock-only, market-scoped).** When `KickSlipExportEnrich` runs on a locked slip, it inspects upcoming
+  legs for missing DraftKings links or non-`42` FanDuel `marketId` prefixes (`odds.PreferredFanDuelMarketPrefix = "42"`),
+  runs one free `/events` check to verify `refresh.TheOddsAPIEnrichFloor` (40 credits) and match all affected games, and
+  calls `LinesForMarkets` (for missing game-line markets) and/or per-game `EventPropsForMarkets` (for missing prop
+  markets) scoped to `draftkings,fanduel`. A primary row with no link—or a FanDuel row with a non-`42` `marketId` prefix
+  when The Odds API carries a `42.*` link—adopts The Odds API's `link`, `sid`, and `event_sid`. If the linked line
+  differs, the row also adopts The Odds API's line and price, so the stored line matches the deep link. A primary row
+  that already has a valid `42.*` link keeps its line, price, and link; a missing sid backfills only when the lines
+  match, and a missing event sid always backfills. Selections only The Odds API quotes are appended, filling missing
+  books and markets. `Store.UpsertOdds` preserves stored `link`, `sid`, and `event_sid` when a later Parlay-only refresh
+  upserts `NULL` on an unchanged line, and clears stale `link`/`sid` (while preserving `event_sid`) if the line moves.
+- **Fallback.** When Parlay API is unconfigured, errors, sits below its floor, or returns zero rows, The Odds API serves
+  the whole week (`Lines`, 3 credits) or game (`EventProps`, 9 credits) if it has at least 25 credits
+  (`refresh.TheOddsAPIFallbackFloor`). Its event IDs fill `games.odds_event_id` only for games that have no stored ID,
+  so a transient primary failure does not churn an existing ID.
 - **Failures.** `odds.ErrNoAPIKey` means the provider is disabled, not failed. If one provider fails while the other
   succeeds, refresh logs a warning and commits the surviving rows, so the source does not back off. If every configured
   provider fails, the sync returns the joined error and refresh backs off for 5 minutes with cached rows still served.
@@ -321,28 +327,31 @@ team abbreviations, then merges the rows. Provider event IDs never need to agree
 ```text
 GET /events/{id}/odds?regions=us&markets={prop markets}
     &oddsFormat=american&includeLinks=true&includeSids=true
+GET /events/{id}/odds?bookmakers=draftkings,fanduel&markets={missing prop markets}
+    &oddsFormat=american&includeLinks=true&includeSids=true
 ```
 
-The call costs 1 credit per market returned, unlike Parlay API's flat 3-credit `/props`. It returns one event object
-whose `bookmakers[].markets[].outcomes[]` carry the prices. `Client.EventProps` maps them into the same `Prop` rows and
-copies `bookmakers[].sid` into `Prop.EventSid`.
+The call costs 1 credit per market returned, unlike Parlay API's flat 3-credit `/props`. `Client.EventProps` fetches all
+9 prop markets across `regions=us` (9 credits) for fallback, while `Client.EventPropsForMarkets(ctx, eventID, markets,
+bookmakers)` fetches only the requested prop markets and `bookmakers=draftkings,fanduel` for lock-time enrichment (1
+credit per missing market). Both map `bookmakers[].markets[].outcomes[]` into `Prop` rows and copy `bookmakers[].sid`
+into `Prop.EventSid`.
 
-In `odds:props:{game}`, `odds.MergeProps` merges a Parlay API board with a per-event board from The Odds API,
-deduplicating any primary collisions on `(book, market_type, team, normalizePropSubject(player_name), side)` (matching
-punctuation and generational-suffix variants such as `"D.J. Moore"` / `"DJ Moore"` and `"Kenneth Walker III"` /
-`"Kenneth Walker"`, preferring linked rows, then prices closest to `-110`):
+In `odds:props:{game}` and `odds:props:enrich:{game}`, `odds.MergeProps` merges a Parlay API board with a per-event
+board from The Odds API, deduplicating any primary collisions on
+`(book, market_type, team, normalizePropSubject(player_name), side)` (matching punctuation and generational-suffix
+variants such as `"D.J. Moore"` / `"DJ Moore"` and `"Kenneth Walker III"` / `"Kenneth Walker"`, preferring linked rows,
+then prices closest to `-110`):
 
-- **Enrichment.** When Parlay API bought props and The Odds API has at least 40 credits (`TheOddsAPIEnrichFloor`),
-  refresh fetches The Odds API props too and records `odds:props:enrich:{game}` in the same transaction. Unlinked
-  primary rows (and FanDuel rows carrying a non-`42` `marketId` prefix when The Odds API carries `42.*`) gain `link`,
-  `sid`, and `event_sid` (and adopt the linked line and price if they differ). Secondary-only rows append missing books
-  and markets.
-- **Enrichment-only after `RunPrefill`.** When `odds:props:{game}` is already fresh from Parlay-only `RunPrefill`,
-  enrichment calls The Odds API `EventProps` only (never Parlay API) at or above `TheOddsAPIEnrichFloor` (40 credits)
-  and merges deep links and missing markets against existing prop rows. See [Data refresh](../concepts/data-refresh.md)
-  for the sync triggers and `sync_state` rules.
+- **Enrichment (lock-only, market-scoped).** When `KickSlipExportEnrich` finds upcoming prop legs on a locked slip
+  missing DraftKings links or `42.*` FanDuel links and The Odds API has at least 40 credits (`TheOddsAPIEnrichFloor`),
+  refresh calls `EventPropsForMarkets` per affected game for only those missing markets and `draftkings,fanduel`, merges
+  against existing current prop rows at a unified `FetchedAt`, and records `odds:props:{game}` and
+  `odds:props:enrich:{game}` in one transaction. Unlinked primary rows (and FanDuel rows carrying a non-`42` `marketId`
+  prefix when The Odds API carries `42.*`) gain `link`, `sid`, and `event_sid` (and adopt the linked line and price if
+  they differ).
 - **Fallback.** When Parlay API is unconfigured, errors, returns no props, or sits below 150 credits, The Odds API
-  serves the game's props if it has at least 25 credits (`TheOddsAPIFallbackFloor`).
+  serves the game's props via `EventProps` if it has at least 25 credits (`TheOddsAPIFallbackFloor`).
 
 ## nfelo (free, no auth)
 
@@ -475,15 +484,14 @@ The free tier is 1,000 credits a month. Target at most 800, leaving room for tes
 
 ### The Odds API
 
-The free tier is 500 credits a month. Its `/odds` call costs 3 credits, the same as Parlay API's.
+The free tier is 500 credits a month. Browsing, pre-fill, and pick-time syncs spend **0** The Odds API credits when
+Parlay API is healthy.
 
-- Enrichment runs only while at least 40 credits remain (`refresh.TheOddsAPIEnrichFloor`) and Parlay API bought the
-  week's lines (or during lock-time `odds:lines:enrich`). Below that, the free `/events` call still refreshes the balance
-  and matches, but no paid lines are bought.
-- Fallback runs only while at least 25 credits remain (`refresh.TheOddsAPIFallbackFloor`) when Parlay API is
-  unconfigured, errors, or sits below its floor.
-- Routine enrichment is about 20 line calls a week × 3 = 60 credits, or about 240 a month. Enrichment pauses at 40,
-  leaving 15 credits of headroom above the 25-credit fallback reserve.
-- Per-event props cost 1 credit per market returned, so a nine-market call costs 9. In `odds:props:{game}` and
-  `odds:props:enrich:{game}`, enrichment runs at or above 40 credits (`refresh.TheOddsAPIEnrichFloor`) and fallback
-  runs at or above 25 credits (`refresh.TheOddsAPIFallbackFloor`).
+- Enrichment runs **only on slip lock** (`KickSlipExportEnrich`) while at least 40 credits remain
+  (`refresh.TheOddsAPIEnrichFloor`), using one free `/events` check and market-scoped `LinesForMarkets` /
+  `EventPropsForMarkets` (`draftkings,fanduel` only) for missing links—costing 1 credit per missing market instead of 3
+  for all game lines or 9 per game for all props. Below 40 credits, the free `/events` call still refreshes the balance,
+  but no paid enrichment runs, leaving 15 credits of headroom above the 25-credit fallback reserve.
+- Fallback runs in `odds:lines` (`Lines`, 3 credits) and `odds:props:{game}` (`EventProps`, 9 credits) only when Parlay
+  API is unconfigured, errors, sits below its floor, or returns zero rows, provided at least 25 credits remain
+  (`refresh.TheOddsAPIFallbackFloor`).
