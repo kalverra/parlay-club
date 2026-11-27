@@ -142,3 +142,7 @@ tests).
   locked-slip links, with unit tests in `internal/refresh/pick_test.go`.
 - [x] Docs: update `docs/concepts/data-refresh.md`, `docs/concepts/export.md`, and `docs/reference/data-sources.md` to
   document Parlay-only browsing and lock-only, market-scoped Odds API enrichment.
+
+## Reviews
+
+- [x] Final review: agy@gemini-4-neon-medium

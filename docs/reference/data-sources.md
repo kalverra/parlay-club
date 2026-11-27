@@ -265,7 +265,7 @@ date's upcoming games—or all upcoming week games when invoked manually via the
 fallback on a non-game day—with 15-minute idempotency) and runs on demand when someone opens an upcoming game on an
 `OPEN` slip's pick board, taps "Load them" or "Refresh odds", or opens a research view. Browsing (`RunPrefill`,
 `SyncGameProps`, `SyncPickGame`, `ForcePickRefresh`, and research views) stays Parlay-only whenever Parlay API succeeds
-with props; `KickSlipExportEnrich` runs lock-only, market-scoped enrichment via `odds:props:enrich:{game}` without
+with props; `KickSlipExportEnrich` runs lock-only, market-scoped enrichment via `odds:props:enrich:{game}:{market}` without
 re-calling Parlay API. `odds:props:{game}` is stale after 30 minutes on the game's Eastern date or within 6 hours of
 kickoff, and 2 hours otherwise (subject to a 2-minute cooldown on manual refresh), and is skipped once kickoff has
 passed. Before matching players, it syncs rosters for both teams (`espn:roster:{team}`). It checks the Parlay API
@@ -337,7 +337,7 @@ bookmakers)` fetches only the requested prop markets and `bookmakers=draftkings,
 credit per missing market). Both map `bookmakers[].markets[].outcomes[]` into `Prop` rows and copy `bookmakers[].sid`
 into `Prop.EventSid`.
 
-In `odds:props:{game}` and `odds:props:enrich:{game}`, `odds.MergeProps` merges a Parlay API board with a per-event
+In `odds:props:{game}` and `odds:props:enrich:{game}:{market}`, `odds.MergeProps` merges a Parlay API board with a per-event
 board from The Odds API, deduplicating any primary collisions on
 `(book, market_type, team, normalizePropSubject(player_name), side)` (matching punctuation and generational-suffix
 variants such as `"D.J. Moore"` / `"DJ Moore"` and `"Kenneth Walker III"` / `"Kenneth Walker"`, preferring linked rows,
@@ -346,8 +346,8 @@ then prices closest to `-110`):
 - **Enrichment (lock-only, market-scoped).** When `KickSlipExportEnrich` finds upcoming prop legs on a locked slip
   missing DraftKings links or `42.*` FanDuel links and The Odds API has at least 40 credits (`TheOddsAPIEnrichFloor`),
   refresh calls `EventPropsForMarkets` per affected game for only those missing markets and `draftkings,fanduel`, merges
-  against existing current prop rows at a unified `FetchedAt`, and records `odds:props:{game}` and
-  `odds:props:enrich:{game}` in one transaction. Unlinked primary rows (and FanDuel rows carrying a non-`42` `marketId`
+  against existing current prop rows at a unified `FetchedAt`, and records
+  `odds:props:enrich:{game}:{market}` in one transaction without bumping `odds:props:{game}`. Unlinked primary rows (and FanDuel rows carrying a non-`42` `marketId`
   prefix when The Odds API carries `42.*`) gain `link`, `sid`, and `event_sid` (and adopt the linked line and price if
   they differ).
 - **Fallback.** When Parlay API is unconfigured, errors, returns no props, or sits below 150 credits, The Odds API

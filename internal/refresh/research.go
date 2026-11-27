@@ -198,37 +198,6 @@ func (s *Service) oddsPropsSource(game db.Game, now time.Time) source {
 	}
 }
 
-// oddsPropsEnrichSource enriches one game's existing props with The Odds API
-// deep links when odds:props:{gameID} is already fresh (for example, after
-// Parlay-only RunPrefill) and enrichment has not run for that sync yet.
-func (s *Service) oddsPropsEnrichSource(game db.Game, now time.Time, force bool) source {
-	return source{
-		key: OddsPropsEnrichSource(game.ID),
-		due: func(ctx context.Context, state db.SyncState) (bool, error) {
-			if !now.Before(game.Kickoff) || s.fallbackProps == nil {
-				return false, nil
-			}
-			propsState, err := s.store.SyncState(ctx, OddsPropsSource(game.ID))
-			if errors.Is(err, db.ErrSyncStateNotFound) {
-				return false, nil
-			}
-			if err != nil {
-				return false, err
-			}
-			if state.FetchedAt.IsZero() || state.FetchedAt.Before(propsState.FetchedAt) {
-				return true, nil
-			}
-			if force {
-				return pickCooldownStale(state.FetchedAt, now), nil
-			}
-			return oddsPropsStale(state.FetchedAt, now, game), nil
-		},
-		run: func(ctx context.Context) (bool, error) {
-			return s.enrichGameProps(ctx, game, now)
-		},
-	}
-}
-
 // propsFetch is one provider's prop fetch result.
 type propsFetch struct {
 	props    []odds.Prop
@@ -545,37 +514,6 @@ func (s *Service) syncOddsProps(ctx context.Context, game db.Game, now time.Time
 	return changed, err
 }
 
-// enrichGameProps fetches per-event props from The Odds API only (never Parlay
-// API), merges them into the game's existing current prop rows at a unified
-// FetchedAt, and records both odds:props:{gameID} and odds:props:enrich:{gameID}.
-func (s *Service) enrichGameProps(ctx context.Context, game db.Game, now time.Time) (bool, error) {
-	if !now.Before(game.Kickoff) || s.fallbackProps == nil {
-		return false, nil
-	}
-	start := time.Now()
-
-	fallback := s.fetchFallbackProps(ctx, game, TheOddsAPIEnrichFloor, now)
-	if fallback.disabled {
-		return false, nil
-	}
-	if fallback.err != nil {
-		return false, fallback.err
-	}
-	if !fallback.bought {
-		return false, nil
-	}
-
-	changed, rows, err := s.commitGamePropsEnrich(ctx, game, fallback.props, now)
-	s.logger.Info().
-		Float64("duration_ms", durationMS(time.Since(start))).
-		Str("game_id", game.ID).
-		Int("rows", rows).
-		Bool("changed", changed).
-		Err(err).
-		Msg("refresh enrich game props")
-	return changed, err
-}
-
 // enrichGamePropsForMarkets fetches only the requested prop markets for one
 // game from The Odds API for draftkings and fanduel using a pre-matched event
 // ID, then merges them into the game's existing current prop rows.
@@ -607,7 +545,7 @@ func (s *Service) enrichGamePropsForMarkets(
 	}
 	_ = s.store.RecordSync(fallbackCtx, TheOddsAPISource, now, &credits.Remaining)
 
-	changed, rows, err := s.commitGamePropsEnrich(ctx, game, props, now)
+	changed, rows, err := s.commitGamePropsEnrich(ctx, game, props, markets, now)
 	s.logger.Info().
 		Float64("duration_ms", durationMS(time.Since(start))).
 		Str("game_id", game.ID).
@@ -623,6 +561,7 @@ func (s *Service) commitGamePropsEnrich(
 	ctx context.Context,
 	game db.Game,
 	props []odds.Prop,
+	markets []string,
 	now time.Time,
 ) (bool, int, error) {
 	existingOdds, err := s.store.OddsForGame(ctx, game.ID)
@@ -642,19 +581,22 @@ func (s *Service) commitGamePropsEnrich(
 		merged[i].FetchedAt = now
 	}
 
-	changed, err := s.writeOddsProps(ctx, game, merged, now, true)
+	changed, err := s.writeOddsProps(ctx, game, merged, now, false, markets...)
 	return changed, len(merged), err
 }
 
-// writeOddsProps writes prop rows and records the game's props sync state.
-// When enriched is true, it also records OddsPropsEnrichSource(game.ID) in the
-// same transaction.
+// writeOddsProps writes prop rows and records sync state in one transaction.
+// When enrichMarkets is empty (syncOddsProps), it records OddsPropsSource(game.ID)
+// and, if enriched is true, OddsPropsEnrichSource(game.ID) for a full-game fallback.
+// When enrichMarkets is non-empty (lock-time enrichment), it records only the
+// per-market enrichment keys without bumping OddsPropsSource(game.ID).
 func (s *Service) writeOddsProps(
 	ctx context.Context,
 	game db.Game,
 	rows []db.Odds,
 	now time.Time,
 	enriched bool,
+	enrichMarkets ...string,
 ) (bool, error) {
 	changed := false
 	err := s.store.Tx(ctx, func(tx *db.Store) error {
@@ -665,11 +607,20 @@ func (s *Service) writeOddsProps(
 			}
 			changed = rowsChanged
 		}
-		if err := tx.RecordSync(ctx, OddsPropsSource(game.ID), now, nil); err != nil {
-			return err
+		if len(enrichMarkets) == 0 {
+			if err := tx.RecordSync(ctx, OddsPropsSource(game.ID), now, nil); err != nil {
+				return err
+			}
 		}
 		if enriched {
-			return tx.RecordSync(ctx, OddsPropsEnrichSource(game.ID), now, nil)
+			if err := tx.RecordSync(ctx, OddsPropsEnrichSource(game.ID), now, nil); err != nil {
+				return err
+			}
+		}
+		for _, market := range enrichMarkets {
+			if err := tx.RecordSync(ctx, OddsPropsMarketEnrichSource(game.ID, market), now, nil); err != nil {
+				return err
+			}
 		}
 		return nil
 	})

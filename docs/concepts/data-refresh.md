@@ -111,8 +111,8 @@ syncs:
   30-second timeout) and inspects upcoming legs for missing DraftKings links or non-`42` FanDuel `marketId` prefixes,
   collecting only the missing markets (`collectMissingExportMarkets`). After one batched free `Events` call and
   `TheOddsAPIEnrichFloor` (40-credit) check (`fetchEnrichMatches`), it runs market-scoped, `draftkings,fanduel`-only
-  enrichment via `singleflight`: `odds:lines:enrich` (`LinesForMarkets`) for missing game-line markets and
-  `odds:props:enrich:{gameID}` (`EventPropsForMarkets`) per affected game for missing prop markets. When enrichment
+  enrichment via `singleflight`: `odds:lines:enrich:{market}` (`LinesForMarkets`) for missing game-line markets and
+  `odds:props:enrich:{gameID}:{market}` (`EventPropsForMarkets`) per affected game for missing prop markets. When enrichment
   writes new links, `publishWeek` emits `slip-updated` over SSE so `#slip-export` refreshes automatically.
   (`GET /slips/{id}/export` stays strictly read-only.)
 
@@ -164,9 +164,9 @@ Each source records its last successful sync in `sync_state.fetched_at`. A sourc
 | `espn:scoreboard`  | Latest week's slate, scores, and status | 2 min while any game is live; 5 min on a scheduled game day; 15 min otherwise                                           | Never                                                              |
 | `weather:{gameID}` | Kickoff-window forecast for one game    | 15 min within 6 h of kickoff; 30 min otherwise                                                                          | Indoor, unknown venue, more than 48 h before kickoff, or kicked off |
 | `odds:lines`       | The week's game lines                   | `RunOnce`: 45 min with 2+ upcoming non-`FINAL` games today in ET; 3 h with 1 upcoming non-`FINAL` game today; 12 h when tomorrow ET has games; 24 h otherwise. Pick-time (`SyncPickLines`/`SyncPickGame`): 15 min when today has upcoming non-`FINAL` games or within 2 h of an upcoming kickoff; 2 h otherwise. (15 min idempotency in `RunPrefill`; 2 min cooldown in `ForcePickRefresh`) | No games, or every game has kicked off |
-| `odds:lines:enrich`| Lock-only The Odds API game-line link enrichment (`LinesForMarkets`, `draftkings,fanduel`) | Same pick-time window as `odds:lines` (15 min on game day / within 2 h of kickoff; 2 h otherwise), or whenever older than `odds:lines` | Every game has kicked off, or The Odds API is unconfigured |
+| `odds:lines:enrich:{market}` (and `odds:lines:enrich` on full-slate fallback) | Lock-only The Odds API game-line link enrichment (`LinesForMarkets`, `draftkings,fanduel`) | Same pick-time window as `odds:lines` (15 min on game day / within 2 h of kickoff; 2 h otherwise), or whenever `max(per-market, coarse)` is older than `odds:lines` | Every game has kicked off, or The Odds API is unconfigured |
 | `odds:props:{gameID}` | Game prop odds                       | 30 min on the game's Eastern date or within 6 h of kickoff; 2 h otherwise (15 min idempotency in `RunPrefill`; 2 min cooldown in `ForcePickRefresh`) | Once game has kicked off               |
-| `odds:props:enrich:{gameID}` | Lock-only per-game The Odds API prop link enrichment (`EventPropsForMarkets`, `draftkings,fanduel`) | 30 min on the game's Eastern date or within 6 h of kickoff; 2 h otherwise, or whenever older than `odds:props:{gameID}` | Once game has kicked off, The Odds API is unconfigured, or `odds:props:{gameID}` has not synced yet |
+| `odds:props:enrich:{gameID}:{market}` (and `odds:props:enrich:{gameID}` on full-game fallback) | Lock-only per-game The Odds API prop link enrichment (`EventPropsForMarkets`, `draftkings,fanduel`) | 30 min on the game's Eastern date or within 6 h of kickoff; 2 h otherwise, or whenever `max(per-market, coarse)` is older than `odds:props:{gameID}` | Once game has kicked off, The Odds API is unconfigured, or `odds:props:{gameID}` has not synced yet |
 | `espn:roster:{teamID}`| NFL team roster                      | 2 h on game days; 6 h otherwise                                                                                         | Never (skipped for `FINAL` games in `Kick()`/`RunPrefill()`/`RunOnce()`) |
 | `espn:summary:{gameID}`| Game summary, key injuries, and live box score | 2 min while `LIVE` with active slip legs; 15 min on the game's Eastern date or within 4 h before kickoff; 1 h otherwise | Game status is `FINAL` |
 | `espn:gamelog:{athleteID}`| Athlete season game log and stats | 1 h on game days; 4 h otherwise                                                                                         | Never                                                              |
@@ -181,7 +181,7 @@ so it resolves in the container without a separate `tzdata` package. The scorebo
 games: any game with status `LIVE` shortens the window to 2 minutes.
 
 `odds:theoddsapi` is not a scheduled source. The Odds API calls ride inside `odds:lines` or `odds:props:{gameID}` on
-fallback, or inside lock-time enrichment (`odds:lines:enrich`, `odds:props:enrich:{gameID}`), and refresh records their
+fallback, or inside lock-time enrichment (`odds:lines:enrich:{market}`, `odds:props:enrich:{gameID}:{market}`), and refresh records their
 balance under that key so the next pass can enforce the fallback and enrichment floors.
 
 Weather is per game, not per week. A game inside its 48-hour window refreshes every 30 minutes (or every 15 minutes
@@ -263,12 +263,12 @@ games on page load: each tap or game selection targets at most that one game.
   non-`FINAL` games in `America/New_York` (falling back to all upcoming week games only when invoked manually with no
   upcoming games today). Prop players are canonicalized via batch resolution against `player_matches` and
   `roster_players`.
-- `odds:props:enrich:{gameID}` (`OddsPropsEnrichSource`): Lock-only enrichment (`enrichGamePropsForMarkets`) triggered by
+- `odds:props:enrich:{gameID}:{market}` (`OddsPropsMarketEnrichSource`): Lock-only enrichment (`enrichGamePropsForMarkets`) triggered by
   `KickSlipExportEnrich` when a locked slip's upcoming prop leg lacks a DraftKings link or a `42.*` FanDuel link and
-  `odds:props:enrich:{gameID}` is missing, older than `odds:props:{gameID}`, or stale. After one batched `Events` check
+  `max(odds:props:enrich:{gameID}:{market}, odds:props:enrich:{gameID})` is missing, older than `odds:props:{gameID}`, or stale. After one batched `Events` check
   at or above `TheOddsAPIEnrichFloor` (40 credits), it calls `EventPropsForMarkets` for only that game's missing prop
   markets and `draftkings,fanduel`, merges against existing current prop rows at a unified `FetchedAt = now`, and
-  updates `odds:props:{gameID}` and `odds:props:enrich:{gameID}` in one transaction.
+  records each fetched `odds:props:enrich:{gameID}:{market}` in one transaction without bumping `odds:props:{gameID}`.
 - `espn:roster:{teamID}`: Stale after 2 hours on game days and 6 hours otherwise. Upserts team roster players into
   `roster_players` with normalized names. Promoted into `Kick()`, `RunPrefill()`, and `RunOnce()` (deduped per week team
   for non-`FINAL` games).

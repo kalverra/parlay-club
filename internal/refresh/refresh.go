@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -69,6 +70,18 @@ func OddsPropsSource(gameID string) string {
 // OddsPropsEnrichSource returns the sync_state key for one game's prop link enrichment.
 func OddsPropsEnrichSource(gameID string) string {
 	return oddsPropsEnrichSourcePrefix + gameID
+}
+
+// OddsLinesMarketEnrichSource returns the sync_state key for one game-line
+// market's lock-time link enrichment.
+func OddsLinesMarketEnrichSource(market string) string {
+	return OddsLinesEnrichSource + ":" + market
+}
+
+// OddsPropsMarketEnrichSource returns the sync_state key for one game's
+// per-market lock-time prop link enrichment.
+func OddsPropsMarketEnrichSource(gameID, market string) string {
+	return OddsPropsEnrichSource(gameID) + ":" + market
 }
 
 // RosterSource returns the sync_state key for one team's roster.
@@ -1198,9 +1211,10 @@ func (s *Service) syncSlipExportEnrich(ctx context.Context, slipID int64) error 
 		return err
 	}
 
-	linesSrc, runLines, duePropGames, propSrcByGame, err := s.dueExportEnrichTargets(
-		ctx, slip.WeekID, games, lineMarkets, propGames, now,
+	dueLineMarkets, duePropGames, duePropMarketsByGame, err := s.dueExportEnrichTargets(
+		ctx, games, lineMarkets, propGames, propMarketsByGame, now,
 	)
+	runLines := len(dueLineMarkets) > 0
 	if err != nil || (!runLines && len(duePropGames) == 0) {
 		return err
 	}
@@ -1212,8 +1226,13 @@ func (s *Service) syncSlipExportEnrich(ctx context.Context, slipID int64) error 
 
 	var errs []error
 	if runLines {
-		err := s.runFlightEnrich(ctx, linesSrc, now, func(runCtx context.Context) (bool, error) {
-			return s.enrichWeekLinesForMarkets(runCtx, slip.WeekID, games, matches, lineMarkets, now)
+		flightKey := enrichLinesFlightKey(dueLineMarkets)
+		err := s.runFlightEnrich(ctx, flightKey, now, func(runCtx context.Context) (bool, error) {
+			stillDue, err := s.dueLineEnrichMarkets(runCtx, games, dueLineMarkets, now)
+			if err != nil || len(stillDue) == 0 {
+				return false, err
+			}
+			return s.enrichWeekLinesForMarkets(runCtx, slip.WeekID, games, matches, stillDue, now)
 		})
 		if err != nil && !errors.Is(err, odds.ErrNoAPIKey) {
 			errs = append(errs, err)
@@ -1227,10 +1246,14 @@ func (s *Service) syncSlipExportEnrich(ctx context.Context, slipID int64) error 
 				Msg("fallback props skipped: no fallback event matched")
 			continue
 		}
-		src := propSrcByGame[game.ID]
-		markets := propMarketsByGame[game.ID]
-		err := s.runFlightEnrich(ctx, src, now, func(runCtx context.Context) (bool, error) {
-			return s.enrichGamePropsForMarkets(runCtx, game, toaEventID, markets, now)
+		markets := duePropMarketsByGame[game.ID]
+		flightKey := enrichPropsFlightKey(game.ID, markets)
+		err := s.runFlightEnrich(ctx, flightKey, now, func(runCtx context.Context) (bool, error) {
+			stillDue, err := s.duePropEnrichMarkets(runCtx, game, markets, now)
+			if err != nil || len(stillDue) == 0 {
+				return false, err
+			}
+			return s.enrichGamePropsForMarkets(runCtx, game, toaEventID, stillDue, now)
 		})
 		if err != nil && !errors.Is(err, odds.ErrNoAPIKey) {
 			errs = append(errs, err)
@@ -1302,45 +1325,136 @@ func (s *Service) collectMissingExportMarkets(
 
 func (s *Service) dueExportEnrichTargets(
 	ctx context.Context,
-	weekID int64,
 	games []db.Game,
 	lineMarkets []string,
 	propGames []db.Game,
+	propMarketsByGame map[string][]string,
 	now time.Time,
-) (source, bool, []db.Game, map[string]source, error) {
-	var linesSrc source
-	runLines := false
-	if len(lineMarkets) > 0 && s.fallbackLines != nil {
-		linesSrc = s.oddsLinesEnrichSource(weekID, games, now)
-		if !s.paused(linesSrc.key, now) {
-			due, err := s.shouldRun(archive.WithKey(ctx, linesSrc.key), linesSrc)
-			if err != nil {
-				return source{}, false, nil, nil, err
-			}
-			runLines = due
-		}
+) ([]string, []db.Game, map[string][]string, error) {
+	dueLineMarkets, err := s.dueLineEnrichMarkets(ctx, games, lineMarkets, now)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if len(dueLineMarkets) > 0 && s.paused(enrichLinesFlightKey(dueLineMarkets), now) {
+		dueLineMarkets = nil
 	}
 
 	var duePropGames []db.Game
-	propSrcByGame := make(map[string]source, len(propGames))
-	if s.fallbackProps != nil {
-		for _, game := range propGames {
-			src := s.oddsPropsEnrichSource(game, now, false)
-			if s.paused(src.key, now) {
-				continue
-			}
-			due, err := s.shouldRun(archive.WithKey(ctx, src.key), src)
-			if err != nil {
-				return source{}, false, nil, nil, err
-			}
-			if due {
-				duePropGames = append(duePropGames, game)
-				propSrcByGame[game.ID] = src
-			}
+	duePropMarketsByGame := make(map[string][]string, len(propGames))
+	for _, game := range propGames {
+		dueMarkets, err := s.duePropEnrichMarkets(ctx, game, propMarketsByGame[game.ID], now)
+		if err != nil {
+			return nil, nil, nil, err
 		}
+		if len(dueMarkets) == 0 || s.paused(enrichPropsFlightKey(game.ID, dueMarkets), now) {
+			continue
+		}
+		duePropGames = append(duePropGames, game)
+		duePropMarketsByGame[game.ID] = dueMarkets
 	}
 
-	return linesSrc, runLines, duePropGames, propSrcByGame, nil
+	return dueLineMarkets, duePropGames, duePropMarketsByGame, nil
+}
+
+func (s *Service) dueLineEnrichMarkets(
+	ctx context.Context,
+	games []db.Game,
+	markets []string,
+	now time.Time,
+) ([]string, error) {
+	if s.fallbackLines == nil || len(games) == 0 || len(markets) == 0 || allKickedOff(games, now) {
+		return nil, nil
+	}
+	coarseFetchedAt, err := s.syncStateTime(ctx, OddsLinesEnrichSource)
+	if err != nil {
+		return nil, err
+	}
+	linesFetchedAt, err := s.syncStateTime(ctx, OddsLinesSource)
+	if err != nil {
+		return nil, err
+	}
+
+	var due []string
+	for _, market := range markets {
+		marketFetchedAt, err := s.syncStateTime(ctx, OddsLinesMarketEnrichSource(market))
+		if err != nil {
+			return nil, err
+		}
+		fetchedAt := maxTime(marketFetchedAt, coarseFetchedAt)
+		if fetchedAt.IsZero() ||
+			(!linesFetchedAt.IsZero() && fetchedAt.Before(linesFetchedAt)) ||
+			oddsPickLinesStale(fetchedAt, now, games) {
+			due = append(due, market)
+		}
+	}
+	return due, nil
+}
+
+func (s *Service) duePropEnrichMarkets(
+	ctx context.Context,
+	game db.Game,
+	markets []string,
+	now time.Time,
+) ([]string, error) {
+	if !now.Before(game.Kickoff) || s.fallbackProps == nil || len(markets) == 0 {
+		return nil, nil
+	}
+	propsFetchedAt, err := s.syncStateTime(ctx, OddsPropsSource(game.ID))
+	if err != nil {
+		return nil, err
+	}
+	if propsFetchedAt.IsZero() {
+		return nil, nil
+	}
+	coarseFetchedAt, err := s.syncStateTime(ctx, OddsPropsEnrichSource(game.ID))
+	if err != nil {
+		return nil, err
+	}
+
+	var due []string
+	for _, market := range markets {
+		marketFetchedAt, err := s.syncStateTime(ctx, OddsPropsMarketEnrichSource(game.ID, market))
+		if err != nil {
+			return nil, err
+		}
+		fetchedAt := maxTime(marketFetchedAt, coarseFetchedAt)
+		if fetchedAt.IsZero() ||
+			fetchedAt.Before(propsFetchedAt) ||
+			oddsPropsStale(fetchedAt, now, game) {
+			due = append(due, market)
+		}
+	}
+	return due, nil
+}
+
+func (s *Service) syncStateTime(ctx context.Context, key string) (time.Time, error) {
+	state, err := s.store.SyncState(ctx, key)
+	if errors.Is(err, db.ErrSyncStateNotFound) {
+		return time.Time{}, nil
+	}
+	if err != nil {
+		return time.Time{}, err
+	}
+	return state.FetchedAt, nil
+}
+
+func maxTime(a, b time.Time) time.Time {
+	if b.After(a) {
+		return b
+	}
+	return a
+}
+
+func enrichLinesFlightKey(markets []string) string {
+	sorted := slices.Clone(markets)
+	slices.Sort(sorted)
+	return OddsLinesEnrichSource + ":" + strings.Join(sorted, ",")
+}
+
+func enrichPropsFlightKey(gameID string, markets []string) string {
+	sorted := slices.Clone(markets)
+	slices.Sort(sorted)
+	return OddsPropsEnrichSource(gameID) + ":" + strings.Join(sorted, ",")
 }
 
 func (s *Service) fetchEnrichMatches(
@@ -1390,27 +1504,23 @@ func (s *Service) enrichEventsClient(runLines bool) interface {
 
 func (s *Service) runFlightEnrich(
 	parent context.Context,
-	src source,
+	key string,
 	now time.Time,
 	run func(context.Context) (bool, error),
 ) error {
-	ctx := archive.WithKey(parent, src.key)
-	_, err, _ := s.flight.Do(src.key, func() (any, error) {
-		due, err := s.shouldRun(ctx, src)
-		if err != nil || !due {
-			return false, err
-		}
+	ctx := archive.WithKey(parent, key)
+	_, err, _ := s.flight.Do(key, func() (any, error) {
 		return run(ctx)
 	})
 	if err != nil {
 		if s.stopping() {
 			return err
 		}
-		s.logger.Error().Err(err).Str("source", src.key).Msg("refresh failed")
-		s.backOff(src.key, now)
+		s.logger.Error().Err(err).Str("source", key).Msg("refresh failed")
+		s.backOff(key, now)
 		return err
 	}
-	s.clearBackoff(src.key)
+	s.clearBackoff(key)
 	return nil
 }
 
