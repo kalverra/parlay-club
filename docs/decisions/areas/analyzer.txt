@@ -4,6 +4,7 @@
 
 ## Live
 
+- [Reframe grades around slip construction and market reality](../slip-build-grades.md) (2026-11-28): Reframe grades around slip construction and Vegas reality, reveal the math in three progressive layers with post-game badges, and split evals into explaining Vegas vs. beating Vegas.
 - [Sharp-friend analyzer](../analyzer.md): Add a deterministic rules engine that reviews the whole slip and shows friendly, non-blocking heads-ups to everyone, including pairings across two people's legs.
 - [Deepen analyzer and board signal loading](../deepen-signal-loader.md): Move signal loading, source freshness checks, 32-team EPA rankings, and rolling player usage math out of HTTP handlers into a shared domain seam with batch queries.
 - [A-grade leg and parlay highlights](../grade-highlights.md): Run ScoreLeg and ScoreSlip over cached board rows and valid correlated combos to surface top A-grade plays on the main hub and game previews with one-tap add.

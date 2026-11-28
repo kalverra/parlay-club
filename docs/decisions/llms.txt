@@ -4,7 +4,7 @@
 
 ## Areas
 
-- [Analyzer](areas/analyzer.txt): Deterministic slip analyzer, sharp-friend warnings, signal loading, injury and sharp-book scoring, v2 grading model, and A-grade highlights. 10 live.
+- [Analyzer](areas/analyzer.txt): Deterministic slip analyzer, sharp-friend warnings, signal loading, injury and sharp-book scoring, v2 grading model, and A-grade highlights. 11 live.
 - [Auth-and-groups](areas/auth-and-groups.txt): App bootstrap, Google OAuth sign-in, and group boundaries for solo and shared play. 3 live.
 - [Board-and-research](areas/board-and-research.txt): Game-first pick board, prop filtering, player and selection identity, moved-line tracking, and research explorer views. 15 live.
 - [Evals](areas/evals.txt): Leak-free historical replay, rubric calibration evals, market-wide backtesting, eval caching, and the in-app Grading Results view. 6 live.
