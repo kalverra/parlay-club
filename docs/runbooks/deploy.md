@@ -85,7 +85,8 @@ push, so a broken gate fails before it can block or allow a deploy.
 4. Authenticates to Google Cloud through Workload Identity Federation as `parlay-deployer`. No service account key is
    stored in GitHub.
 5. Compares the tested commit against the commit currently live on Cloud Run (for CI-triggered runs). If no runtime,
-   template, seed, or container files changed, the job skips the build and deploy. Manual dispatches always deploy.
+   template, seed, container, or `.github/workflows/deploy.yml` files changed, the job skips the build and deploy.
+   Manual dispatches always deploy.
 6. Pre-flights the GCP project in parallel: the Artifact Registry repo, the Litestream bucket, and an `ENABLED` version
    of each required secret. It collects every failure, then exits before the build. `github-token`, `prefill-token`,
    the VAPID pair, and `reminder-token` are checked separately; when one has an `ENABLED` version the job sets
@@ -96,12 +97,12 @@ push, so a broken gate fails before it can block or allow a deploy.
    layers from the GitHub Actions cache.
 9. Drains the service: sets manual scaling to zero, waits 15 seconds for the old Litestream process to finish its final
    sync, then deploys. This prevents two Litestream processes from writing the same replica during the rollout.
-10. Runs `gcloud run deploy` with automatic scaling restored, one instance at most, concurrency 80, 1 CPU, 512 MiB, a
-    3600 second timeout, CPU boost, public access, the runtime account, `APP_ENV=prod`, `DB_PATH=/data/parlay.db`,
-    `LITESTREAM_BUCKET`, optional `LITESTREAM_REPLICA_URL`, `BASE_URL`, optional `REMINDER_QUEUE` (from a repository
-    variable), and `GITHUB_REPO` (from the optional `ISSUES_REPO` variable, or the repo that runs the workflow). It
-    mounts the five required Secret Manager secrets, plus `GITHUB_TOKEN`, `PREFILL_TOKEN`, the VAPID pair, and
-    `REMINDER_TOKEN` when their optional secrets have a version.
+10. Runs `gcloud run deploy` with automatic scaling restored, one instance at most, concurrency 80, 2 vCPU, 2 GiB, Gen 2
+    execution environment, a 3600 second timeout, CPU boost, public access, the runtime account, `APP_ENV=prod`,
+    `DB_PATH=/data/parlay.db`, `LITESTREAM_BUCKET`, optional `LITESTREAM_REPLICA_URL`, `BASE_URL`, optional
+    `REMINDER_QUEUE` (from a repository variable), and `GITHUB_REPO` (from the optional `ISSUES_REPO` variable, or the
+    repo that runs the workflow). It mounts the five required Secret Manager secrets, plus `GITHUB_TOKEN`,
+    `PREFILL_TOKEN`, the VAPID pair, and `REMINDER_TOKEN` when their optional secrets have a version.
 11. Reads the service URL and retries once with `BASE_URL` set to that URL if the first revision could not boot. That is
     the first-deploy path; later deploys get `BASE_URL` from the repo variable.
 12. Probes `GET /readyz` on the new revision (Google Frontend reserves `/healthz` on `*.run.app`), then writes the image
@@ -139,7 +140,7 @@ Roll back the app by sending traffic to an earlier revision:
 
 ```sh
 gcloud run services update-traffic parlay-club \
-  --project PROJECT_ID --region us-central1 \
+  --project PROJECT_ID --region us-east4 \
   --to-revisions REVISION=100
 ```
 
@@ -181,7 +182,8 @@ If no group exists, the import waits and logs. Create the first group, then depl
 The $5 monthly budget from setup emails the billing account's administrators and users at 50%, 90%, and 100%. Add
 yourself under **Billing → Account management** if those mails never arrive.
 
-- **Billing → Reports** shows spend by service. Cloud Run, the bucket, and the secrets are normally pennies.
+- **Billing → Reports** shows spend by service. In `us-east4` (Tier 1), 2 vCPU / 2 GiB / Gen 2 gets 25 free active
+  hours/month (~$5/month at ~55 active hours/month); the bucket and secrets are pennies.
 - **Billing → Budgets** shows the budget and its thresholds.
 - Artifact Registry keeps only the last 3 images; older ones are deleted by the setup cleanup policy. If the 0.5 GB free
   tier is a worry, check the repo size after a busy week.

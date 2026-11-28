@@ -126,6 +126,6 @@ revision leaves the prior revision serving and rollback is immediate)
       verify with `actionlint`.
 - [x] Update the default `REGION` in `deploy/setup.sh` from `us-central1` to `us-east4` (both usage text and fallback
   assignment); verify with `bash -n deploy/setup.sh`.
-- [ ] Docs: update `docs/runbooks/deploy.md` and `docs/guides/gcp-setup.md` for the `2 vCPU / 2 GiB / Gen 2` sizing, the
+- [x] Docs: update `docs/runbooks/deploy.md` and `docs/guides/gcp-setup.md` for the `2 vCPU / 2 GiB / Gen 2` sizing, the
       `deploy.yml` runtime-change trigger, the `us-east4` default region, and updated monthly spend expectations; verify
       with `good-vibes docs lint`.

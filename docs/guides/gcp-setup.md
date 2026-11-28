@@ -52,7 +52,7 @@ The script stops at the first failure and prints what it finished. It creates:
 | Resource             | Details                                                                                   |
 | -------------------- | ----------------------------------------------------------------------------------------- |
 | APIs                 | Cloud Run, Artifact Registry, Secret Manager, Cloud Scheduler, IAM, STS, billing budgets, GCS |
-| GCS bucket           | `gs://PROJECT_ID-parlay-litestream` in `us-central1`, for Litestream, with soft-delete cleared (`--clear-soft-delete`) and a 30-day lifecycle on `backups/` |
+| GCS bucket           | `gs://PROJECT_ID-parlay-litestream` in `us-east4`, for Litestream, with soft-delete cleared (`--clear-soft-delete`) and a 30-day lifecycle on `backups/` |
 | Artifact Registry    | Docker repo `parlay-club` with a cleanup policy that keeps the last 3 images               |
 | Secrets              | `session-key`, `google-client-id`, `google-client-secret`, `odds-api-key`, `the-odds-api-key`, all empty; `github-token` and `prefill-token`, empty and optional |
 | Runtime account      | `parlay-runtime`, read/write on the bucket and read on all seven secrets                  |
@@ -65,7 +65,7 @@ Override defaults with environment variables when your names differ:
 
 | Variable        | Default                           |
 | --------------- | --------------------------------- |
-| `REGION`        | `us-central1`                     |
+| `REGION`        | `us-east4`                        |
 | `GITHUB_REPO`   | `kalverra/parlay-club`            |
 | `SERVICE`       | `parlay-club`                     |
 | `AR_REPO`       | `parlay-club`                     |
@@ -158,7 +158,7 @@ secrets: none of them is sensitive.
 | Variable            | Value                                                   |
 | ------------------- | ------------------------------------------------------- |
 | `GCP_PROJECT`       | the project ID                                          |
-| `GCP_REGION`        | `us-central1` unless you changed it                     |
+| `GCP_REGION`        | `us-east4` unless you changed it                        |
 | `WIF_PROVIDER`      | the full Workload Identity provider name the script prints |
 | `DEPLOY_SA`         | `parlay-deployer@PROJECT_ID.iam.gserviceaccount.com`    |
 | `RUNTIME_SA`        | `parlay-runtime@PROJECT_ID.iam.gserviceaccount.com`     |
@@ -173,7 +173,7 @@ variables before it talks to Google Cloud, so a typo fails in seconds. Set all o
 
 ```sh
 gh variable set GCP_PROJECT --body PROJECT_ID
-gh variable set GCP_REGION --body us-central1
+gh variable set GCP_REGION --body us-east4
 gh variable set WIF_PROVIDER --body 'projects/PROJECT_NUMBER/locations/global/workloadIdentityPools/github/providers/github'
 gh variable set DEPLOY_SA --body 'parlay-deployer@PROJECT_ID.iam.gserviceaccount.com'
 gh variable set RUNTIME_SA --body 'parlay-runtime@PROJECT_ID.iam.gserviceaccount.com'
@@ -243,7 +243,7 @@ props before anyone opens the app on Sundays at 9:30 AM `America/New_York` (`30 
 ```sh
 gcloud scheduler jobs create http parlay-club-prefill \
   --project="PROJECT_ID" \
-  --location="us-central1" \
+  --location="us-east4" \
   --schedule="30 9 * * 0" \
   --time-zone="America/New_York" \
   --uri="https://SERVICE_URL/internal/prefill" \
@@ -252,7 +252,7 @@ gcloud scheduler jobs create http parlay-club-prefill \
   --attempt-deadline=3m
 ```
 
-Replace `parlay-club`, `us-central1`, and `SERVICE_URL` if you overrode `SERVICE` or `REGION`. `deploy/setup.sh` prints
+Replace `parlay-club`, `us-east4`, and `SERVICE_URL` if you overrode `SERVICE` or `REGION`. `deploy/setup.sh` prints
 this command with your project, region, and service filled in.
 
 ## Verify
