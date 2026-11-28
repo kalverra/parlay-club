@@ -290,3 +290,7 @@ button/popover separation are only partially verified by HTML/handler tests)
       375px, with template/DOM assertions in `internal/web/pick_test.go`.
 - [x] Docs: update `docs/concepts/slips.md` (staying within its line budget) and `docs/reference/routes.md` to document
   default pick-board grouping (`?group=`), pre-pick grades, and `from=detail`.
+
+## Reviews
+
+- [x] Final review: agy@gemini-4-neon-medium

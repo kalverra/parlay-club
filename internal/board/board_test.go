@@ -1839,3 +1839,28 @@ func TestDetailGroupByGradeBucketsIndividualSidesAndSorts(t *testing.T) {
 	require.Len(t, detail.Sections[3].Options, 1)
 	assert.Equal(t, "Over 47.5", detail.Sections[3].Options[0].Text)
 }
+
+func TestDetailTabsRetainEmptyNarrowedCategory(t *testing.T) {
+	t.Parallel()
+
+	kickoff := at(t, 8, 13, 0)
+	g := game("401", kickoff)
+	rows := []db.Odds{
+		odds("401", "draftkings", "SPREAD", "BUF", "", "TEAM", new(-3.0), -110),
+	}
+	built := board.Build([]db.Game{g}, rows, nil, "", nil, kickoff.Add(-time.Hour))
+
+	detail := board.Detail(g, built, board.Query{
+		Category: board.CategoryPassing,
+		Now:      kickoff.Add(-time.Hour),
+	})
+	assert.Empty(t, detail.Sections)
+
+	var tabCategories []board.Category
+	for _, tab := range detail.Tabs {
+		tabCategories = append(tabCategories, tab.Category)
+	}
+	assert.Equal(t, []board.Category{board.CategoryLines, board.CategoryPassing}, tabCategories)
+	assert.Equal(t, 1, detail.Tabs[0].Count)
+	assert.Equal(t, 0, detail.Tabs[1].Count)
+}

@@ -1006,6 +1006,7 @@ func Detail(game db.Game, rows []Row, q Query) GameDetail {
 
 	counts := tabCounts(visible)
 	category := tabCategory(q.Category, counts)
+	narrowCat, narrowed := narrowCategory(q.Category)
 	mode := detailSort(q.Sort)
 	groupBy := detailGroupBy(q.GroupBy)
 	detail := GameDetail{
@@ -1015,7 +1016,7 @@ func Detail(game db.Game, rows []Row, q Query) GameDetail {
 		Sort:     mode,
 	}
 	for _, known := range tabCategories {
-		if counts[known] == 0 && known != category {
+		if counts[known] == 0 && known != category && (!narrowed || known != narrowCat) {
 			continue
 		}
 		detail.Tabs = append(detail.Tabs, Tab{

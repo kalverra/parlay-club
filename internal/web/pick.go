@@ -132,8 +132,6 @@ type PickDetailView struct {
 	Unloaded        bool
 	Highlights      HighlightsView
 	Sections        []PickDetailSectionView
-	Lines           []PickLineGroupView
-	Players         []PickPlayerView
 	Empty           bool
 }
 
@@ -1024,19 +1022,7 @@ func pickDetailView(
 		view.Sections = append(view.Sections, secView)
 	}
 
-	for _, group := range model.Lines {
-		view.Lines = append(
-			view.Lines,
-			pickLineGroupView(slipID, group, atLimit, linkQuery, false, canRefresh, homeBook),
-		)
-	}
-	for _, player := range model.Players {
-		view.Players = append(
-			view.Players,
-			pickPlayerView(slipID, player, model.Game, atLimit, linkQuery, canRefresh, homeBook),
-		)
-	}
-	view.Empty = len(view.Sections) == 0 && len(view.Lines) == 0 && len(view.Players) == 0
+	view.Empty = len(view.Sections) == 0
 	return view
 }
 

@@ -4457,3 +4457,17 @@ func TestPickSwapInGroupByGradeTargetsPickDetail(t *testing.T) {
 	assert.Contains(t, body, `name="from" value="detail"`)
 	assert.Contains(t, body, `name="group" value="grade"`)
 }
+
+func TestPickDetailShowsEmptyStateAndActiveChipForEmptyNarrowedCategory(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	game := addGame(t, fixture, gameKickoff())
+	addGameOdds(t, fixture.store, game.ID)
+	addPropOdds(t, fixture.store, game.ID, "PASS_YDS", "Josh Allen", 245.5, -110)
+
+	body := html.UnescapeString(pickDetail(t, fixture, "game="+game.ID+"&cat=passing&q=spread").Body.String())
+	assert.Contains(t, body, "Nothing matches that search.")
+	assert.Contains(t, body, `data-category="passing"`)
+	assert.Contains(t, body, `aria-current="true"`)
+}
