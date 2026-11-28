@@ -2560,3 +2560,76 @@ func TestSlipPanelGradeSummaryStripV2AndV1Fallback(t *testing.T) {
 		assert.NotContains(t, body, "data-grade-summary")
 	})
 }
+
+func TestSlipPanelRendersSideBadgesForOULegs(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 5)
+	game := addGame(t, fixture, gameKickoff())
+
+	addStoredLeg(t, fixture, db.Leg{
+		UserID:     fixture.user.ID,
+		GameID:     new(game.ID),
+		MarketType: "PASS_YDS",
+		Selection:  "Josh Allen Over 245.5 Pass Yds",
+		Team:       new("BUF"),
+		PlayerName: new("Josh Allen"),
+		Side:       new("OVER"),
+		Line:       new(245.5),
+		Odds:       -110,
+	})
+	addStoredLeg(t, fixture, db.Leg{
+		UserID:     fixture.user.ID,
+		GameID:     new(game.ID),
+		MarketType: "TOTAL",
+		Selection:  "Under 47.5",
+		Side:       new("UNDER"),
+		Line:       new(47.5),
+		Odds:       -110,
+	})
+	addStoredLeg(t, fixture, db.Leg{
+		UserID:     fixture.user.ID,
+		GameID:     new(game.ID),
+		MarketType: "SPREAD",
+		Selection:  "BUF -7.5",
+		Team:       new("BUF"),
+		Side:       new("TEAM"),
+		Line:       new(-7.5),
+		Odds:       -110,
+	})
+	addStoredLeg(t, fixture, db.Leg{
+		UserID:     fixture.user.ID,
+		GameID:     new(game.ID),
+		MarketType: "ANYTIME_TD",
+		Selection:  "James Cook Anytime TD",
+		Team:       new("BUF"),
+		PlayerName: new("James Cook"),
+		Side:       new("YES"),
+		Odds:       +120,
+	})
+	addStoredLeg(t, fixture, db.Leg{
+		UserID:     fixture.user.ID,
+		MarketType: "OTHER",
+		Selection:  "Bills win both halves",
+		Odds:       +200,
+	})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodGet,
+		fmt.Sprintf("/slips/%d/panel", fixture.slip.ID),
+		nil,
+	)
+	fixture.handler.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	body := html.UnescapeString(rec.Body.String())
+	assert.Contains(t, body, `badge-over`)
+	assert.Contains(t, body, `data-side-badge="OVER"`)
+	assert.Contains(t, body, "▲")
+	assert.Contains(t, body, `badge-under`)
+	assert.Contains(t, body, `data-side-badge="UNDER"`)
+	assert.Contains(t, body, "▼")
+	assert.Equal(t, 2, strings.Count(body, "data-side-badge="))
+}

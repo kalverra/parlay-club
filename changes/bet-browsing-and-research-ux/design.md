@@ -234,7 +234,7 @@ ergonomics and theme contrast need careful verification beyond HTML assertions)
 - [x] Add `IsOU`, `SharedLine`, and hoisted `SplitLine` fields to `PickLineGroupView` in `internal/web/pick.go` and
   render compact side-by-side Over/Under controls in `web/templates/partials.html`, verifying add/switch/remove/swap
   markup in `internal/web/pick_test.go`.
-- [ ] Add structured `SideBadge` and `SideClass` fields to `LegView` and `PickTrayLegView` in `internal/web/slips.go`
+- [x] Add structured `SideBadge` and `SideClass` fields to `LegView` and `PickTrayLegView` in `internal/web/slips.go`
   and `internal/web/pick.go` and render prominent `OVER`/`UNDER` visual badges on `#slip-panel` and `#pick-tray` in
   `web/templates/partials.html` (with semantic theme styles in `web/tailwind/` and `go generate ./...`), covered by
   tests in `internal/web/slips_test.go` and `internal/web/pick_test.go`.

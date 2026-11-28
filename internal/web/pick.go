@@ -227,6 +227,8 @@ type PickDockView struct {
 type TrayLegView struct {
 	ID            int64
 	Selection     string
+	SideBadge     string
+	SideClass     string
 	Odds          string
 	ImpliedChance string
 	Grade         GradeView
@@ -1402,9 +1404,12 @@ func (h *slipHandlers) dockFrom(
 		if leg.GameID != nil && lockedGames[*leg.GameID] {
 			locked = true
 		}
+		sideBadge, sideClass := legSideBadge(leg.Side)
 		trayLeg := TrayLegView{
 			ID:            leg.ID,
 			Selection:     leg.Selection,
+			SideBadge:     sideBadge,
+			SideClass:     sideClass,
 			Odds:          formatOdds(leg.Odds),
 			ImpliedChance: formatImpliedChance(parlay.ImpliedProb(leg.Odds)),
 			Locked:        locked,

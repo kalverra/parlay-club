@@ -419,6 +419,19 @@
     color: var(--ink-muted);
   }
 
+  /* Semantic O/U side badges */
+  .badge-over {
+    border-color: var(--positive);
+    background-color: var(--positive-soft);
+    color: var(--positive-ink);
+  }
+
+  .badge-under {
+    border-color: var(--warning);
+    background-color: var(--warning-soft);
+    color: var(--warning-ink);
+  }
+
   /* Semantic analyzer grades */
   .grade-a {
     border-color: var(--positive);

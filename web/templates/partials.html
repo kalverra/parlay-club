@@ -49,6 +49,18 @@
 </div>
 {{end}}
 
+{{define "side-badge"}}
+  {{if .SideBadge}}
+    <span
+      class="inline-flex shrink-0 items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide {{.SideClass}}"
+      data-side-badge="{{.SideBadge}}"
+    >
+      <span aria-hidden="true">{{if eq .SideBadge "OVER"}}&#9650;{{else}}&#9660;{{end}}</span>
+      <span>{{.SideBadge}}</span>
+    </span>
+  {{end}}
+{{end}}
+
 {{define "slip-panel"}}
 <div
   id="slip-panel"
@@ -229,7 +241,10 @@
                 {{template "matchup-logos" (dict "AwayURL" .MatchupAwayLogo "HomeURL" .MatchupHomeLogo "Size" "h-5 w-5")}}
               {{- end -}}
               <div class="min-w-0 flex-1">
-                <p class="truncate text-sm font-medium">{{.Selection}}</p>
+                <div class="flex flex-wrap items-center gap-1.5">
+                  {{template "side-badge" .}}
+                  <p class="min-w-0 truncate text-sm font-medium">{{.Selection}}</p>
+                </div>
                 <div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-ink-muted">
                 <span class="ui-odds">{{.Odds}}{{if .ImpliedChance}} <span class="font-normal text-ink-muted" title="Implied chance from odds">({{.ImpliedChance}})</span>{{end}}</span>
                 {{if .SplitLine}}<span class="rounded border border-line-strong bg-surface-2 px-1.5 py-0.5 font-mono text-[10px] font-medium tabular-nums text-ink">{{.SplitLine}}</span>{{end}}
@@ -2509,7 +2524,10 @@
     {{range .Legs}}
       <li class="flex items-start justify-between gap-2 rounded-lg border border-line px-3 py-2">
         <div class="min-w-0 flex-1">
-          <p class="truncate text-sm font-medium">{{.Selection}}</p>
+          <div class="flex flex-wrap items-center gap-1.5">
+            {{template "side-badge" .}}
+            <p class="min-w-0 truncate text-sm font-medium">{{.Selection}}</p>
+          </div>
           <div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-ink-muted">
             <span class="ui-odds">{{.Odds}}{{if .ImpliedChance}} <span class="font-normal text-ink-muted" title="Implied chance from odds">({{.ImpliedChance}})</span>{{end}}</span>
             {{if .ImpliedChance}}{{template "help-bubble" (dict "Href" (printf "/docs/glossary?from=/slips/%d/pick#term-implied-prob" $.SlipID) "Label" "What implied chance means")}}{{end}}

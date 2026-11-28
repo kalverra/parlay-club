@@ -269,6 +269,8 @@ type SlipMemberView struct {
 type LegView struct {
 	ID              int64
 	Selection       string
+	SideBadge       string
+	SideClass       string
 	Odds            string
 	ImpliedChance   string
 	Model           string // nfelo chip; "" when there is no fresh model
@@ -2349,9 +2351,12 @@ func legViews(
 	byUser := make(map[int64][]LegView, len(names))
 	for _, leg := range legs {
 		canVote := open && hasUser && viewerIsMember && leg.UserID != viewerID
+		sideBadge, sideClass := legSideBadge(leg.Side)
 		view := LegView{
 			ID:            leg.ID,
 			Selection:     leg.Selection,
+			SideBadge:     sideBadge,
+			SideClass:     sideClass,
 			Odds:          formatOdds(leg.Odds),
 			ImpliedChance: formatImpliedChance(parlay.ImpliedProb(leg.Odds)),
 			Model:         legModel(leg, games),
@@ -3189,6 +3194,21 @@ func titleSide(raw string) string {
 		return "Yes"
 	default:
 		return ""
+	}
+}
+
+// legSideBadge returns the O/U badge text and semantic CSS class for a leg side.
+func legSideBadge(side *string) (badge, class string) {
+	if side == nil {
+		return "", ""
+	}
+	switch strings.ToUpper(strings.TrimSpace(*side)) {
+	case "OVER":
+		return "OVER", "badge-over"
+	case "UNDER":
+		return "UNDER", "badge-under"
+	default:
+		return "", ""
 	}
 }
 
