@@ -415,12 +415,24 @@
             <a href="/slips/new{{if .Slip.WeekID}}?week={{.Slip.WeekID}}{{end}}" class="font-medium text-ink hover:underline">+ New slip</a>
           {{end}}
         </p>
+        {{if .Slip.ProcessOutcome.Has}}
+          <p class="mt-1 text-xs text-ink-muted" data-process-outcome-summary>{{.Slip.ProcessOutcome.Summary}}</p>
+        {{end}}
       </div>
-      <span
-        class="shrink-0 rounded-full border px-2 py-1 text-xs font-medium {{if eq .Slip.Status "OPEN"}}border-accent bg-accent-soft text-ink{{else if eq .Slip.Status "LOCKED"}}border-warning bg-warning-soft text-warning-ink{{else}}border-positive bg-positive-soft text-positive-ink{{end}}"
-      >
-        {{.Slip.Status}}
-      </span>
+      <div class="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
+        {{if .Slip.ProcessOutcome.Has}}
+          <span
+            class="ui-stamp text-[11px] {{.Slip.ProcessOutcome.Class}}"
+            data-process-outcome="{{.Slip.ProcessOutcome.Key}}"
+            title="{{.Slip.ProcessOutcome.Summary}}"
+          >{{.Slip.ProcessOutcome.Label}}</span>
+        {{end}}
+        <span
+          class="shrink-0 rounded-full border px-2 py-1 text-xs font-medium {{if eq .Slip.Status "OPEN"}}border-accent bg-accent-soft text-ink{{else if eq .Slip.Status "LOCKED"}}border-warning bg-warning-soft text-warning-ink{{else if eq .Slip.Result "LOST"}}badge-lost{{else if eq .Slip.Result "PUSH"}}badge-push{{else if eq .Slip.Result "VOID"}}badge-void{{else}}border-positive bg-positive-soft text-positive-ink{{end}}"
+        >
+          {{.Slip.Status}}
+        </span>
+      </div>
     </div>
     {{if gt (len .Siblings) 1}}
       <nav class="mt-3 flex items-center gap-2 overflow-x-auto border-t border-line pt-3" aria-label="Sibling slips" data-sibling-switcher>

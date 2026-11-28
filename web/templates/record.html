@@ -198,6 +198,51 @@
         </div>
       {{end}}
     </div>
+
+    {{if .Slips}}
+      <div class="space-y-3">
+        <div class="flex items-baseline justify-between gap-2">
+          <h2 class="text-base font-semibold">Graded slips</h2>
+          <p class="text-xs text-page-muted">Newest graded slips first</p>
+        </div>
+
+        <div class="space-y-2.5">
+          {{range .Slips}}
+            <a
+              href="/slips/{{.SlipID}}"
+              class="ui-card block p-3.5 transition hover:border-line-strong hover:bg-surface-2"
+            >
+              <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+                <div class="min-w-0 space-y-1">
+                  <div class="flex flex-wrap items-center gap-1.5 text-xs text-ink-muted">
+                    <span class="font-medium text-ink">{{.WeekLabel}}</span>
+                    <span aria-hidden="true">&middot;</span>
+                    <span class="truncate font-semibold text-ink">{{.SlipName}}</span>
+                  </div>
+                  {{if .ProcessOutcome.Has}}
+                    <p class="text-xs text-ink-muted">{{.ProcessOutcome.Summary}}</p>
+                  {{end}}
+                </div>
+
+                <div class="flex flex-wrap items-center gap-2 sm:shrink-0 sm:justify-end">
+                  {{if .Grade}}
+                    <span class="rounded-full border px-2 py-0.5 text-xs font-semibold {{.GradeClass}}">Build {{.Grade}}</span>
+                  {{end}}
+                  {{if .ProcessOutcome.Has}}
+                    <span
+                      class="ui-stamp text-[11px] {{.ProcessOutcome.Class}}"
+                      data-process-outcome="{{.ProcessOutcome.Key}}"
+                      title="{{.ProcessOutcome.Summary}}"
+                    >{{.ProcessOutcome.Label}}</span>
+                  {{end}}
+                  <span class="rounded-full border px-2 py-0.5 text-xs font-semibold {{.ResultClass}}">{{.Result}}</span>
+                </div>
+              </div>
+            </a>
+          {{end}}
+        </div>
+      </div>
+    {{end}}
   {{end}}
   {{template "tag-explain-dialog"}}
 </section>

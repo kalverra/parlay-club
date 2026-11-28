@@ -129,6 +129,16 @@
                   <span aria-hidden="true">&middot;</span>
                   <span class="truncate">{{.SlipName}}</span>
                   <span class="rounded-full border px-1.5 py-0.5 text-[10px] font-semibold {{.SlipResultClass}}">Slip {{.SlipResult}}</span>
+                  {{if .SlipGrade}}
+                    <span class="rounded-full border px-1.5 py-0.5 text-[10px] font-semibold {{.SlipGradeClass}}">Build {{.SlipGrade}}</span>
+                  {{end}}
+                  {{if .SlipProcessOutcome.Has}}
+                    <span
+                      class="ui-stamp text-[10px] {{.SlipProcessOutcome.Class}}"
+                      data-process-outcome="{{.SlipProcessOutcome.Key}}"
+                      title="{{.SlipProcessOutcome.Summary}}"
+                    >{{.SlipProcessOutcome.Label}}</span>
+                  {{end}}
                 </div>
                 <p class="text-sm font-semibold text-ink">{{.Selection}}</p>
                 <div class="flex flex-wrap items-center gap-1.5 text-xs text-ink-muted">

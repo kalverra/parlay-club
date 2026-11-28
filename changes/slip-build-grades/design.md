@@ -307,7 +307,7 @@ using existing view-model patterns)
 
 Risk: low (read-only display badges over existing settled slip and eval-cache data with handler/template test coverage)
 
-- [ ] Render post-game Process vs. Outcome badges (`Clean Hit`, `Tough Beat`, `Total Bailout`, `Book Donation`) on
+- [x] Render post-game Process vs. Outcome badges (`Clean Hit`, `Tough Beat`, `Total Bailout`, `Book Donation`) on
   settled slip cards (`/slips/{id}`) and Record Book views (`/record` and `/record/members/{id}`), backed by
   `SuiteReport.SlipGrades` and unit/handler tests.
 - [ ] Docs: update `docs/concepts/analyzer.md`, `docs/reference/analyzer-rules.md`, and `docs/concepts/docs-hub.md` to

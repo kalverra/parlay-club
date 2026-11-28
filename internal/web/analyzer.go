@@ -1009,6 +1009,41 @@ func gradeClass(letter string) string {
 	}
 }
 
+// ProcessOutcomeView is the post-game Process vs. Outcome badge for a settled slip.
+type ProcessOutcomeView struct {
+	Has     bool
+	Key     string
+	Label   string
+	Summary string
+	Class   string
+}
+
+func newProcessOutcomeView(po analyzer.ProcessOutcome) ProcessOutcomeView {
+	if po.Key == "" {
+		return ProcessOutcomeView{}
+	}
+	return ProcessOutcomeView{
+		Has:     true,
+		Key:     po.Key,
+		Label:   po.Label,
+		Summary: po.Summary,
+		Class:   processOutcomeClass(po.Tone),
+	}
+}
+
+func processOutcomeClass(tone string) string {
+	switch tone {
+	case "positive":
+		return "bg-positive-soft text-positive-ink"
+	case "warn":
+		return "bg-warning-soft text-warning-ink"
+	case "bad":
+		return "bg-danger-soft text-danger-ink"
+	default:
+		return "bg-surface-2 text-ink-muted"
+	}
+}
+
 // legModel is the nfelo chip beside a leg's odds. A spread shows the model's
 // number from the leg team's side; a moneyline shows the model's win
 // probability. Anything else, or a game without model data, has no chip.

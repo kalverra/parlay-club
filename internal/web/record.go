@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/kalverra/parlay-club/internal/analyzer"
 	"github.com/kalverra/parlay-club/internal/db"
 	"github.com/kalverra/parlay-club/internal/parlay"
 	"github.com/kalverra/parlay-club/internal/record"
@@ -33,6 +34,19 @@ type RecordPage struct {
 	LongestWin    int
 	LongestLoss   int
 	Leaderboard   []RecordMemberView
+	Slips         []RecordSlipView
+}
+
+// RecordSlipView is one graded slip in the Record Book's season slip list.
+type RecordSlipView struct {
+	SlipID         int64
+	WeekLabel      string
+	SlipName       string
+	Result         string
+	ResultClass    string
+	Grade          string
+	GradeClass     string
+	ProcessOutcome ProcessOutcomeView
 }
 
 // SeasonOption is one season in the Record Book season selector.
@@ -86,23 +100,26 @@ type RecordMemberPage struct {
 
 // RecordMemberBetView is one graded leg in a member's season bet history.
 type RecordMemberBetView struct {
-	WeekLabel        string
-	SlipID           int64
-	SlipName         string
-	SlipResult       string
-	SlipResultClass  string
-	Selection        string
-	MarketLabel      string
-	Odds             string
-	Grade            string
-	GradeClass       string
-	Result           string
-	ResultClass      string
-	SoleKiller       bool
-	NetVotes         int
-	NetVotesText     string
-	NetVotesPositive bool
-	NetVotesNegative bool
+	WeekLabel          string
+	SlipID             int64
+	SlipName           string
+	SlipResult         string
+	SlipResultClass    string
+	SlipGrade          string
+	SlipGradeClass     string
+	SlipProcessOutcome ProcessOutcomeView
+	Selection          string
+	MarketLabel        string
+	Odds               string
+	Grade              string
+	GradeClass         string
+	Result             string
+	ResultClass        string
+	SoleKiller         bool
+	NetVotes           int
+	NetVotesText       string
+	NetVotesPositive   bool
+	NetVotesNegative   bool
 }
 
 type recordSeasonData struct {
@@ -112,6 +129,7 @@ type recordSeasonData struct {
 	legs       []db.Leg
 	users      []db.User
 	legGrades  map[int64]string
+	slipGrades map[int64]string
 	votes      map[int64]int
 	book       record.Book
 }
@@ -135,7 +153,7 @@ func (h *slipHandlers) recordBook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	data := buildRecordPage(page, group, loaded.season, loaded.allSeasons, loaded.users, loaded.book)
+	data := buildRecordPage(page, group, loaded)
 	h.renderPage(w, "record", data)
 }
 
@@ -222,7 +240,7 @@ func (h *slipHandlers) loadRecordSeasonData(
 		return nil, false
 	}
 
-	legGrades := h.loadRecordLegGrades(ctx, groupID, selectedSeason)
+	legGrades, slipGrades := h.loadEvalGrades(ctx, groupID, selectedSeason)
 	book := buildRecordBook(selectedSeason, slips, legs, users, wagers, legGrades, votes)
 	return &recordSeasonData{
 		season:     selectedSeason,
@@ -231,14 +249,19 @@ func (h *slipHandlers) loadRecordSeasonData(
 		legs:       legs,
 		users:      users,
 		legGrades:  legGrades,
+		slipGrades: slipGrades,
 		votes:      votes,
 		book:       book,
 	}, true
 }
 
-func (h *slipHandlers) loadRecordLegGrades(ctx context.Context, groupID int64, season int) map[int64]string {
-	if h.deps.EvalCache == nil {
-		return nil
+func (h *slipHandlers) loadEvalGrades(
+	ctx context.Context,
+	groupID int64,
+	season int,
+) (legGrades, slipGrades map[int64]string) {
+	if h.deps.EvalCache == nil || groupID <= 0 || season <= 0 {
+		return nil, nil
 	}
 	suite, err := h.deps.EvalCache.GetOrCompute(ctx, h.deps.Store, groupID, season)
 	if err != nil {
@@ -246,14 +269,14 @@ func (h *slipHandlers) loadRecordLegGrades(ctx context.Context, groupID int64, s
 			Err(err).
 			Int64("group_id", groupID).
 			Int("season", season).
-			Msg("record book: compute eval leg grades")
-		return nil
+			Msg("record book: compute eval grades")
+		return nil, nil
 	}
 	engineName := ""
 	if h.deps.GradingEngine != nil {
 		engineName = h.deps.GradingEngine.Name()
 	}
-	return suite.LegGrades(engineName)
+	return suite.LegGrades(engineName), suite.SlipGrades(engineName)
 }
 
 // resolveRecordSeason picks the season to display from ?season=, falling back
@@ -352,30 +375,50 @@ func buildRecordBook(
 func buildRecordPage(
 	page Page,
 	group db.Group,
-	selectedSeason int,
-	allSeasons []int,
-	users []db.User,
-	book record.Book,
+	loaded *recordSeasonData,
 ) RecordPage {
 	return RecordPage{
 		Page:          page,
 		GroupName:     group.Name,
-		Season:        selectedSeason,
-		Seasons:       buildSeasonOptions(allSeasons, selectedSeason),
+		Season:        loaded.season,
+		Seasons:       buildSeasonOptions(loaded.allSeasons, loaded.season),
 		HasGroup:      true,
-		HasSlips:      book.TotalSlips > 0,
-		Record:        fmt.Sprintf("%d-%d-%d", book.Wins, book.Losses, book.Pushes),
-		Wins:          book.Wins,
-		Losses:        book.Losses,
-		Pushes:        book.Pushes,
-		TotalSlips:    book.TotalSlips,
-		UnitsPL:       formatUnits(book.UnitsPL),
-		UnitsPositive: book.UnitsPL > 0.005,
-		UnitsNegative: book.UnitsPL < -0.005,
-		LongestWin:    book.LongestWin,
-		LongestLoss:   book.LongestLoss,
-		Leaderboard:   buildLeaderboardViews(users, book),
+		HasSlips:      loaded.book.TotalSlips > 0,
+		Record:        fmt.Sprintf("%d-%d-%d", loaded.book.Wins, loaded.book.Losses, loaded.book.Pushes),
+		Wins:          loaded.book.Wins,
+		Losses:        loaded.book.Losses,
+		Pushes:        loaded.book.Pushes,
+		TotalSlips:    loaded.book.TotalSlips,
+		UnitsPL:       formatUnits(loaded.book.UnitsPL),
+		UnitsPositive: loaded.book.UnitsPL > 0.005,
+		UnitsNegative: loaded.book.UnitsPL < -0.005,
+		LongestWin:    loaded.book.LongestWin,
+		LongestLoss:   loaded.book.LongestLoss,
+		Leaderboard:   buildLeaderboardViews(loaded.users, loaded.book),
+		Slips:         buildRecordSlips(loaded.slips, loaded.slipGrades),
 	}
+}
+
+func buildRecordSlips(slips []db.GradedSlip, slipGrades map[int64]string) []RecordSlipView {
+	views := make([]RecordSlipView, 0, len(slips))
+	for _, gs := range slices.Backward(slips) {
+		grade := slipGrades[gs.Slip.ID]
+		var gClass string
+		if grade != "" {
+			gClass = gradeClass(grade)
+		}
+		views = append(views, RecordSlipView{
+			SlipID:         gs.Slip.ID,
+			WeekLabel:      recordWeekLabel(gs.Week),
+			SlipName:       gs.Slip.Name,
+			Result:         string(gs.Slip.Result),
+			ResultClass:    resultClass(string(gs.Slip.Result)),
+			Grade:          grade,
+			GradeClass:     gClass,
+			ProcessOutcome: newProcessOutcomeView(analyzer.ClassifyProcessResult(grade, gs.Slip.Result)),
+		})
+	}
+	return views
 }
 
 func buildRecordMemberPage(
@@ -424,6 +467,12 @@ func buildMemberBets(userID int64, loaded *recordSeasonData) []RecordMemberBetVi
 		slipLegs := legsBySlip[gs.Slip.ID]
 		soleKillerLegID := soleKillerLeg(gs.Slip.Result, slipLegs)
 		wLabel := recordWeekLabel(gs.Week)
+		slipGrade := loaded.slipGrades[gs.Slip.ID]
+		var slipGradeClass string
+		if slipGrade != "" {
+			slipGradeClass = gradeClass(slipGrade)
+		}
+		slipOutcome := newProcessOutcomeView(analyzer.ClassifyProcessResult(slipGrade, gs.Slip.Result))
 
 		for _, leg := range slipLegs {
 			if leg.UserID != userID {
@@ -441,23 +490,26 @@ func buildMemberBets(userID int64, loaded *recordSeasonData) []RecordMemberBetVi
 			}
 
 			bets = append(bets, RecordMemberBetView{
-				WeekLabel:        wLabel,
-				SlipID:           gs.Slip.ID,
-				SlipName:         gs.Slip.Name,
-				SlipResult:       string(gs.Slip.Result),
-				SlipResultClass:  resultClass(string(gs.Slip.Result)),
-				Selection:        leg.Selection,
-				MarketLabel:      researchMarketLabel(leg.MarketType),
-				Odds:             formatOdds(leg.Odds),
-				Grade:            grade,
-				GradeClass:       gClass,
-				Result:           string(leg.Result),
-				ResultClass:      resultClass(string(leg.Result)),
-				SoleKiller:       leg.ID == soleKillerLegID,
-				NetVotes:         netVotes,
-				NetVotesText:     netVotesText,
-				NetVotesPositive: netVotes > 0,
-				NetVotesNegative: netVotes < 0,
+				WeekLabel:          wLabel,
+				SlipID:             gs.Slip.ID,
+				SlipName:           gs.Slip.Name,
+				SlipResult:         string(gs.Slip.Result),
+				SlipResultClass:    resultClass(string(gs.Slip.Result)),
+				SlipGrade:          slipGrade,
+				SlipGradeClass:     slipGradeClass,
+				SlipProcessOutcome: slipOutcome,
+				Selection:          leg.Selection,
+				MarketLabel:        researchMarketLabel(leg.MarketType),
+				Odds:               formatOdds(leg.Odds),
+				Grade:              grade,
+				GradeClass:         gClass,
+				Result:             string(leg.Result),
+				ResultClass:        resultClass(string(leg.Result)),
+				SoleKiller:         leg.ID == soleKillerLegID,
+				NetVotes:           netVotes,
+				NetVotesText:       netVotesText,
+				NetVotesPositive:   netVotes > 0,
+				NetVotesNegative:   netVotes < 0,
 			})
 		}
 	}

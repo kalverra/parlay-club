@@ -236,6 +236,8 @@ type SlipView struct {
 	Name             string
 	ScopeBadge       string
 	Status           string
+	Result           string
+	ProcessOutcome   ProcessOutcomeView
 	LegsPerMember    int
 	Open             bool
 	LiveMode         bool
@@ -2142,12 +2144,24 @@ func (h *slipHandlers) slipPageData(ctx context.Context, slip db.Slip) (SlipPage
 		return SlipPage{}, err
 	}
 
+	var processOutcome ProcessOutcomeView
+	if slip.Status == db.SlipGraded && h.deps.Store != nil && h.deps.EvalCache != nil {
+		if week, weekErr := h.deps.Store.WeekByID(ctx, slip.WeekID); weekErr == nil {
+			_, slipGrades := h.loadEvalGrades(ctx, slip.GroupID, week.Season)
+			if grade := slipGrades[slip.ID]; grade != "" {
+				processOutcome = newProcessOutcomeView(analyzer.ClassifyProcessResult(grade, slip.Result))
+			}
+		}
+	}
+
 	view := &SlipView{
 		ID:               slip.ID,
 		WeekID:           slip.WeekID,
 		Name:             slip.Name,
 		ScopeBadge:       scopeBadge(slip),
 		Status:           string(slip.Status),
+		Result:           string(slip.Result),
+		ProcessOutcome:   processOutcome,
 		LegsPerMember:    slip.LegsPerMember,
 		Open:             open,
 		LiveMode:         liveMode,

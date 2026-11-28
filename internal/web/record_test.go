@@ -362,3 +362,134 @@ func TestRecordMemberHistoryScopingAndRendering(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec2026.Code)
 	assert.Contains(t, html.UnescapeString(rec2026.Body.String()), "No graded legs for Bob in the 2026 season.")
 }
+
+func TestProcessOutcomeBadgesOnSettledSlipAndRecordViews(t *testing.T) {
+	t.Parallel()
+
+	f := newSlipFixture(t, 2)
+	ctx := t.Context()
+
+	wk, err := f.store.UpsertWeek(ctx, 2025, 2, 4)
+	require.NoError(t, err)
+	_, err = f.store.UpsertGame(ctx, db.Game{
+		ID:       "g-2025-4",
+		WeekID:   wk.ID,
+		HomeTeam: "BUF",
+		AwayTeam: "MIA",
+		HomeName: "Buffalo Bills",
+		AwayName: "Miami Dolphins",
+		Kickoff:  time.Date(2025, 9, 28, 17, 0, 0, 0, time.UTC),
+		Status:   db.GameFinal,
+		Indoor:   true,
+	})
+	require.NoError(t, err)
+
+	// 4-leg heavy-chalk slip -> EngineV2 grades B -> Lost => Tough Beat.
+	toughSlip, err := f.store.CreateSlip(
+		ctx, f.group.ID, wk.ID, nil, "Chalk Tough Beat", db.SlateScopeFullWeek, 4, []int64{f.user.ID},
+	)
+	require.NoError(t, err)
+	for i, sel := range []string{"BUF ML", "KC ML", "DET ML", "PHI ML"} {
+		leg, legErr := f.store.CreateLeg(ctx, db.Leg{
+			SlipID:     toughSlip.ID,
+			UserID:     f.user.ID,
+			GameID:     new("g-2025-4"),
+			MarketType: "ML",
+			Selection:  sel,
+			Odds:       -250,
+		})
+		require.NoError(t, legErr)
+		res := parlay.Won
+		if i == 0 {
+			res = parlay.Lost
+		}
+		require.NoError(t, f.store.SetLegResult(ctx, leg.ID, res, f.user.Name))
+	}
+	require.NoError(t, f.store.SetSlipGrade(ctx, toughSlip.ID, parlay.Lost, db.SlipGraded))
+
+	// Opposing ML legs on the same game -> EngineV2 grades D/F -> Lost => Book Donation.
+	donationSlip, err := f.store.CreateSlip(
+		ctx, f.group.ID, wk.ID, nil, "Same Game Conflict", db.SlateScopeFullWeek, 2, []int64{f.user.ID},
+	)
+	require.NoError(t, err)
+	legBuf, err := f.store.CreateLeg(ctx, db.Leg{
+		SlipID:     donationSlip.ID,
+		UserID:     f.user.ID,
+		GameID:     new("g-2025-4"),
+		MarketType: "ML",
+		Team:       new("BUF"),
+		Selection:  "BUF ML",
+		Odds:       -110,
+	})
+	require.NoError(t, err)
+	require.NoError(t, f.store.SetLegResult(ctx, legBuf.ID, parlay.Won, f.user.Name))
+	legMia, err := f.store.CreateLeg(ctx, db.Leg{
+		SlipID:     donationSlip.ID,
+		UserID:     f.user.ID,
+		GameID:     new("g-2025-4"),
+		MarketType: "ML",
+		Team:       new("MIA"),
+		Selection:  "MIA ML",
+		Odds:       110,
+	})
+	require.NoError(t, err)
+	require.NoError(t, f.store.SetLegResult(ctx, legMia.ID, parlay.Lost, f.user.Name))
+	require.NoError(t, f.store.SetSlipGrade(ctx, donationSlip.ID, parlay.Lost, db.SlipGraded))
+
+	// Settled slip card (/slips/{id}) renders the Process vs. Outcome stamp and non-green LOST status.
+	toughRec := httptest.NewRecorder()
+	f.handler.ServeHTTP(
+		toughRec,
+		httptest.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("/slips/%d", toughSlip.ID), nil),
+	)
+	require.Equal(t, http.StatusOK, toughRec.Code)
+	toughBody := html.UnescapeString(toughRec.Body.String())
+	assert.Contains(t, toughBody, `data-process-outcome="tough_beat"`)
+	assert.Contains(t, toughBody, "Tough Beat")
+	assert.Contains(t, toughBody, "Good process, bad variance. Don't tilt.")
+	assert.Contains(t, toughBody, "badge-lost")
+
+	donationRec := httptest.NewRecorder()
+	f.handler.ServeHTTP(
+		donationRec,
+		httptest.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("/slips/%d", donationSlip.ID), nil),
+	)
+	require.Equal(t, http.StatusOK, donationRec.Code)
+	donationBody := html.UnescapeString(donationRec.Body.String())
+	assert.Contains(t, donationBody, `data-process-outcome="book_donation"`)
+	assert.Contains(t, donationBody, "Book Donation")
+	assert.Contains(t, donationBody, "The exact trap we flagged hit.")
+	assert.Contains(t, donationBody, "badge-lost")
+
+	// /record renders the Graded slips section with Build grade and Process vs. Outcome stamps.
+	recRec := httptest.NewRecorder()
+	f.handler.ServeHTTP(
+		recRec,
+		httptest.NewRequestWithContext(ctx, http.MethodGet, "/record?season=2025", nil),
+	)
+	require.Equal(t, http.StatusOK, recRec.Code)
+	recBody := html.UnescapeString(recRec.Body.String())
+	assert.Contains(t, recBody, "Graded slips")
+	assert.Contains(t, recBody, "Chalk Tough Beat")
+	assert.Contains(t, recBody, "Same Game Conflict")
+	assert.Contains(t, recBody, `data-process-outcome="tough_beat"`)
+	assert.Contains(t, recBody, `data-process-outcome="book_donation"`)
+	assert.Contains(t, recBody, "Tough Beat")
+	assert.Contains(t, recBody, "Book Donation")
+
+	// /record/members/{id} renders Build grade and Process vs. Outcome stamps on the member's bet cards.
+	memRec := httptest.NewRecorder()
+	memURL := fmt.Sprintf("/record/members/%d?season=2025", f.user.ID)
+	f.handler.ServeHTTP(
+		memRec,
+		httptest.NewRequestWithContext(ctx, http.MethodGet, memURL, nil),
+	)
+	require.Equal(t, http.StatusOK, memRec.Code)
+	memBody := html.UnescapeString(memRec.Body.String())
+	assert.Contains(t, memBody, "Chalk Tough Beat")
+	assert.Contains(t, memBody, "Same Game Conflict")
+	assert.Contains(t, memBody, `data-process-outcome="tough_beat"`)
+	assert.Contains(t, memBody, `data-process-outcome="book_donation"`)
+	assert.Contains(t, memBody, "Tough Beat")
+	assert.Contains(t, memBody, "Book Donation")
+}
