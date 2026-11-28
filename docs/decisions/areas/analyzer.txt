@@ -11,5 +11,6 @@
 - [Include roster injuries in leg grading](../injury-aware-grading.md): Capture ESPN roster injury statuses alongside game summaries and adjust leg grading so backups are not penalized for low-volume games behind an out starter.
 - [nfelo signals in the analyzer](../nfelo-signals.md): Treat nfelo as one more free, lazily synced source, beside ESPN and Open-Meteo.
 - [nflverse signals for leg suggestions and grading](../nflverse-signals.md): Sync weekly nflverse team-defense EPA, player usage, and snap-share CSVs into SQLite and feed them into deterministic analyzer grades and pick-board matchup badges.
+- [Warn on sportsbook-ineligible parlay combinations](../parlay-combo-warnings.md): Add a dedicated deterministic combination-eligibility rule group to the analyzer that inspects same-game leg pairs for hard blocks and common DK/FD SGP restrictions, and surface those warnings both on the slip and while picking.
 - [Sharp bookmaker odds comparison](../sharp-book-grading.md): Compute a de-vigged sharp benchmark from stored multi-book odds and feed retail-versus-sharp line and price gaps into the analyzer's Line & Price grade.
 - [Unify slip analysis and rubric grading](../unify-analyzer-evaluation.md): Evaluate slip warnings and grades in a single pass against an explicit rubric using shared leg predicates and typed rule identifiers across web and eval callers.
