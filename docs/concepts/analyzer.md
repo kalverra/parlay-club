@@ -45,11 +45,14 @@ flowchart LR
 The slip panel renders the Analyzer section under the legs, with a "How grading works" link to `/docs/grading`:
 
 - **Overall slip grade**: a clickable A–F pill with a one-line sharp-friend summary. Tapping it opens an inline
-  `<details>` breakdown formatted for 375px phone width: an optional "High uncertainty" badge, a copula Script
+  `<details>` breakdown formatted for 375px phone width: a 3-column **Overall / Hit chance / Payout value** summary
+  strip (showing the letter and score, `CalibratedProb` formatted as `~N%`—or `<1%` / `>99%`—using the copula-adjusted
+  joint probability on multi-leg slips, and a plain-language `Price & Vig` read of `Strong value`, `Fair value`,
+  `Slight juice`, or `Steep juice` without `+EV %` copy), an optional "High uncertainty" badge, a copula Script
   multiplier summary on multi-leg slips, the four 0–100 pillar meters (Price & Vig, Script Fit, Stability & Tail Risk,
   Context & Traps), up to three plain-English "Why" bullets from the strongest drivers, and a `?` bubble to
-  `/docs/grading#slip-grade`. When `Pillars` is empty (such as under `EngineV1`), the popover falls back to the factor
-  list.
+  `/docs/grading#slip-grade`. When `Pillars` and `CalibratedProb` are absent (such as under `EngineV1`), the summary
+  strip is omitted and the popover falls back to the factor list.
 - **Per-leg grade pills**: each graded leg row displays its A–F pill; tapping it opens the same compact four-pillar
   breakdown for that leg and a `?` bubble to `/docs/grading#leg-grades`. Legs with market `OTHER` or an unmatched game
   show no grade pill.

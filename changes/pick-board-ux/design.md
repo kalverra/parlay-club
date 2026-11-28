@@ -254,7 +254,7 @@ tests)
       render the 3-column **Overall / Hit chance / Payout value** summary strip in `grade-breakdown`
       (`web/templates/partials.html`), and cover v2 legs, v2 multi-leg slips, and v1 fallback in
       `internal/web/analyzer_test.go` and `internal/web/slips_test.go`.
-- [ ] Docs: update `docs/concepts/analyzer.md` to document the Overall, Hit chance, and Payout value summary strip
+- [x] Docs: update `docs/concepts/analyzer.md` to document the Overall, Hit chance, and Payout value summary strip
   inside the grade breakdown popover.
 
 ### Phase 2: Board grouping modes and pre-pick row scoring
