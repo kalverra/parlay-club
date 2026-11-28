@@ -35,41 +35,59 @@ const (
 	sigmaMargin    = 13.5
 	sigmaGameTotal = 13.5
 	sigmaTeamTotal = 9.5
+
+	probTrendDeadband = 0.005
+	trendUp           = "up"
+	trendDown         = "down"
+	trendFlat         = "flat"
 )
 
 // LegProgress describes the live or settled progress and hit probability of
 // one parlay leg.
 type LegProgress struct {
-	State       State
-	ProgressPct float64 // 0..100 fill width
-	Tone        string  // "won", "on_track", "trailing", "lost", "neutral"
-	StatLabel   string  // e.g. "182 / 245.5 yds", "BUF 21-17 (+7.5)"
-	ClockLabel  string  // e.g. "Q3 8:42", "Halftime", "Final"
-	PreGameProb float64 // 0..1 from parlay.ImpliedProb(leg.Odds)
-	LiveProb    float64 // 0..1 updated hit probability
-	Counts      bool    // false for PUSH/VOID
-	HasLive     bool    // true when live/settled progress UI should show
+	State           State
+	ProgressPct     float64 // 0..100 fill width
+	GameProgressPct float64 // 0 (SCHEDULED), (1-remFrac)*100 (LIVE), 100 (FINAL)
+	Tone            string  // "won", "on_track", "trailing", "lost", "neutral"
+	StatLabel       string  // e.g. "182 / 245.5 yds", "BUF 21-17 (+7.5)"
+	ClockLabel      string  // e.g. "Q3 8:42", "Halftime", "Final"
+	PreGameProb     float64 // 0..1 from parlay.ImpliedProb(leg.Odds)
+	LiveProb        float64 // 0..1 updated hit probability
+	ProbDelta       float64 // LiveProb - PreGameProb (0 for PUSH/VOID)
+	ProbTrend       string  // "up", "down", "flat"
+	Counts          bool    // false for PUSH/VOID
+	HasLive         bool    // true when live/settled progress UI should show
 }
 
 // SlipProgress describes the aggregate live or settled progress and hit
 // probability of a parlay slip.
 type SlipProgress struct {
-	Show        bool
-	State       State   // LIVE, CASHED, BUSTED, PUSH, SCHEDULED
-	ProgressPct float64 // 0..100 aggregate fill width
-	Tone        string  // "won", "on_track", "trailing", "lost", "neutral"
-	Summary     string  // e.g. "2/4 hit · 1 live"
-	PreGameProb float64 // product of counting pre-game implied probs
-	LiveProb    float64 // product of counting live probs
-	HitCount    int
-	LiveCount   int
-	LostCount   int
-	TotalCount  int
+	Show           bool
+	State          State   // LIVE, CASHED, BUSTED, PUSH, SCHEDULED
+	ProgressPct    float64 // 0..100 aggregate fill width
+	Tone           string  // "won", "on_track", "trailing", "lost", "neutral"
+	Summary        string  // e.g. "2/4 hit · 1 live"
+	PreGameProb    float64 // product of counting pre-game implied probs
+	LiveProb       float64 // product of counting live probs
+	ProbDelta      float64 // LiveProb - PreGameProb
+	ProbTrend      string  // "up", "down", "flat"
+	HitCount       int
+	LiveCount      int
+	ScheduledCount int // counting legs still SCHEDULED
+	LostCount      int
+	TotalCount     int
 }
 
 // EvaluateLeg computes the live or settled progress and hit probability for a
 // single leg given its game state and optional ESPN box score.
 func EvaluateLeg(leg db.Leg, game *db.Game, box *espn.BoxScore) LegProgress {
+	lp := evaluateLeg(leg, game, box)
+	lp.GameProgressPct = gameProgressPct(game)
+	lp.ProbDelta, lp.ProbTrend = probDeltaAndTrend(lp.PreGameProb, lp.LiveProb, lp.Counts)
+	return lp
+}
+
+func evaluateLeg(leg db.Leg, game *db.Game, box *espn.BoxScore) LegProgress {
 	preProb := parlay.ImpliedProb(leg.Odds)
 	clockLabel := ""
 	if game != nil {
@@ -395,4 +413,26 @@ func formatSignedFloat(v float64) string {
 		return "+" + formatFloat(v)
 	}
 	return formatFloat(v)
+}
+
+func gameProgressPct(game *db.Game) float64 {
+	if game == nil {
+		return 0
+	}
+	return clamp((1.0-RemainingFraction(game.Status, game.Period, game.Clock))*100, 0, 100)
+}
+
+func probDeltaAndTrend(preProb, liveProb float64, counts bool) (float64, string) {
+	if !counts {
+		return 0, trendFlat
+	}
+	delta := liveProb - preProb
+	switch {
+	case delta > probTrendDeadband:
+		return delta, trendUp
+	case delta < -probTrendDeadband:
+		return delta, trendDown
+	default:
+		return delta, trendFlat
+	}
 }

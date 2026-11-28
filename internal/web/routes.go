@@ -40,6 +40,7 @@ type Refresher interface {
 	KickPickGame(ctx context.Context, weekID int64, gameID string)
 	KickSlipExportEnrich(ctx context.Context, slipID int64)
 	ForcePickRefresh(ctx context.Context, weekID int64, gameID string) error
+	ForceLiveRefresh(ctx context.Context, slipID, weekID int64) error
 }
 
 // ReminderScheduler reconciles kickoff reminder tasks. A nil scheduler skips

@@ -155,8 +155,8 @@ probB = pB / overround
 #### Power (`DevigTwoWayPower`)
 
 Multiplicative normalization under-corrects favorite-longshot bias in retail prop and touchdown markets.
-`DevigTwoWayPower(priceA, priceB)` solves for the exponent `k > 0` such that the powered implied probabilities sum
-to `1`:
+`DevigTwoWayPower(priceA, priceB)` solves for the exponent `k > 0` such that the powered implied probabilities sum to
+`1`:
 
 ```text
 pA^k + pB^k = 1
@@ -181,9 +181,9 @@ vig       = overround - 1
 ```
 
 It returns `(pA, pB, 0, true)` when `|vig| ≤ 1e-13`, and falls back to multiplicative normalization when `vig < 0`
-(since `z ∈ (0, 1)` requires a positive overround). For positive overround, it solves for `z` via 80-step bisection
-on `[0, 1 − 1e-12]` until `|probA + probB − 1| ≤ 1e-13`. Like Power, Shin assigns a higher fair probability to the
-favorite and a lower fair probability to the longshot than multiplicative normalization on asymmetric lines.
+(since `z ∈ (0, 1)` requires a positive overround). For positive overround, it solves for `z` via 80-step bisection on
+`[0, 1 − 1e-12]` until `|probA + probB − 1| ≤ 1e-13`. Like Power, Shin assigns a higher fair probability to the favorite
+and a lower fair probability to the longshot than multiplicative normalization on asymmetric lines.
 
 ### Price edge and fair EV
 
@@ -210,9 +210,9 @@ It returns `0` when `fairProb` is not strictly inside `(0, 1)` (including `NaN`,
 ## Live progress and hit probability
 
 `internal/progress` evaluates live leg and parlay progress deterministically without network calls or live odds feeds.
-Every live market anchors to the leg's pre-game implied probability `preProb = parlay.ImpliedProb(leg.Odds)`, clamped
-to `p0 ∈ [0.02, 0.98]` (defaulting to `0.50` when odds are missing or invalid). As remaining game time approaches `0`,
-live probability converges toward `0` or `1`, clamped to `[0.01, 0.99]` while a leg is still `LIVE`.
+Every live market anchors to the leg's pre-game implied probability `preProb = parlay.ImpliedProb(leg.Odds)`, clamped to
+`p0 ∈ [0.02, 0.98]` (defaulting to `0.50` when odds are missing or invalid). As remaining game time approaches `0`, live
+probability converges toward `0` or `1`, clamped to `[0.01, 0.99]` while a leg is still `LIVE`.
 
 ### Time remaining
 
@@ -235,19 +235,25 @@ or `"Live"` when both period and clock are absent.
 ### Leg states and fallbacks
 
 - **Settled results** (`leg.Result != PENDING`) take precedence over game status: `WON` → `CASHED` (`LiveProb = 1.0`,
-  `ProgressPct = 100`), `LOST` → `BUSTED` (`0.0`, `0`), `PUSH` → `PUSH` (`Counts = false`), `VOID` → `VOID` (`Counts = false`).
+  `ProgressPct = 100`), `LOST` → `BUSTED` (`0.0`, `0`), `PUSH` → `PUSH` (`Counts = false`), `VOID` → `VOID`
+  (`Counts = false`).
 - **Scheduled or unlinked games** (`game == nil` or `SCHEDULED`) return `SCHEDULED` with `LiveProb = preProb`,
   `HasLive = false`, and `Counts = true`.
 - **Unsupported or incomplete inputs** (`OTHER`, unknown market/side/team, missing line, or missing player ID and name)
-  return `UNAVAILABLE` with `LiveProb = preProb` and `HasLive = false`.
+  return `UNAVAILABLE` with `LiveProb = preProb`, `HasLive = false`, and `Counts = true`.
 - **Pending live box scores** (`box == nil || !box.HasStats`) return `LIVE` with `StatLabel = "Live · stats pending"`,
   `ProgressPct = 0`, `Tone = "neutral"`, and `LiveProb = preProb`.
 - **Absent players in a populated live box score** (`box.HasStats == true`) evaluate with `0` stats rather than voiding
   before the game is `FINAL`.
+- **Game progress and probability delta:** Every returned `LegProgress` sets
+  `GameProgressPct = clamp((1 - remFrac) × 100, 0, 100)` (`0` when `game == nil` or `SCHEDULED`, `100` when `FINAL`),
+  `ProbDelta = LiveProb - PreGameProb` (`0` when `Counts == false`), and `ProbTrend` (`"up"` for `ProbDelta > 0.005`,
+  `"down"` for `ProbDelta < -0.005`, `"flat"` within the `0.005` deadband and for `PUSH`/`VOID`).
 
 ### Normal-model markets
 
-Let `Φ` be the standard normal CDF and `Φ⁻¹` its inverse (Acklam's rational approximation). With `σ_rem = σ_full × √remFrac`:
+Let `Φ` be the standard normal CDF and `Φ⁻¹` its inverse (Acklam's rational approximation). With
+`σ_rem = σ_full × √remFrac`:
 
 **`SPREAD` and `ML`** (`line = 0` for `ML`, `σ_full = 13.5` points):
 
@@ -277,8 +283,14 @@ becomes `BUSTED` (`0.0`, `0%`). Yardage markets can lose yards on negative plays
 Otherwise:
 
 ```text
-OVER:   μ_full = line + σ_full × Φ⁻¹(p0),   liveProb = clamp(Φ((cur + μ_full×remFrac - line) / σ_rem), 0.01, 0.99),   pct = clamp(cur / line × 100, 0, 100)
-UNDER:  μ_full = line - σ_full × Φ⁻¹(p0),   liveProb = clamp(Φ((line - cur - μ_full×remFrac) / σ_rem), 0.01, 0.99),   pct = clamp((line - cur) / line × 100, 0, 100)
+OVER:
+  μ_full   = line + σ_full × Φ⁻¹(p0)
+  liveProb = clamp(Φ((cur + μ_full×remFrac - line) / σ_rem), 0.01, 0.99)
+  pct      = clamp(cur / line × 100, 0, 100)
+UNDER:
+  μ_full   = line - σ_full × Φ⁻¹(p0)
+  liveProb = clamp(Φ((line - cur - μ_full×remFrac) / σ_rem), 0.01, 0.99)
+  pct      = clamp((line - cur) / line × 100, 0, 100)
 ```
 
 ### Poisson touchdown models
@@ -301,8 +313,13 @@ UNDER:  μ_full = line - σ_full × Φ⁻¹(p0),   liveProb = clamp(Φ((line - c
   counting leg is `BUSTED`, `1.0` if all counting legs are `CASHED`).
 - `ProgressPct` averages counting leg progress (`CASHED = 100`, `LIVE = clamp(leg.ProgressPct, 0, 100)`, `BUSTED` /
   `SCHEDULED` / `UNAVAILABLE = 0`), or `100` when all counting legs are `CASHED`.
+- `ScheduledCount` counts counting legs that are neither `CASHED`, `BUSTED`, nor `LIVE` (`SCHEDULED` or `UNAVAILABLE`).
+  When `Show` is `true` and the slip is `LIVE`, `Summary` joins `"{HitCount}/{TotalCount} hit"` with
+  `"{LiveCount} live"` (if `> 0`) and `"{ScheduledCount} upcoming"` (if `> 0`) using `" · "`.
 - `Show` is `true` if any leg (including `PUSH`/`VOID`) has `HasLive == true`. If all legs are `PUSH`/`VOID` on a
   non-empty slip, `State` is `PUSH`.
+- `ProbDelta` (`LiveProb - PreGameProb`) and `ProbTrend` (`"up"`, `"down"`, `"flat"` with the `0.005` deadband) are
+  computed for the slip (`0` and `"flat"` when empty or all `PUSH`/`VOID`).
 - `Tone` is `"lost"` if any leg busted, `"won"` if all counting legs cashed, `"on_track"` when `LiveProb ≥ PreGameProb`,
   and `"trailing"` otherwise.
 
@@ -311,8 +328,8 @@ UNDER:  μ_full = line - σ_full × Φ⁻¹(p0),   liveProb = clamp(Φ((line - c
 The Slip tab uses reference odds and `Payout` for its payout calculator, and displays `formatImpliedChance` (via
 `ImpliedProb` and `DecimalImpliedProb`) on leg rows, payout combined/reference odds, and A-grade highlights. Quick-add
 pills prefill the user's home-book price, or the median across all books when the user has no home book or no price
-there. The record book uses the same profit term, `stake × (D − 1) × (1 + boost/100)`, for dollar P/L on slips where
-a person logged a wager.
+there. The record book uses the same profit term, `stake × (D − 1) × (1 + boost/100)`, for dollar P/L on slips where a
+person logged a wager.
 
 ## API
 
@@ -342,5 +359,5 @@ a person logged a wager.
 | ------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
 | `RemainingFraction(status db.GameStatus, period *int, clock *string) float64` | Fraction of regulation remaining in `[0, 1]` (up to `0.167` in OT). |
 | `ClockLabel(status db.GameStatus, period *int, clock *string) string`     | Compact clock display (`"Q3 8:42"`, `"Halftime"`, `"Final"`, etc.).     |
-| `EvaluateLeg(leg db.Leg, game *db.Game, box *espn.BoxScore) LegProgress`  | Live or settled progress, tone, stat/clock labels, and hit probability. |
-| `EvaluateSlip(legs []LegProgress) SlipProgress`                           | Combined parlay progress, summary, and live hit probability.            |
+| `EvaluateLeg(leg db.Leg, game *db.Game, box *espn.BoxScore) LegProgress`  | Live or settled progress, `GameProgressPct`, tone, stat/clock labels, hit probability, and `ProbDelta`/`ProbTrend`. |
+| `EvaluateSlip(legs []LegProgress) SlipProgress`                           | Combined parlay progress, summary, `ScheduledCount`, hit probability, and `ProbDelta`/`ProbTrend`. |

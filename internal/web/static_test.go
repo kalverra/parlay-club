@@ -155,6 +155,18 @@ func TestAppJSRegistersTheServiceWorker(t *testing.T) {
 	assert.Contains(t, script, `"serviceWorker" in navigator`, "browsers without a worker skip registration")
 }
 
+func TestAppJSReloadsWhenLiveModeFlips(t *testing.T) {
+	t.Parallel()
+
+	source, err := fs.ReadFile(assets.Static, "static/app.js")
+	require.NoError(t, err)
+	script := string(source)
+
+	assert.Contains(t, script, `section[data-live-mode]`)
+	assert.Contains(t, script, `getAttribute("data-live-mode")`)
+	assert.Contains(t, script, `window.location.reload()`)
+}
+
 func TestStaticHasTheInstallIcons(t *testing.T) {
 	t.Parallel()
 

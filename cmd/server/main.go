@@ -164,7 +164,11 @@ func run() error {
 	scope := groups.Scope(logger, store, auth.UserFrom, cookies)
 	groupHandlers := groups.NewHandlers(logger, store, auth.UserFrom, cookies, renderer, cfg.BaseURL)
 
-	stream := live.NewStream(hub, refresher.LiveWindow)
+	var streamOpts []live.StreamOption
+	if !cfg.Sandbox {
+		streamOpts = append(streamOpts, live.WithLiveTick(25*time.Second, refresher.KickLive))
+	}
+	stream := live.NewStream(hub, refresher.LiveWindow, streamOpts...)
 	pushService := push.New(store, logger, push.Keys{
 		Public:  cfg.VAPIDPublicKey,
 		Private: cfg.VAPIDPrivateKey,

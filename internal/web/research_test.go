@@ -43,6 +43,10 @@ func (r *researchTestRefresher) ForcePickRefresh(_ context.Context, _ int64, _ s
 	return nil
 }
 
+func (r *researchTestRefresher) ForceLiveRefresh(_ context.Context, _, _ int64) error {
+	return nil
+}
+
 func researchHandlerWithRefresher(
 	t *testing.T,
 	fixture *slipFixture,

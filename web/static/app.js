@@ -95,6 +95,17 @@ document.addEventListener("htmx:afterSwap", (event) => {
   const target = (event.detail && event.detail.target) || document;
   formatTimes(target);
 
+  const livePageRoot = document.querySelector("section[data-live-mode]");
+  const livePanel = document.getElementById("slip-panel");
+  if (livePageRoot && livePanel) {
+    const pageMode = livePageRoot.getAttribute("data-live-mode");
+    const panelMode = livePanel.getAttribute("data-live-mode");
+    if (pageMode !== null && panelMode !== null && pageMode !== panelMode) {
+      window.location.reload();
+      return;
+    }
+  }
+
   const pane = document.querySelector("[data-keep-scroll]");
   if (pane && keptScrollTop !== null) {
     pane.scrollTop = keptScrollTop;

@@ -1909,6 +1909,10 @@ func (r *pickTestRefresher) ForcePickRefresh(_ context.Context, weekID int64, ga
 	return nil
 }
 
+func (r *pickTestRefresher) ForceLiveRefresh(_ context.Context, _, _ int64) error {
+	return nil
+}
+
 func (r *pickTestRefresher) totalCalls() int {
 	return len(r.linesCalls) + len(r.gameCalls) + len(r.forceCalls)
 }

@@ -57,6 +57,12 @@ func TestIsSpotlightSlip(t *testing.T) {
 			want: true,
 		},
 		{
+			name: "locked slip in live step",
+			slip: db.Slip{ID: 55, Status: db.SlipLocked, SlateScope: db.SlateScopeSundayMain},
+			next: slips.Next{Step: slips.StepLive},
+			want: true,
+		},
+		{
 			name: "locked slip with live eligible game",
 			slip: db.Slip{ID: 6, Status: db.SlipLocked, SlateScope: db.SlateScopeSundayMain},
 			next: slips.Next{Step: slips.StepClosed},
@@ -267,12 +273,67 @@ func TestBuildGroupOverviewPageStates(t *testing.T) {
 
 		require.Len(t, page.Spotlight, 1)
 		assert.Equal(t, liveSlip.ID, page.Spotlight[0].ID)
-		assert.Equal(t, "Open slip", page.Spotlight[0].ActionLabel)
+		assert.Equal(t, slips.StepLive, page.Spotlight[0].Step)
+		assert.Equal(t, "Live", page.Spotlight[0].NextStep)
+		assert.Equal(t, "Watch live", page.Spotlight[0].ActionLabel)
 		assert.True(t, page.Spotlight[0].Live.Show)
 		assert.Equal(t, "LIVE", page.Spotlight[0].Live.State)
 		assert.Equal(t, "0/1 hit · 1 live", page.Spotlight[0].Live.Summary)
 		assert.NotEmpty(t, page.Spotlight[0].Live.LiveChance)
 		assert.Empty(t, page.RecentSlips)
+	})
+
+	t.Run("live slip beats pick slip in spotlight priority", func(t *testing.T) {
+		t.Parallel()
+		liveSlip := db.Slip{
+			ID: 202, GroupID: 1, WeekID: 9, Name: "Live Sunday",
+			SlateScope: db.SlateScopeSundayMain, LegsPerMember: 1, Status: db.SlipLocked,
+		}
+		pickSlip := db.Slip{
+			ID: 203, GroupID: 1, WeekID: 9, Name: "Full Week Pick",
+			SlateScope: db.SlateScopeFullWeek, LegsPerMember: 1, Status: db.SlipOpen,
+		}
+
+		page := buildGroupOverviewPage(groupOverviewInput{
+			Group:      group,
+			ActiveWeek: &week9,
+			WeekGames: []db.Game{
+				{ID: "g-live", HomeTeam: "BUF", AwayTeam: "KC", Kickoff: now.Add(-time.Hour), Status: db.GameLive},
+				{
+					ID:       "g-mon",
+					HomeTeam: "DAL",
+					AwayTeam: "PHI",
+					Kickoff:  now.Add(30 * time.Hour),
+					Status:   db.GameScheduled,
+				},
+			},
+			WeekSlips: []groupOverviewSlip{
+				{
+					Slip:    pickSlip,
+					Week:    week9,
+					Members: []db.SlipMember{{User: ada}},
+				},
+				{
+					Slip:    liveSlip,
+					Week:    week9,
+					Members: []db.SlipMember{{User: ada, LockedAt: &lockedAt}},
+					Legs: []db.Leg{
+						{
+							ID: 1, SlipID: 202, UserID: ada.ID, GameID: new("g-live"),
+							MarketType: "ML", Team: new("BUF"), Side: new("TEAM"), Odds: -110, Result: parlay.Pending,
+						},
+					},
+				},
+			},
+			ViewerID: ada.ID,
+			Now:      now,
+		})
+
+		require.Len(t, page.Spotlight, 2)
+		assert.Equal(t, liveSlip.ID, page.Spotlight[0].ID)
+		assert.Equal(t, "Watch live", page.Spotlight[0].ActionLabel)
+		assert.Equal(t, "Live", page.Spotlight[0].NextStep)
+		assert.Equal(t, pickSlip.ID, page.Spotlight[1].ID)
 	})
 
 	t.Run("closed and graded slips move out of spotlight into recent slips and record", func(t *testing.T) {

@@ -315,13 +315,13 @@ existing patterns)
 
 Risk: low (small blast radius with full unit-test coverage and no external I/O or UI layout changes)
 
-- [ ] Add `StepLive` (`"live"`, label `"Live"`) to `internal/slips/next.go` when a locked, non-graded slip has at least
+- [x] Add `StepLive` (`"live"`, label `"Live"`) to `internal/slips/next.go` when a locked, non-graded slip has at least
   one leg whose game is `LIVE`, `FINAL`, or at/past kickoff, keeping `StepExport` for pre-kickoff and unlinked-only
   slips, with unit tests in `internal/slips/next_test.go`.
-- [ ] Extend `internal/progress` (`LegProgress` and `SlipProgress`) with `GameProgressPct`, `ProbDelta`, `ProbTrend`,
+- [x] Extend `internal/progress` (`LegProgress` and `SlipProgress`) with `GameProgressPct`, `ProbDelta`, `ProbTrend`,
   and `ScheduledCount`, updating `EvaluateLeg` and `EvaluateSlip` so every leg state carries game progress and
   before-vs-current probability delta, with unit tests in `internal/progress/progress_test.go`.
-- [ ] Docs: update `docs/reference/odds-math.md` and `docs/concepts/slips.md` for `StepLive` and the new progress
+- [x] Docs: update `docs/reference/odds-math.md` and `docs/concepts/slips.md` for `StepLive` and the new progress
   fields.
 
 ### Phase 2: Fast viewer-driven free-API live refresh and SSE ticks
@@ -332,15 +332,15 @@ preserving `singleflight`, shutdown drain, and sandbox isolation)
 Risk: medium (touches live ESPN cadence and SSE stream timers where cleanup or backoff bugs could increase upstream
 traffic or keep Cloud Run warm)
 
-- [ ] Add `SyncLive`, `KickLive`, and cooldown-guarded `ForceLiveRefresh` to `internal/refresh` (fetching only
+- [x] Add `SyncLive`, `KickLive`, and cooldown-guarded `ForceLiveRefresh` to `internal/refresh` (fetching only
   `espn:scoreboard`, concurrent `espn:summary:{gameID}` for `LIVE` slip games at a 20-second `liveFastAge`, and
   immediate `syncGrade` on `FINAL` games, with zero paid odds calls), plus unit tests in
   `internal/refresh/live_test.go`.
-- [ ] Add `WithLiveTick` to `internal/live/stream.go` so active `live` SSE connections trigger `KickLive` on connect and
+- [x] Add `WithLiveTick` to `internal/live/stream.go` so active `live` SSE connections trigger `KickLive` on connect and
   every 25 seconds (stopping cleanly on disconnect, `bye` deadline, or `Shutdown`), wire it in `cmd/server/main.go`
   (disabled in sandbox mode), and expose `POST /slips/{id}/live/refresh` in `internal/web/slips.go`, with tests in
   `internal/live/stream_test.go` and `internal/web/slips_test.go`.
-- [ ] Docs: update `docs/concepts/data-refresh.md`, `docs/concepts/live-updates.md`, and `docs/reference/routes.md` with
+- [x] Docs: update `docs/concepts/data-refresh.md`, `docs/concepts/live-updates.md`, and `docs/reference/routes.md` with
   the fast live refresh cadence, SSE tick lifecycle, and manual refresh route.
 
 ### Phase 3: Dedicated phone-first Live view ordered by game time
@@ -351,14 +351,18 @@ leg states, HTMX mode-transition handling, and group overview spotlight priority
 Risk: medium (restructures the locked slip page DOM and secondary drawer layout where visual hierarchy and HTMX swaps
 are only partially covered by server-side HTML tests)
 
-- [ ] Build Live view models in `internal/web/slips.go` (`LiveMode`, `LiveUpdatedISO`, enriched `SlipLiveView` and
+- [x] Build Live view models in `internal/web/slips.go` (`LiveMode`, `LiveUpdatedISO`, enriched `SlipLiveView` and
       `LegLiveView` with before/current % and delta for every leg, and `LiveGames` sorted `LIVE`, `SCHEDULED`, `FINAL`
       by kickoff time with owner badges) and update `internal/web/home.go` (`isSpotlightSlip`, `stepPriority`) to
       spotlight `StepLive` slips with `"Watch live"`, with tests.
-- [ ] Implement the phone-first Live layout in `web/templates/slip.html`, `web/templates/partials.html`, and
+- [x] Implement the phone-first Live layout in `web/templates/slip.html`, `web/templates/partials.html`, and
       `web/static/app.js`: render the compact Live header (freshness timestamp and Refresh button), Parlay Live Hero box
       (before + current % and progress bar), game-time-ordered game/leg progress boxes (game bar, leg bar, owner badge,
       and before + current % on every leg), collapsed secondary `<details>` for export/payout/wager/activity below
       `#slip-panel`, and reload in `app.js` when `data-live-mode` flips on HTMX swap, with handler and template tests.
-- [ ] Docs: update `docs/concepts/slips.md` for the dedicated Live view, game-time ordering, and collapsed secondary
+- [x] Docs: update `docs/concepts/slips.md` for the dedicated Live view, game-time ordering, and collapsed secondary
   controls, and run `good-vibes docs lint` and `good-vibes docs index`.
+
+## Reviews
+
+- [x] Final review: manual (DeepSeek V4.1 Flash), after the configured reviewer hit its quota

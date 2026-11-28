@@ -105,7 +105,7 @@ func isSpotlightSlip(slip db.Slip, next slips.Next, games []db.Game, now time.Ti
 		return false
 	}
 	switch next.Step {
-	case slips.StepPick, slips.StepLockIn, slips.StepJoin, slips.StepWaiting, slips.StepExport:
+	case slips.StepPick, slips.StepLockIn, slips.StepJoin, slips.StepWaiting, slips.StepExport, slips.StepLive:
 		return true
 	}
 	if slip.Status == db.SlipLocked {
@@ -162,9 +162,12 @@ func buildGroupOverviewPage(in groupOverviewInput) GroupOverviewPage {
 		_, slipProg := evaluateSlipProgress(ws.Legs, in.WeekGames)
 		actionLabel := "Open slip"
 		actionHref := fmt.Sprintf("/slips/%d", ws.Slip.ID)
-		if next.Step == slips.StepPick {
+		switch next.Step {
+		case slips.StepPick:
 			actionLabel = next.Label()
 			actionHref = fmt.Sprintf("/slips/%d/pick", ws.Slip.ID)
+		case slips.StepLive:
+			actionLabel = "Watch live"
 		}
 
 		spotlightIDs[ws.Slip.ID] = true
@@ -182,7 +185,7 @@ func buildGroupOverviewPage(in groupOverviewInput) GroupOverviewPage {
 				TotalPicks:  len(ws.Members) * ws.Slip.LegsPerMember,
 				LockedCount: lockedCount,
 				Progress:    progress,
-				Live:        slipLiveView(slipProg),
+				Live:        slipLiveView(slipProg, false),
 				ActionLabel: actionLabel,
 				ActionHref:  actionHref,
 			},
@@ -433,8 +436,9 @@ func (h *slipHandlers) groupWeekSummary(
 }
 
 // betterStep reports whether candidate should headline a group card ahead of
-// current: actionable steps beat waiting/export, which beat closed, which beat
-// done; ties break by earliest upcoming deadline, then existing slice order.
+// current: live slips beat actionable steps, which beat waiting/export, which
+// beat closed, which beat done; ties break by earliest upcoming deadline, then
+// existing slice order.
 func betterStep(candidate, current slips.Next) bool {
 	cp, curP := stepPriority(candidate.Step), stepPriority(current.Step)
 	if cp != curP {
@@ -451,6 +455,8 @@ func betterStep(candidate, current slips.Next) bool {
 
 func stepPriority(step slips.Step) int {
 	switch step {
+	case slips.StepLive:
+		return 5
 	case slips.StepPick, slips.StepLockIn, slips.StepJoin:
 		return 4
 	case slips.StepWaiting, slips.StepExport:

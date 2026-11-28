@@ -1,6 +1,9 @@
 package progress
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // EvaluateSlip aggregates individual leg evaluations into a combined parlay
 // progress summary. Pushed and voided legs (Counts == false) are excluded from
@@ -8,8 +11,9 @@ import "fmt"
 func EvaluateSlip(legs []LegProgress) SlipProgress {
 	if len(legs) == 0 {
 		return SlipProgress{
-			State: StateScheduled,
-			Tone:  toneNeutral,
+			State:     StateScheduled,
+			Tone:      toneNeutral,
+			ProbTrend: trendFlat,
 		}
 	}
 
@@ -42,6 +46,7 @@ func EvaluateSlip(legs []LegProgress) SlipProgress {
 			out.LiveProb *= leg.LiveProb
 			sumPct += clamp(leg.ProgressPct, 0, 100)
 		default:
+			out.ScheduledCount++
 			out.LiveProb *= leg.LiveProb
 		}
 	}
@@ -50,6 +55,7 @@ func EvaluateSlip(legs []LegProgress) SlipProgress {
 		out.State = StatePush
 		out.Tone = toneNeutral
 		out.Summary = "Push"
+		out.ProbTrend = trendFlat
 		return out
 	}
 
@@ -74,16 +80,24 @@ func EvaluateSlip(legs []LegProgress) SlipProgress {
 		} else {
 			out.Tone = toneTrailing
 		}
-		if out.LiveCount > 0 {
-			out.Summary = fmt.Sprintf("%d/%d hit · %d live", out.HitCount, out.TotalCount, out.LiveCount)
-		} else {
-			out.Summary = fmt.Sprintf("%d/%d hit", out.HitCount, out.TotalCount)
-		}
+		out.Summary = formatLiveSummary(out.HitCount, out.TotalCount, out.LiveCount, out.ScheduledCount)
 	default:
 		out.State = StateScheduled
 		out.Tone = toneNeutral
 		out.Summary = fmt.Sprintf("%d/%d hit", out.HitCount, out.TotalCount)
 	}
 
+	out.ProbDelta, out.ProbTrend = probDeltaAndTrend(out.PreGameProb, out.LiveProb, true)
 	return out
+}
+
+func formatLiveSummary(hit, total, live, scheduled int) string {
+	parts := []string{fmt.Sprintf("%d/%d hit", hit, total)}
+	if live > 0 {
+		parts = append(parts, fmt.Sprintf("%d live", live))
+	}
+	if scheduled > 0 {
+		parts = append(parts, fmt.Sprintf("%d upcoming", scheduled))
+	}
+	return strings.Join(parts, " · ")
 }

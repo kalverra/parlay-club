@@ -36,6 +36,11 @@ func nextLeg(userID int64) db.Leg {
 	return db.Leg{UserID: userID, Selection: "BUF ML"}
 }
 
+// nextLegForGame is one pick owned by userID tied to gameID.
+func nextLegForGame(userID int64, gameID string) db.Leg {
+	return db.Leg{UserID: userID, GameID: &gameID, Selection: "BUF ML"}
+}
+
 // nextGame is one scheduled game.
 func nextGame(id string, kickoff time.Time) db.Game {
 	return db.Game{ID: id, Kickoff: kickoff, Status: db.GameScheduled}
@@ -552,4 +557,123 @@ func TestFirstKickoffIsTheSlipsFixedStart(t *testing.T) {
 		}, games)
 		assert.False(t, ok)
 	})
+}
+
+func TestNextStepLiveTransitions(t *testing.T) {
+	t.Parallel()
+
+	ada := nextUser(1, "Ada")
+	sam := nextUser(2, "Sam")
+	lockedSlip := db.Slip{LegsPerMember: 1, Status: db.SlipLocked, Result: parlay.Pending}
+
+	earlyLive := db.Game{ID: "g-live", Kickoff: nextNow.Add(time.Hour), Status: db.GameLive}
+	earlyFinal := db.Game{ID: "g-final", Kickoff: nextNow.Add(-4 * time.Hour), Status: db.GameFinal}
+	atKickoff := db.Game{ID: "g-at", Kickoff: nextNow, Status: db.GameScheduled}
+	pastKickoff := db.Game{ID: "g-past", Kickoff: nextNow.Add(-15 * time.Minute), Status: db.GameScheduled}
+	lateScheduled := db.Game{ID: "g-late", Kickoff: nextNow.Add(3 * time.Hour), Status: db.GameScheduled}
+
+	allGames := []db.Game{earlyLive, earlyFinal, atKickoff, pastKickoff, lateScheduled}
+	lockedMembers := []db.SlipMember{nextMember(ada, true), nextMember(sam, true)}
+
+	tests := []struct {
+		name      string
+		slip      db.Slip
+		members   []db.SlipMember
+		legs      []db.Leg
+		games     []db.Game
+		wantStep  slips.Step
+		wantLabel string
+	}{
+		{
+			name:      "locked slip with a LIVE leg game enters StepLive",
+			slip:      lockedSlip,
+			members:   lockedMembers,
+			legs:      []db.Leg{nextLegForGame(ada.ID, earlyLive.ID), nextLegForGame(sam.ID, lateScheduled.ID)},
+			games:     allGames,
+			wantStep:  slips.StepLive,
+			wantLabel: "Live",
+		},
+		{
+			name:      "locked slip with a FINAL leg game enters StepLive",
+			slip:      lockedSlip,
+			members:   lockedMembers,
+			legs:      []db.Leg{nextLegForGame(ada.ID, earlyFinal.ID), nextLegForGame(sam.ID, lateScheduled.ID)},
+			games:     allGames,
+			wantStep:  slips.StepLive,
+			wantLabel: "Live",
+		},
+		{
+			name:      "locked slip with a leg exactly at kickoff enters StepLive",
+			slip:      lockedSlip,
+			members:   lockedMembers,
+			legs:      []db.Leg{nextLegForGame(ada.ID, atKickoff.ID)},
+			games:     allGames,
+			wantStep:  slips.StepLive,
+			wantLabel: "Live",
+		},
+		{
+			name:      "locked slip with a leg past kickoff enters StepLive",
+			slip:      lockedSlip,
+			members:   lockedMembers,
+			legs:      []db.Leg{nextLegForGame(ada.ID, pastKickoff.ID)},
+			games:     allGames,
+			wantStep:  slips.StepLive,
+			wantLabel: "Live",
+		},
+		{
+			name:      "everyone locked before status catches up also enters StepLive",
+			slip:      db.Slip{LegsPerMember: 1, Status: db.SlipOpen, Result: parlay.Pending},
+			members:   lockedMembers,
+			legs:      []db.Leg{nextLegForGame(ada.ID, earlyLive.ID)},
+			games:     allGames,
+			wantStep:  slips.StepLive,
+			wantLabel: "Live",
+		},
+		{
+			name:      "locked slip with only late scheduled legs stays StepExport even when earlier games started",
+			slip:      lockedSlip,
+			members:   lockedMembers,
+			legs:      []db.Leg{nextLegForGame(ada.ID, lateScheduled.ID), nextLegForGame(sam.ID, lateScheduled.ID)},
+			games:     allGames,
+			wantStep:  slips.StepExport,
+			wantLabel: "Ready to place",
+		},
+		{
+			name:      "locked slip with only unlinked legs stays StepExport",
+			slip:      lockedSlip,
+			members:   lockedMembers,
+			legs:      []db.Leg{nextLeg(ada.ID), nextLegForGame(sam.ID, "missing-game")},
+			games:     allGames,
+			wantStep:  slips.StepExport,
+			wantLabel: "Ready to place",
+		},
+		{
+			name:      "graded slip stays StepDone even with started leg games",
+			slip:      db.Slip{LegsPerMember: 1, Status: db.SlipGraded, Result: parlay.Won},
+			members:   lockedMembers,
+			legs:      []db.Leg{nextLegForGame(ada.ID, earlyFinal.ID)},
+			games:     allGames,
+			wantStep:  slips.StepDone,
+			wantLabel: "Won",
+		},
+		{
+			name:      "unlocked slip stays StepWaiting even when another member's leg game started",
+			slip:      db.Slip{LegsPerMember: 1, Status: db.SlipOpen, Result: parlay.Pending},
+			members:   []db.SlipMember{nextMember(ada, true), nextMember(sam, false)},
+			legs:      []db.Leg{nextLegForGame(ada.ID, earlyLive.ID), nextLegForGame(sam.ID, lateScheduled.ID)},
+			games:     allGames,
+			wantStep:  slips.StepWaiting,
+			wantLabel: "Waiting on Sam",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := slips.NextStep(tc.slip, tc.members, tc.legs, tc.games, ada.ID, nextNow)
+			assert.Equal(t, tc.wantStep, got.Step)
+			assert.Equal(t, tc.wantLabel, got.Label())
+		})
+	}
 }

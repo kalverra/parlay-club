@@ -296,6 +296,7 @@ type Service struct {
 
 	mu                 sync.Mutex
 	backoff            map[string]time.Time
+	liveCooldown       map[int64]time.Time
 	onMarketDataChange func()
 	afterPass          func(context.Context)
 
@@ -369,6 +370,7 @@ func New(deps Deps) *Service {
 		now:           now,
 		logger:        deps.Logger,
 		backoff:       make(map[string]time.Time),
+		liveCooldown:  make(map[int64]time.Time),
 		stopCtx:       stopCtx,
 		stopCancel:    stopCancel,
 	}
@@ -1664,4 +1666,5 @@ func (s *Service) ClearBackoff() {
 	defer s.mu.Unlock()
 
 	clear(s.backoff)
+	clear(s.liveCooldown)
 }

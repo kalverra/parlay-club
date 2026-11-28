@@ -239,6 +239,10 @@ func (s *stubRefresher) ForcePickRefresh(_ context.Context, _ int64, _ string) e
 	return nil
 }
 
+func (s *stubRefresher) ForceLiveRefresh(_ context.Context, _, _ int64) error {
+	return nil
+}
+
 func TestGamePropsHandler(t *testing.T) {
 	t.Parallel()
 

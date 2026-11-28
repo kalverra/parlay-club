@@ -1,5 +1,5 @@
 {{define "content"}}
-<section class="space-y-3"{{if .LiveURL}} data-live-url="{{.LiveURL}}"{{end}}>
+<section class="space-y-3"{{if .LiveURL}} data-live-url="{{.LiveURL}}"{{end}}{{if .Slip}} data-live-mode="{{.Slip.LiveMode}}"{{end}}>
   {{if .Creating}}
     {{if not .Create.Weeks}}
       <div class="space-y-1">
@@ -128,12 +128,29 @@
       </form>
     {{end}}
   {{else if .Slip}}
-    {{template "slip-export" .Export}}
-    {{template "slip-panel" .}}
-    {{template "slip-payout" .Slip.Payout}}
-    {{template "slip-wager" .Slip.Wager}}
-    {{template "slip-activity" .}}
-    {{template "leg-sheet" .}}
+    {{if .Slip.LiveMode}}
+      {{template "slip-panel" .}}
+      <details class="ui-card" data-live-secondary>
+        <summary class="flex cursor-pointer list-none items-center justify-between gap-2 px-4 py-3">
+          <span class="text-sm font-semibold text-ink">Bet details, export &amp; wager</span>
+          <span class="text-xs text-ink-subtle">Show &#9662;</span>
+        </summary>
+        <div class="space-y-3 border-t border-line p-4">
+          {{template "slip-export" .Export}}
+          {{template "slip-payout" .Slip.Payout}}
+          {{template "slip-wager" .Slip.Wager}}
+          {{template "slip-activity" .}}
+        </div>
+      </details>
+      {{template "leg-sheet" .}}
+    {{else}}
+      {{template "slip-export" .Export}}
+      {{template "slip-panel" .}}
+      {{template "slip-payout" .Slip.Payout}}
+      {{template "slip-wager" .Slip.Wager}}
+      {{template "slip-activity" .}}
+      {{template "leg-sheet" .}}
+    {{end}}
   {{else}}
     <h1 class="text-xl font-semibold">Slip</h1>
     <p class="ui-card border-dashed p-4 text-sm text-ink-muted">

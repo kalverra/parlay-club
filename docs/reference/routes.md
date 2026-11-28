@@ -165,6 +165,7 @@ slip outside every group is 404.
 | `GET /slips/{id}/pick/dock`                | The fixed dock's count and combined price                       | Dock partial. Refreshes on `tray-updated` and `slip-updated`. |
 | `GET /slips/{id}/tray`                     | The viewer's picks, warnings, and one action, loaded into the dock's sheet | Tray partial. Refreshes on `tray-updated` and `slip-updated`. |
 | `GET /slips/{id}/panel`                    | Members, legs, odds, lock state, and banner                     | Panel partial. Refreshes on `slip-updated`. |
+| `POST /slips/{id}/live/refresh`            | Force a live ESPN refresh for a slip                            | `#slip-panel` partial (10s per-slip cooldown); zero paid odds calls. |
 | `GET /slips/{id}/export`                   | Export card for a `LOCKED` slip                                 | Export partial. Refreshes on `slip-updated`. |
 | `GET /slips/{id}/payout`                   | Payout calculator                                               | Optional `?stake=` and `?boost=`; defaults 10 and 0. Payout partial. |
 | `GET /slips/{id}/activity`                 | Activity feed                                                   | Activity partial. Refreshes on `slip-updated`. |
@@ -191,7 +192,8 @@ props boards. When a player market leg is saved, the handler automatically resol
 all and allows no game. When `selection` is blank, the handler builds the display text from the market fields. Each leg
 row on the slip panel carries an `OVER`/`UNDER` badge on O/U legs, a "Research &rarr;" link (`/research/bet` for
 upcoming non-`OTHER` legs, falling back to `/research` for kicked-off or `OTHER` legs), and `+ Add` to open
-`GET /bets/add-sheet`. An unreadable number is 422 with "Odds need to be a number.", "Line needs to be a number.", or a similar short message.
+`GET /bets/add-sheet`. An unreadable number is 422 with "Odds need to be a number.", "Line needs to be a number.", or a
+similar short message.
 
 `?quick=1` turns the form into a quick add: the target becomes the game card's `#quick-add-{gameID}` element, and a
 successful `POST` answers with the `leg-added` partial instead of the slip panel.
@@ -215,9 +217,15 @@ regardless of slip status. Unreadable numbers, non-positive stakes, American odd
 
 `GET /slips/{id}/events` serves one connection for one slip. If the slip is already `GRADED`, it answers immediately
 with `event: bye` and returns without subscribing. Otherwise it subscribes to `slip:{id}` and `week:{weekID}`, sends
-`slip-updated` and `board-updated` signals, pings every 25 seconds, and ends with `bye` at its deadline. The slip page
-sets `data-live-url` for `OPEN` and `LOCKED` slips so the client opens the stream, and omits it for `GRADED` slips. See
+`slip-updated` and `board-updated` signals, pings every 25 seconds, and ends with `bye` at its deadline. When
+`LiveWindow` is true (and not in sandbox mode), `WithLiveTick` triggers `KickLive` on connect and every 25 seconds while
+the stream stays open, stopping on disconnect, `bye` deadline, or `Shutdown`. The slip page sets `data-live-url` for
+`OPEN` and `LOCKED` slips so the client opens the stream, and omits it for `GRADED` slips. See
 [Live updates](../concepts/live-updates.md).
+
+`POST /slips/{id}/live/refresh` loads the slip (404 if missing or outside the active group), runs
+`ForceLiveRefresh(ctx, slip.ID, slip.WeekID)` (spending zero paid odds credits, subject to a 10-second per-slip
+cooldown), and re-renders the `#slip-panel` partial.
 
 `GET /slips/{id}/export` renders the export card on a `LOCKED` slip: a one-tap combined DraftKings or FanDuel link when
 the book can take several picks, per-leg taps otherwise, the manual list, and the copy text. It reads stored odds only
@@ -248,12 +256,11 @@ bar in the header with links to each sibling slip and their status summaries (`(
 and detail drilldowns. It reads the filtered games, one `OddsForWeek` read, the week's rosters, and the viewer's legs,
 then hands them to `internal/board`. `board.BuildDualBook` filters to selections quoted by both DraftKings and FanDuel,
 folds one row per selection using the viewer's home book (`draftkings` or `fanduel`, or FanDuel when unset) with no
-median line averaging, and drops games that have kicked off. `board.Slates` turns
-the same rows into one card per upcoming game for the slate, `board.StartedCount` counts the games that already kicked
-off for the empty state, and `board.Detail` shapes the open game's header, tabs, and the active tab's lines or player
-cards. A card is marked unloaded when its game has lines but no prop rows. The handler sets `Page.Wide`, so the header
-and main use `max-w-6xl`, and sets `data-live-url` for `OPEN` and `LOCKED` slips so the page opens one stream, omitting
-it for `GRADED` slips.
+median line averaging, and drops games that have kicked off. `board.Slates` turns the same rows into one card per
+upcoming game for the slate, `board.StartedCount` counts the games that already kicked off for the empty state, and
+`board.Detail` shapes the open game's header, tabs, and the active tab's lines or player cards. A card is marked
+unloaded when its game has lines but no prop rows. The handler sets `Page.Wide`, so the header and main use `max-w-6xl`,
+and sets `data-live-url` for `OPEN` and `LOCKED` slips so the page opens one stream, omitting it for `GRADED` slips.
 
 The board's query contract:
 
@@ -281,19 +288,19 @@ without touching the open detail.
 Inside the open game, the detail has a pinned header with the back link, matchup, kickoff, venue, a Research link, and a
 horizontal category chip bar (`All` plus non-empty categories). Below—when the slip is `OPEN` and the viewer has open
 slots—sits the `"Top plays in this game"` strip (up to 3 A-grade legs and 1 same-game A-grade combo), followed by the
-`Group by` switcher (`Category` default, `Player`, `Grade`) and sort chips (`Popular`, `Grade`, `Player`, `Odds`, `Line`,
-`Matchup`). Category, `Group by`, and sort chips swap `#pick-detail` and push the full page URL, leaving the slate and
-its scroll alone. `#pick-detail` re-fetches itself on `board-updated`, and a `#pick-detail` swap out-of-band syncs the
-search form's hidden `group`, `cat`, and `sort` (`#pick-group`, `#pick-cat`, `#pick-sort`). The "All games" back link
-drops `game` and `cat`, keeps `q` and `win`, and swaps `#pick-body`.
+`Group by` switcher (`Category` default, `Player`, `Grade`) and sort chips (`Popular`, `Grade`, `Player`, `Odds`,
+`Line`, `Matchup`). Category, `Group by`, and sort chips swap `#pick-detail` and push the full page URL, leaving the
+slate and its scroll alone. `#pick-detail` re-fetches itself on `board-updated`, and a `#pick-detail` swap out-of-band
+syncs the search form's hidden `group`, `cat`, and `sort` (`#pick-group`, `#pick-cat`, `#pick-sort`). The "All games"
+back link drops `game` and `cat`, keeps `q` and `win`, and swaps `#pick-body`.
 
 `GET /slips/{id}/pick/detail` answers with `#pick-detail`: the open game's header, category chips, `Group by` and sort
-chips, and collapsible `<details data-section=... data-keep-open=...>` sections (`Lines` or `Players` in `Category`/`Player`
-modes, or `Grade A`–`F` in `Grade` mode; collapsed when `q == ""` and expanded when `q != ""`). Paired `OVER`/`UNDER`
-rows hoist the shared or split line into the row header above compact `Over`/`Under` buttons. `board.ScoreRows` scores
-every gradable row from cached SQLite signals (even at `remainingSlots == 0`) so options render sibling `Grade A–F`
-`<details>` popovers and compact `Research ->` links outside the pick `<form>`. Without an open game the route renders
-the "Pick a game" placeholder, not the slate.
+chips, and collapsible `<details data-section=... data-keep-open=...>` sections (`Lines` or `Players` in
+`Category`/`Player` modes, or `Grade A`–`F` in `Grade` mode; collapsed when `q == ""` and expanded when `q != ""`).
+Paired `OVER`/`UNDER` rows hoist the shared or split line into the row header above compact `Over`/`Under` buttons.
+`board.ScoreRows` scores every gradable row from cached SQLite signals (even at `remainingSlots == 0`) so options render
+sibling `Grade A–F` `<details>` popovers and compact `Research ->` links outside the pick `<form>`. Without an open game
+the route renders the "Pick a game" placeholder, not the slate.
 
 In `Category` and `Player` modes, options use `from=board` (`POST /slips/{id}/legs` with `quick=1&from=board`,
 `DELETE /legs/{id}?from=board`, `PUT /legs/{id}` with `from=board`) and swap `closest .pick-line-group` with the
@@ -358,8 +365,9 @@ Requested with `Hx-Request` and a `player_id` but no `game_id`, it renders the p
 it renders the game sheet partial.
 
 The explorer reads one week of cached games, odds, and rosters (`GamesForWeek`, `OddsForWeek`, `RosterForTeams`), folds
-them with `board.BuildDualBook` (requiring both DraftKings and FanDuel quotes, with no median line averaging), and scores each row with `analyzer.ScoreLeg` before `board.Explore` filters and sorts. It never
-syncs odds, injuries, or game logs, so searching, filtering, and sorting spend no Odds API or Parlay API credits.
+them with `board.BuildDualBook` (requiring both DraftKings and FanDuel quotes, with no median line averaging), and
+scores each row with `analyzer.ScoreLeg` before `board.Explore` filters and sorts. It never syncs odds, injuries, or
+game logs, so searching, filtering, and sorting spend no Odds API or Parlay API credits.
 
 | Parameter | Meaning |
 | --------- | ------- |
@@ -392,7 +400,8 @@ a collapsed `"Compare all N books"` `<details>`; and up to 5 related bets with `
 `GET /bets/add-sheet` reads `game_id`, `market` (or `market_type`), `side`, `team`, `player_id`, `player_name`, `line`,
 `odds`, `selection`, and `return` (`safeReturnPath`, default `/research`), returning 404 if `game_id`, `market`, or the
 game is missing or `market=OTHER`. It renders `bet-add-sheet` into `#bet-add-dialog-body` with eligible `OPEN` slips in
-`StepPick` (`POST /slips/{id}/legs` with `quick=1&from=research`), or an empty state linking to `/slips/new?week={weekID}`.
+`StepPick` (`POST /slips/{id}/legs` with `quick=1&from=research`), or an empty state linking to
+`/slips/new?week={weekID}`.
 
 `GET /research/games/{id}` reads cached injuries and rosters and renders injuries filtered to key positions (`QB`, `RB`,
 `WR`, `TE`, `LT`, `OT`, `C`, `CB`, `S`), plus sportsbook prop names against their matched athlete.
@@ -424,8 +433,8 @@ and the member leaderboard (stacked cards below `sm:` and a table at `sm:+`). Ea
 `/record/members/{id}?season=` and displays clickable `data-tag-explain` chips that open `#tag-explain-dialog`.
 
 `GET /record/members/{id}?season=` parses `{id}` (400 on invalid ID), resolves `?season=` with the same rules, and
-verifies `{id}` appears in `RecordUsersForGroupSeason` for the active group and season (returning `404 Not Found` if
-no group is active or the user is outside the group). It renders `web/templates/record_member.html` with a back link to
+verifies `{id}` appears in `RecordUsersForGroupSeason` for the active group and season (returning `404 Not Found` if no
+group is active or the user is outside the group). It renders `web/templates/record_member.html` with a back link to
 `/record?season=`, season selector, member header and rank, 4-stat summary strip (`Legs`, `Hit %` with implied-odds
 lift, `Avg odds`, `Dollar P/L`), clickable `data-tag-explain` tags opening `#tag-explain-dialog`, and newest-first
 graded leg cards linking to `/slips/{id}`. See [Record Book](../concepts/record-book.md).

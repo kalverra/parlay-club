@@ -2710,3 +2710,311 @@ func TestSlipHubCrossSlipLegAddButtons(t *testing.T) {
 	// Only the teammate's upcoming non-OTHER leg gets the + Add chooser button.
 	assert.Equal(t, 1, strings.Count(body, `hx-target="#bet-add-dialog-body"`))
 }
+
+type liveRefreshSpy struct {
+	stubRefresher
+	calls []struct {
+		slipID int64
+		weekID int64
+	}
+	err       error
+	onRefresh func(context.Context, int64, int64) error
+}
+
+func (s *liveRefreshSpy) ForceLiveRefresh(ctx context.Context, slipID, weekID int64) error {
+	s.calls = append(s.calls, struct {
+		slipID int64
+		weekID int64
+	}{slipID: slipID, weekID: weekID})
+	if s.onRefresh != nil {
+		if err := s.onRefresh(ctx, slipID, weekID); err != nil {
+			return err
+		}
+	}
+	return s.err
+}
+
+func TestSlipLiveRefresh(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 1)
+	game := addGame(t, fixture, gameKickoff())
+	resp := postForm(t, fixture.handler, fmt.Sprintf("/slips/%d/legs", fixture.slip.ID), url.Values{
+		"game_id":     {game.ID},
+		"market_type": {"TOTAL"},
+		"side":        {"OVER"},
+		"line":        {"47.5"},
+		"odds":        {"-110"},
+	})
+	require.Equal(t, http.StatusOK, resp.Code, resp.Body.String())
+
+	spy := &liveRefreshSpy{}
+	renderer, err := webui.NewRenderer(assets.Templates, false)
+	require.NoError(t, err)
+	handler := webui.NewWithDeps(webui.Dependencies{
+		Logger:     zerolog.Nop(),
+		Renderer:   renderer,
+		UserFrom:   func(context.Context) (db.User, bool) { return fixture.user, true },
+		GroupsFrom: func(context.Context) []webui.GroupOption { return nil },
+		GroupFrom:  func(context.Context) (db.Group, bool) { return fixture.group, true },
+		SetGroup:   func(http.ResponseWriter, int64) {},
+		Store:      fixture.store,
+		Slips:      slips.New(fixture.store, fixture.hub, nil),
+		Stream:     live.NewStream(fixture.hub, func(int64) bool { return false }),
+		Refresh:    spy,
+	})
+
+	rec := postForm(t, handler, fmt.Sprintf("/slips/%d/live/refresh", fixture.slip.ID), nil)
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Body.String(), `id="slip-panel"`)
+	require.Len(t, spy.calls, 1)
+	assert.Equal(t, fixture.slip.ID, spy.calls[0].slipID)
+	assert.Equal(t, fixture.week.ID, spy.calls[0].weekID)
+
+	// Refresh errors are logged and still render the panel partial.
+	spy.err = assert.AnError
+	recErr := postForm(t, handler, fmt.Sprintf("/slips/%d/live/refresh", fixture.slip.ID), nil)
+	require.Equal(t, http.StatusOK, recErr.Code)
+	assert.Contains(t, recErr.Body.String(), `id="slip-panel"`)
+	require.Len(t, spy.calls, 2)
+
+	// Unknown slip returns 404 without calling ForceLiveRefresh.
+	recMissing := postForm(t, handler, "/slips/99999/live/refresh", nil)
+	assert.Equal(t, http.StatusNotFound, recMissing.Code)
+	assert.Len(t, spy.calls, 2)
+
+	// Grading during ForceLiveRefresh reloads the slip so data-live-mode flips to "false".
+	lockResp := postForm(t, fixture.handler, fmt.Sprintf("/slips/%d/lock", fixture.slip.ID), nil)
+	require.Equal(t, http.StatusOK, lockResp.Code, lockResp.Body.String())
+	game.Status = db.GameLive
+	_, err = fixture.store.UpsertGame(t.Context(), game)
+	require.NoError(t, err)
+
+	spy.err = nil
+	spy.onRefresh = func(ctx context.Context, slipID, _ int64) error {
+		return fixture.store.SetSlipGrade(ctx, slipID, parlay.Won, db.SlipGraded)
+	}
+	recGraded := postForm(t, handler, fmt.Sprintf("/slips/%d/live/refresh", fixture.slip.ID), nil)
+	require.Equal(t, http.StatusOK, recGraded.Code)
+	assert.Contains(t, recGraded.Body.String(), `data-live-mode="false"`)
+	assert.NotContains(t, recGraded.Body.String(), `data-live-mode="true"`)
+	require.Len(t, spy.calls, 3)
+}
+
+func TestSlipDedicatedLiveView(t *testing.T) {
+	t.Parallel()
+
+	t.Run("live_mode_layout_and_ordering", func(t *testing.T) {
+		t.Parallel()
+
+		fixture := newSlipFixture(t, 2)
+		ben := addSam(t, fixture)
+
+		baseKickoff := gameKickoff()
+		liveGame, err := fixture.store.UpsertGame(t.Context(), db.Game{
+			ID:         "live-view-g1",
+			WeekID:     fixture.week.ID,
+			HomeTeam:   "BUF",
+			AwayTeam:   "KC",
+			HomeName:   "Buffalo Bills",
+			AwayName:   "Kansas City Chiefs",
+			HomeESPNID: "2",
+			AwayESPNID: "12",
+			Kickoff:    baseKickoff,
+			Status:     db.GameScheduled,
+		})
+		require.NoError(t, err)
+		schedGame, err := fixture.store.UpsertGame(t.Context(), db.Game{
+			ID:         "live-view-g2",
+			WeekID:     fixture.week.ID,
+			HomeTeam:   "DAL",
+			AwayTeam:   "PHI",
+			HomeName:   "Dallas Cowboys",
+			AwayName:   "Philadelphia Eagles",
+			HomeESPNID: "6",
+			AwayESPNID: "21",
+			Kickoff:    baseKickoff.Add(3 * time.Hour),
+			Status:     db.GameScheduled,
+		})
+		require.NoError(t, err)
+		finalGame, err := fixture.store.UpsertGame(t.Context(), db.Game{
+			ID:         "live-view-g3",
+			WeekID:     fixture.week.ID,
+			HomeTeam:   "MIA",
+			AwayTeam:   "NYJ",
+			HomeName:   "Miami Dolphins",
+			AwayName:   "New York Jets",
+			HomeESPNID: "15",
+			AwayESPNID: "20",
+			Kickoff:    baseKickoff.Add(-4 * time.Hour),
+			Status:     db.GameScheduled,
+		})
+		require.NoError(t, err)
+
+		// Add legs across both members before locking.
+		for _, leg := range []db.Leg{
+			{
+				SlipID:     fixture.slip.ID,
+				UserID:     fixture.user.ID,
+				GameID:     new(liveGame.ID),
+				MarketType: "ML",
+				Team:       new("BUF"),
+				Side:       new("TEAM"),
+				Selection:  "BUF ML",
+				Odds:       -120,
+			},
+			{
+				SlipID:     fixture.slip.ID,
+				UserID:     fixture.user.ID,
+				GameID:     new(finalGame.ID),
+				MarketType: "TOTAL",
+				Side:       new("OVER"),
+				Line:       new(44.5),
+				Selection:  "Over 44.5",
+				Odds:       -110,
+			},
+			{
+				SlipID:     fixture.slip.ID,
+				UserID:     ben.ID,
+				GameID:     new(schedGame.ID),
+				MarketType: "SPREAD",
+				Team:       new("DAL"),
+				Side:       new("TEAM"),
+				Line:       new(-3.5),
+				Selection:  "DAL -3.5",
+				Odds:       -110,
+			},
+		} {
+			_, err = fixture.store.CreateLeg(t.Context(), leg)
+			require.NoError(t, err)
+		}
+
+		// Lock both members and the slip.
+		lockAt := baseKickoff.Add(-30 * time.Minute)
+		require.NoError(t, fixture.store.SetSlipMemberLock(t.Context(), fixture.slip.ID, fixture.user.ID, &lockAt))
+		require.NoError(t, fixture.store.SetSlipMemberLock(t.Context(), fixture.slip.ID, ben.ID, &lockAt))
+		lockSlip(t, fixture)
+
+		// Transition games to LIVE / FINAL and record a sync timestamp.
+		liveGame.Status = db.GameLive
+		liveGame.HomeScore = new(21)
+		liveGame.AwayScore = new(17)
+		liveGame.Period = new(3)
+		liveGame.Clock = new("8:42")
+		_, err = fixture.store.UpsertGame(t.Context(), liveGame)
+		require.NoError(t, err)
+
+		finalGame.Status = db.GameFinal
+		finalGame.HomeScore = new(28)
+		finalGame.AwayScore = new(20)
+		_, err = fixture.store.UpsertGame(t.Context(), finalGame)
+		require.NoError(t, err)
+
+		fetchedAt := time.Date(2026, 11, 8, 19, 15, 0, 0, time.UTC)
+		require.NoError(t, fixture.store.RecordSync(t.Context(), "espn:scoreboard", fetchedAt, nil))
+
+		// Full page render.
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequestWithContext(
+			t.Context(),
+			http.MethodGet,
+			fmt.Sprintf("/slips/%d", fixture.slip.ID),
+			nil,
+		)
+		fixture.handler.ServeHTTP(rec, req)
+		require.Equal(t, http.StatusOK, rec.Code)
+		body := html.UnescapeString(rec.Body.String())
+
+		// Live mode attributes and compact header.
+		assert.Equal(t, 2, strings.Count(body, `data-live-mode="true"`))
+		assert.Contains(t, body, `data-live-header`)
+		assert.Contains(t, body, fetchedAt.Format(time.RFC3339))
+		assert.Contains(t, body, fmt.Sprintf(`hx-post="/slips/%d/live/refresh"`, fixture.slip.ID))
+		assert.NotContains(t, body, "Ready to place")
+
+		// Parlay Live Hero box.
+		assert.Contains(t, body, `data-live-hero`)
+		assert.Contains(t, body, `data-slip-live-progress`)
+		assert.Contains(t, body, "Before")
+		assert.Contains(t, body, "Now")
+
+		// Game-time ordering: LIVE -> SCHEDULED -> FINAL.
+		liveIdx := strings.Index(body, `data-live-game="live-view-g1"`)
+		schedIdx := strings.Index(body, `data-live-game="live-view-g2"`)
+		finalIdx := strings.Index(body, `data-live-game="live-view-g3"`)
+		require.NotEqual(t, -1, liveIdx)
+		require.NotEqual(t, -1, schedIdx)
+		require.NotEqual(t, -1, finalIdx)
+		assert.Less(t, liveIdx, schedIdx, "LIVE game should appear before SCHEDULED game")
+		assert.Less(t, schedIdx, finalIdx, "SCHEDULED game should appear before FINAL game")
+
+		// Game progress bars, leg progress bars, owner badges, and Before/Now % on every leg.
+		assert.Equal(t, 3, strings.Count(body, "data-game-progress"))
+		assert.Equal(t, 3, strings.Count(body, "data-leg-live-progress"))
+		assert.Equal(t, 3, strings.Count(body, "data-owner-badge"))
+		assert.Equal(t, 3, strings.Count(body, "data-leg-chances"))
+		assert.Contains(t, body, "Sam")
+
+		// Collapsed secondary <details> below #slip-panel containing export/payout/wager/activity.
+		panelIdx := strings.Index(body, `id="slip-panel"`)
+		secondaryIdx := strings.Index(body, `data-live-secondary`)
+		exportIdx := strings.Index(body, `id="slip-export"`)
+		payoutIdx := strings.Index(body, `id="slip-payout"`)
+		wagerIdx := strings.Index(body, `id="slip-wager"`)
+		activityIdx := strings.Index(body, `id="slip-activity"`)
+		assert.Less(t, panelIdx, secondaryIdx, "#slip-panel comes before collapsed secondary drawer")
+		assert.Less(t, secondaryIdx, exportIdx)
+		assert.Less(t, secondaryIdx, payoutIdx)
+		assert.Less(t, secondaryIdx, wagerIdx)
+		assert.Less(t, secondaryIdx, activityIdx)
+		assert.NotContains(t, body, `<details class="ui-card" data-live-secondary open`)
+
+		// Panel partial also carries data-live-mode="true".
+		panelRec := httptest.NewRecorder()
+		panelReq := httptest.NewRequestWithContext(
+			t.Context(),
+			http.MethodGet,
+			fmt.Sprintf("/slips/%d/panel", fixture.slip.ID),
+			nil,
+		)
+		fixture.handler.ServeHTTP(panelRec, panelReq)
+		require.Equal(t, http.StatusOK, panelRec.Code)
+		assert.Contains(t, panelRec.Body.String(), `data-live-mode="true"`)
+	})
+
+	t.Run("pre_kickoff_locked_keeps_export_first_layout", func(t *testing.T) {
+		t.Parallel()
+
+		fixture := newSlipFixture(t, 1)
+		futureKickoff := time.Now().UTC().Add(4 * time.Hour)
+		game := addGame(t, fixture, futureKickoff)
+		resp := postForm(t, fixture.handler, fmt.Sprintf("/slips/%d/legs", fixture.slip.ID), url.Values{
+			"game_id":     {game.ID},
+			"market_type": {"ML"},
+			"team":        {"BUF"},
+			"side":        {"TEAM"},
+			"odds":        {"-110"},
+		})
+		require.Equal(t, http.StatusOK, resp.Code, resp.Body.String())
+
+		lockAt := futureKickoff.Add(-30 * time.Minute)
+		require.NoError(t, fixture.store.SetSlipMemberLock(t.Context(), fixture.slip.ID, fixture.user.ID, &lockAt))
+		lockSlip(t, fixture)
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequestWithContext(
+			t.Context(),
+			http.MethodGet,
+			fmt.Sprintf("/slips/%d", fixture.slip.ID),
+			nil,
+		)
+		fixture.handler.ServeHTTP(rec, req)
+		require.Equal(t, http.StatusOK, rec.Code)
+		body := rec.Body.String()
+
+		assert.Equal(t, 2, strings.Count(body, `data-live-mode="false"`))
+		assert.NotContains(t, body, `data-live-secondary`)
+		assert.NotContains(t, body, `data-live-hero`)
+		assert.Less(t, strings.Index(body, `id="slip-export"`), strings.Index(body, `id="slip-panel"`))
+	})
+}

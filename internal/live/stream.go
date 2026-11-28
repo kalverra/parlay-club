@@ -21,6 +21,10 @@ const (
 // server supplies the game-aware rule; tests supply a fixed answer.
 type IsLive func(weekID int64) bool
 
+// Tick is called on connect and periodically while a live SSE stream is
+// open. The server supplies refresh.KickLive.
+type Tick func(slipID, weekID int64)
+
 // Clock supplies the stream's timers. Tests substitute one they fire by hand.
 type Clock interface {
 	NewTimer(time.Duration) Timer
@@ -37,11 +41,13 @@ type Timer interface {
 // the browser refetches the partials it shows, so no per-user HTML travels
 // through the hub.
 type Stream struct {
-	hub    *Hub
-	isLive IsLive
-	clock  Clock
-	done   chan struct{}
-	stop   sync.Once
+	hub           *Hub
+	isLive        IsLive
+	clock         Clock
+	liveTick      Tick
+	liveTickEvery time.Duration
+	done          chan struct{}
+	stop          sync.Once
 }
 
 // StreamOption configures a Stream.
@@ -52,6 +58,17 @@ type StreamOption func(*Stream)
 func WithClock(clock Clock) StreamOption {
 	return func(s *Stream) {
 		s.clock = clock
+	}
+}
+
+// WithLiveTick calls fn on connect and every interval while a live SSE stream
+// remains open. It does not run when IsLive returns false.
+func WithLiveTick(interval time.Duration, fn Tick) StreamOption {
+	return func(s *Stream) {
+		if interval > 0 && fn != nil {
+			s.liveTickEvery = interval
+			s.liveTick = fn
+		}
 	}
 }
 
@@ -96,6 +113,14 @@ func (s *Stream) ServeSlip(w http.ResponseWriter, r *http.Request, slipID, weekI
 	deadline := s.clock.NewTimer(deadlineFor(live))
 	defer deadline.Stop()
 
+	var liveTick Timer
+	var liveTickCh <-chan time.Time
+	if live && s.liveTick != nil && s.liveTickEvery > 0 {
+		liveTick = s.clock.NewTimer(s.liveTickEvery)
+		defer liveTick.Stop()
+		liveTickCh = liveTick.C()
+	}
+
 	header := w.Header()
 	header.Set("Content-Type", "text/event-stream")
 	header.Set("Cache-Control", "no-cache")
@@ -103,6 +128,18 @@ func (s *Stream) ServeSlip(w http.ResponseWriter, r *http.Request, slipID, weekI
 	header.Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
+
+	select {
+	case <-s.done:
+		return
+	case <-r.Context().Done():
+		return
+	default:
+	}
+
+	if live && s.liveTick != nil {
+		s.liveTick(slipID, weekID)
+	}
 
 	for {
 		select {
@@ -115,6 +152,9 @@ func (s *Stream) ServeSlip(w http.ResponseWriter, r *http.Request, slipID, weekI
 				return
 			}
 			ping.Reset(pingEvery)
+		case <-liveTickCh:
+			s.liveTick(slipID, weekID)
+			liveTick.Reset(s.liveTickEvery)
 		case <-slipUpdates:
 			if err := writeFrame(w, flusher, "event: slip-updated\ndata: {}\n\n"); err != nil {
 				return

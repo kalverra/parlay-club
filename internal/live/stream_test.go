@@ -156,6 +156,198 @@ func TestStreamPingsWhileItWaits(t *testing.T) {
 	assert.Empty(t, ping.event)
 }
 
+type liveTickCall struct {
+	slipID int64
+	weekID int64
+}
+
+func TestStreamLiveTickFiresOnConnectAndIntervalUntilDeadline(t *testing.T) {
+	t.Parallel()
+
+	var hub live.Hub
+	clock := newFakeClock()
+	ticks := make(chan liveTickCall, 8)
+	stream := live.NewStream(
+		&hub,
+		func(int64) bool { return true },
+		live.WithClock(clock),
+		live.WithLiveTick(25*time.Second, func(slipID, weekID int64) {
+			ticks <- liveTickCall{slipID: slipID, weekID: weekID}
+		}),
+	)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		stream.ServeSlip(w, r, 7, 2026209)
+	}))
+	t.Cleanup(server.Close)
+
+	client := dial(t, server.URL)
+	assert.Equal(t, liveTickCall{slipID: 7, weekID: 2026209}, awaitTick(t, ticks))
+
+	clock.Fire(25 * time.Second)
+	assert.Equal(t, liveTickCall{slipID: 7, weekID: 2026209}, awaitTick(t, ticks))
+	assert.Equal(t, "ping", readFrame(t, client.reader).comment)
+
+	clock.Fire(25 * time.Second)
+	assert.Equal(t, liveTickCall{slipID: 7, weekID: 2026209}, awaitTick(t, ticks))
+	assert.Equal(t, "ping", readFrame(t, client.reader).comment)
+
+	clock.Fire(15 * time.Minute)
+	bye := readFrame(t, client.reader)
+	assert.Equal(t, "bye", bye.event)
+	_, err := client.reader.ReadByte()
+	require.ErrorIs(t, err, io.EOF)
+
+	clock.Fire(25 * time.Second)
+	assertNoTick(t, ticks)
+}
+
+func TestStreamLiveTickSkippedWhenNotLive(t *testing.T) {
+	t.Parallel()
+
+	var hub live.Hub
+	clock := newFakeClock()
+	ticks := make(chan liveTickCall, 4)
+	stream := live.NewStream(
+		&hub,
+		func(int64) bool { return false },
+		live.WithClock(clock),
+		live.WithLiveTick(25*time.Second, func(slipID, weekID int64) {
+			ticks <- liveTickCall{slipID: slipID, weekID: weekID}
+		}),
+	)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		stream.ServeSlip(w, r, 7, 2026209)
+	}))
+	t.Cleanup(server.Close)
+
+	client := dial(t, server.URL)
+	clock.Fire(25 * time.Second)
+	assert.Equal(t, "ping", readFrame(t, client.reader).comment)
+	assertNoTick(t, ticks)
+}
+
+func TestStreamLiveTickStopsOnDisconnectAndShutdown(t *testing.T) {
+	t.Parallel()
+
+	t.Run("client disconnect", func(t *testing.T) {
+		t.Parallel()
+
+		var hub live.Hub
+		clock := newFakeClock()
+		ticks := make(chan liveTickCall, 4)
+		done := make(chan struct{})
+		stream := live.NewStream(
+			&hub,
+			func(int64) bool { return true },
+			live.WithClock(clock),
+			live.WithLiveTick(25*time.Second, func(slipID, weekID int64) {
+				ticks <- liveTickCall{slipID: slipID, weekID: weekID}
+			}),
+		)
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			defer close(done)
+			stream.ServeSlip(w, r, 7, 2026209)
+		}))
+		t.Cleanup(server.Close)
+
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL, nil)
+		require.NoError(t, err)
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		assert.Equal(t, liveTickCall{slipID: 7, weekID: 2026209}, awaitTick(t, ticks))
+
+		require.NoError(t, resp.Body.Close())
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("ServeSlip did not return after client disconnect")
+		}
+
+		clock.Fire(25 * time.Second)
+		assertNoTick(t, ticks)
+	})
+
+	t.Run("shutdown", func(t *testing.T) {
+		t.Parallel()
+
+		var hub live.Hub
+		clock := newFakeClock()
+		ticks := make(chan liveTickCall, 4)
+		done := make(chan struct{})
+		stream := live.NewStream(
+			&hub,
+			func(int64) bool { return true },
+			live.WithClock(clock),
+			live.WithLiveTick(25*time.Second, func(slipID, weekID int64) {
+				ticks <- liveTickCall{slipID: slipID, weekID: weekID}
+			}),
+		)
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			defer close(done)
+			stream.ServeSlip(w, r, 7, 2026209)
+		}))
+		t.Cleanup(server.Close)
+
+		client := dial(t, server.URL)
+		assert.Equal(t, liveTickCall{slipID: 7, weekID: 2026209}, awaitTick(t, ticks))
+
+		stream.Shutdown()
+		body, err := io.ReadAll(client.reader)
+		require.NoError(t, err)
+		assert.Empty(t, string(body))
+
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("ServeSlip did not return after Shutdown")
+		}
+
+		clock.Fire(25 * time.Second)
+		assertNoTick(t, ticks)
+	})
+
+	t.Run("already shut down", func(t *testing.T) {
+		t.Parallel()
+
+		var hub live.Hub
+		ticks := make(chan liveTickCall, 2)
+		stream := live.NewStream(
+			&hub,
+			func(int64) bool { return true },
+			live.WithLiveTick(25*time.Second, func(slipID, weekID int64) {
+				ticks <- liveTickCall{slipID: slipID, weekID: weekID}
+			}),
+		)
+		stream.Shutdown()
+
+		recorder := httptest.NewRecorder()
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/events", nil)
+		stream.ServeSlip(recorder, req, 7, 2026209)
+		assert.Equal(t, http.StatusOK, recorder.Code)
+		assertNoTick(t, ticks)
+	})
+}
+
+func awaitTick(t *testing.T, ticks <-chan liveTickCall) liveTickCall {
+	t.Helper()
+	select {
+	case call := <-ticks:
+		return call
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for liveTick")
+		return liveTickCall{}
+	}
+}
+
+func assertNoTick(t *testing.T, ticks <-chan liveTickCall) {
+	t.Helper()
+	select {
+	case call := <-ticks:
+		t.Fatalf("unexpected liveTick call: %+v", call)
+	case <-time.After(30 * time.Millisecond):
+	}
+}
+
 // newStreamServer serves one stream for slip 7 in week 2026209.
 func newStreamServer(t *testing.T, hub *live.Hub, liveWindow bool) *httptest.Server {
 	t.Helper()

@@ -1,6 +1,7 @@
 package web
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -103,6 +104,7 @@ func (h *slipHandlers) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /slips/{id}/pick/dock", h.pickDock)
 	mux.HandleFunc("GET /slips/{id}/tray", h.pickTray)
 	mux.HandleFunc("GET /slips/{id}/panel", h.panel)
+	mux.HandleFunc("POST /slips/{id}/live/refresh", h.liveRefresh)
 	mux.HandleFunc("GET /slips/{id}/export", h.export)
 	mux.HandleFunc("GET /slips/{id}/payout", h.payout)
 	mux.HandleFunc("PUT /slips/{id}/wagers/me", h.setWager)
@@ -128,6 +130,7 @@ func (h *slipHandlers) Routes(mux *http.ServeMux) {
 type SlipPage struct {
 	Page
 	LiveURL    string
+	LiveMode   bool
 	Slip       *SlipView
 	Export     ExportView
 	Creating   bool
@@ -226,35 +229,60 @@ type NextAction struct {
 
 // SlipView is everything the slip panel draws.
 type SlipView struct {
-	ID            int64
-	WeekID        int64
-	Name          string
-	ScopeBadge    string
-	Status        string
-	LegsPerMember int
-	Open          bool
-	LockedIn      int
-	MemberCount   int
-	Members       []SlipMemberView
-	Live          SlipLiveView
-	Payout        PayoutView
-	Wager         WagerView
-	Activity      []ActivityView
-	Analyzer      AnalyzerView
-	Siblings      []SiblingSlipView
+	ID               int64
+	WeekID           int64
+	Name             string
+	ScopeBadge       string
+	Status           string
+	LegsPerMember    int
+	Open             bool
+	LiveMode         bool
+	LiveUpdatedISO   string
+	LiveUpdatedLabel string
+	LockedIn         int
+	MemberCount      int
+	Members          []SlipMemberView
+	LiveGames        []LiveGameGroup
+	Live             SlipLiveView
+	Payout           PayoutView
+	Wager            WagerView
+	Activity         []ActivityView
+	Analyzer         AnalyzerView
+	Siblings         []SiblingSlipView
+}
+
+// LiveGameGroup groups a Live-mode slip's legs under their game card, sorted
+// by live urgency and kickoff time.
+type LiveGameGroup struct {
+	GameID          string // "" for unlinked OTHER legs
+	Matchup         string // e.g. "BUF @ MIA" or "Other legs"
+	AwayTeam        string
+	HomeTeam        string
+	AwayLogo        string
+	HomeLogo        string
+	ScoreLabel      string // e.g. "21 - 17" (empty when SCHEDULED)
+	Status          string // "LIVE", "SCHEDULED", "FINAL", "UNLINKED"
+	ClockLabel      string // "Q3 8:42", "Halftime", "Final", or ""
+	KickoffISO      string // RFC3339 for <time> formatting when SCHEDULED
+	KickoffLabel    string
+	GameProgressPct int // 0..100
+	Legs            []LegView
 }
 
 // SlipLiveView summarizes live or settled parlay progress for the slip panel.
 type SlipLiveView struct {
-	Show          bool
-	State         string
-	ProgressPct   int
-	BarClass      string
-	BadgeClass    string
-	StatusLabel   string
-	Summary       string
-	LiveChance    string
-	PreGameChance string
+	Show           bool
+	State          string
+	ProgressPct    int
+	BarClass       string
+	BadgeClass     string
+	StatusLabel    string
+	Summary        string
+	LiveChance     string
+	PreGameChance  string
+	ProbDelta      string
+	ProbTrend      string
+	ScheduledCount int
 }
 
 // SlipMemberView is one member's section of the panel.
@@ -280,6 +308,7 @@ type LegView struct {
 	Grade           GradeView
 	Result          string
 	GradedBy        string
+	Owner           User
 	OwnerName       string
 	CanEdit         bool
 	CanGrade        bool
@@ -296,13 +325,17 @@ type LegView struct {
 
 // LegLiveView summarizes live or settled progress for one leg row.
 type LegLiveView struct {
-	State       string
-	ProgressPct int
-	BarClass    string
-	StatLabel   string
-	ClockLabel  string
-	LiveChance  string
-	Tone        string
+	State           string
+	ProgressPct     int
+	GameProgressPct int
+	BarClass        string
+	StatLabel       string
+	ClockLabel      string
+	LiveChance      string
+	PreGameChance   string
+	ProbDelta       string
+	ProbTrend       string
+	Tone            string
 }
 
 // VoteView is one leg's tally and the viewer's own vote. UpValue and DownValue
@@ -763,6 +796,31 @@ func (h *slipHandlers) panel(w http.ResponseWriter, r *http.Request) {
 	slip, _, _, ok := h.loadSlip(w, r, r.PathValue("id"))
 	if !ok {
 		return
+	}
+	h.renderPanel(w, r, slip)
+}
+
+// liveRefresh triggers a cooldown-guarded manual live ESPN refresh for a slip
+// and returns the updated #slip-panel partial.
+func (h *slipHandlers) liveRefresh(w http.ResponseWriter, r *http.Request) {
+	slip, _, _, ok := h.loadSlip(w, r, r.PathValue("id"))
+	if !ok {
+		return
+	}
+	if h.deps.Refresh != nil {
+		if err := h.deps.Refresh.ForceLiveRefresh(r.Context(), slip.ID, slip.WeekID); err != nil {
+			h.deps.Logger.Warn().
+				Err(err).
+				Int64("slip_id", slip.ID).
+				Int64("week_id", slip.WeekID).
+				Msg("force live refresh")
+		}
+		var err error
+		slip, err = h.deps.Store.SlipByID(r.Context(), slip.ID)
+		if err != nil {
+			h.serverError(w, err)
+			return
+		}
 	}
 	h.renderPanel(w, r, slip)
 }
@@ -1991,9 +2049,11 @@ func (h *slipHandlers) slipPageData(ctx context.Context, slip db.Slip) (SlipPage
 	}
 
 	names := make(map[int64]string, len(members))
+	owners := make(map[int64]User, len(members))
 	viewerIsMember := false
 	for _, person := range members {
 		names[person.User.ID] = person.User.Name
+		owners[person.User.ID] = NewUser(person.User)
 		if hasUser && person.User.ID == user.ID {
 			viewerIsMember = true
 		}
@@ -2013,6 +2073,7 @@ func (h *slipHandlers) slipPageData(ctx context.Context, slip db.Slip) (SlipPage
 		homeBook = *user.HomeBook
 	}
 	next := slips.NextStep(slip, members, legs, games, viewerID, now)
+	liveMode := next.Step == slips.StepLive
 	boardRows, err := h.slipBoardRows(ctx, slip, games, legs, next.Step == slips.StepPick, viewerID, homeBook, now)
 	if err != nil {
 		return SlipPage{}, err
@@ -2027,10 +2088,12 @@ func (h *slipHandlers) slipPageData(ctx context.Context, slip db.Slip) (SlipPage
 		slip.ID,
 		legs,
 		names,
+		owners,
 		gamesByID,
 		legGrades,
 		media,
 		open,
+		liveMode,
 		hasUser,
 		viewerIsMember,
 		viewerID,
@@ -2041,6 +2104,25 @@ func (h *slipHandlers) slipPageData(ctx context.Context, slip db.Slip) (SlipPage
 	)
 
 	locked, memberViews := buildSlipMemberViews(members, legsByUser, slip.LegsPerMember, open, hasUser, viewerID)
+
+	var (
+		liveGames        []LiveGameGroup
+		liveUpdatedISO   string
+		liveUpdatedLabel string
+	)
+	if liveMode {
+		legViewByID := make(map[int64]LegView, len(legs))
+		for _, userLegs := range legsByUser {
+			for _, lv := range userLegs {
+				legViewByID[lv.ID] = lv
+			}
+		}
+		liveGames = buildLiveGames(legs, allWeekGames, media, legViewByID)
+		liveUpdatedISO, liveUpdatedLabel, err = h.liveUpdatedStamp(ctx, legs)
+		if err != nil {
+			return SlipPage{}, err
+		}
+	}
 
 	activity := make([]ActivityView, 0, len(entries))
 	for _, entry := range entries {
@@ -2056,20 +2138,24 @@ func (h *slipHandlers) slipPageData(ctx context.Context, slip db.Slip) (SlipPage
 	}
 
 	view := &SlipView{
-		ID:            slip.ID,
-		WeekID:        slip.WeekID,
-		Name:          slip.Name,
-		ScopeBadge:    scopeBadge(slip),
-		Status:        string(slip.Status),
-		LegsPerMember: slip.LegsPerMember,
-		Open:          open,
-		LockedIn:      locked,
-		MemberCount:   len(members),
-		Members:       memberViews,
-		Live:          slipLiveView(slipProg),
-		Activity:      activity,
-		Analyzer:      analysis,
-		Siblings:      siblings,
+		ID:               slip.ID,
+		WeekID:           slip.WeekID,
+		Name:             slip.Name,
+		ScopeBadge:       scopeBadge(slip),
+		Status:           string(slip.Status),
+		LegsPerMember:    slip.LegsPerMember,
+		Open:             open,
+		LiveMode:         liveMode,
+		LiveUpdatedISO:   liveUpdatedISO,
+		LiveUpdatedLabel: liveUpdatedLabel,
+		LockedIn:         locked,
+		MemberCount:      len(members),
+		Members:          memberViews,
+		LiveGames:        liveGames,
+		Live:             slipLiveView(slipProg, liveMode),
+		Activity:         activity,
+		Analyzer:         analysis,
+		Siblings:         siblings,
 	}
 
 	var highlights HighlightsView
@@ -2079,6 +2165,7 @@ func (h *slipHandlers) slipPageData(ctx context.Context, slip db.Slip) (SlipPage
 	return SlipPage{
 		Page:       h.page(nil, slip.Name),
 		LiveURL:    slipLiveURL(slip),
+		LiveMode:   liveMode,
 		Slip:       view,
 		Next:       nextView(next, slip, viewerID, games),
 		Highlights: highlights,
@@ -2359,10 +2446,11 @@ func legViews(
 	slipID int64,
 	legs []db.Leg,
 	names map[int64]string,
+	owners map[int64]User,
 	games map[string]analyzer.Game,
 	legGrades map[int64]GradeView,
 	media legMediaIndex,
-	open, hasUser, viewerIsMember bool,
+	open, liveMode, hasUser, viewerIsMember bool,
 	viewerID int64,
 	votes map[int64]VoteView,
 	legProgs map[int64]progress.LegProgress,
@@ -2398,13 +2486,14 @@ func legViews(
 			Grade:         legGrades[leg.ID],
 			Result:        string(leg.Result),
 			GradedBy:      legGradedBy(leg.GradedBy),
+			Owner:         owners[leg.UserID],
 			OwnerName:     names[leg.UserID],
 			CanEdit:       canEdit,
 			CanGrade:      viewerIsMember,
 			ResearchURL:   legResearchURL(leg, media, slipID, now),
 			AddURL:        addURL,
 			Votes:         legVoteView(votes, leg, canVote),
-			Live:          legLiveView(legProgs[leg.ID]),
+			Live:          legLiveView(legProgs[leg.ID], liveMode),
 		}
 		applyLegMedia(&view, leg, media)
 		byUser[leg.UserID] = append(byUser[leg.UserID], view)
@@ -3371,25 +3460,28 @@ func evaluateSlipProgress(
 	return legProgs, progress.EvaluateSlip(allProgs)
 }
 
-func slipLiveView(sp progress.SlipProgress) SlipLiveView {
-	if !sp.Show {
+func slipLiveView(sp progress.SlipProgress, liveMode bool) SlipLiveView {
+	if !sp.Show && !liveMode {
 		return SlipLiveView{}
 	}
 	return SlipLiveView{
-		Show:          true,
-		State:         string(sp.State),
-		ProgressPct:   roundPct(sp.ProgressPct),
-		BarClass:      progressBarClass(sp.Tone),
-		BadgeClass:    slipLiveBadgeClass(sp.State, sp.Tone),
-		StatusLabel:   slipLiveStatusLabel(sp.State),
-		Summary:       sp.Summary,
-		LiveChance:    formatLiveChance(sp.State, sp.LiveProb),
-		PreGameChance: formatImpliedChance(sp.PreGameProb),
+		Show:           true,
+		State:          string(sp.State),
+		ProgressPct:    roundPct(sp.ProgressPct),
+		BarClass:       progressBarClass(sp.Tone),
+		BadgeClass:     slipLiveBadgeClass(sp.State, sp.Tone),
+		StatusLabel:    slipLiveStatusLabel(sp.State),
+		Summary:        sp.Summary,
+		LiveChance:     formatLiveChance(sp.State, sp.LiveProb),
+		PreGameChance:  formatImpliedChance(sp.PreGameProb),
+		ProbDelta:      formatProbDelta(sp.ProbDelta, sp.ProbTrend),
+		ProbTrend:      sp.ProbTrend,
+		ScheduledCount: sp.ScheduledCount,
 	}
 }
 
-func legLiveView(lp progress.LegProgress) *LegLiveView {
-	if !lp.HasLive {
+func legLiveView(lp progress.LegProgress, liveMode bool) *LegLiveView {
+	if !liveMode && !lp.HasLive {
 		return nil
 	}
 	statLabel := lp.StatLabel
@@ -3397,13 +3489,186 @@ func legLiveView(lp progress.LegProgress) *LegLiveView {
 		statLabel = legLiveStateLabel(lp.State)
 	}
 	return &LegLiveView{
-		State:       string(lp.State),
-		ProgressPct: roundPct(lp.ProgressPct),
-		BarClass:    progressBarClass(lp.Tone),
-		StatLabel:   statLabel,
-		ClockLabel:  lp.ClockLabel,
-		LiveChance:  formatLiveChance(lp.State, lp.LiveProb),
-		Tone:        lp.Tone,
+		State:           string(lp.State),
+		ProgressPct:     roundPct(lp.ProgressPct),
+		GameProgressPct: roundPct(lp.GameProgressPct),
+		BarClass:        progressBarClass(lp.Tone),
+		StatLabel:       statLabel,
+		ClockLabel:      lp.ClockLabel,
+		LiveChance:      formatLiveChance(lp.State, lp.LiveProb),
+		PreGameChance:   formatImpliedChance(lp.PreGameProb),
+		ProbDelta:       formatProbDelta(lp.ProbDelta, lp.ProbTrend),
+		ProbTrend:       lp.ProbTrend,
+		Tone:            lp.Tone,
+	}
+}
+
+func formatProbDelta(delta float64, trend string) string {
+	if trend == "" || trend == "flat" || math.IsNaN(delta) || math.IsInf(delta, 0) {
+		return ""
+	}
+	pct := math.Round(delta * 100)
+	if pct == 0 {
+		return ""
+	}
+	if pct > 0 {
+		return fmt.Sprintf("+%.0f%%", pct)
+	}
+	return fmt.Sprintf("%.0f%%", pct)
+}
+
+// espnScoreboardSource matches refresh.ScoreboardSource without importing
+// internal/refresh (which would create a test import cycle via internal/sandbox).
+const espnScoreboardSource = "espn:scoreboard"
+
+func (h *slipHandlers) liveUpdatedStamp(ctx context.Context, legs []db.Leg) (iso, label string, err error) {
+	keys := make([]string, 0, 1+len(legs))
+	seen := make(map[string]bool, 1+len(legs))
+	addKey := func(k string) {
+		if k != "" && !seen[k] {
+			seen[k] = true
+			keys = append(keys, k)
+		}
+	}
+	addKey(espnScoreboardSource)
+	for _, leg := range legs {
+		if leg.GameID != nil && *leg.GameID != "" {
+			addKey(db.ArchiveSummaryKey(*leg.GameID))
+		}
+	}
+	var latest time.Time
+	for _, key := range keys {
+		state, syncErr := h.deps.Store.SyncState(ctx, key)
+		if errors.Is(syncErr, db.ErrSyncStateNotFound) {
+			continue
+		}
+		if syncErr != nil {
+			return "", "", syncErr
+		}
+		if state.FetchedAt.After(latest) {
+			latest = state.FetchedAt
+		}
+	}
+	if latest.IsZero() {
+		return "", "", nil
+	}
+	u := latest.UTC()
+	return u.Format(time.RFC3339), u.Format("3:04 PM") + " UTC", nil
+}
+
+func buildLiveGames(
+	legs []db.Leg,
+	games []db.Game,
+	media legMediaIndex,
+	legViewByID map[int64]LegView,
+) []LiveGameGroup {
+	gameByID := make(map[string]db.Game, len(games))
+	for _, g := range games {
+		gameByID[g.ID] = g
+	}
+	legsByGame := make(map[string][]LegView)
+	for _, leg := range legs {
+		lv, ok := legViewByID[leg.ID]
+		if !ok {
+			continue
+		}
+		gid := ""
+		if leg.GameID != nil {
+			gid = *leg.GameID
+		}
+		if gid != "" {
+			if _, found := gameByID[gid]; !found {
+				gid = ""
+			}
+		}
+		legsByGame[gid] = append(legsByGame[gid], lv)
+	}
+
+	groups := make([]LiveGameGroup, 0, len(legsByGame))
+	for gid, groupLegs := range legsByGame {
+		slices.SortFunc(groupLegs, func(a, b LegView) int {
+			if c := cmp.Compare(legLiveSortOrder(a.Live), legLiveSortOrder(b.Live)); c != 0 {
+				return c
+			}
+			return cmp.Compare(a.ID, b.ID)
+		})
+		if gid == "" {
+			groups = append(groups, LiveGameGroup{
+				Matchup: "Other legs",
+				Status:  "UNLINKED",
+				Legs:    groupLegs,
+			})
+			continue
+		}
+		g := gameByID[gid]
+		scoreLabel := ""
+		if g.Status != db.GameScheduled && g.AwayScore != nil && g.HomeScore != nil {
+			scoreLabel = fmt.Sprintf("%d - %d", *g.AwayScore, *g.HomeScore)
+		}
+		remFrac := progress.RemainingFraction(g.Status, g.Period, g.Clock)
+		groups = append(groups, LiveGameGroup{
+			GameID:          g.ID,
+			Matchup:         g.AwayTeam + " @ " + g.HomeTeam,
+			AwayTeam:        g.AwayTeam,
+			HomeTeam:        g.HomeTeam,
+			AwayLogo:        media.teamLogos[g.AwayTeam],
+			HomeLogo:        media.teamLogos[g.HomeTeam],
+			ScoreLabel:      scoreLabel,
+			Status:          string(g.Status),
+			ClockLabel:      progress.ClockLabel(g.Status, g.Period, g.Clock),
+			KickoffISO:      g.Kickoff.UTC().Format(time.RFC3339),
+			KickoffLabel:    g.Kickoff.UTC().Format("Mon 3:04 PM") + " UTC",
+			GameProgressPct: roundPct((1.0 - remFrac) * 100),
+			Legs:            groupLegs,
+		})
+	}
+
+	slices.SortFunc(groups, func(a, b LiveGameGroup) int {
+		if c := cmp.Compare(liveGameStatusOrder(a.Status), liveGameStatusOrder(b.Status)); c != 0 {
+			return c
+		}
+		if a.GameID != "" && b.GameID != "" {
+			if c := gameByID[a.GameID].Kickoff.Compare(gameByID[b.GameID].Kickoff); c != 0 {
+				return c
+			}
+		}
+		return cmp.Compare(a.GameID, b.GameID)
+	})
+	return groups
+}
+
+func liveGameStatusOrder(status string) int {
+	switch status {
+	case string(db.GameLive):
+		return 0
+	case string(db.GameScheduled):
+		return 1
+	case string(db.GameFinal):
+		return 2
+	default:
+		return 3
+	}
+}
+
+func legLiveSortOrder(lv *LegLiveView) int {
+	if lv == nil {
+		return 1
+	}
+	switch lv.State {
+	case string(progress.StateLive):
+		return 0
+	case string(progress.StateScheduled):
+		return 1
+	case string(progress.StateUnavailable):
+		return 2
+	case string(progress.StateCashed):
+		return 3
+	case string(progress.StateBusted):
+		return 4
+	case string(progress.StatePush), string(progress.StateVoid):
+		return 5
+	default:
+		return 6
 	}
 }
 
@@ -3481,6 +3746,10 @@ func legLiveStateLabel(state progress.State) string {
 		return "Push"
 	case progress.StateVoid:
 		return "Void"
+	case progress.StateScheduled:
+		return "Upcoming"
+	case progress.StateUnavailable:
+		return "Stats unavailable"
 	default:
 		return ""
 	}

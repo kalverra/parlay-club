@@ -28,6 +28,9 @@ const (
 	StepWaiting Step = "waiting"
 	// StepExport means everyone is locked in and the picks can be placed.
 	StepExport Step = "export"
+	// StepLive means everyone is locked in and at least one leg's game has
+	// started.
+	StepLive Step = "live"
 	// StepDone means the slip has been graded.
 	StepDone Step = "done"
 )
@@ -82,7 +85,11 @@ func NextStep(
 
 	if member.LockedAt != nil {
 		if everyoneLocked(members) || slip.Status == db.SlipLocked {
-			next.Step = StepExport
+			if legGamesStarted(legs, games, now) {
+				next.Step = StepLive
+			} else {
+				next.Step = StepExport
+			}
 			return next
 		}
 		// A member who never finished picking can no longer catch up once every
@@ -124,6 +131,8 @@ func (n Next) Label() string {
 		return "Waiting on " + NameList(n.WaitingOn)
 	case StepExport:
 		return "Ready to place"
+	case StepLive:
+		return "Live"
 	case StepDone:
 		switch n.Result {
 		case parlay.Won:
@@ -163,6 +172,32 @@ func everyoneLocked(members []db.SlipMember) bool {
 		}
 	}
 	return len(members) > 0
+}
+
+// legGamesStarted reports whether any leg on the slip references a game that is
+// LIVE, FINAL, or at or past its kickoff time. Unlinked legs (nil/empty GameID
+// or missing from games) are ignored.
+func legGamesStarted(legs []db.Leg, games []db.Game, now time.Time) bool {
+	if len(legs) == 0 || len(games) == 0 {
+		return false
+	}
+	byID := make(map[string]db.Game, len(games))
+	for _, game := range games {
+		byID[game.ID] = game
+	}
+	for _, leg := range legs {
+		if leg.GameID == nil || *leg.GameID == "" {
+			continue
+		}
+		game, ok := byID[*leg.GameID]
+		if !ok {
+			continue
+		}
+		if game.Status == db.GameLive || game.Status == db.GameFinal || !now.Before(game.Kickoff) {
+			return true
+		}
+	}
+	return false
 }
 
 // waitingOn names the members who have not locked in, in member order. The

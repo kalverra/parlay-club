@@ -65,12 +65,286 @@
 <div
   id="slip-panel"
   class="space-y-3"
+  data-live-mode="{{.Slip.LiveMode}}"
   hx-get="/slips/{{.Slip.ID}}/panel"
   hx-trigger="slip-updated from:body, board-updated from:body"
   hx-sync="this:drop"
   hx-disinherit="hx-sync"
   hx-swap="outerHTML"
 >
+  {{if .Slip.LiveMode}}
+    <header class="ui-slip-card p-3.5 sm:p-4" data-live-header>
+      <div class="flex items-start justify-between gap-2.5">
+        <div class="min-w-0">
+          <div class="flex flex-wrap items-center gap-1.5">
+            <span class="inline-flex shrink-0 items-center gap-1 rounded-full border border-positive bg-positive-soft px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-positive-ink">
+              LIVE
+            </span>
+            <h1 class="truncate font-display text-lg font-semibold sm:text-xl">{{.Slip.Name}}</h1>
+            {{if .Slip.ScopeBadge}}
+              <span class="shrink-0 rounded-md border border-line bg-surface-2 px-1.5 py-0.5 text-[11px] font-medium text-ink-muted">
+                {{.Slip.ScopeBadge}}
+              </span>
+            {{end}}
+          </div>
+          <p class="mt-1 text-xs text-ink-muted">
+            {{if .Slip.LiveUpdatedISO}}
+              Updated <time datetime="{{.Slip.LiveUpdatedISO}}">{{.Slip.LiveUpdatedLabel}}</time>
+            {{else}}
+              Live updates
+            {{end}}
+          </p>
+        </div>
+        <form
+          class="shrink-0"
+          hx-post="/slips/{{.Slip.ID}}/live/refresh"
+          hx-target="#slip-panel"
+          hx-swap="outerHTML"
+        >
+          <button
+            type="submit"
+            class="rounded-md border border-line-strong bg-surface-2 px-2.5 py-1 text-xs font-medium text-ink hover:border-accent"
+          >
+            Refresh
+          </button>
+        </form>
+      </div>
+      {{if gt (len .Siblings) 1}}
+        <nav class="mt-3 flex items-center gap-2 overflow-x-auto border-t border-line pt-2.5" aria-label="Sibling slips" data-sibling-switcher>
+          {{range .Siblings}}
+            <a
+              href="/slips/{{.ID}}"
+              class="inline-flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition {{if .Current}}bg-accent text-accent-ink shadow-sm{{else}}border border-line-strong bg-surface-2 text-ink-muted hover:text-ink{{end}}"
+              {{if .Current}}aria-current="page"{{end}}
+            >
+              <span>{{.Name}}</span>
+              <span class="{{if .Current}}opacity-80{{else}}text-ink-subtle{{end}}">({{.Summary}})</span>
+            </a>
+          {{end}}
+          <a
+            href="/slips/new{{if .Slip.WeekID}}?week={{.Slip.WeekID}}{{end}}"
+            class="inline-flex shrink-0 items-center rounded-lg border border-dashed border-line-strong px-2.5 py-1.5 text-xs font-medium text-ink-muted transition hover:border-ink-muted hover:text-ink"
+          >
+            + New slip
+          </a>
+        </nav>
+      {{end}}
+    </header>
+
+    {{if .Slip.Live.Show}}
+      <section class="ui-slip-card p-3.5 sm:p-4" data-slip-live-progress data-live-state="{{.Slip.Live.State}}" data-live-hero>
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div class="flex min-w-0 items-center gap-2">
+            <span class="shrink-0 rounded-full border px-2 py-0.5 text-xs font-semibold {{.Slip.Live.BadgeClass}}">
+              {{.Slip.Live.StatusLabel}}
+            </span>
+            <span class="truncate text-sm font-medium text-ink">{{.Slip.Live.Summary}}</span>
+          </div>
+          {{template "help-bubble" (dict "Href" (printf "/docs?from=/slips/%d#sys-live" $.Slip.ID) "Label" "How live hit chance works")}}
+        </div>
+
+        <div class="mt-3 grid grid-cols-2 gap-2">
+          <div class="rounded-lg border border-line bg-surface-2 px-3 py-2">
+            <p class="text-[11px] font-medium uppercase tracking-wide text-ink-muted">Before</p>
+            <p class="mt-0.5 text-base font-semibold tabular-nums text-ink">
+              {{if .Slip.Live.PreGameChance}}{{.Slip.Live.PreGameChance}}{{else}}&mdash;{{end}}
+            </p>
+          </div>
+          <div class="rounded-lg border border-line bg-surface-2 px-3 py-2">
+            <p class="text-[11px] font-medium uppercase tracking-wide text-ink-muted">Now</p>
+            <div class="mt-0.5 flex flex-wrap items-baseline gap-1.5">
+              <span class="text-base font-semibold tabular-nums text-ink">
+                {{if .Slip.Live.LiveChance}}{{.Slip.Live.LiveChance}}{{else}}&mdash;{{end}}
+              </span>
+              {{if .Slip.Live.ProbDelta}}
+                <span class="rounded px-1.5 py-0.5 text-[11px] font-semibold tabular-nums {{if eq .Slip.Live.ProbTrend "up"}}bg-positive-soft text-positive-ink{{else if eq .Slip.Live.ProbTrend "down"}}bg-danger-soft text-danger-ink{{else}}bg-surface text-ink-muted{{end}}">
+                  {{.Slip.Live.ProbDelta}}
+                </span>
+              {{end}}
+            </div>
+          </div>
+        </div>
+
+        <div
+          class="mt-3 h-2 w-full overflow-hidden rounded-full bg-surface-2"
+          role="progressbar"
+          aria-label="Live parlay progress"
+          aria-valuemin="0"
+          aria-valuemax="100"
+          aria-valuenow="{{.Slip.Live.ProgressPct}}"
+        >
+          <div
+            class="h-full rounded-full transition-all {{.Slip.Live.BarClass}}"
+            style="width: {{.Slip.Live.ProgressPct}}%"
+          ></div>
+        </div>
+      </section>
+    {{end}}
+
+    {{range .Slip.LiveGames}}
+      <section class="ui-slip-card p-3.5 sm:p-4" data-live-game="{{.GameID}}" data-live-game-status="{{.Status}}">
+        <div class="flex items-center justify-between gap-2">
+          <div class="flex min-w-0 items-center gap-2">
+            {{if or .AwayLogo .HomeLogo .AwayTeam .HomeTeam}}
+              {{template "matchup-logos" (dict "AwayURL" .AwayLogo "HomeURL" .HomeLogo "AwayFallback" .AwayTeam "HomeFallback" .HomeTeam "Size" "h-6 w-6")}}
+            {{end}}
+            <h2 class="truncate font-display text-sm font-semibold text-ink sm:text-base">{{.Matchup}}</h2>
+          </div>
+          <div class="flex shrink-0 items-center gap-2">
+            {{if .ScoreLabel}}
+              <span class="font-mono text-sm font-bold tabular-nums text-ink">{{.ScoreLabel}}</span>
+            {{end}}
+            {{if eq .Status "LIVE"}}
+              <span class="rounded-full border border-positive bg-positive-soft px-2 py-0.5 text-[11px] font-semibold text-positive-ink">
+                {{if .ClockLabel}}{{.ClockLabel}}{{else}}Live{{end}}
+              </span>
+            {{else if eq .Status "FINAL"}}
+              <span class="rounded-full border border-line-strong bg-surface-2 px-2 py-0.5 text-[11px] font-medium text-ink-muted">
+                {{if .ClockLabel}}{{.ClockLabel}}{{else}}Final{{end}}
+              </span>
+            {{else if eq .Status "SCHEDULED"}}
+              <span class="text-xs text-ink-muted">
+                {{if .KickoffISO}}<time datetime="{{.KickoffISO}}">{{.KickoffLabel}}</time>{{else}}{{.KickoffLabel}}{{end}}
+              </span>
+            {{else}}
+              <span class="rounded-full border border-line bg-surface-2 px-2 py-0.5 text-[11px] text-ink-muted">Custom</span>
+            {{end}}
+          </div>
+        </div>
+
+        {{if ne .Status "UNLINKED"}}
+          <div
+            class="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-surface-2"
+            role="progressbar"
+            aria-label="{{.Matchup}} game progress"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            aria-valuenow="{{.GameProgressPct}}"
+            data-game-progress
+          >
+            <div
+              class="h-full rounded-full bg-accent transition-all"
+              style="width: {{.GameProgressPct}}%"
+            ></div>
+          </div>
+        {{end}}
+
+        <ul class="mt-3 space-y-2">
+          {{range .Legs}}
+            {{$leg := .}}
+            <li class="rounded-lg border border-line px-3 py-2.5" data-live-leg="{{.ID}}">
+              <div class="flex items-start justify-between gap-2">
+                <div class="flex min-w-0 flex-1 items-start gap-2">
+                  {{- if .PlayerHeadshot -}}
+                    {{template "player-portrait" (dict "URL" .PlayerHeadshot "Initials" .PlayerInitials "Size" "h-7 w-7" "TextSize" "text-[10px]")}}
+                  {{- else if .TeamLogo -}}
+                    {{template "team-logo" (dict "URL" .TeamLogo "Size" "h-6 w-6")}}
+                  {{- else if .PlayerInitials -}}
+                    {{template "player-portrait" (dict "Initials" .PlayerInitials "Size" "h-7 w-7" "TextSize" "text-[10px]")}}
+                  {{- else if or .MatchupAwayLogo .MatchupHomeLogo -}}
+                    {{template "matchup-logos" (dict "AwayURL" .MatchupAwayLogo "HomeURL" .MatchupHomeLogo "Size" "h-5 w-5")}}
+                  {{- end -}}
+                  <div class="min-w-0 flex-1">
+                    <div class="flex flex-wrap items-center gap-1.5">
+                      {{template "side-badge" .}}
+                      <p class="min-w-0 truncate text-sm font-medium">{{.Selection}}</p>
+                    </div>
+                    <div class="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-ink-muted">
+                      <span class="ui-odds">{{.Odds}}</span>
+                      {{if .SplitLine}}<span class="rounded border border-line-strong bg-surface-2 px-1.5 py-0.5 font-mono text-[10px] font-medium tabular-nums text-ink">{{.SplitLine}}</span>{{end}}
+                      {{if .CanGrade}}
+                        <details class="relative">
+                          <summary
+                            class="cursor-pointer list-none rounded-full border px-1.5 py-0.5 {{resultClass .Result}}"
+                            title="Grade this leg"
+                          >
+                            {{resultLabel .Result .GradedBy}}
+                          </summary>
+                          <ul class="absolute left-0 z-20 mt-1 w-32 overflow-hidden rounded-lg border border-line-strong bg-surface py-1 shadow-xl">
+                            {{range list "PENDING" "WON" "LOST" "PUSH" "VOID"}}
+                              <li>
+                                <form hx-put="/legs/{{$leg.ID}}/result" hx-target="#slip-panel" hx-swap="outerHTML">
+                                  <input type="hidden" name="result" value="{{.}}">
+                                  <button
+                                    type="submit"
+                                    class="block w-full px-3 py-1.5 text-left text-xs {{if eq . $leg.Result}}bg-accent-soft font-semibold text-ink{{else}}text-ink{{end}} hover:bg-surface-2"
+                                  >
+                                    {{.}}
+                                  </button>
+                                </form>
+                              </li>
+                            {{end}}
+                          </ul>
+                        </details>
+                      {{else}}
+                        <span class="rounded-full border px-1.5 py-0.5 {{resultClass .Result}}">
+                          {{resultLabel .Result .GradedBy}}
+                        </span>
+                      {{end}}
+                    </div>
+                  </div>
+                </div>
+                <span class="inline-flex shrink-0 items-center gap-1 rounded-full border border-line-strong bg-surface-2 px-2 py-0.5 text-[11px] font-medium text-ink" data-owner-badge>
+                  {{if .Owner.PictureURL}}
+                    <img src="{{.Owner.PictureURL}}" alt="" referrerpolicy="no-referrer" class="h-4 w-4 rounded-full object-cover">
+                  {{else if .Owner.Initials}}
+                    <span class="flex h-4 w-4 items-center justify-center rounded-full text-[9px] font-semibold text-zinc-950 {{.Owner.AvatarClass}}">{{.Owner.Initials}}</span>
+                  {{end}}
+                  <span>{{.OwnerName}}</span>
+                </span>
+              </div>
+
+              {{with .Live}}
+                <div class="mt-2 space-y-1.5" data-leg-live-progress data-live-state="{{.State}}">
+                  <div
+                    class="h-1.5 w-full overflow-hidden rounded-full bg-surface-2"
+                    role="progressbar"
+                    aria-label="Leg live progress"
+                    aria-valuemin="0"
+                    aria-valuemax="100"
+                    aria-valuenow="{{.ProgressPct}}"
+                  >
+                    <div
+                      class="h-full rounded-full transition-all {{.BarClass}}"
+                      style="width: {{.ProgressPct}}%"
+                    ></div>
+                  </div>
+                  <div class="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 text-[11px] text-ink-muted">
+                    <span class="min-w-0 truncate">
+                      {{- .StatLabel -}}
+                      {{- if and .StatLabel .ClockLabel }} · {{end -}}
+                      {{- .ClockLabel -}}
+                    </span>
+                    <div class="flex shrink-0 items-center gap-1.5 tabular-nums" data-leg-chances>
+                      <span>Before {{if .PreGameChance}}{{.PreGameChance}}{{else}}&mdash;{{end}}</span>
+                      <span aria-hidden="true" class="text-ink-subtle">&rarr;</span>
+                      <span class="font-semibold text-ink">Now {{if .LiveChance}}{{.LiveChance}}{{else}}&mdash;{{end}}</span>
+                      {{if .ProbDelta}}
+                        <span class="rounded px-1 py-0.5 text-[10px] font-semibold {{if eq .ProbTrend "up"}}bg-positive-soft text-positive-ink{{else if eq .ProbTrend "down"}}bg-danger-soft text-danger-ink{{else}}bg-surface-2 text-ink-muted{{end}}">
+                          {{.ProbDelta}}
+                        </span>
+                      {{end}}
+                    </div>
+                  </div>
+                </div>
+              {{end}}
+            </li>
+          {{end}}
+        </ul>
+      </section>
+    {{end}}
+
+    {{if gt .Slip.LockedIn 0}}
+      <form hx-post="/slips/{{.Slip.ID}}/unlock" hx-target="#slip-panel" hx-swap="outerHTML">
+        <button
+          type="submit"
+          class="w-full rounded-lg border border-chrome-border bg-chrome px-3 py-2 text-sm text-chrome-ink hover:bg-chrome-border/40"
+        >
+          Unlock slip
+        </button>
+      </form>
+    {{end}}
+  {{else}}
   <section class="ui-next-card p-4">
     <p class="text-[11px] font-semibold uppercase tracking-wide text-chrome-muted">Next</p>
     <h2 class="mt-1 font-display text-lg font-semibold">{{.Next.Title}}</h2>
@@ -484,6 +758,7 @@
       </ul>
     {{end}}
   </section>
+  {{end}}
 </div>
 {{end}}
 

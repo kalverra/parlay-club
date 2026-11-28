@@ -8,7 +8,17 @@ tags: [live, sse, hub, eventsource, deadlines, hub-topics]
 
 # Live updates
 
-## Summary
+## Overview
+
+```mermaid
+flowchart LR
+  Page["Slip page (EventSource)"] -->|"GET /slips/{id}/events"| Stream["live.Stream.ServeSlip"]
+  Stream -->|"IsLive: connect + every 25s"| Tick["WithLiveTick -> KickLive"]
+  Tick -->|"SyncLive (free ESPN only)"| Hub["Hub (slip:{id}, week:{weekID})"]
+  Slips["internal/slips / internal/refresh"] -->|"Publish after commit"| Hub
+  Hub -->|"slip-updated / board-updated"| Stream
+  Stream -->|"SSE signal (data: {})"| Page
+```
 
 A slip page keeps one `EventSource` open. Events carry no HTML; they only say that something changed. The page then
 refetches the partials it already shows, so every person gets fresh data without per-person HTML crossing the hub.
@@ -67,6 +77,9 @@ commit; auth cookies and SSE deadlines stay on real time even while the stage cl
 - It subscribes to `slip:{id}` and `week:{weekID}` and unsubscribes when the request ends.
 - It sends `event: slip-updated` or `event: board-updated` with `data: {}`.
 - It sends a `: ping` comment every 25 seconds so proxies keep the connection open.
+- When configured with `WithLiveTick` (25 seconds calling `KickLive` in production, omitted in sandbox mode) and the
+  week is in its live window, it invokes the tick callback on connect and every 25 seconds while the stream remains
+  open, stopping its timer on client disconnect, `bye` deadline, or `Shutdown`.
 - It sets `Content-Type: text/event-stream`, `Cache-Control: no-cache`, `Connection: keep-alive`, and
   `X-Accel-Buffering: no`, and flushes every frame.
 
@@ -92,8 +105,8 @@ browser's `EventSource` then reconnects on its own after the usual retry delay, 
 returns is closed at once.
 
 This order matters. `http.Server.Shutdown` waits for active handlers but does not cancel their request contexts, so an
-open stream would hold the drain until its deadline expired. Ending the streams first leaves the whole stop inside the
-8 second budget that Litestream needs to sync; see [Persistence](persistence.md). The refresh drain runs after the HTTP
+open stream would hold the drain until its deadline expired. Ending the streams first leaves the whole stop inside the 8
+second budget that Litestream needs to sync; see [Persistence](persistence.md). The refresh drain runs after the HTTP
 drain, on the same budget. See [Data refresh](data-refresh.md).
 
 The `IsLive` func passed to `live.NewStream` is `refresh.Service.LiveWindow`: a week is live when a game is live or a
@@ -102,8 +115,8 @@ from a `Clock` interface, so tests can fire deadlines by hand. See [Data refresh
 
 ## Client (`web/static/app.js`)
 
-For `OPEN` and `LOCKED` slips, the page marks its body with `data-live-url`; `GRADED` slips omit it. When `data-live-url`
-is present, the client opens one `EventSource`.
+For `OPEN` and `LOCKED` slips, the page marks its body with `data-live-url`; `GRADED` slips omit it. When
+`data-live-url` is present, the client opens one `EventSource`.
 
 - `slip-updated` and `board-updated` call `htmx.trigger(document.body, ...)`. Partials listen with
   `hx-trigger="slip-updated from:body"`.

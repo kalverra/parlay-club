@@ -5,7 +5,7 @@ type: concept
 summary: How a group builds and tracks shared parlays from the slate, covering slate scopes, deadlines, the hub, live progress, A-grade highlights, the pick board, votes, wagers, grading, and editing rules.
 tags: [slips, weeks, legs, members, locking, grading, results, activity, groups, games, quick-add, nfelo, props, autocomplete, research, next-step, hub, pick-board, slate, drilldown, tabs, search, dock, tray, votes, voting, wagers, slate-scopes, deadlines, multi-slip, highlights, live-progress, docs, help-bubbles]
 budget:
-  max_lines: 585
+  max_lines: 615
   max_spans_per_100_lines: 105
   reason: Covers the full slip lifecycle, pick board, highlights, voting, research, grading, wagers, multi-slip rules, and the post-commit live and push seams in one concept doc.
 ---
@@ -30,31 +30,34 @@ postseason), and a week number. Its id is `season*1000 + season_type*100 + week_
 season is `2026209`.
 
 A **slip** is one shared parlay inside a group and a week. Every slip has a **slate scope** (`thursday`, `sunday_main`,
-`weekend`, or `full_week`) that isolates its games and deadline. A week usually has one slip, but a group can make more, and a
-person can belong to several in the same week. The app tracks the picks. Each person places the bet at their own book
-with their own stake, and no money passes through the app.
+`weekend`, or `full_week`) that isolates its games and deadline. A week usually has one slip, but a group can make more,
+and a person can belong to several in the same week. The app tracks the picks. Each person places the bet at their own
+book with their own stake, and no money passes through the app.
 
 ## The hub
 
-`GET /slips/{id}` is the hub. A step banner leads, then the slip header card, the members and their legs, the export card,
-the payout calculator, the **My wager** form (`slip-wager`), and the activity feed. The header shows the slip title,
-its scope badge (`Thursday Slate`, `Sunday Slate`, `Weekend Slate`, `Full Week`, or `1 Game` / `N Games` for custom
-slips), status, and a `+ New slip` link to `/slips/new?week={id}`. On a single-slip week, `+ New slip` sits in the header metadata row. When a group has multiple
-slips in the active week, one horizontal sibling pill switcher bar (`[data-sibling-switcher]`) sits below the title
-with links to each sibling slip, their status summary (`(Locked)`, `(1/2 Picks)`, `(Won)`), and `+ New slip` as a
-trailing pill. In the `export` step the export card moves above the banner, because placing the picks is the one thing
-left. `slip-wager` sits outside `slip-panel`, so live `slip-updated` refreshes do not wipe out in-progress wager inputs.
-The bottom bar keeps Groups, This week, Research, Record Book, and Docs; the hub's one primary action is the way into
-picking. The hub stays one column at every width. Docs (`/docs`) holds the standing explanation; a `?` bubble beside an
-annotation opens the matching section with `?from=`, and [Docs hub](docs-hub.md#help-bubbles) maps every bubble.
+`GET /slips/{id}` is the hub. A step banner leads, then the slip header card, the members and their legs, the export
+card, the payout calculator, the **My wager** form (`slip-wager`), and the activity feed. The header shows the slip
+title, its scope badge (`Thursday Slate`, `Sunday Slate`, `Weekend Slate`, `Full Week`, or `1 Game` / `N Games` for
+custom slips), status, and a `+ New slip` link to `/slips/new?week={id}`. On a single-slip week, `+ New slip` sits in
+the header metadata row. When a group has multiple slips in the active week, one horizontal sibling pill switcher bar
+(`[data-sibling-switcher]`) sits below the title with links to each sibling slip, their status summary (`(Locked)`,
+`(1/2 Picks)`, `(Won)`), and `+ New slip` as a trailing pill. In the `export` step the export card moves above the
+banner, because placing the picks is the one thing left. In the `live` step, `#slip-panel` leads in a dedicated Live
+layout while export, payout, `slip-wager`, and activity collapse into a secondary drawer below it, and `app.js` reloads
+the page if `data-live-mode` flips on an HTMX swap. `slip-wager` sits outside `#slip-panel`, so live `slip-updated`
+refreshes do not wipe out in-progress wager inputs. The bottom bar keeps Groups, This week, Research, Record Book, and
+Docs; the hub's one primary action is the way into picking. The hub stays one column at every width. Docs (`/docs`)
+holds the standing explanation; a `?` bubble beside an annotation opens the matching section with `?from=`, and
+[Docs hub](docs-hub.md#help-bubbles) maps every bubble.
 
 When the slip is `OPEN` and the viewer is in the `pick` step (has remaining leg slots), `#slip-panel` renders a compact
 **"Top A-grade ideas"** strip below the step banner. It runs `analyzer.LoadBoardSignals` and `board.SelectHighlights`
 over cached SQLite odds and signals—making zero external API calls—to surface up to 3 A-grade legs and up to 2 A-grade
 2–3 leg parlay combos. Each card shows its `A` pill, a concise reason, odds with a muted implied percentage chance (and
-combined implied chance on combo headers), an inline `<details>` [four-pillar grade breakdown](analyzer.md), and
-one-tap `+ Add` (or `"Add all N"` via `POST /slips/{id}/legs/batch`, which disables as `"Needs N open slots"` when fewer
-than `N` slots remain). When no A-grade plays exist or the viewer finishes picking, the strip hides cleanly.
+combined implied chance on combo headers), an inline `<details>` [four-pillar grade breakdown](analyzer.md), and one-tap
+`+ Add` (or `"Add all N"` via `POST /slips/{id}/legs/batch`, which disables as `"Needs N open slots"` when fewer than
+`N` slots remain). When no A-grade plays exist or the viewer finishes picking, the strip hides cleanly.
 
 `slips.NextStep` is one pure function over the slip, its members, its legs, the week's games, the viewer, and `now`. It
 returns the step, the legs still needed, the names the slip waits on, the first kickoff still ahead, and the slip's
@@ -67,8 +70,12 @@ result. The hub banner and each group card read its label, so the two always agr
 | `closed`  | The week's picks are over before the slip could finish.  | Picks are closed   | None; the slip stays visible.                       |
 | `lock_in` | The viewer has every leg and has not locked in.           | Ready to lock in   | Posts `/slips/{id}/lock`.                           |
 | `waiting` | The viewer is locked in and someone else is not.          | Waiting on {names} | Nudge {name} shares or copies the message.          |
-| `export`  | Everyone is locked in.                                    | Ready to place     | The export card leads the hub.                      |
+| `export`  | Everyone is locked in and no leg's game has started.      | Ready to place     | The export card leads the hub.                      |
+| `live`    | Everyone is locked in and at least one leg's game started.| Live               | Track live progress on the slip.                    |
 | `done`    | The slip is `GRADED`.                                     | Won, Lost, or Push | None.                                               |
+
+A locked, non-graded slip moves from `export` to `live` when at least one leg references a live, final, or
+at/past-kickoff game in its scope; pre-kickoff and unlinked-only slips stay in `export`.
 
 The deadline is the earliest game in the slip's slate scope whose kickoff is still ahead of `now`. It renders as
 `Picks close for BUF @ MIA at <time>`, and `app.js` formats the time in the reader's zone. Scoping isolates deadlines: a
@@ -100,10 +107,10 @@ already exist, `EnsureWeekSlips` skips missing schedules whose `slate_scope` has
 schedules). The route always renders the per-group overview page:
 
 - **Spotlight slips:** Active or upcoming slips from that week appear in the hero spotlight (`isSpotlightSlip`): any
-  non-graded slip whose next step is `pick`, `lock_in`, `join`, `waiting`, or `export`, or a locked slip with an
-  eligible live or upcoming game (`now < kickoff`). Cards sort by urgency and earliest deadline, show a compact live
-  progress bar and `Live X%` hit chance when any leg is live or settled, and offer a primary button ("Pick N more" to
-  `/slips/{id}/pick` when in `pick`, otherwise "Open slip" to `/slips/{id}`).
+  non-graded slip whose next step is `pick`, `lock_in`, `join`, `waiting`, `export`, or `live`, or a locked slip with an
+  eligible live or upcoming game (`now < kickoff`). Cards sort by urgency (`live` first) and earliest deadline, show a
+  compact live progress bar and `Live X%` hit chance when any leg is live or settled, and offer a primary button ("Pick
+  N more" to `/slips/{id}/pick` when in `pick`, "Watch live" to `/slips/{id}` when in `live`, otherwise "Open slip").
 - **Quiet state & overview sections:** With no spotlight slips, the hero shows "No active slip right now", notes the
   next upcoming week if loaded, and offers "+ Start a slip" (`/slips/new`). Below it sit the group record snapshot
   (`/record`), recent non-spotlight slips, recurring schedules (`+ Add recurring slip` to `/slips/new?mode=recurring`),
@@ -117,7 +124,8 @@ The create screen adapts to whether upcoming weeks and existing slips are presen
 
 - **No upcoming weeks:** When `UpcomingWeeks` is empty, it displays *"No upcoming games are loaded yet"* and hides the
   form.
-- **Empty week:** With an upcoming week and no slips yet, it reads *"Start {Week}'s slip"* and *"No slip for {Week} yet"*.
+- **Empty week:** With an upcoming week and no slips yet, it reads *"Start {Week}'s slip"* and
+  *"No slip for {Week} yet"*.
 - **Existing-slip week:** When the target week already has at least one slip, it reads *"Add a slip for {Week}"* and
   *"Pick a mode, games or slate, legs per member, and who's in."*
 - **Solo group:** A group with only the viewer adds *"It's just you for now"* and points at Groups for an invite.
@@ -126,9 +134,9 @@ A mode toggle switches between **One-off** (default) and **Recurring**:
 
 - **One-off (`mode=one_off`):** Picks an upcoming week (switching weeks loads `GET /slips/new/games` via HTMX), shows
   dynamic weekday shortcut chips derived from that week's upcoming games in Eastern time (`All Sunday`, `All Thursday`,
-  `All Monday`, `All Saturday`, `All Friday`, `All games`, `Clear`), pre-selects Sunday games when present (otherwise all
-  upcoming games), and persists `SlateScopeCustom` with the selected `game_id` rows via `db.Store.CreateSlipWithGames`.
-  Submitting zero games returns 422 (`ErrSlipGamesRequired`).
+  `All Monday`, `All Saturday`, `All Friday`, `All games`, `Clear`), pre-selects Sunday games when present (otherwise
+  all upcoming games), and persists `SlateScopeCustom` with the selected `game_id` rows via
+  `db.Store.CreateSlipWithGames`. Submitting zero games returns 422 (`ErrSlipGamesRequired`).
 - **Recurring (`mode=recurring`):** Picks a repeating `slate_scope` (`ValidForSchedule`: `sunday_main`, `thursday`,
   `weekend`, `full_week`), creates a `GroupSlipSchedule`, runs `slips.EnsureWeekSlips` on the first upcoming week, and
   redirects to the materialized slip (or `/groups/{id}/week` if no matching game is upcoming).
@@ -149,8 +157,8 @@ Every slip belongs to a **slate scope** (`internal/db/slips.go`):
 
 Scopes isolate deadlines and pick boundaries through `slips.FilterGamesForSlip`:
 
-- **Deadlines:** `slips.NextStep` filters games with `FilterGamesForSlip` before finding the earliest upcoming kickoff. A
-  Thursday game does not pull a Sunday Main or custom Sunday slip's deadline forward.
+- **Deadlines:** `slips.NextStep` filters games with `FilterGamesForSlip` before finding the earliest upcoming kickoff.
+  A Thursday game does not pull a Sunday Main or custom Sunday slip's deadline forward.
 - **Picks:** A pick must belong to a game allowed by the slip's scope (or `slip_games` for `custom`). Adding a pick for
   an ineligible game returns `ErrGameOutsideScope`.
 - **Closure:** Once all eligible games in a slip's scope kick off, an incomplete slip enters `closed`. Other slips in
@@ -209,7 +217,10 @@ missing, stale (>72h), or live. `db.Store.CreateLeg` starts every leg `PENDING` 
 
 The slip's **reference odds** multiply each leg's reference price: the median of the prices the slip members' home books
 carry for that leg via `db.MatchBookOdds` (one price per book, preferring an exact `Line` match and falling back to the
-book's current line for the same selection). A leg whose members' books do not price it keeps its own price. The payout calculator shows muted implied percentage chances inline beside both **Combined** and **Reference** odds, omitting them when no legs count (empty or all-`PUSH`/`VOID` slips). Each chance pairs with a `?` bubble. The formulas are in [Odds math](../reference/odds-math.md).
+book's current line for the same selection). A leg whose members' books do not price it keeps its own price. The payout
+calculator shows muted implied percentage chances inline beside both **Combined** and **Reference** odds, omitting them
+when no legs count (empty or all-`PUSH`/`VOID` slips). Each chance pairs with a `?` bubble. The formulas are in
+[Odds math](../reference/odds-math.md).
 
 ### Selection identity
 
@@ -238,21 +249,22 @@ header, main, and dock widen to `max-w-6xl`, and carries the slip's `data-live-u
 page. The dock is only on this screen; the hub keeps its panel and banner.
 
 `internal/board` turns the week's stored odds into rows. It reads nothing itself. Before building rows and cards, the
-pick board filters the week's games for the active slip using `slips.FilterGamesForSlip`. Games outside
-the slip's scope are omitted from the slate, window chips, and detail drilldowns. `db.CurrentOdds` (applied by
-`Store.OddsForWeek` and `Store.OddsForGame`) drops rows from older odds syncs at the storage seam, then `board.BuildDualBook`
-folds one row per selection, keeping only selections quoted by **both** DraftKings and FanDuel so every pickable line
-is exportable on both books. Rather than averaging differing lines into a median, it populates `DK` and `FD` quotes and
-sets `LinesDiffer` when their lines differ, using the viewer's `homeBook` (DraftKings or FanDuel, defaulting to FanDuel
-when unset) for the primary line and price. When `LinesDiffer` is true, slate cards, option buttons, the pick tray, slip
+pick board filters the week's games for the active slip using `slips.FilterGamesForSlip`. Games outside the slip's scope
+are omitted from the slate, window chips, and detail drilldowns. `db.CurrentOdds` (applied by `Store.OddsForWeek` and
+`Store.OddsForGame`) drops rows from older odds syncs at the storage seam, then `board.BuildDualBook` folds one row per
+selection, keeping only selections quoted by **both** DraftKings and FanDuel so every pickable line is exportable on
+both books. Rather than averaging differing lines into a median, it populates `DK` and `FD` quotes and sets
+`LinesDiffer` when their lines differ, using the viewer's `homeBook` (DraftKings or FanDuel, defaulting to FanDuel when
+unset) for the primary line and price. When `LinesDiffer` is true, slate cards, option buttons, the pick tray, slip
 legs, and A-grade highlights render an explicit DK vs. FD split-line badge ordered with the viewer's `homeBook` first
-(e.g., DK 68.5 (-111) · FD 66.5 (-115)). A game that has kicked off is left out and counted. Each row carries its game, market, team, player, the
-roster athlete ID and position, side, line, price, display text, a category, and a kickoff window, plus picked-leg drift
-fields (`PickedLine`, `PickedOdds`, `Drifted`, `BoardDriftNote`, `TrayDriftNote`) when bound to a viewer leg.
+(e.g., DK 68.5 (-111) · FD 66.5 (-115)). A game that has kicked off is left out and counted. Each row carries its game,
+market, team, player, the roster athlete ID and position, side, line, price, display text, a category, and a kickoff
+window, plus picked-leg drift fields (`PickedLine`, `PickedOdds`, `Drifted`, `BoardDriftNote`, `TrayDriftNote`) when
+bound to a viewer leg.
 
-`board.BuildSlate` (using `board.Slates`) shapes those rows into one card per game still ahead. It filters by the
-search text and the kickoff window, orders cards by kickoff, resolves the open game, counts rows per kickoff window,
-flags games with lines but no loaded props (`Unloaded`), and derives each card's spread, total, moneyline, and slate
+`board.BuildSlate` (using `board.Slates`) shapes those rows into one card per game still ahead. It filters by the search
+text and the kickoff window, orders cards by kickoff, resolves the open game, counts rows per kickoff window, flags
+games with lines but no loaded props (`Unloaded`), and derives each card's spread, total, moneyline, and slate
 empty-state flags. A game with no stored odds still gets a card, with no lines and no props. The prop count is every row
 outside the lines category, so team totals count as props.
 
@@ -263,14 +275,14 @@ kickoff (Thursday, Sunday morning before noon, Sunday early before 4, Sunday lat
 Thursday- or Monday-night game that lands on the next day in UTC still reads by its local Eastern day. A chip shows how
 many rows it covers and appears only when it has rows. Each card shows paired away and home team logos beside the
 matchup, venue, kickoff, spread, total, moneyline, an `"N A-grade"` pill when that game has unpicked A-grade legs, and
-either "Explore N props" or "No props yet", and the open game is highlighted. Cards are links: a plain `href` to the full page and an `hx-get` that swaps `#pick-body` and pushes the
-full page URL.
+either "Explore N props" or "No props yet", and the open game is highlighted. Cards are links: a plain `href` to the
+full page and an `hx-get` that swaps `#pick-body` and pushes the full page URL.
 
 A card opens the detail: a pinned header with paired matchup logos, the matchup, kickoff, venue, a Research link, an
-"All games" back link, and a horizontal category chip bar (All plus non-empty categories). Below—when the slip is
-OPEN with open slots—sits **"Top plays in this game"** (up to 3 A-grade legs and 1 same-game A-grade combo with
-one-tap + Add), followed by the **Group by** switcher (Category default, Player, Grade) and sort chips. The header and
-chips stay below the top bar while rows scroll sideways on a phone with no visible scrollbar.
+"All games" back link, and a horizontal category chip bar (All plus non-empty categories). Below—when the slip is OPEN
+with open slots—sits **"Top plays in this game"** (up to 3 A-grade legs and 1 same-game A-grade combo with one-tap +
+Add), followed by the **Group by** switcher (Category default, Player, Grade) and sort chips. The header and chips stay
+below the top bar while rows scroll sideways on a phone with no visible scrollbar.
 
 Category chips are All (default when `cat` is omitted or empty), Lines, Passing, Rushing, Receiving, TDs, and Kicking.
 Team totals fold into Lines; a category chip appears only when it has rows or is active, and its badge counts its rows.
@@ -302,9 +314,9 @@ per player card in priority order):
 
 - **Smash matchup:** player `OVER` prop with >= 20% `TargetShare` or >= 12 carries/game against a bottom-6 opposing
   defense (EPA allowed rank >= 27).
-- **Fits slip:** line or prop that pairs positively with an existing leg on the open slip (such as a receiver `OVER` with
-  that team's QB passing yards `OVER`, or an opposing receiver or same-team RB `OVER` with a `-7.0` or larger favorite
-  spread).
+- **Fits slip:** line or prop that pairs positively with an existing leg on the open slip (such as a receiver `OVER`
+  with that team's QB passing yards `OVER`, or an opposing receiver or same-team RB `OVER` with a `-7.0` or larger
+  favorite spread).
 - **Role bump:** player `OVER`/`YES` prop where a same-position teammate is marked `Out` in the merged game injury list
   (`games.injuries_json` plus key-position `roster_players` injuries via `analyzer.MergeGameInjuries`) and the player
   posted >= 15 percentage points higher `OffensePct` in a prior game this season.
@@ -319,31 +331,31 @@ Game selection replaces `#pick-body`, which can reset the slate's scroll. `app.j
 element with a UTC ISO value, a neutral ET fallback from the server ("Mon 3:04 PM ET"), and the reader's local zone from
 `app.js` after each swap.
 
-`board.Row.MatchesLeg` matches each viewer leg by `db.SameSelection` (ignoring `Line`), so a picked leg stays bound
-to its board row with remove and swap controls even if the consensus or home-book line moves after picking.
+`board.Row.MatchesLeg` matches each viewer leg by `db.SameSelection` (ignoring `Line`), so a picked leg stays bound to
+its board row with remove and swap controls even if the consensus or home-book line moves after picking.
 
 `board.Pair` is the one pairing rule, shared by the detail and every refreshed row (`board.LineGroupForLeg` applies
 `BoardSignals`, pairs the game's rows, and locates the matching `LineGroup` via `LineGroup.HoldsLeg`). It folds rows
 that share a line into one group: `SPREAD`, `ML`, and `TOTAL` key on the market alone so both sides stay together even
 when DK and FD differ by half a point, `TEAM_TOTAL` keys on its market and team, and a player prop keys on its market
-and canonical player. `board.LineKey` names that identity, so the row's element id and the update path agree. Options come back in a
-fixed order, never in input order: away then home on a spread or moneyline, Over then Under on a total or prop, and the
-single Yes on an anytime touchdown. A line with no stored price on one side keeps one option, and a line with both sides
-picked, which the custom form can produce, paints both and lets either be removed.
+and canonical player. `board.LineKey` names that identity, so the row's element id and the update path agree. Options
+come back in a fixed order, never in input order: away then home on a spread or moneyline, Over then Under on a total or
+prop, and the single Yes on an anytime touchdown. A line with no stored price on one side keeps one option, and a line
+with both sides picked, which the custom form can produce, paints both and lets either be removed.
 
 Tapping a side of an unpicked line adds it (with `quick=1&from=board`), tapping a picked side removes it, and tapping
 the other side of a picked line sends `PUT /legs/{id}` so the pair holds one leg instead of two (`UpdateLeg` enforces
 owner, lock in, and kickoff). In Category and Player modes, add, update, and delete return the refreshed pair row with
-pre-pick grade pills plus tray-updated, swapping only that row; a switch across lines also fires board-updated. In
-Grade mode (where opposite sides can sit in different grade buckets), options use `from=detail` and return an out-of-band
+pre-pick grade pills plus tray-updated, swapping only that row; a switch across lines also fires board-updated. In Grade
+mode (where opposite sides can sit in different grade buckets), options use `from=detail` and return an out-of-band
 `#pick-detail` swap plus tray-updated and slip-updated. At the limit, an unpicked option opens "Swap which pick?" for
 unlocked legs.
 
-When a saved non-`OTHER` leg's `Line` or `Odds` differ from the current board row (`board.Row.Drifted`), `board.BuildDualBook`
-populates `BoardDriftNote` (`Slip ... · now ...`) and `TrayDriftNote` (`Now ...`) so both the board option and the pick
-tray show a drift notice. While the slip is `OPEN` and the leg is not kickoff-locked (and the viewer is not locked in on
-the board), a one-tap **Sync line** form (`PUT /legs/{id}` with `from=board` or `from=tray`) updates the leg's `line`,
-`odds`, and regenerated `selection` text to match the board.
+When a saved non-`OTHER` leg's `Line` or `Odds` differ from the current board row (`board.Row.Drifted`),
+`board.BuildDualBook` populates `BoardDriftNote` (`Slip ... · now ...`) and `TrayDriftNote` (`Now ...`) so both the
+board option and the pick tray show a drift notice. While the slip is `OPEN` and the leg is not kickoff-locked (and the
+viewer is not locked in on the board), a one-tap **Sync line** form (`PUT /legs/{id}` with `from=board` or `from=tray`)
+updates the leg's `line`, `odds`, and regenerated `selection` text to match the board.
 
 A game that has stored lines but no prop rows offers "Load them" on its slate card and again in its open detail: "Props
 for BUF @ MIA aren't loaded yet." The button calls `GET /games/{id}/props?slip=`, which runs `SyncGameProps` for that
@@ -368,10 +380,11 @@ synced. When only some games have started, one line says how many are hidden.
 The dock shows "Your picks", `Picked of Limit`, the combined price, and its implied percentage chance (e.g.,
 `1 of 2 · 1.91x (-110) · 52%`), plus a "Slip" button. The combined price uses `parlay.CombinedOdds` and
 `parlay.DecimalToAmerican`, matching the payout card; an empty slip shows only the count and omits the implied chance.
-The button loads `GET /slips/{id}/tray` into a `dialog` sheet showing the viewer's legs (each with an Over/Under
-badge when applicable, odds, and muted implied chance), remove buttons (or "Locked" after kickoff), progress ("1 of 2"),
-analyzer warnings for those legs, and "Done" or "Review and lock in" at the limit. Both the dock (`GET /slips/{id}/pick/dock`) and tray watch `tray-updated` and
-`slip-updated` so any leg change updates the count and price without a reload.
+The button loads `GET /slips/{id}/tray` into a `dialog` sheet showing the viewer's legs (each with an Over/Under badge
+when applicable, odds, and muted implied chance), remove buttons (or "Locked" after kickoff), progress ("1 of 2"),
+analyzer warnings for those legs, and "Done" or "Review and lock in" at the limit. Both the dock
+(`GET /slips/{id}/pick/dock`) and tray watch `tray-updated` and `slip-updated` so any leg change updates the count and
+price without a reload.
 
 `GET /games` is a 303 to the active group's week, so old links still land somewhere useful. `GET /games/{id}/props`
 without `?slip=` still renders the standalone prop partial for one game, with team totals and player props grouped under
@@ -383,10 +396,10 @@ Members can react to each other's picks with an up or down vote. The hub shows `
 viewer's own vote, and makes the tallies tap targets while the slip is `OPEN`. The owner of a leg sees the tally only,
 and once the slip leaves `OPEN` every leg is read-only: the buttons go and the tally stays.
 
-`slips.Service.Vote` (`internal/slips`) takes the leg, the member, and `1`, `-1`, or `0` to clear. Only slip members vote
-(`ErrNotMember`), never on their own pick (`ErrOwnVote`), and only while the slip is `OPEN` (`ErrVotesClosed`). Kickoff
-does not close a vote, and unlocking reopens voting because it sets the slip back to `OPEN`. Voting the same value again
-changes nothing and publishes nothing. A change publishes `slip:{id}` and writes no activity entry.
+`slips.Service.Vote` (`internal/slips`) takes the leg, the member, and `1`, `-1`, or `0` to clear. Only slip members
+vote (`ErrNotMember`), never on their own pick (`ErrOwnVote`), and only while the slip is `OPEN` (`ErrVotesClosed`).
+Kickoff does not close a vote, and unlocking reopens voting because it sets the slip back to `OPEN`. Voting the same
+value again changes nothing and publishes nothing. A change publishes `slip:{id}` and writes no activity entry.
 
 A changed pick loses its votes: `UpdateLeg` deletes them in the same transaction when the canonical selection changes
 (game, market, team, canonical player, or side) or when an `OTHER` pick changes. Odds-only edits and board-synced line
@@ -397,34 +410,55 @@ for the Record Book.
 
 ## Research
 
-Research (`GET /research`) is a primary tab: a slate-wide explorer of every cached bet this week, with a targeted game or
-player sheet below it when a link names one.
+Research (`GET /research`) is a primary tab: a slate-wide explorer of every cached bet this week, with a targeted game
+or player sheet below it when a link names one.
 
-- **Explorer and visual-first per-bet view:** `board.BuildDualBook` and `board.Explore` filter cached rows to selections quoted by both DraftKings and FanDuel and score them with `analyzer.ScoreLeg` with zero paid API credits. Each card links to `/research/bet` (keyed by `db.SameSelection` so links survive drift) and offers "+ Add" via `GET /bets/add-sheet` into `#bet-add-dialog`. `/research/bet` leads with the bet summary (with Over/Under badge) and add-to-slip actions, then a 2-column FD vs DK snapshot (home book first), de-vig edge, 4-pillar bars, and warnings, followed by visual player/team charts, lower-fold full breakdown with a collapsed "Compare all N books" section, and related bets (direct "+ Add" when `slip_id` is an eligible active slip, or `#bet-add-dialog` otherwise); filters and sorts are in [the routes](../reference/routes.md#research).
+- **Explorer and visual-first per-bet view:** `board.BuildDualBook` and `board.Explore` filter cached rows to selections
+  quoted by both DraftKings and FanDuel and score them with `analyzer.ScoreLeg` with zero paid API credits. Each card
+  links to `/research/bet` (keyed by `db.SameSelection` so links survive drift) and offers "+ Add" via
+  `GET /bets/add-sheet` into `#bet-add-dialog`. `/research/bet` leads with the bet summary (with Over/Under badge) and
+  add-to-slip actions, then a 2-column FD vs DK snapshot (home book first), de-vig edge, 4-pillar bars, and warnings,
+  followed by visual player/team charts, lower-fold full breakdown with a collapsed "Compare all N books" section, and
+  related bets (direct "+ Add" when `slip_id` is an eligible active slip, or `#bet-add-dialog` otherwise); filters and
+  sorts are in [the routes](../reference/routes.md#research).
 - **Sheets:** `GET /research/games/{id}` reads cached injuries and fixes unmatched prop names;
   `GET /research/players/{espnID}` reads the cached game log and shows the matchup strip, L5 and season hit rates, the
-  last-5 range and median, and the opposing-defense chart. Logos and portraits fall back to initials or text, and Research
-  stays one column.
+  last-5 range and median, and the opposing-defense chart. Logos and portraits fall back to initials or text, and
+  Research stays one column.
 
 ## Live progress
 
-Once any leg on a slip enters a `LIVE` game or is settled (`WON`, `LOST`, `PUSH`, `VOID`), the app surfaces live
-progress bars and deterministic hit chances without spending paid odds credits:
+Once a locked slip enters the `live` step (or while an open/graded slip has a live or settled leg), the app surfaces
+live progress bars and deterministic hit chances without spending paid odds credits:
 
-- **Slip hub (`#slip-panel`):** Renders a live parlay progress card above the member list with a status badge (`Live`,
-  `Cashed`, `Busted`, `Push`, or `Scheduled`), hit/live/lost summary, `role="progressbar"` fill bar, and
-  `Live chance X%` beside the muted `Pre-game Y%` implied probability (omitting chances when every leg pushes or voids).
-  `Live chance` carries a `?` bubble to `#sys-live` that explains how progress moves, and each leg row's implied chance
-  bubbles to the glossary at `#term-implied-prob`. A `LIVE` or settled leg row adds a slim progress strip showing the live
-  stat or score, game clock/quarter (or `Live · stats pending` before box-score stats arrive), and leg hit chance (`100%`
-  when cashed, `0%` when busted).
-- **Group overview:** Spotlight cards show a single-row progress bar, status badge, summary, and `Live X%`.
+- **Dedicated Live view (`live` step on `/slips/{id}`):**
+  - **Layout and collapsed secondary controls:** `#slip-panel` (`data-live-mode="true"`) renders first, while export,
+    payout, `slip-wager`, and activity move below it inside a collapsed details drawer ("Bet details, export & wager").
+    Keeping `slip-wager` outside `#slip-panel` prevents SSE swaps from wiping wager edits. When `#slip-panel` swaps with
+    a different `data-live-mode` than the outer section, `app.js` reloads the page so open tabs transition cleanly at
+    kickoff or grading.
+  - **Compact Live header:** Shows the LIVE pill, slip title, scope badge, sibling switcher (when multiple slips exist),
+    an updated timestamp from `sync_state`, and a Refresh button (`POST /slips/{id}/live/refresh`), omitting the
+    pre-game Next banner, highlights strip, and analyzer warnings.
+  - **Parlay Live Hero card:** Shows the status badge (Live, Cashed, Busted, Push, or Scheduled), hit/live/upcoming/lost
+    summary, a `?` bubble to `#sys-live`, a 2-column **Before** vs. **Now** hit-chance box with probability delta badge,
+    and the parlay progress bar.
+  - **Game-time ordering (`LiveGames`):** Instead of grouping by member, legs group by game and sort live, then
+    scheduled, then final by earliest kickoff (with unlinked `OTHER` legs last under "Other legs"). Each game card shows
+    team logos, matchup, live score (or kickoff `<time>`), clock/quarter badge, and a game-elapsed progress bar. Inside
+    each game, legs sort by urgency (live, scheduled, unavailable, cashed, busted, push/void) and display a compact
+    owner badge, grade override menu, leg progress bar, live stat/clock label, and a **Before → Now** hit-chance row on
+    every leg.
+- **Pre-live and graded slips (`#slip-panel`):** When `LiveMode` is false but a leg is `LIVE` or settled, `#slip-panel`
+  renders a compact live parlay card above the member list and adds a slim progress strip to live or settled leg rows.
+- **Group overview:** Spotlight cards rank `live` slips first ("Watch live"), showing a single-row progress bar, status
+  badge, summary, and `Live X%`.
 - **Probability and early settlement (`internal/progress`):** `EvaluateLeg` and `EvaluateSlip` anchor each leg to its
   pre-game implied probability (`parlay.ImpliedProb`) and update it deterministically from ESPN scores/clock and
-  `games.boxscore_json`. `PUSH` and `VOID` legs drop out of the parlay product and bar average, and any `LOST` or busted
-  leg drops the parlay live chance to `0%`. Monotonic markets (totals, TDs, attempts, receptions, kicking points) cash
-  or bust as soon as a live stat crosses the line; yardage props stay live until `FINAL` because negative plays can
-  reduce totals.
+  `games.boxscore_json`. Every leg also carries game-elapsed progress and before-vs-current probability delta and trend
+  (up, down, or flat within a 0.5% deadband), and slip progress adds an upcoming leg count (shown as "· N upcoming" when
+  non-zero) plus slip-level probability delta and trend. `PUSH`/`VOID` legs drop out, any lost leg sets parlay live
+  chance to 0%, monotonic markets settle early on crossing the line, and yardage props stay live until final.
 
 ## Grading
 
@@ -437,9 +471,10 @@ result chip on each leg opens a menu of `PENDING`, `WON`, `LOST`, `PUSH`, and `V
 `PUT /legs/{id}/result` with the upper-case result, and the refreshed panel shows the recomputed slip. Someone who is
 not on the slip sees a plain chip and cannot grade.
 
-`slips.Service.SetLegResult` (`internal/slips`) records the member's name in `graded_by`, writes "{name} set {selection} to
-{result}" to the activity feed, and publishes `slip:{id}`. Grading a leg the same way again by the same member changes
-nothing, so it writes no activity entry and publishes nothing. A later grade by any member overrides the earlier one.
+`slips.Service.SetLegResult` (`internal/slips`) records the member's name in `graded_by`, writes "{name} set {selection}
+to {result}" to the activity feed, and publishes `slip:{id}`. Grading a leg the same way again by the same member
+changes nothing, so it writes no activity entry and publishes nothing. A later grade by any member overrides the earlier
+one.
 
 The slip result recomputes from every leg after each change:
 
@@ -480,17 +515,17 @@ A slip's status is `OPEN`, `LOCKED`, or `GRADED`, and its result is `PENDING`, `
 
 ## Editing and locking
 
-The rules live in `slips.Service` (`internal/slips`). Each method checks them, writes the change and one activity entry in one
-transaction, updates the slip's status, then publishes `slip:{id}`. The clock is injected through `now`, so kickoff and
-locking stay testable.
+The rules live in `slips.Service` (`internal/slips`). Each method checks them, writes the change and one activity entry
+in one transaction, updates the slip's status, then publishes `slip:{id}`. The clock is injected through `now`, so
+kickoff and locking stay testable.
 
-The service holds two optional seams, both called only after the commit. `Publisher` is one method, `Publish(topic string)`,
-and `*live.Hub` satisfies it; [Live updates](live-updates.md) covers the topics. `Notifier` is one method,
-`Notify(ctx, Event)`, and `*push.Service` satisfies it when push is on. An `Event` carries the kind, the slip, the actor
-(`0` for the auto grader), the number of legs added, and the one pick when only one was added, but no message text, so
-[Notifications](notifications.md#slip-events) owns the words and the recipients. It raises `legs_added` from `AddLeg` or
-`AddLegs`, `slip_locked` from the lock in that moves the slip to `LOCKED`, and `slip_graded` from the grade that moves it
-to `GRADED`. A rolled-back transaction raises nothing.
+The service holds two optional seams, both called only after the commit. `Publisher` is one method,
+`Publish(topic string)`, and `*live.Hub` satisfies it; [Live updates](live-updates.md) covers the topics. `Notifier` is
+one method, `Notify(ctx, Event)`, and `*push.Service` satisfies it when push is on. An `Event` carries the kind, the
+slip, the actor (`0` for the auto grader), the number of legs added, and the one pick when only one was added, but no
+message text, so [Notifications](notifications.md#slip-events) owns the words and the recipients. It raises `legs_added`
+from `AddLeg` or `AddLegs`, `slip_locked` from the lock in that moves the slip to `LOCKED`, and `slip_graded` from the
+grade that moves it to `GRADED`. A rolled-back transaction raises nothing.
 
 1. Only slip members can add legs. A member can edit or delete only their own legs. A non-member gets `ErrNotMember`,
    and someone else's leg gets `ErrNotOwner`.
@@ -561,14 +596,15 @@ Thursday Slate slip and Sunday Slate slip) or as one-off slips.
 When a week has multiple slips:
 
 - **Group overview (`GET /groups/{id}/week`):** Renders a spotlight card for each active or upcoming slip in the week
-  (ordered by urgency and earliest deadline) showing its name, scope badge (Thursday Slate, Sunday Slate, Weekend
-  Slate, Full Week, or custom game count), next-step pill, reader-localized deadline, pick/lock progress, and primary
-  action button, alongside "+ New slip" in the header.
+  (ordered by urgency and earliest deadline) showing its name, scope badge (Thursday Slate, Sunday Slate, Weekend Slate,
+  Full Week, or custom game count), next-step pill, reader-localized deadline, pick/lock progress, and primary action
+  button, alongside "+ New slip" in the header.
 - **Single sibling pill switcher (`GET /slips/{id}`):** The slip header card renders one horizontal pill bar below the
   title with links to each sibling slip, their status summary (`(Locked)`, `(1/2 Picks)`, `(Won)`), and `+ New slip` at
   the end. It updates live on `slip-updated`.
 - **Groups home summary (`GET /`):** Evaluates `slips.NextStep` across every slip in the group's latest week and shows
-  the highest-priority label: actionable viewer step (`pick`, `lock_in`, `join`) > active progress (`waiting`, `export`)
+  the highest-priority label: `live` > actionable viewer step (`pick`, `lock_in`, `join`) > active progress (`waiting`,
+  `export`)
   > `closed` > `done`, breaking ties by earliest upcoming deadline and then `SlipsForWeek` order.
 - **Pick isolation:** Each slip isolates its own deadlines and available board games by its `slate_scope`.
 
