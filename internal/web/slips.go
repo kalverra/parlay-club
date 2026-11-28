@@ -1043,6 +1043,9 @@ func (h *slipHandlers) addLeg(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Hx-Trigger", "tray-updated")
 		h.renderPartial(w, "pick-line-group", h.pickPairRow(r.Context(), slip, created, true))
 		return
+	case "detail":
+		h.renderPickDetailSwap(w, r, slip, db.StringValue(created.GameID))
+		return
 	case "pick":
 		data, err := h.pickPageData(r.Context(), slip, pickQuery(r, h.deps.now()))
 		if err != nil {
@@ -1145,6 +1148,9 @@ func (h *slipHandlers) updateLeg(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Hx-Trigger", trigger)
 		h.renderPartial(w, "pick-line-group", h.pickPairRow(r.Context(), slip, updated, true))
 		return
+	case "detail":
+		h.renderPickDetailSwap(w, r, slip, db.StringValue(updated.GameID))
+		return
 	case "tray":
 		dock, err := h.pickDockData(r.Context(), slip)
 		if err != nil {
@@ -1237,8 +1243,37 @@ func (h *slipHandlers) deleteLeg(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Hx-Trigger", "tray-updated")
 		h.renderPartial(w, "pick-line-group", h.pickPairRow(r.Context(), slip, leg, false))
 		return
+	case "detail":
+		h.renderPickDetailSwap(w, r, slip, db.StringValue(leg.GameID))
+		return
 	}
 	h.renderPanel(w, r, slip)
+}
+
+// renderPickDetailSwap refreshes #pick-detail after a pick-board mutation in
+// grouped/grade mode without touching the slate or triggering external refreshes.
+func (h *slipHandlers) renderPickDetailSwap(
+	w http.ResponseWriter,
+	r *http.Request,
+	slip db.Slip,
+	fallbackGameID string,
+) {
+	q := pickQuery(r, h.deps.now())
+	if q.GameID == "" {
+		q.GameID = fallbackGameID
+	}
+	detail, ok, err := h.pickDetailData(r.Context(), slip, q)
+	if err != nil {
+		h.serverError(w, err)
+		return
+	}
+	w.Header().Set("Hx-Trigger", "tray-updated, slip-updated")
+	if !ok {
+		h.renderPartialCtx(r.Context(), w, "pick-detail-empty", nil)
+		return
+	}
+	detail.OOB = true
+	h.renderPartialCtx(r.Context(), w, "pick-detail", detail)
 }
 
 // lockIn records the signed-in member's lock.

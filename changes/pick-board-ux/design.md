@@ -281,7 +281,7 @@ swaps, `from=detail` HTMX mutation responses for Grade mode, and mobile-safe sib
 Risk: medium (modifies primary pick-board templates and HTMX swap targets where phone-width popover layout and
 button/popover separation are only partially verified by HTML/handler tests)
 
-- [ ] Wire `GroupBy`, `SortGrade`, and `board.ScoreRows` through `internal/web/pick.go` and `internal/web/slips.go`
+- [x] Wire `GroupBy`, `SortGrade`, and `board.ScoreRows` through `internal/web/pick.go` and `internal/web/slips.go`
       (including at-limit `pickDetailData`, `pickPairRow`, and `from=detail` add/update/delete swaps for
       `GroupByGrade`), with handler and zero-extra-refresh tests in `internal/web/pick_test.go`.
 - [ ] Update `pick-detail`, `pick-line-group`, and `pick-option` in `web/templates/partials.html` (and regenerate

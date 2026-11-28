@@ -35,6 +35,7 @@ type PickPage struct {
 type PickBodyView struct {
 	SlipID   int64
 	Search   string
+	GroupBy  string
 	Category string
 	Window   string
 	Sort     string
@@ -48,6 +49,7 @@ type PickBodyView struct {
 type PickSlateView struct {
 	SlipID     int64
 	Search     string
+	GroupBy    string
 	Category   string
 	Window     string
 	Sort       string
@@ -116,6 +118,7 @@ type PickDetailView struct {
 	KickoffISO      string
 	KickoffFallback string
 	Search          string
+	GroupBy         string
 	Category        string
 	Sort            string
 	RefreshURL      string
@@ -123,13 +126,27 @@ type PickDetailView struct {
 	OOB             bool
 	BackHref        string
 	BackPushURL     string
+	Groups          []PickChip
 	Tabs            []PickChip
 	Sorts           []PickChip
 	Unloaded        bool
 	Highlights      HighlightsView
+	Sections        []PickDetailSectionView
 	Lines           []PickLineGroupView
 	Players         []PickPlayerView
 	Empty           bool
+}
+
+// PickDetailSectionView is one grouped section in the open game's detail.
+type PickDetailSectionView struct {
+	Key        string
+	Label      string
+	Badge      string
+	BadgeClass string
+	Count      int
+	Lines      []PickLineGroupView
+	Players    []PickPlayerView
+	Options    []PickRowView
 }
 
 // PickLineGroupView is one line and the sides a person can pick from it.
@@ -185,6 +202,7 @@ type PickRowView struct {
 	SplitLine     string
 	DriftNote     string
 	CanRefresh    bool
+	Grade         GradeView
 }
 
 // PickDockView is the viewer's own picks: the fixed dock's count and combined
@@ -237,6 +255,7 @@ type PickSwapView struct {
 	Fields PickRowView
 	Legs   []TrayLegView
 	Q      string
+	Group  string
 	Cat    string
 	Win    string
 	Sort   string
@@ -287,6 +306,7 @@ func (h *slipHandlers) pickResults(w http.ResponseWriter, r *http.Request) {
 	// full page URL rather than the partial URL the request used.
 	self := board.Query{
 		Q:        data.Body.Search,
+		GroupBy:  q.GroupBy,
 		Category: board.Category(data.Body.Category),
 		Window:   board.Window(data.Body.Window),
 		Sort:     board.Sort(data.Body.Sort),
@@ -487,6 +507,7 @@ func (h *slipHandlers) pickSwap(w http.ResponseWriter, r *http.Request) {
 		Text:   r.URL.Query().Get("text"),
 		Legs:   legs,
 		Q:      r.URL.Query().Get("q"),
+		Group:  r.URL.Query().Get("group"),
 		Cat:    r.URL.Query().Get("cat"),
 		Win:    r.URL.Query().Get("win"),
 		Sort:   r.URL.Query().Get("sort"),
@@ -564,6 +585,7 @@ func (h *slipHandlers) pickPageData(
 		sigStart := time.Now()
 		boardGames, boardStats = h.loadBoardSignalsForRows(ctx, now, slip.WeekID, games, rows)
 		AddDBTiming(ctx, time.Since(sigStart))
+		rows = board.ScoreRows(rows, boardGames, boardStats, h.deps.GradingEngine)
 		insights = gameCardInsightsByGame(games, rows, boardGames, boardStats)
 	}
 	slate := buildPickSlate(slip, slateModel, rows, homeBook, q, insights)
@@ -575,6 +597,7 @@ func (h *slipHandlers) pickPageData(
 	body := PickBodyView{
 		SlipID:   slip.ID,
 		Search:   q.Q,
+		GroupBy:  string(q.GroupBy),
 		Category: string(q.Category),
 		Window:   string(q.Window),
 		Sort:     string(q.Sort),
@@ -592,9 +615,11 @@ func (h *slipHandlers) pickPageData(
 			atLimit, remainingSlots, boardGames, boardStats, homeBook,
 		)
 		body.Detail = &detail
+		body.GroupBy = detail.GroupBy
 		body.Category = detail.Category
 		body.Sort = detail.Sort
 	}
+	body.Slate.GroupBy = body.GroupBy
 	body.Slate.Category = body.Category
 	body.Slate.Sort = body.Sort
 	body.Slate.Detail = body.Detail != nil
@@ -647,6 +672,7 @@ func (h *slipHandlers) pickSlateData(
 		sigStart := time.Now()
 		boardGames, boardStats := h.loadBoardSignalsForRows(ctx, now, slip.WeekID, games, rows)
 		AddDBTiming(ctx, time.Since(sigStart))
+		rows = board.ScoreRows(rows, boardGames, boardStats, h.deps.GradingEngine)
 		insights = gameCardInsightsByGame(games, rows, boardGames, boardStats)
 	}
 	slate := buildPickSlate(slip, board.BuildSlate(games, rows, roster, q), rows, homeBook, q, insights)
@@ -706,10 +732,11 @@ func (h *slipHandlers) pickDetailData(
 	atLimit := remainingSlots == 0
 	var boardGames map[string]analyzer.Game
 	var boardStats map[string]analyzer.PlayerStats
-	if slip.Status == db.SlipOpen && remainingSlots > 0 && len(rows) > 0 {
+	if slip.Status == db.SlipOpen && len(rows) > 0 {
 		sigStart := time.Now()
 		boardGames, boardStats = h.loadBoardSignalsForRows(ctx, now, slip.WeekID, gameSlice, rows)
 		AddDBTiming(ctx, time.Since(sigStart))
+		rows = board.ScoreRows(rows, boardGames, boardStats, h.deps.GradingEngine)
 	}
 	detail := h.buildPickDetail(
 		ctx, slip, game, openCards[0], rows, legs, q, now,
@@ -742,6 +769,7 @@ func buildPickSlate(
 	slate := PickSlateView{
 		SlipID:     slip.ID,
 		Search:     q.Q,
+		GroupBy:    string(q.GroupBy),
 		Category:   string(q.Category),
 		Window:     string(q.Window),
 		Sort:       string(q.Sort),
@@ -859,6 +887,7 @@ func (h *slipHandlers) buildPickDetail(
 	boardStart := time.Now()
 	model := board.Detail(game, rows, board.Query{
 		Q:        q.Q,
+		GroupBy:  q.GroupBy,
 		Category: q.Category,
 		Sort:     q.Sort,
 		Now:      now,
@@ -891,7 +920,8 @@ func pickDetailView(
 	homeBook string,
 ) PickDetailView {
 	linkQuery := q
-	linkQuery.Category = model.Category
+	linkQuery.GroupBy = q.GroupBy
+	linkQuery.Category = q.Category
 	linkQuery.Sort = model.Sort
 
 	view := PickDetailView{
@@ -906,12 +936,17 @@ func pickDetailView(
 		KickoffISO:      kickoffISO(model.Game.Kickoff),
 		KickoffFallback: kickoffFallback(model.Game.Kickoff),
 		Search:          q.Q,
+		GroupBy:         string(model.GroupBy),
 		Category:        string(model.Category),
 		Sort:            string(model.Sort),
 		RefreshURL:      detailHref(slipID, linkQuery, "", ""),
 		BackHref:        pickBackHref(slipID, q),
 		BackPushURL:     pickBackPushURL(slipID, q),
 		Unloaded:        unloaded,
+	}
+	for _, option := range board.DetailGroupBys {
+		view.Groups = append(view.Groups, detailChip(
+			slipID, linkQuery, "group", string(option), option.Label(), 0, option == model.GroupBy))
 	}
 	for _, tab := range model.Tabs {
 		view.Tabs = append(view.Tabs, detailChip(
@@ -921,6 +956,57 @@ func pickDetailView(
 		view.Sorts = append(view.Sorts, detailChip(
 			slipID, linkQuery, "sort", string(option), option.Label(), 0, option == model.Sort))
 	}
+
+	var pickedByLine map[string]int64
+	var pickedCountByLine map[string]int
+	if model.GroupBy == board.GroupByGrade {
+		pickedByLine = make(map[string]int64)
+		pickedCountByLine = make(map[string]int)
+		for _, sec := range model.Sections {
+			for _, row := range sec.Options {
+				if row.Picked != 0 {
+					key := row.PlayerID + "|" + board.LineKey(row.Market, row.Team, row.PlayerName, row.Line)
+					pickedByLine[key] = row.Picked
+					pickedCountByLine[key]++
+				}
+			}
+		}
+	}
+	for _, sec := range model.Sections {
+		secView := PickDetailSectionView{
+			Key:   sec.Key,
+			Label: sec.Label,
+			Badge: sec.Badge,
+			Count: sec.Count,
+		}
+		if sec.Badge != "" {
+			secView.BadgeClass = gameGradeBadgeClass(sec.Badge)
+		}
+		for _, group := range sec.Lines {
+			secView.Lines = append(
+				secView.Lines,
+				pickLineGroupView(slipID, group, atLimit, linkQuery, false, canRefresh, homeBook),
+			)
+		}
+		for _, player := range sec.Players {
+			secView.Players = append(
+				secView.Players,
+				pickPlayerView(slipID, player, model.Game, atLimit, linkQuery, canRefresh, homeBook),
+			)
+		}
+		for _, row := range sec.Options {
+			option := pickRowView(slipID, row, atLimit, linkQuery, canRefresh, homeBook)
+			if option.PickID == 0 && model.GroupBy == board.GroupByGrade {
+				key := row.PlayerID + "|" + board.LineKey(row.Market, row.Team, row.PlayerName, row.Line)
+				if pickedCountByLine[key] == 1 {
+					option.UpdateID = pickedByLine[key]
+				}
+			}
+			secView.Options = append(secView.Options, option)
+		}
+		view.Sections = append(view.Sections, secView)
+	}
+
 	for _, group := range model.Lines {
 		view.Lines = append(
 			view.Lines,
@@ -928,25 +1014,40 @@ func pickDetailView(
 		)
 	}
 	for _, player := range model.Players {
-		card := PickPlayerView{
-			Name:        player.Name,
-			Initials:    Initials(player.Name),
-			HeadshotURL: player.HeadshotURL,
-			Position:    player.Position,
-			Team:        player.Team,
-			TeamLogo:    teamLogoForGame(player.Team, model.Game),
-			Tags:        player.Tags,
-		}
-		for _, group := range player.Lines {
-			card.Lines = append(
-				card.Lines,
-				pickLineGroupView(slipID, group, atLimit, linkQuery, true, canRefresh, homeBook),
-			)
-		}
-		view.Players = append(view.Players, card)
+		view.Players = append(
+			view.Players,
+			pickPlayerView(slipID, player, model.Game, atLimit, linkQuery, canRefresh, homeBook),
+		)
 	}
-	view.Empty = len(view.Lines) == 0 && len(view.Players) == 0
+	view.Empty = len(view.Sections) == 0 && len(view.Lines) == 0 && len(view.Players) == 0
 	return view
+}
+
+func pickPlayerView(
+	slipID int64,
+	player board.PlayerGroup,
+	game board.GameCard,
+	atLimit bool,
+	linkQuery board.Query,
+	canRefresh bool,
+	homeBook string,
+) PickPlayerView {
+	card := PickPlayerView{
+		Name:        player.Name,
+		Initials:    Initials(player.Name),
+		HeadshotURL: player.HeadshotURL,
+		Position:    player.Position,
+		Team:        player.Team,
+		TeamLogo:    teamLogoForGame(player.Team, game),
+		Tags:        player.Tags,
+	}
+	for _, group := range player.Lines {
+		card.Lines = append(
+			card.Lines,
+			pickLineGroupView(slipID, group, atLimit, linkQuery, true, canRefresh, homeBook),
+		)
+	}
+	return card
 }
 
 // teamLogoForGame resolves a player's team logo from the game's away/home team.
@@ -1376,6 +1477,7 @@ func pickHref(slipID int64, q board.Query, key, value string) string {
 			values.Set(name, current)
 		}
 	}
+	set("group", string(q.GroupBy))
 	set("cat", string(q.Category))
 	set("win", string(q.Window))
 	set("sort", string(q.Sort))
@@ -1416,6 +1518,7 @@ func detailHref(slipID int64, q board.Query, key, value string) string {
 			values.Set(name, current)
 		}
 	}
+	set("group", string(q.GroupBy))
 	set("cat", string(q.Category))
 	set("sort", string(q.Sort))
 	set("win", string(q.Window))
@@ -1505,6 +1608,9 @@ func pickRowView(
 	if row.Line != nil {
 		view.Line = formatFloat(*row.Line)
 	}
+	if row.Grade.Letter != "" {
+		view.Grade = LegGradeView(row.Grade)
+	}
 	if row.Picked != 0 && row.Drifted {
 		view.DriftNote = row.BoardDriftNote
 		view.CanRefresh = canRefresh
@@ -1559,6 +1665,9 @@ func swapURL(slipID int64, row PickRowView, q board.Query) string {
 	values.Set("text", row.Text)
 	if q.Q != "" {
 		values.Set("q", q.Q)
+	}
+	if q.GroupBy != "" {
+		values.Set("group", string(q.GroupBy))
 	}
 	if q.Category != "" {
 		values.Set("cat", string(q.Category))
@@ -1649,8 +1758,13 @@ func (h *slipHandlers) pickPairRow(
 		homeBook = *user.HomeBook
 	}
 	mine := legsForUser(legs, user.ID)
+	now := h.deps.now()
 	rows := board.BuildDualBook(
-		[]db.Game{game}, odds, roster, homeBook, mine, h.deps.now())
+		[]db.Game{game}, odds, roster, homeBook, mine, now)
+	if slip.Status == db.SlipOpen && len(rows) > 0 {
+		boardGames, boardStats := h.loadBoardSignalsForRows(ctx, now, slip.WeekID, []db.Game{game}, rows)
+		rows = board.ScoreRows(rows, boardGames, boardStats, h.deps.GradingEngine)
+	}
 	var playerIDs []string
 	if leg.PlayerID != nil && *leg.PlayerID != "" {
 		playerIDs = []string{*leg.PlayerID}
@@ -1708,11 +1822,15 @@ func pickQuery(r *http.Request, now time.Time) board.Query {
 	}
 	q := board.Query{
 		Q:        strings.TrimSpace(value("q")),
+		GroupBy:  board.GroupBy(value("group")),
 		Category: board.Category(value("cat")),
 		Window:   board.Window(value("win")),
 		Sort:     board.Sort(value("sort")),
 		GameID:   strings.TrimSpace(value("game")),
 		Now:      now,
+	}
+	if !knownGroupBy(q.GroupBy) {
+		q.GroupBy = ""
 	}
 	if !knownCategory(q.Category) {
 		q.Category = ""
@@ -1724,6 +1842,13 @@ func pickQuery(r *http.Request, now time.Time) board.Query {
 		q.Sort = ""
 	}
 	return q
+}
+
+func knownGroupBy(groupBy board.GroupBy) bool {
+	if groupBy == "" {
+		return true
+	}
+	return slices.Contains(board.DetailGroupBys, groupBy)
 }
 
 func knownCategory(category board.Category) bool {
@@ -1903,7 +2028,10 @@ func gameCardInsightsByGame(
 			if row.Picked != 0 || row.Market == "OTHER" {
 				continue
 			}
-			grade := analyzer.ScoreLeg(board.RowToAnalyzerLeg(row), boardGames, boardStats)
+			grade := row.Grade
+			if grade.Letter == "" {
+				grade = analyzer.ScoreLeg(board.RowToAnalyzerLeg(row), boardGames, boardStats)
+			}
 			gradeCounts[grade.Letter]++
 			if row.Category != board.CategoryLines && row.PlayerName != "" {
 				if prev, ok := playerScores[row.PlayerName]; !ok || grade.Score > prev {

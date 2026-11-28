@@ -4146,3 +4146,206 @@ func TestPickBoardRendersInlineComboWarningWithoutBlocking(t *testing.T) {
 	assert.Contains(t, spreadSection, fmt.Sprintf(`hx-post="/slips/%d/legs"`, fixture.slip.ID))
 	assert.NotContains(t, spreadSection, "disabled")
 }
+
+func TestPickDetailGroupByAndSortGradePreserveQueryAndZeroExtraRefresh(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 3)
+	now := time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC)
+	game := addGame(t, fixture, now.Add(4*time.Hour))
+	addGameOdds(t, fixture.store, game.ID)
+	addPropOdds(t, fixture.store, game.ID, "PASS_YDS", "Josh Allen", 245.5, -110)
+
+	refresher := &pickTestRefresher{}
+	handler := pickHandlerWithRefresher(t, fixture, fixture.user, refresher, func() time.Time { return now })
+
+	detailURL := fmt.Sprintf("/slips/%d/pick/detail?game=%s&group=player&sort=grade", fixture.slip.ID, game.ID)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, detailURL, nil)
+	req.Header.Set("Hx-Request", "true")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	detailBody := html.UnescapeString(rec.Body.String())
+	assert.Contains(
+		t,
+		detailBody,
+		fmt.Sprintf(
+			`hx-get="/slips/%d/pick/detail?cat=passing&game=%s&group=player&sort=grade"`,
+			fixture.slip.ID,
+			game.ID,
+		),
+	)
+	assert.Contains(t, detailBody, `id="pick-sort" type="hidden" name="sort" value="grade" hx-swap-oob="true"`)
+	assert.Empty(t, refresher.linesCalls, "detail view should not trigger line refresh")
+	assert.Empty(t, refresher.forceCalls, "detail view should not force refresh")
+	assert.Len(t, refresher.gameCalls, 1, "detail view kicks only the open upcoming game once")
+
+	resultsURL := fmt.Sprintf("/slips/%d/pick/results?game=%s&group=grade&sort=grade", fixture.slip.ID, game.ID)
+	resReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, resultsURL, nil)
+	resReq.Header.Set("Hx-Request", "true")
+	resRec := httptest.NewRecorder()
+	handler.ServeHTTP(resRec, resReq)
+	require.Equal(t, http.StatusOK, resRec.Code, resRec.Body.String())
+	assert.Equal(
+		t,
+		fmt.Sprintf("/slips/%d/pick?cat=lines&game=%s&group=grade&sort=grade", fixture.slip.ID, game.ID),
+		resRec.Header().Get("Hx-Push-Url"),
+	)
+	assert.Empty(t, refresher.linesCalls, "results switch should not trigger line refresh")
+	assert.Empty(t, refresher.forceCalls, "results switch should not force refresh")
+
+	bogusURL := fmt.Sprintf("/slips/%d/pick/detail?game=%s&group=bogus&sort=bogus", fixture.slip.ID, game.ID)
+	bogusReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, bogusURL, nil)
+	bogusReq.Header.Set("Hx-Request", "true")
+	bogusRec := httptest.NewRecorder()
+	handler.ServeHTTP(bogusRec, bogusReq)
+	require.Equal(t, http.StatusOK, bogusRec.Code, bogusRec.Body.String())
+	bogusBody := html.UnescapeString(bogusRec.Body.String())
+	assert.NotContains(t, bogusBody, "group=bogus")
+	assert.NotContains(t, bogusBody, "sort=bogus")
+}
+
+func TestPickDetailAtLimitPreservesGroupByInSwapURL(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 1)
+	game := addGame(t, fixture, gameKickoff())
+	addGameOdds(t, fixture.store, game.ID)
+	addStoredLeg(t, fixture, db.Leg{
+		UserID:     fixture.user.ID,
+		GameID:     new(game.ID),
+		MarketType: "ML",
+		Selection:  "BUF ML",
+		Team:       new("BUF"),
+		Side:       new("TEAM"),
+		Odds:       -130,
+	})
+
+	detailURL := fmt.Sprintf("/slips/%d/pick/detail?game=%s&group=grade&sort=grade", fixture.slip.ID, game.ID)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, detailURL, nil)
+	req.Header.Set("Hx-Request", "true")
+	rec := httptest.NewRecorder()
+	fixture.handler.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	body := html.UnescapeString(rec.Body.String())
+	assert.Contains(t, body, fmt.Sprintf("/slips/%d/pick/swap?", fixture.slip.ID))
+	assert.Contains(t, body, "group=grade")
+	assert.Contains(t, body, "sort=grade")
+}
+
+func TestPickFromDetailAddUpdateDeleteSwapsAndZeroExtraRefresh(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	now := time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC)
+	game := addGame(t, fixture, now.Add(4*time.Hour))
+	addGameOdds(t, fixture.store, game.ID)
+	addPropOdds(t, fixture.store, game.ID, "PASS_YDS", "Josh Allen", 245.5, -110)
+
+	refresher := &pickTestRefresher{}
+	handler := pickHandlerWithRefresher(t, fixture, fixture.user, refresher, func() time.Time { return now })
+
+	addForm := url.Values{
+		"from":        {"detail"},
+		"group":       {"grade"},
+		"sort":        {"grade"},
+		"game":        {game.ID},
+		"game_id":     {game.ID},
+		"market_type": {"PASS_YDS"},
+		"team":        {"BUF"},
+		"player_name": {"Josh Allen"},
+		"side":        {"OVER"},
+		"line":        {"245.5"},
+		"odds":        {"-110"},
+	}
+	addReq := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodPost,
+		fmt.Sprintf("/slips/%d/legs", fixture.slip.ID),
+		strings.NewReader(addForm.Encode()),
+	)
+	addReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	addReq.Header.Set("Hx-Request", "true")
+	addRec := httptest.NewRecorder()
+	handler.ServeHTTP(addRec, addReq)
+	require.Equal(t, http.StatusOK, addRec.Code, addRec.Body.String())
+	assert.Equal(t, "tray-updated, slip-updated", addRec.Header().Get("Hx-Trigger"))
+	addBody := html.UnescapeString(addRec.Body.String())
+	assert.Contains(t, addBody, `id="pick-detail"`)
+	assert.Contains(t, addBody, `group=grade`)
+	assert.Contains(t, addBody, `id="pick-sort" type="hidden" name="sort" value="grade" hx-swap-oob="true"`)
+	assert.Zero(t, refresher.totalCalls(), "from=detail add must not trigger external refresh")
+
+	legs, err := fixture.store.LegsForSlip(t.Context(), fixture.slip.ID)
+	require.NoError(t, err)
+	require.Len(t, legs, 1)
+
+	putForm := url.Values{
+		"from":        {"detail"},
+		"group":       {"grade"},
+		"sort":        {"grade"},
+		"game":        {game.ID},
+		"game_id":     {game.ID},
+		"market_type": {"PASS_YDS"},
+		"team":        {"BUF"},
+		"player_name": {"Josh Allen"},
+		"side":        {"UNDER"},
+		"line":        {"245.5"},
+		"odds":        {"-110"},
+	}
+	putReq := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodPut,
+		fmt.Sprintf("/legs/%d", legs[0].ID),
+		strings.NewReader(putForm.Encode()),
+	)
+	putReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	putReq.Header.Set("Hx-Request", "true")
+	putRec := httptest.NewRecorder()
+	handler.ServeHTTP(putRec, putReq)
+	require.Equal(t, http.StatusOK, putRec.Code, putRec.Body.String())
+	assert.Equal(t, "tray-updated, slip-updated", putRec.Header().Get("Hx-Trigger"))
+	putBody := html.UnescapeString(putRec.Body.String())
+	assert.Contains(t, putBody, `id="pick-detail"`)
+	assert.Contains(t, putBody, `group=grade`)
+	assert.Zero(t, refresher.totalCalls(), "from=detail update must not trigger external refresh")
+
+	delURL := fmt.Sprintf("/legs/%d?from=detail&group=grade&sort=grade&game=%s", legs[0].ID, game.ID)
+	delReq := httptest.NewRequestWithContext(t.Context(), http.MethodDelete, delURL, nil)
+	delReq.Header.Set("Hx-Request", "true")
+	delRec := httptest.NewRecorder()
+	handler.ServeHTTP(delRec, delReq)
+	require.Equal(t, http.StatusOK, delRec.Code, delRec.Body.String())
+	assert.Equal(t, "tray-updated, slip-updated", delRec.Header().Get("Hx-Trigger"))
+	delBody := html.UnescapeString(delRec.Body.String())
+	assert.Contains(t, delBody, `id="pick-detail"`)
+	assert.Contains(t, delBody, `group=grade`)
+	assert.Zero(t, refresher.totalCalls(), "from=detail delete must not trigger external refresh")
+
+	// Also verify from=board (pickPairRow) scores without triggering external refresh.
+	boardForm := url.Values{
+		"from":        {"board"},
+		"game_id":     {game.ID},
+		"market_type": {"PASS_YDS"},
+		"team":        {"BUF"},
+		"player_name": {"Josh Allen"},
+		"side":        {"OVER"},
+		"line":        {"245.5"},
+		"odds":        {"-110"},
+	}
+	boardReq := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodPost,
+		fmt.Sprintf("/slips/%d/legs", fixture.slip.ID),
+		strings.NewReader(boardForm.Encode()),
+	)
+	boardReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	boardReq.Header.Set("Hx-Request", "true")
+	boardRec := httptest.NewRecorder()
+	handler.ServeHTTP(boardRec, boardReq)
+	require.Equal(t, http.StatusOK, boardRec.Code, boardRec.Body.String())
+	assert.Contains(t, boardRec.Body.String(), `class="pick-line-group"`)
+	assert.Zero(t, refresher.totalCalls(), "from=board pickPairRow must not trigger external refresh")
+}
