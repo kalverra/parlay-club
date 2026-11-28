@@ -2306,13 +2306,180 @@
 
 {{define "pick-line-group"}}
 <div id="{{.ID}}" class="pick-line-group">
-  {{if .Label}}<p class="text-[11px] font-semibold uppercase tracking-wide text-ink-muted">{{.Label}}</p>{{end}}
-  <div class="mt-1 grid gap-2 {{if eq (len .Options) 1}}grid-cols-1{{else}}grid-cols-2{{end}}">
-    {{range .Options}}
-      <div class="pick-row min-w-0">{{template "pick-option" .}}</div>
-    {{end}}
-  </div>
+  {{if .IsOU}}
+    <div class="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
+      {{if .Label}}<p class="text-[11px] font-semibold uppercase tracking-wide text-ink-muted">{{.Label}}{{if .SharedLine}} &middot; <span class="font-mono tabular-nums text-ink">{{.SharedLine}}</span>{{end}}</p>{{end}}
+      {{if .SplitLine}}
+        <span class="rounded border border-line-strong bg-surface-2 px-1.5 py-0.5 font-mono text-[10px] font-medium tabular-nums text-ink">{{.SplitLine}}</span>
+      {{end}}
+    </div>
+    <div class="mt-1 grid grid-cols-2 gap-1.5">
+      {{$sharedLine := .SharedLine}}
+      {{range .Options}}
+        <div class="pick-row min-w-0">{{template "pick-ou-option" (dict "Option" . "SharedLine" $sharedLine)}}</div>
+      {{end}}
+    </div>
+  {{else}}
+    {{if .Label}}<p class="text-[11px] font-semibold uppercase tracking-wide text-ink-muted">{{.Label}}</p>{{end}}
+    <div class="mt-1 grid gap-2 {{if eq (len .Options) 1}}grid-cols-1{{else}}grid-cols-2{{end}}">
+      {{range .Options}}
+        <div class="pick-row min-w-0">{{template "pick-option" .}}</div>
+      {{end}}
+    </div>
+  {{end}}
 </div>
+{{end}}
+
+{{define "pick-ou-option"}}
+  {{$opt := .Option}}
+  {{$sharedLine := .SharedLine}}
+  {{with $opt}}
+  <div class="space-y-1">
+  {{if .PickID}}
+    <form
+      hx-delete="/legs/{{.PickID}}?from={{if .FromDetail}}detail{{else}}board{{end}}"
+      {{if .FromDetail}}hx-include="#pick-q, #pick-cat, #pick-win, #pick-sort, #pick-group, #pick-game"{{end}}
+      hx-target="{{if .FromDetail}}#pick-detail{{else}}closest .pick-line-group{{end}}"
+      hx-swap="outerHTML"
+    >
+      <button
+        type="submit"
+        class="w-full rounded-lg border border-positive bg-positive-soft px-2.5 py-1.5 text-left text-sm font-medium text-positive-ink hover:opacity-90"
+        aria-pressed="true"
+        title="Remove {{if eq .Side "OVER"}}Over{{else}}Under{{end}}"
+      >
+        <span class="flex items-center justify-between gap-1.5">
+          <span class="inline-flex min-w-0 items-center gap-1 truncate font-semibold">
+            <span aria-hidden="true">{{if eq .Side "OVER"}}&#9650;{{else}}&#9660;{{end}}</span>
+            <span>{{if eq .Side "OVER"}}Over{{else}}Under{{end}}{{if and (not $sharedLine) .Line}} {{.Line}}{{end}}</span>
+          </span>
+          <span class="shrink-0 text-xs font-semibold" aria-hidden="true">&#10003;</span>
+        </span>
+        <span class="mt-0.5 block text-xs font-normal opacity-85 ui-odds">{{.Price}}{{if .ImpliedChance}} <span title="Implied chance from odds">({{.ImpliedChance}})</span>{{end}}</span>
+        {{if .Badge}}<span class="mt-1 inline-block rounded-full border border-line-strong bg-surface px-1.5 py-0.5 text-[10px] font-medium text-ink">{{.Badge}}</span>{{end}}
+      </button>
+    </form>
+    {{if .DriftNote}}
+      <div class="flex items-center justify-between gap-2 rounded-md border border-warning bg-warning-soft px-2 py-1 text-[11px] text-warning-ink">
+        <span class="truncate">{{.DriftNote}}</span>
+        {{if .CanRefresh}}
+          <form
+            hx-put="/legs/{{.PickID}}"
+            {{if .FromDetail}}hx-include="#pick-q, #pick-cat, #pick-win, #pick-sort, #pick-group, #pick-game"{{end}}
+            hx-target="{{if .FromDetail}}#pick-detail{{else}}closest .pick-line-group{{end}}"
+            hx-swap="outerHTML"
+          >
+            <input type="hidden" name="from" value="{{if .FromDetail}}detail{{else}}board{{end}}">
+            <input type="hidden" name="game_id" value="{{.GameID}}">
+            <input type="hidden" name="market_type" value="{{.Market}}">
+            <input type="hidden" name="team" value="{{.Team}}">
+            <input type="hidden" name="side" value="{{.Side}}">
+            <input type="hidden" name="player_name" value="{{.PlayerName}}">
+            {{if .PlayerID}}<input type="hidden" name="player_id" value="{{.PlayerID}}">{{end}}
+            {{if .Line}}<input type="hidden" name="line" value="{{.Line}}">{{end}}
+            <input type="hidden" name="odds" value="{{.Odds}}">
+            <button type="submit" class="shrink-0 font-semibold text-ink underline hover:opacity-75">
+              Sync line
+            </button>
+          </form>
+        {{end}}
+      </div>
+    {{end}}
+  {{else if .UpdateID}}
+    <form
+      hx-put="/legs/{{.UpdateID}}"
+      {{if .FromDetail}}hx-include="#pick-q, #pick-cat, #pick-win, #pick-sort, #pick-group, #pick-game"{{end}}
+      hx-target="{{if .FromDetail}}#pick-detail{{else}}closest .pick-line-group{{end}}"
+      hx-swap="outerHTML"
+    >
+      <input type="hidden" name="from" value="{{if .FromDetail}}detail{{else}}board{{end}}">
+      <input type="hidden" name="game_id" value="{{.GameID}}">
+      <input type="hidden" name="market_type" value="{{.Market}}">
+      <input type="hidden" name="team" value="{{.Team}}">
+      <input type="hidden" name="side" value="{{.Side}}">
+      <input type="hidden" name="player_name" value="{{.PlayerName}}">
+      {{if .PlayerID}}<input type="hidden" name="player_id" value="{{.PlayerID}}">{{end}}
+      {{if .Line}}<input type="hidden" name="line" value="{{.Line}}">{{end}}
+      <input type="hidden" name="odds" value="{{.Odds}}">
+      <button
+        type="submit"
+        class="w-full rounded-lg border border-line-strong bg-surface-2 px-2.5 py-1.5 text-left text-sm font-medium text-ink hover:border-accent"
+        title="Switch to {{if eq .Side "OVER"}}Over{{else}}Under{{end}}"
+      >
+        <span class="inline-flex min-w-0 items-center gap-1 truncate font-semibold">
+          <span aria-hidden="true">{{if eq .Side "OVER"}}&#9650;{{else}}&#9660;{{end}}</span>
+          <span>{{if eq .Side "OVER"}}Over{{else}}Under{{end}}{{if and (not $sharedLine) .Line}} {{.Line}}{{end}}</span>
+        </span>
+        <span class="mt-0.5 block text-xs font-normal text-ink-muted ui-odds">{{.Price}}{{if .ImpliedChance}} <span title="Implied chance from odds">({{.ImpliedChance}})</span>{{end}}</span>
+        {{if .Badge}}<span class="mt-1 inline-block rounded-full border border-accent bg-accent-soft px-1.5 py-0.5 text-[10px] font-medium text-ink">{{.Badge}}</span>{{end}}
+      </button>
+    </form>
+  {{else if .AtLimit}}
+    <button
+      type="button"
+      class="w-full rounded-lg border border-line-strong bg-surface-2 px-2.5 py-1.5 text-left text-sm font-medium text-ink hover:border-accent"
+      hx-get="{{.SwapURL}}"
+      hx-target="#pick-swap-body"
+      hx-swap="innerHTML"
+      title="Swap into slip"
+    >
+      <span class="inline-flex min-w-0 items-center gap-1 truncate font-semibold">
+        <span aria-hidden="true">{{if eq .Side "OVER"}}&#9650;{{else}}&#9660;{{end}}</span>
+        <span>{{if eq .Side "OVER"}}Over{{else}}Under{{end}}{{if and (not $sharedLine) .Line}} {{.Line}}{{end}}</span>
+      </span>
+      <span class="mt-0.5 block text-xs font-normal text-ink-muted ui-odds">{{.Price}}{{if .ImpliedChance}} <span title="Implied chance from odds">({{.ImpliedChance}})</span>{{end}}</span>
+      {{if .Badge}}<span class="mt-1 inline-block rounded-full border border-accent bg-accent-soft px-1.5 py-0.5 text-[10px] font-medium text-ink">{{.Badge}}</span>{{end}}
+    </button>
+  {{else}}
+    <form
+      hx-post="/slips/{{.SlipID}}/legs"
+      {{if .FromDetail}}hx-include="#pick-q, #pick-cat, #pick-win, #pick-sort, #pick-group, #pick-game"{{end}}
+      hx-target="{{if .FromDetail}}#pick-detail{{else}}closest .pick-line-group{{end}}"
+      hx-swap="outerHTML"
+    >
+      <input type="hidden" name="quick" value="1">
+      <input type="hidden" name="from" value="{{if .FromDetail}}detail{{else}}board{{end}}">
+      <input type="hidden" name="game_id" value="{{.GameID}}">
+      <input type="hidden" name="market_type" value="{{.Market}}">
+      <input type="hidden" name="team" value="{{.Team}}">
+      <input type="hidden" name="side" value="{{.Side}}">
+      <input type="hidden" name="player_name" value="{{.PlayerName}}">
+      {{if .PlayerID}}<input type="hidden" name="player_id" value="{{.PlayerID}}">{{end}}
+      {{if .Line}}<input type="hidden" name="line" value="{{.Line}}">{{end}}
+      <input type="hidden" name="odds" value="{{.Odds}}">
+      <button
+        type="submit"
+        class="w-full rounded-lg border border-line-strong bg-surface-2 px-2.5 py-1.5 text-left text-sm font-medium text-ink hover:border-accent"
+      >
+        <span class="inline-flex min-w-0 items-center gap-1 truncate font-semibold">
+          <span aria-hidden="true">{{if eq .Side "OVER"}}&#9650;{{else}}&#9660;{{end}}</span>
+          <span>{{if eq .Side "OVER"}}Over{{else}}Under{{end}}{{if and (not $sharedLine) .Line}} {{.Line}}{{end}}</span>
+        </span>
+        <span class="mt-0.5 block text-xs font-normal text-ink-muted ui-odds">{{.Price}}{{if .ImpliedChance}} <span title="Implied chance from odds">({{.ImpliedChance}})</span>{{end}}</span>
+        {{if .Badge}}<span class="mt-1 inline-block rounded-full border border-accent bg-accent-soft px-1.5 py-0.5 text-[10px] font-medium text-ink">{{.Badge}}</span>{{end}}
+      </button>
+    </form>
+  {{end}}
+  {{if .Grade.Letter}}
+    <div class="flex flex-wrap items-center gap-2 pt-0.5">
+      <details data-leg-grade data-help-popover>
+        <summary
+          class="inline-flex cursor-pointer list-none items-center gap-1 whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] font-semibold {{.Grade.Class}}"
+          title="Leg grade {{.Grade.Letter}} ({{.Grade.Score}}/100)"
+        >
+          Grade {{.Grade.Letter}}
+        </summary>
+        <div class="absolute left-0 right-0 z-30 mt-1 max-w-full rounded-lg border border-line-strong bg-surface p-2.5 text-xs text-ink shadow-lg">
+          {{template "grade-breakdown" (dict "Grade" .Grade "HeaderLabel" (printf "Leg grade: %s (%d)" .Grade.Letter .Grade.Score) "GuideHref" (printf "/docs/grading?from=/slips/%d/pick#leg-grades" .SlipID) "IsSlip" false "EmptyText" "Baseline 75 — no extra adjustments.")}}
+        </div>
+      </details>
+    </div>
+  {{end}}
+  {{if .ComboWarning}}
+    <p class="rounded-md border border-warning bg-warning-soft px-2 py-1 text-[11px] leading-snug text-warning-ink" data-combo-warning>{{.ComboWarning}}</p>
+  {{end}}
+  </div>
+  {{end}}
 {{end}}
 
 {{define "pick-detail-empty"}}

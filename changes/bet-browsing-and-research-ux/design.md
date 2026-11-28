@@ -231,7 +231,7 @@ sibling grade popovers and HTMX row swaps intact across pick board, slip hub, an
 Risk: medium (modifies high-traffic picking controls and slip leg markup across all site themes; mobile tap-target
 ergonomics and theme contrast need careful verification beyond HTML assertions)
 
-- [ ] Add `IsOU`, `SharedLine`, and hoisted `SplitLine` fields to `PickLineGroupView` in `internal/web/pick.go` and
+- [x] Add `IsOU`, `SharedLine`, and hoisted `SplitLine` fields to `PickLineGroupView` in `internal/web/pick.go` and
   render compact side-by-side Over/Under controls in `web/templates/partials.html`, verifying add/switch/remove/swap
   markup in `internal/web/pick_test.go`.
 - [ ] Add structured `SideBadge` and `SideClass` fields to `LegView` and `PickTrayLegView` in `internal/web/slips.go`

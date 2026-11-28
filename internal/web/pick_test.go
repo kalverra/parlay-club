@@ -1323,9 +1323,9 @@ func TestPickDetailLinesTabShowsGameLinesThenTeamTotals(t *testing.T) {
 	assert.Contains(t, body, `data-category="lines"`, "team totals fold into Lines")
 	spread := strings.Index(body, ">Spread</p>")
 	moneyline := strings.Index(body, ">Moneyline</p>")
-	total := strings.Index(body, ">Total</p>")
-	buffalo := strings.Index(body, ">BUF team total</p>")
-	miami := strings.Index(body, ">MIA team total</p>")
+	total := strings.Index(body, ">Total · <span")
+	buffalo := strings.Index(body, ">BUF team total · <span")
+	miami := strings.Index(body, ">MIA team total · <span")
 	require.GreaterOrEqual(t, spread, 0, "the Lines tab names its spread")
 	require.GreaterOrEqual(t, moneyline, 0, "the Lines tab names its moneyline")
 	require.GreaterOrEqual(t, total, 0, "the Lines tab names its total")
@@ -1335,8 +1335,8 @@ func TestPickDetailLinesTabShowsGameLinesThenTeamTotals(t *testing.T) {
 	assert.Less(t, total, moneyline)
 	assert.Less(t, moneyline, buffalo, "team totals come after the game lines")
 	assert.Less(t, moneyline, miami, "team totals come after the game lines")
-	assert.Contains(t, body, "BUF Team Total Over 24.5")
-	assert.Contains(t, body, "MIA Team Total Over 20.5")
+	assert.Contains(t, body, "24.5")
+	assert.Contains(t, body, "20.5")
 	assert.Contains(t, body, "grid-cols-2", "both sides of a line sit in one row")
 }
 
@@ -2490,7 +2490,7 @@ func TestPickBoardWiresSignalsBadgesSortAndHTMXSwaps(t *testing.T) {
 
 		swapBody := html.UnescapeString(postRec.Body.String())
 		assert.Contains(t, swapBody, `class="pick-line-group"`)
-		assert.Contains(t, swapBody, `tap to remove`)
+		assert.Contains(t, swapBody, `aria-pressed="true"`)
 		assert.Contains(t, swapBody, `Smash matchup`)
 	})
 
@@ -3030,8 +3030,10 @@ func TestPickBoardCollapsesPlayerPropRowsAndSwapsAcrossLines(t *testing.T) {
 	body := html.UnescapeString(detail.Body.String())
 	assert.Equal(t, 1, strings.Count(body, `class="pick-line-group"`),
 		"all books and name spellings collapse into one pick-line-group row")
-	assert.Contains(t, body, "Over 72.5")
-	assert.Contains(t, body, "Under 72.5")
+	assert.Contains(t, body, "Rush Yds")
+	assert.Contains(t, body, "72.5")
+	assert.Contains(t, body, ">Over<")
+	assert.Contains(t, body, ">Under<")
 
 	// Pick Over 72.5, then switch to Under 75.5 on the same player prop:
 	// sameBoardLine treats them as the same line so HTMX refreshes only that row.
@@ -3089,10 +3091,10 @@ func TestPickBoardCollapsesPlayerPropRowsAndSwapsAcrossLines(t *testing.T) {
 		"sameBoardLine should refresh only the prop's pair row, not trigger board-updated")
 	swapBody := html.UnescapeString(swapRec.Body.String())
 	assert.Contains(t, swapBody, `id="pick-line-`)
-	assert.Contains(t, swapBody, "Over 72.5")
-	assert.Contains(t, swapBody, "tap to switch")
-	assert.Contains(t, swapBody, "Under 72.5")
-	assert.Contains(t, swapBody, "tap to remove")
+	assert.Contains(t, swapBody, "72.5")
+	assert.Contains(t, swapBody, `title="Switch to Over"`)
+	assert.Contains(t, swapBody, `aria-pressed="true"`)
+	assert.Contains(t, swapBody, `hx-delete="/legs/`)
 }
 
 func newProdScalePickFixture(b *testing.B) (*slipFixture, string) {
@@ -3445,8 +3447,8 @@ func TestPickBoardDeleteAndSwapStayBoundWhenLineMoves(t *testing.T) {
 	require.Equal(t, http.StatusOK, delRec.Code, delRec.Body.String())
 	delBody := html.UnescapeString(delRec.Body.String())
 	assert.Contains(t, delBody, `class="pick-line-group"`)
-	assert.Contains(t, delBody, "Over 73.5")
-	assert.Contains(t, delBody, "tap to add")
+	assert.Contains(t, delBody, "73.5")
+	assert.Contains(t, delBody, `hx-post="/slips/`)
 
 	// Switching TOTAL OVER 47.5 to TOTAL UNDER 48.5 refreshes only the row (sameBoardLine).
 	swapForm := url.Values{
@@ -3468,8 +3470,8 @@ func TestPickBoardDeleteAndSwapStayBoundWhenLineMoves(t *testing.T) {
 	require.Equal(t, http.StatusOK, swapRec.Code, swapRec.Body.String())
 	assert.Equal(t, "tray-updated", swapRec.Header().Get("Hx-Trigger"))
 	swapBody := html.UnescapeString(swapRec.Body.String())
-	assert.Contains(t, swapBody, "Under 48.5")
-	assert.Contains(t, swapBody, "tap to remove")
+	assert.Contains(t, swapBody, "48.5")
+	assert.Contains(t, swapBody, `aria-pressed="true"`)
 }
 
 func TestPickBoardAndTrayShowDriftAndSyncLine(t *testing.T) {
@@ -3564,7 +3566,8 @@ func TestPickBoardAndTrayShowDriftAndSyncLine(t *testing.T) {
 	require.Equal(t, http.StatusOK, syncRec.Code, syncRec.Body.String())
 	assert.Equal(t, "tray-updated", syncRec.Header().Get("Hx-Trigger"))
 	syncBody := html.UnescapeString(syncRec.Body.String())
-	assert.Contains(t, syncBody, "Over 252.5")
+	assert.Contains(t, syncBody, "252.5")
+	assert.Contains(t, syncBody, `aria-pressed="true"`)
 	assert.NotContains(t, syncBody, "Sync line")
 	assert.NotContains(t, syncBody, "Slip 245.5")
 
@@ -4584,4 +4587,109 @@ func TestPickDetailSectionsCollapseByDefaultAndAutoOpenWhenSearching(t *testing.
 	passingTag := sectionTag(t, searchBody, "passing")
 	assert.Contains(t, passingTag, fmt.Sprintf(`data-keep-open="%s"`, "passing"))
 	assert.Contains(t, passingTag, " open", "section should auto-open when searching")
+}
+
+func TestPickBoardCompactOUControlsAndHoistedSplitLine(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 1)
+	game := addGame(t, fixture, gameKickoff())
+	now := time.Now().UTC()
+
+	_, err := fixture.store.UpsertOdds(t.Context(), []db.Odds{
+		{
+			GameID:     game.ID,
+			Book:       "draftkings",
+			MarketType: "PASS_YDS",
+			Team:       "BUF",
+			PlayerName: "Josh Allen",
+			Side:       "OVER",
+			Line:       new(245.5),
+			Price:      -110,
+			FetchedAt:  now,
+		},
+		{
+			GameID:     game.ID,
+			Book:       "fanduel",
+			MarketType: "PASS_YDS",
+			Team:       "BUF",
+			PlayerName: "Josh Allen",
+			Side:       "OVER",
+			Line:       new(242.5),
+			Price:      -115,
+			FetchedAt:  now,
+		},
+		{
+			GameID:     game.ID,
+			Book:       "draftkings",
+			MarketType: "PASS_YDS",
+			Team:       "BUF",
+			PlayerName: "Josh Allen",
+			Side:       "UNDER",
+			Line:       new(245.5),
+			Price:      -112,
+			FetchedAt:  now,
+		},
+		{
+			GameID:     game.ID,
+			Book:       "fanduel",
+			MarketType: "PASS_YDS",
+			Team:       "BUF",
+			PlayerName: "Josh Allen",
+			Side:       "UNDER",
+			Line:       new(242.5),
+			Price:      -108,
+			FetchedAt:  now,
+		},
+	})
+	require.NoError(t, err)
+
+	// 1. Unpicked state: shared line + hoisted split line once in header, compact Over/Under add forms.
+	unpicked := html.UnescapeString(pickDetail(t, fixture, "game="+game.ID+"&cat=passing").Body.String())
+	assert.Contains(t, unpicked, "Pass Yds · ")
+	assert.Contains(t, unpicked, "245.5")
+	assert.Equal(t, 1, strings.Count(unpicked, "DK 245.5 (-110) · FD 242.5 (-115)"),
+		"split line is hoisted once in the header, not duplicated in both buttons")
+	assert.Contains(t, unpicked, "▲")
+	assert.Contains(t, unpicked, "▼")
+	assert.Contains(t, unpicked, `hx-post="/slips/`)
+	assert.Contains(t, unpicked, `hx-target="#pick-detail"`)
+	assert.NotContains(t, unpicked, "tap to add")
+	// Grade <details> is a sibling outside <form> and <button>.
+	formClose := strings.Index(unpicked, "</form>")
+	gradeOpen := strings.Index(unpicked, "<details data-leg-grade")
+	require.Positive(t, formClose)
+	require.Greater(t, gradeOpen, formClose, "grade popover must be a sibling outside the <form>")
+
+	// 2. Pick OVER from the board: returns pick-line-group with remove (OVER) and switch (UNDER) + at-limit N/A.
+	addRec := postForm(t, fixture.handler, fmt.Sprintf("/slips/%d/legs", fixture.slip.ID), url.Values{
+		"quick":       {"1"},
+		"from":        {"board"},
+		"game_id":     {game.ID},
+		"market_type": {"PASS_YDS"},
+		"team":        {"BUF"},
+		"player_name": {"Josh Allen"},
+		"player_id":   {"josh-allen"},
+		"side":        {"OVER"},
+		"line":        {"245.5"},
+		"odds":        {"-110"},
+	})
+	require.Equal(t, http.StatusOK, addRec.Code, addRec.Body.String())
+	pickedRow := html.UnescapeString(addRec.Body.String())
+	assert.Contains(t, pickedRow, `class="pick-line-group"`)
+	assert.Contains(t, pickedRow, `hx-delete="/legs/`)
+	assert.Contains(t, pickedRow, `aria-pressed="true"`)
+	assert.Contains(t, pickedRow, "✓")
+	assert.Contains(t, pickedRow, `hx-put="/legs/`)
+	assert.Contains(t, pickedRow, `title="Switch to Under"`)
+	assert.Contains(t, pickedRow, `hx-target="closest .pick-line-group"`)
+	assert.NotContains(t, pickedRow, "tap to remove")
+	assert.NotContains(t, pickedRow, "tap to switch")
+
+	// 3. At-limit (limit=1) on another O/U market renders swap button without "swap in" copy.
+	addGameOdds(t, fixture.store, game.ID)
+	atLimitBody := html.UnescapeString(pickDetail(t, fixture, "game="+game.ID+"&cat=lines").Body.String())
+	assert.Contains(t, atLimitBody, `hx-target="#pick-swap-body"`)
+	assert.Contains(t, atLimitBody, `title="Swap into slip"`)
+	assert.Contains(t, atLimitBody, "Total · ")
 }

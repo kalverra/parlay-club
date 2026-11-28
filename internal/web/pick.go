@@ -149,9 +149,12 @@ type PickDetailSectionView struct {
 
 // PickLineGroupView is one line and the sides a person can pick from it.
 type PickLineGroupView struct {
-	ID      string
-	Label   string
-	Options []PickRowView
+	ID         string
+	Label      string
+	IsOU       bool
+	SharedLine string
+	SplitLine  string
+	Options    []PickRowView
 }
 
 // PickPlayerView is one player's card in a prop tab. A player's markets share
@@ -1125,6 +1128,26 @@ func pickLineGroupView(
 			option.Text = propOptionText(row)
 		}
 		view.Options = append(view.Options, option)
+	}
+	if len(view.Options) == 2 && view.Options[0].Side == "OVER" && view.Options[1].Side == "UNDER" {
+		view.IsOU = true
+		if view.Options[0].Line != "" && view.Options[0].Line == view.Options[1].Line {
+			view.SharedLine = view.Options[0].Line
+		}
+		for _, opt := range view.Options {
+			if opt.PickID != 0 && opt.SplitLine != "" {
+				view.SplitLine = opt.SplitLine
+				break
+			}
+		}
+		if view.SplitLine == "" {
+			for _, opt := range view.Options {
+				if opt.SplitLine != "" {
+					view.SplitLine = opt.SplitLine
+					break
+				}
+			}
+		}
 	}
 	return view
 }
