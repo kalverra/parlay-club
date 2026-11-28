@@ -5,7 +5,7 @@ type: reference
 summary: Every HTTP route the server serves, the middleware in front of them, and the status codes, HTMX headers, and SSE frames handlers return.
 tags: [routes, http, handlers, middleware, htmx, sse, props, prefill, research, schedules, wagers, record, analyzer, guide, docs, glossary, themes, manifest, service-worker, pwa]
 budget:
-  max_lines: 620
+  max_lines: 650
   reason: Every HTTP route, the middleware around it, and its response behavior live in one reference table.
 ---
 
@@ -406,20 +406,29 @@ from `?leg_id=` or stored odds; market tabs use each market's own stored O/U lin
 
 ### Record Book
 
-| Method + path            | Purpose                                           | Response |
-| ------------------------ | ------------------------------------------------- | -------- |
-| `GET /record?season=`    | Season Record Book for the active group           | Full page; invalid or non-positive `season` is 400. |
+| Method + path                        | Purpose                                           | Response |
+| ------------------------------------ | ------------------------------------------------- | -------- |
+| `GET /record?season=`                | Season Record Book for the active group           | Full page; invalid or non-positive `season` is 400. |
+| `GET /record/members/{id}?season=`   | Member bet history and earned tags for a season   | Full page; invalid `id` or `season` is 400, out-of-group user is 404. |
 
 `GET /record` reads the active group from `Scope` and resolves the season in order: explicit `?season=` query parameter,
 latest season with `GRADED` slips, latest season with any slip, latest loaded week's season, or the current calendar
 year. An unreadable or non-positive `?season=` answers `400 Bad Request`.
 
 The handler loads the group's `GRADED` slips, their legs, participating users (including former members who authored a
-leg on a graded slip), and logged wagers for that season, computes `record.Build`, and renders
+leg on a graded slip), logged wagers, net leg votes (`VotesForGroupSeason`), and cached pre-kickoff leg grades
+(`EvalCache.GetOrCompute`, failing soft if replay errors) for that season, computes `record.Build`, and renders
 `web/templates/record.html`. When no group is active or the selected season has no graded slips, it renders an empty
 state. Otherwise it shows the season selector, four summary cards (Group record, Units P/L, Win streak, Loss streak),
-and the member leaderboard (stacked cards below `sm:` and a table at `sm:+`). See
-[Record Book](../concepts/record-book.md).
+and the member leaderboard (stacked cards below `sm:` and a table at `sm:+`). Each leaderboard member links to
+`/record/members/{id}?season=` and displays clickable `data-tag-explain` chips that open `#tag-explain-dialog`.
+
+`GET /record/members/{id}?season=` parses `{id}` (400 on invalid ID), resolves `?season=` with the same rules, and
+verifies `{id}` appears in `RecordUsersForGroupSeason` for the active group and season (returning `404 Not Found` if
+no group is active or the user is outside the group). It renders `web/templates/record_member.html` with a back link to
+`/record?season=`, season selector, member header and rank, 4-stat summary strip (`Legs`, `Hit %` with implied-odds
+lift, `Avg odds`, `Dollar P/L`), clickable `data-tag-explain` tags opening `#tag-explain-dialog`, and newest-first
+graded leg cards linking to `/slips/{id}`. See [Record Book](../concepts/record-book.md).
 
 ### Analyzer guide
 

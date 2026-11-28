@@ -246,6 +246,10 @@ Risk: low (read-only route behind `RequireUser` and `groups.Scope` with explicit
 - [x] Add `GET /record/members/{id}` in `internal/web/slips.go` and `internal/web/record.go`, register `"record-member"`
       in `internal/web/render.go`, build `web/templates/record_member.html` with summary strip, clickable tags, and
       newest-first graded leg history, and add scoping and rendering tests in `internal/web/record_test.go`.
-- [ ] Docs: update `docs/concepts/record-book.md` (including fixing its stale front-matter fields) and
+- [x] Docs: update `docs/concepts/record-book.md` (including fixing its stale front-matter fields) and
       `docs/reference/routes.md` to document the expanded tag catalog, clickable tag explanations, and
       `GET /record/members/{id}?season=`.
+
+## Reviews
+
+- [x] Final review: agy@gemini-4-neon-low
