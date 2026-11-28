@@ -482,3 +482,63 @@ func TestPriceEdge(t *testing.T) {
 		})
 	}
 }
+
+func TestFormatOneIn(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		prob float64
+		want string
+	}{
+		{name: "13 percent longshot", prob: 0.13, want: "~1 in 8"},
+		{name: "25 percent", prob: 0.25, want: "~1 in 4"},
+		{name: "50 percent coin flip", prob: 0.50, want: "~1 in 2"},
+		{name: "minus 110 favorite", prob: 110.0 / 210.0, want: "~1 in 2"},
+		{name: "minus 200 favorite", prob: 200.0 / 300.0, want: "~2 in 3"},
+		{name: "minus 300 favorite", prob: 0.75, want: "~3 in 4"},
+		{name: "minus 400 favorite", prob: 0.80, want: "~4 in 5"},
+		{name: "sub 1 percent", prob: 0.005, want: "~1 in 200"},
+		{name: "above 99 percent", prob: 0.995, want: "almost every time"},
+		{name: "zero invalid", prob: 0, want: ""},
+		{name: "one invalid", prob: 1, want: ""},
+		{name: "negative invalid", prob: -0.2, want: ""},
+		{name: "nan invalid", prob: math.NaN(), want: ""},
+		{name: "inf invalid", prob: math.Inf(1), want: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tt.want, parlay.FormatOneIn(tt.prob))
+		})
+	}
+}
+
+func TestFormatImpliedReality(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		prob float64
+		want string
+	}{
+		{name: "13 percent", prob: 0.13, want: "13% implied (hits ~1 in 8 times)"},
+		{name: "50 percent", prob: 0.50, want: "50% implied (hits ~1 in 2 times)"},
+		{name: "75 percent favorite", prob: 0.75, want: "75% implied (hits ~3 in 4 times)"},
+		{name: "less than 1 percent", prob: 0.005, want: "<1% implied (hits ~1 in 200 times)"},
+		{name: "greater than 99 percent", prob: 0.995, want: ">99% implied (hits almost every time)"},
+		{name: "zero invalid", prob: 0, want: ""},
+		{name: "one invalid", prob: 1, want: ""},
+		{name: "nan invalid", prob: math.NaN(), want: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tt.want, parlay.FormatImpliedReality(tt.prob))
+		})
+	}
+}

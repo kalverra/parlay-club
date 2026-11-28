@@ -322,7 +322,11 @@ func (e *V2Engine) scoreLegInternal(
 		score,
 	)
 
-	return v2LegEval{
+	vegasImpliedProb := parlay.ImpliedProb(leg.Odds)
+	fairNoVigProb := marketProb
+	rawModelProb := resolveRawModelProb(leg, game, pred, e.cfg)
+
+	ev := v2LegEval{
 		leg:          leg,
 		game:         game,
 		role:         role,
@@ -339,16 +343,21 @@ func (e *V2Engine) scoreLegInternal(
 		stabPillar:   stabPillar,
 		ctxPillar:    ctxPillar,
 		grade: LegGrade{
-			LegID:          leg.ID,
-			Letter:         letterForScore(score, e.cfg),
-			Score:          score,
-			Factors:        factors,
-			Pillars:        []PillarScore{pricePillar, scriptPillar, stabPillar, ctxPillar},
-			CalibratedProb: calibratedProb,
-			MarketProb:     marketProb,
-			Uncertain:      uncertain,
+			LegID:            leg.ID,
+			Letter:           letterForScore(score, e.cfg),
+			Score:            score,
+			Factors:          factors,
+			Pillars:          []PillarScore{pricePillar, scriptPillar, stabPillar, ctxPillar},
+			CalibratedProb:   calibratedProb,
+			MarketProb:       marketProb,
+			RawModelProb:     rawModelProb,
+			VegasImpliedProb: vegasImpliedProb,
+			FairNoVigProb:    fairNoVigProb,
+			Uncertain:        uncertain,
 		},
 	}
+	ev.grade.Diagnostics = buildLegDiagnostics(ev, rawModelProb, vegasImpliedProb, fairNoVigProb, e.cfg)
+	return ev
 }
 
 func (e *V2Engine) predictPropLeg(
@@ -960,6 +969,16 @@ func resolveLegProbs(
 	default:
 		return fallbackRetailFairProb(leg.Odds), 0
 	}
+}
+
+func resolveRawModelProb(leg Leg, game Game, pred *modelv2.LegPrediction, cfg V2Config) float64 {
+	if pred != nil && pred.ModelProb > 0 && pred.ModelProb < 1 {
+		return clampProb(pred.ModelProb, v2MinClampedProb, v2MaxClampedProb)
+	}
+	if p := resolveGameLineModelProb(leg, game, cfg); p > 0 && p < 1 {
+		return clampProb(p, v2MinClampedProb, v2MaxClampedProb)
+	}
+	return 0
 }
 
 func resolveGameLineModelProb(leg Leg, game Game, cfg V2Config) float64 {
@@ -1637,16 +1656,20 @@ func buildSingleLegSlipGrade(
 	factors := slices.Clone(only.grade.Factors)
 	summary := singleLegSlipSummary(only, warnings)
 	return SlipGrade{
-		Letter:         only.grade.Letter,
-		Score:          only.grade.Score,
-		Summary:        summary,
-		Factors:        factors,
-		LegGrades:      legGrades,
-		Pillars:        pillars,
-		CalibratedProb: only.grade.CalibratedProb,
-		MarketProb:     only.grade.MarketProb,
-		CorrMultiplier: 1.0,
-		Uncertain:      only.grade.Uncertain,
+		Letter:           only.grade.Letter,
+		Score:            only.grade.Score,
+		Summary:          summary,
+		Factors:          factors,
+		LegGrades:        legGrades,
+		Pillars:          pillars,
+		CalibratedProb:   only.grade.CalibratedProb,
+		MarketProb:       only.grade.MarketProb,
+		RawModelProb:     only.grade.RawModelProb,
+		VegasImpliedProb: only.grade.VegasImpliedProb,
+		FairNoVigProb:    only.grade.FairNoVigProb,
+		CorrMultiplier:   1.0,
+		Diagnostics:      buildSingleLegSlipDiagnostics(only),
+		Uncertain:        only.grade.Uncertain,
 	}
 }
 
@@ -1675,6 +1698,8 @@ func (e *V2Engine) buildMultiLegSlipGrade(
 	indepProb := 1.0
 	marketIndepProb := 1.0
 	hasAllMarket := true
+	rawModelIndepProb := 1.0
+	hasAllRawModel := true
 	combinedDec := 1.0
 	hasAllOdds := true
 	anyUncertain := false
@@ -1687,6 +1712,11 @@ func (e *V2Engine) buildMultiLegSlipGrade(
 			marketIndepProb *= ev.grade.MarketProb
 		} else {
 			hasAllMarket = false
+		}
+		if ev.grade.RawModelProb > 0 && ev.grade.RawModelProb < 1 {
+			rawModelIndepProb *= ev.grade.RawModelProb
+		} else {
+			hasAllRawModel = false
 		}
 		if d := parlay.AmericanToDecimal(ev.leg.Odds); d > 1 {
 			combinedDec *= d
@@ -1710,6 +1740,14 @@ func (e *V2Engine) buildMultiLegSlipGrade(
 	slipMarketProb := 0.0
 	if hasAllMarket {
 		slipMarketProb = marketIndepProb
+	}
+	slipRawModelProb := 0.0
+	if hasAllRawModel {
+		slipRawModelProb = rawModelIndepProb
+	}
+	vegasImpliedProb := 0.0
+	if hasAllOdds && combinedDec > 1 {
+		vegasImpliedProb = 1.0 / combinedDec
 	}
 
 	pricePillar, sgpTaxed := e.scoreSlipPriceVigPillar(
@@ -1764,17 +1802,47 @@ func (e *V2Engine) buildMultiLegSlipGrade(
 		sgpTaxed,
 	)
 
+	diag := e.buildMultiLegSlipDiagnostics(
+		legs,
+		evals,
+		gradedIdxs,
+		warnings,
+		jointEst,
+		hasJoint,
+		score,
+		letter,
+		jointProb,
+		corrMult,
+		vegasImpliedProb,
+		slipMarketProb,
+		slipRawModelProb,
+		combinedDec,
+		hasAllOdds,
+		sgpTaxed,
+		hasDangerConflict,
+		hasWarnConflict,
+		chalkCount,
+		pricePillar,
+		scriptPillar,
+		stabPillar,
+		ctxPillar,
+	)
+
 	return SlipGrade{
-		Letter:         letter,
-		Score:          score,
-		Summary:        summary,
-		Factors:        factors,
-		LegGrades:      legGrades,
-		Pillars:        []PillarScore{pricePillar, scriptPillar, stabPillar, ctxPillar},
-		CalibratedProb: jointProb,
-		MarketProb:     slipMarketProb,
-		CorrMultiplier: corrMult,
-		Uncertain:      anyUncertain,
+		Letter:           letter,
+		Score:            score,
+		Summary:          summary,
+		Factors:          factors,
+		LegGrades:        legGrades,
+		Pillars:          []PillarScore{pricePillar, scriptPillar, stabPillar, ctxPillar},
+		CalibratedProb:   jointProb,
+		MarketProb:       slipMarketProb,
+		RawModelProb:     slipRawModelProb,
+		VegasImpliedProb: vegasImpliedProb,
+		FairNoVigProb:    slipMarketProb,
+		CorrMultiplier:   corrMult,
+		Diagnostics:      diag,
+		Uncertain:        anyUncertain,
 	}
 }
 

@@ -36,28 +36,36 @@ type PillarScore struct {
 
 // LegGrade is the deterministic quality grade for one slip leg.
 type LegGrade struct {
-	LegID          int64
-	Letter         string        // "A", "B", "C", "D", "F", or "" when skipped
-	Score          int           // 0..100 (0 when skipped)
-	Factors        []GradeFactor // applied adjustments in deterministic order
-	Pillars        []PillarScore // v2 four-pillar breakdown (nil on v1)
-	CalibratedProb float64       // calibrated fair leg probability (0 on v1 or skipped)
-	MarketProb     float64       // Power-devigged market anchor (0 if unavailable)
-	Uncertain      bool          // heightened uncertainty from role/injury/news shifts
+	LegID            int64
+	Letter           string           // "A", "B", "C", "D", "F", or "" when skipped
+	Score            int              // 0..100 (0 when skipped)
+	Factors          []GradeFactor    // applied adjustments in deterministic order
+	Pillars          []PillarScore    // v2 four-pillar breakdown (nil on v1)
+	CalibratedProb   float64          // calibrated fair leg probability (0 on v1 or skipped)
+	MarketProb       float64          // Power-devigged market anchor (0 if unavailable)
+	RawModelProb     float64          // standalone unblended model probability (0 when no model ran)
+	VegasImpliedProb float64          // raw 1 / decimalOdds (0 if odds unavailable)
+	FairNoVigProb    float64          // Power-devigged fair prob when sharp/consensus exists (0 if unavailable)
+	Diagnostics      BuildDiagnostics // structural build diagnostics & provenance
+	Uncertain        bool             // heightened uncertainty from role/injury/news shifts
 }
 
 // SlipGrade is the deterministic overall quality grade for a parlay slip.
 type SlipGrade struct {
-	Letter         string        // "A", "B", "C", "D", "F", or "" when no legs are gradable
-	Score          int           // 0..100
-	Summary        string        // one-line sharp-friend summary
-	Factors        []GradeFactor // slip-level adjustments (correlation, parlay drag, chalk drag)
-	LegGrades      []LegGrade    // per-leg grades in input leg order
-	Pillars        []PillarScore // v2 four-pillar breakdown (nil on v1)
-	CalibratedProb float64       // calibrated joint slip probability (0 on v1 or skipped)
-	MarketProb     float64       // Power-devigged independent market probability (0 if unavailable)
-	CorrMultiplier float64       // M_corr = p_joint / prod(p_i) (0 on v1)
-	Uncertain      bool          // true when any graded leg has heightened uncertainty
+	Letter           string           // "A", "B", "C", "D", "F", or "" when no legs are gradable
+	Score            int              // 0..100
+	Summary          string           // one-line sharp-friend summary
+	Factors          []GradeFactor    // slip-level adjustments (correlation, parlay drag, chalk drag)
+	LegGrades        []LegGrade       // per-leg grades in input leg order
+	Pillars          []PillarScore    // v2 four-pillar breakdown (nil on v1)
+	CalibratedProb   float64          // calibrated joint slip probability (0 on v1 or skipped)
+	MarketProb       float64          // Power-devigged independent market probability (0 if unavailable)
+	RawModelProb     float64          // standalone unblended model probability (0 when unavailable)
+	VegasImpliedProb float64          // 1 / combinedDecimalOdds (0 if any leg lacks odds)
+	FairNoVigProb    float64          // Power-devigged independent market prob when all legs have sharp/consensus
+	CorrMultiplier   float64          // M_corr = p_joint / prod(p_i) (0 on v1)
+	Diagnostics      BuildDiagnostics // structural build diagnostics & provenance
+	Uncertain        bool             // true when any graded leg has heightened uncertainty
 }
 
 // SlipEvaluation holds both the analyzer warnings and deterministic grade from

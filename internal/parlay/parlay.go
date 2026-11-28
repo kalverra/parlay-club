@@ -4,6 +4,7 @@
 package parlay
 
 import (
+	"fmt"
 	"math"
 	"slices"
 )
@@ -181,4 +182,43 @@ func PriceEdge(retailAmerican int, fairProb float64) float64 {
 		return 0
 	}
 	return fairProb - retailProb
+}
+
+// FormatOneIn formats a probability in (0, 1) as a human-friendly frequency
+// ratio such as "~1 in 8" or "~2 in 3". Returns "" for probabilities outside
+// (0, 1) or non-finite values.
+func FormatOneIn(prob float64) string {
+	if !(prob > 0 && prob < 1) {
+		return ""
+	}
+	if prob > 0.99 {
+		return "almost every time"
+	}
+	if prob <= 0.50 {
+		n := max(2, int(math.Round(1/prob)))
+		return fmt.Sprintf("~1 in %d", n)
+	}
+	missIn := max(2, int(math.Round(1/(1-prob))))
+	if missIn == 2 {
+		return "~1 in 2"
+	}
+	return fmt.Sprintf("~%d in %d", missIn-1, missIn)
+}
+
+// FormatImpliedReality formats a probability in (0, 1) into plain-English
+// implied reality text, such as "13% implied (hits ~1 in 8 times)", handling
+// <1% and >99% bounds cleanly. Returns "" for invalid probabilities.
+func FormatImpliedReality(prob float64) string {
+	if !(prob > 0 && prob < 1) {
+		return ""
+	}
+	pct := prob * 100
+	switch {
+	case pct < 1.0:
+		return fmt.Sprintf("<1%% implied (hits %s times)", FormatOneIn(prob))
+	case pct > 99.0:
+		return ">99% implied (hits almost every time)"
+	default:
+		return fmt.Sprintf("%d%% implied (hits %s times)", int(math.Round(pct)), FormatOneIn(prob))
+	}
 }
