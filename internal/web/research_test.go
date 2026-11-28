@@ -2365,3 +2365,77 @@ func TestResearchExploreAndBetRenderSplitLinesWithHomeBookFirst(t *testing.T) {
 	betFDBody := betFD.Body.String()
 	assert.Contains(t, betFDBody, "FD 263.5 (-115) · DK 265.5 (-110)")
 }
+
+func TestResearchBetVisualHierarchyAndFDDKSnapshot(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	game := addGame(t, fixture, gameKickoff())
+	seedBetResearchPlayer(t, fixture, game)
+
+	betURL := "/research/bet?" + url.Values{
+		"game_id":   {game.ID},
+		"market":    {"PASS_YDS"},
+		"side":      {"OVER"},
+		"team":      {"BUF"},
+		"player_id": {"3918298"},
+	}.Encode()
+
+	// DraftKings homeBook: DK card appears before FD card in the snapshot.
+	dkUser, err := fixture.store.SetUserHomeBook(t.Context(), fixture.user.ID, new("draftkings"))
+	require.NoError(t, err)
+	dkHandler := researchHandlerWithRefresher(t, fixture, dkUser, &researchTestRefresher{})
+
+	recDK := httptest.NewRecorder()
+	dkHandler.ServeHTTP(recDK, httptest.NewRequestWithContext(t.Context(), http.MethodGet, betURL, nil))
+	require.Equal(t, http.StatusOK, recDK.Code)
+	bodyDK := recDK.Body.String()
+
+	assert.Contains(t, bodyDK, `data-side-badge="OVER"`)
+	assert.Contains(t, bodyDK, "data-research-pillars")
+	assert.Contains(t, bodyDK, "Compare all 3 books")
+
+	snapshotIdx := strings.Index(bodyDK, "data-fdk-snapshot")
+	pillarsIdx := strings.Index(bodyDK, "data-research-pillars")
+	playerIdx := strings.Index(bodyDK, `id="research-panel"`)
+	breakdownIdx := strings.Index(bodyDK, "data-grade-breakdown")
+	allBooksIdx := strings.Index(bodyDK, "data-all-books")
+
+	require.Greater(t, snapshotIdx, -1)
+	require.Greater(t, pillarsIdx, snapshotIdx)
+	require.Greater(t, playerIdx, pillarsIdx)
+	require.Greater(t, breakdownIdx, playerIdx)
+	require.Greater(t, allBooksIdx, breakdownIdx)
+
+	// Collapsed <details> must not start open.
+	assert.NotContains(t, bodyDK[allBooksIdx:allBooksIdx+40], " open")
+
+	// Snapshot contains DK before FD, and excludes betmgm.
+	snapshotBlock := bodyDK[snapshotIdx:pillarsIdx]
+	dkCardIdx := strings.Index(snapshotBlock, `data-snapshot-book="draftkings"`)
+	fdCardIdx := strings.Index(snapshotBlock, `data-snapshot-book="fanduel"`)
+	require.Greater(t, dkCardIdx, -1)
+	require.Greater(t, fdCardIdx, dkCardIdx)
+	assert.NotContains(t, snapshotBlock, "betmgm")
+	assert.Contains(t, bodyDK[allBooksIdx:], ">betmgm<")
+
+	// FanDuel homeBook: FD card appears before DK card in the snapshot.
+	fdUser, err := fixture.store.SetUserHomeBook(t.Context(), fixture.user.ID, new("fanduel"))
+	require.NoError(t, err)
+	fdHandler := researchHandlerWithRefresher(t, fixture, fdUser, &researchTestRefresher{})
+
+	recFD := httptest.NewRecorder()
+	fdHandler.ServeHTTP(recFD, httptest.NewRequestWithContext(t.Context(), http.MethodGet, betURL, nil))
+	require.Equal(t, http.StatusOK, recFD.Code)
+	bodyFD := recFD.Body.String()
+
+	fdSnapStart := strings.Index(bodyFD, "data-fdk-snapshot")
+	fdSnapEnd := strings.Index(bodyFD, "data-research-pillars")
+	require.Greater(t, fdSnapStart, -1)
+	require.Greater(t, fdSnapEnd, fdSnapStart)
+	fdSnapshotBlock := bodyFD[fdSnapStart:fdSnapEnd]
+	assert.Less(t,
+		strings.Index(fdSnapshotBlock, `data-snapshot-book="fanduel"`),
+		strings.Index(fdSnapshotBlock, `data-snapshot-book="draftkings"`),
+	)
+}

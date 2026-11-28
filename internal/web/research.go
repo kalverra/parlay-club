@@ -150,6 +150,8 @@ type BetResearchView struct {
 	MarketType      string
 	MarketLabel     string
 	Side            string
+	SideBadge       string
+	SideClass       string
 	Team            string
 	PlayerID        string
 	PlayerName      string
@@ -202,6 +204,8 @@ type BetPricingView struct {
 	BestImplied      string
 	DevigEdge        string
 	DevigNote        string
+	SnapshotBooks    []BetBookView
+	BookCount        int
 	Books            []BetBookView
 }
 
@@ -607,6 +611,7 @@ func (h *researchHandlers) buildBetResearch(ctx context.Context, r *http.Request
 	view.MarketType = bet.Market
 	view.MarketLabel = researchMarketLabel(bet.Market)
 	view.Side = bet.Side
+	view.SideBadge, view.SideClass = legSideBadge(&bet.Side)
 	view.Team = bet.Team
 	view.PlayerID = bet.PlayerID
 	view.PlayerName = bet.PlayerName
@@ -826,8 +831,41 @@ func buildBetPricing(odds []db.Odds, row board.Row, game db.Game, homeBook strin
 		return strings.Compare(left.Book, right.Book)
 	})
 
+	view.BookCount = len(view.Books)
+	view.SnapshotBooks = extractSnapshotBooks(view.Books, homeKey)
 	view.DevigEdge, view.DevigNote = betDevigEdge(odds, row, game, best.odds)
 	return view
+}
+
+// extractSnapshotBooks returns the explicit FanDuel and DraftKings quotes
+// ordered with the viewer's homeBook first when it is one of them.
+func extractSnapshotBooks(books []BetBookView, homeKey string) []BetBookView {
+	var fd, dk *BetBookView
+	for i := range books {
+		switch db.NormalizeBook(books[i].Book) {
+		case "fanduel":
+			fd = &books[i]
+		case "draftkings":
+			dk = &books[i]
+		}
+	}
+	out := make([]BetBookView, 0, 2)
+	if homeKey == "draftkings" {
+		if dk != nil {
+			out = append(out, *dk)
+		}
+		if fd != nil {
+			out = append(out, *fd)
+		}
+		return out
+	}
+	if fd != nil {
+		out = append(out, *fd)
+	}
+	if dk != nil {
+		out = append(out, *dk)
+	}
+	return out
 }
 
 // betBookPrices groups one selection's cached odds by book, choosing the book's

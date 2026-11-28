@@ -247,7 +247,7 @@ pillar bars from already-computed data, and collapses the full book list)
 Risk: low (read-only `/research/bet` presentation change with no mutations, no external API calls, and direct handler
 HTML coverage)
 
-- [ ] Extract explicit FanDuel and DraftKings quotes (ordered with `homeBook` first) and visual pillar summary data on
+- [x] Extract explicit FanDuel and DraftKings quotes (ordered with `homeBook` first) and visual pillar summary data on
   `BetResearchView` in `internal/web/research.go`, and reorder `web/templates/research_bet.html` to lead with the
   FD/DK snapshot, visual grade/warnings, and player/team graphics while moving all-book prices into a collapsed
   `<details>` below the fold, with tests in `internal/web/research_test.go`.
