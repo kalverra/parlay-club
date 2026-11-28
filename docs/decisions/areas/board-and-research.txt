@@ -4,6 +4,7 @@
 
 ## Live
 
+- [Bet browsing, slip O/U clarity, and research UX](../bet-browsing-and-research-ux.md): Bet browsing, slip O/U clarity, and research UX
 - [Unify player identity across sportsbooks](../canonical-player-identity.md): Normalize and resolve player names against team rosters once during prop ingest so stored odds, board cards, and saved legs share one canonical player ID, name, and team.
 - [Deepen pick-board read assembly and current-odds filtering](../deepen-pick-board.md): Filter superseded odds rows at the storage seam and deepen the board module to own scoped board assembly, signal attachment on paired line groups, and picked-leg drift state across full-page and partial views.
 - [DK and FD dual-book board and split-line display](../dk-fd-board-and-lines.md): DK and FD dual-book board and split-line display
