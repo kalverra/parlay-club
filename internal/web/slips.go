@@ -78,6 +78,7 @@ func (h *slipHandlers) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /analyzer/guide", h.analyzerGuide)
 	mux.HandleFunc("GET /analyzer/results", h.evalResults)
 	mux.HandleFunc("GET /record", h.recordBook)
+	mux.HandleFunc("GET /record/members/{id}", h.recordMember)
 	mux.HandleFunc("GET /groups/{id}/week", h.groupWeek)
 	mux.HandleFunc("GET /me", h.profile)
 	mux.HandleFunc("POST /me", h.updateProfile)

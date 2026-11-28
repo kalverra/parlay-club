@@ -1,0 +1,165 @@
+{{define "content"}}
+<section class="space-y-5">
+  <div class="flex flex-wrap items-center justify-between gap-3">
+    <a
+      href="/record?season={{.Season}}"
+      class="rounded-md border border-line-strong bg-surface-2 px-2.5 py-1 text-xs font-medium text-ink hover:bg-surface"
+    >&larr; Record Book</a>
+
+    {{if .Seasons}}
+      <form method="get" action="/record/members/{{.Member.UserID}}" class="flex items-center gap-2">
+        <label for="record-member-season" class="sr-only">Season</label>
+        <select
+          id="record-member-season"
+          name="season"
+          aria-label="Season"
+          onchange="this.form.submit()"
+          class="rounded-lg border border-line-strong bg-surface px-3 py-1.5 text-sm font-medium text-ink focus:border-accent focus:outline-none"
+        >
+          {{range .Seasons}}
+            <option value="{{.Year}}"{{if .Current}} selected{{end}}>{{.Year}} Season</option>
+          {{end}}
+        </select>
+        <noscript>
+          <button
+            type="submit"
+            class="rounded-lg border border-line-strong bg-surface-2 px-3 py-1.5 text-sm font-medium text-ink"
+          >
+            Go
+          </button>
+        </noscript>
+      </form>
+    {{end}}
+  </div>
+
+  <div class="ui-card p-4 space-y-3">
+    <div class="flex items-center justify-between gap-3">
+      <div class="flex items-center gap-3 min-w-0">
+        {{template "avatar" .Member.Avatar}}
+        <div class="min-w-0">
+          <h1 class="truncate text-xl font-semibold text-ink">{{.Member.Name}}</h1>
+          {{if .HasGroup}}
+            <p class="text-sm text-ink-muted">
+              {{.GroupName}} &middot; {{.Season}} season
+            </p>
+          {{end}}
+        </div>
+      </div>
+      {{if gt .Member.Rank 0}}
+        <span class="shrink-0 rounded-full border border-line-strong bg-surface-2 px-2.5 py-0.5 font-mono text-xs font-semibold tabular-nums text-ink-muted">
+          #{{.Member.Rank}}
+        </span>
+      {{end}}
+    </div>
+
+    {{if .Member.Tags}}
+      <div class="flex flex-wrap gap-1.5 border-t border-line pt-3">
+        {{range .Member.Tags}}
+          <button
+            type="button"
+            data-tag-explain
+            data-tag-label="{{.Label}}"
+            data-tag-tone="{{.Tone}}"
+            data-tag-rule="{{.Rule}}"
+            data-tag-explanation="{{.Explanation}}"
+            class="ui-stamp cursor-pointer text-[11px] {{if .IsPraise}}bg-positive-soft text-positive-ink{{else}}bg-danger-soft text-danger-ink{{end}}"
+          >{{.Label}}</button>
+        {{end}}
+      </div>
+    {{end}}
+  </div>
+
+  <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
+    <div class="ui-card p-3.5">
+      <p class="text-xs font-medium text-ink-muted">Legs</p>
+      <p class="mt-1 font-mono text-xl font-semibold tabular-nums text-ink">{{.Member.LegsRecord}}</p>
+      <p class="mt-0.5 text-xs text-ink-subtle">
+        {{.Member.TotalLegs}} graded leg{{if ne .Member.TotalLegs 1}}s{{end}}
+      </p>
+    </div>
+
+    <div class="ui-card p-3.5">
+      <p class="text-xs font-medium text-ink-muted">Hit %</p>
+      <p class="mt-1 font-mono text-xl font-semibold tabular-nums {{if .Member.Qualified}}text-ink{{else}}text-ink-muted{{end}}">
+        {{.Member.HitPct}}
+      </p>
+      <p class="mt-0.5 text-xs text-ink-subtle">
+        {{if .Member.ImpliedLift}}{{.Member.ImpliedLift}} vs odds{{else}}6+ decided to qualify{{end}}
+      </p>
+    </div>
+
+    <div class="ui-card p-3.5">
+      <p class="text-xs font-medium text-ink-muted">Avg odds</p>
+      <p class="mt-1 font-mono text-xl font-semibold tabular-nums text-ink">{{.Member.AvgLegOdds}}</p>
+      <p class="mt-0.5 text-xs text-ink-subtle">Across priced legs</p>
+    </div>
+
+    <div class="ui-card p-3.5">
+      <p class="text-xs font-medium text-ink-muted">Dollar P/L</p>
+      <p class="mt-1 font-mono text-xl font-semibold tabular-nums {{if .Member.DollarPositive}}text-positive-ink{{else if .Member.DollarNegative}}text-danger-ink{{else}}text-ink{{end}}">
+        {{.Member.DollarPL}}
+      </p>
+      <p class="mt-0.5 text-xs text-ink-subtle">
+        {{.Member.WagerCount}} logged wager{{if ne .Member.WagerCount 1}}s{{end}}
+      </p>
+    </div>
+  </div>
+
+  <div class="space-y-3">
+    <div class="flex items-baseline justify-between gap-2">
+      <h2 class="text-base font-semibold">Bet history</h2>
+      <p class="text-xs text-page-muted">Newest graded slips first</p>
+    </div>
+
+    {{if not .Bets}}
+      <p class="ui-card border-dashed p-4 text-sm text-ink-muted">
+        No graded legs for {{.Member.Name}} in the {{.Season}} season.
+      </p>
+    {{else}}
+      <div class="space-y-2.5">
+        {{range .Bets}}
+          <a
+            href="/slips/{{.SlipID}}"
+            class="ui-card block p-3.5 transition hover:border-line-strong hover:bg-surface-2"
+          >
+            <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+              <div class="min-w-0 space-y-1">
+                <div class="flex flex-wrap items-center gap-1.5 text-xs text-ink-muted">
+                  <span class="font-medium text-ink">{{.WeekLabel}}</span>
+                  <span aria-hidden="true">&middot;</span>
+                  <span class="truncate">{{.SlipName}}</span>
+                  <span class="rounded-full border px-1.5 py-0.5 text-[10px] font-semibold {{.SlipResultClass}}">Slip {{.SlipResult}}</span>
+                </div>
+                <p class="text-sm font-semibold text-ink">{{.Selection}}</p>
+                <div class="flex flex-wrap items-center gap-1.5 text-xs text-ink-muted">
+                  {{if .MarketLabel}}
+                    <span>{{.MarketLabel}}</span>
+                  {{end}}
+                  {{if .NetVotesText}}
+                    <span class="rounded-full border px-1.5 py-0.5 font-mono text-[11px] font-medium tabular-nums {{if .NetVotesPositive}}border-positive bg-positive-soft text-positive-ink{{else}}border-danger bg-danger-soft text-danger-ink{{end}}">
+                      {{.NetVotesText}} votes
+                    </span>
+                  {{end}}
+                </div>
+              </div>
+
+              <div class="flex flex-wrap items-center gap-2 sm:shrink-0 sm:justify-end">
+                <span class="font-mono text-sm font-semibold tabular-nums text-ink">{{.Odds}}</span>
+                {{if .Grade}}
+                  <span class="rounded-full border px-2 py-0.5 text-xs font-semibold {{.GradeClass}}">{{.Grade}}</span>
+                {{end}}
+                {{if .SoleKiller}}
+                  <span class="ui-stamp bg-danger-soft text-danger-ink text-[11px]">Sole killer</span>
+                {{end}}
+                <span class="rounded-full border px-2 py-0.5 text-xs font-semibold {{.ResultClass}}">{{.Result}}</span>
+              </div>
+            </div>
+          </a>
+        {{end}}
+      </div>
+    {{end}}
+  </div>
+
+  {{template "tag-explain-dialog"}}
+</section>
+{{end}}

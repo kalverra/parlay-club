@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/kalverra/parlay-club/internal/db"
+	"github.com/kalverra/parlay-club/internal/parlay"
 	"github.com/kalverra/parlay-club/internal/record"
 )
 
@@ -71,6 +73,49 @@ type RecordTagView struct {
 	Explanation string
 }
 
+// RecordMemberPage is the member bet history screen at GET /record/members/{id}.
+type RecordMemberPage struct {
+	Page
+	GroupName string
+	Season    int
+	Seasons   []SeasonOption
+	HasGroup  bool
+	Member    RecordMemberView
+	Bets      []RecordMemberBetView
+}
+
+// RecordMemberBetView is one graded leg in a member's season bet history.
+type RecordMemberBetView struct {
+	WeekLabel        string
+	SlipID           int64
+	SlipName         string
+	SlipResult       string
+	SlipResultClass  string
+	Selection        string
+	MarketLabel      string
+	Odds             string
+	Grade            string
+	GradeClass       string
+	Result           string
+	ResultClass      string
+	SoleKiller       bool
+	NetVotes         int
+	NetVotesText     string
+	NetVotesPositive bool
+	NetVotesNegative bool
+}
+
+type recordSeasonData struct {
+	season     int
+	allSeasons []int
+	slips      []db.GradedSlip
+	legs       []db.Leg
+	users      []db.User
+	legGrades  map[int64]string
+	votes      map[int64]int
+	book       record.Book
+}
+
 // recordBook renders the active group's season Record Book at GET /record?season=.
 func (h *slipHandlers) recordBook(w http.ResponseWriter, r *http.Request) {
 	page := h.pageWithTab(r, "Record Book", TabRecord)
@@ -85,70 +130,130 @@ func (h *slipHandlers) recordBook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx := r.Context()
-	allSeasons, err := h.deps.Store.SeasonsForGroup(ctx, group.ID)
-	if err != nil {
-		h.serverError(w, err)
-		return
-	}
-	gradedSeasons, err := h.deps.Store.GradedSeasonsForGroup(ctx, group.ID)
-	if err != nil {
-		h.serverError(w, err)
-		return
-	}
-
-	selectedSeason, ok := h.resolveRecordSeason(w, r, allSeasons, gradedSeasons)
+	loaded, ok := h.loadRecordSeasonData(w, r, group.ID)
 	if !ok {
 		return
 	}
 
-	slips, err := h.deps.Store.GradedSlipsForGroupSeason(ctx, group.ID, selectedSeason)
-	if err != nil {
-		h.serverError(w, err)
-		return
-	}
-	legs, err := h.deps.Store.GradedLegsForGroupSeason(ctx, group.ID, selectedSeason)
-	if err != nil {
-		h.serverError(w, err)
-		return
-	}
-	users, err := h.deps.Store.RecordUsersForGroupSeason(ctx, group.ID, selectedSeason)
-	if err != nil {
-		h.serverError(w, err)
-		return
-	}
-	wagers, err := h.deps.Store.WagersForGroupSeason(ctx, group.ID, selectedSeason)
-	if err != nil {
-		h.serverError(w, err)
-		return
-	}
-	votes, err := h.deps.Store.VotesForGroupSeason(ctx, group.ID, selectedSeason)
-	if err != nil {
-		h.serverError(w, err)
-		return
-	}
-
-	var legGrades map[int64]string
-	if h.deps.EvalCache != nil {
-		suite, err := h.deps.EvalCache.GetOrCompute(ctx, h.deps.Store, group.ID, selectedSeason)
-		if err != nil {
-			h.deps.Logger.Warn().
-				Err(err).
-				Int64("group_id", group.ID).
-				Int("season", selectedSeason).
-				Msg("record book: compute eval leg grades")
-		} else {
-			engineName := ""
-			if h.deps.GradingEngine != nil {
-				engineName = h.deps.GradingEngine.Name()
-			}
-			legGrades = suite.LegGrades(engineName)
-		}
-	}
-
-	book := buildRecordBook(selectedSeason, slips, legs, users, wagers, legGrades, votes)
-	data := buildRecordPage(page, group, selectedSeason, allSeasons, users, book)
+	data := buildRecordPage(page, group, loaded.season, loaded.allSeasons, loaded.users, loaded.book)
 	h.renderPage(w, "record", data)
+}
+
+// recordMember renders one group member's season summary, tags, and newest-first
+// graded leg history at GET /record/members/{id}?season=.
+func (h *slipHandlers) recordMember(w http.ResponseWriter, r *http.Request) {
+	userID, ok := parseID(r.PathValue("id"))
+	if !ok {
+		http.Error(w, "invalid member id", http.StatusBadRequest)
+		return
+	}
+	if h.deps.Store == nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	group, ok := h.group(r.Context())
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+
+	loaded, ok := h.loadRecordSeasonData(w, r, group.ID)
+	if !ok {
+		return
+	}
+
+	targetUser, found := findUserByID(loaded.users, userID)
+	if !found {
+		http.NotFound(w, r)
+		return
+	}
+
+	page := h.pageWithTab(r, targetUser.Name+" · Record Book", TabRecord)
+	data := buildRecordMemberPage(page, group, targetUser, loaded)
+	h.renderPage(w, "record-member", data)
+}
+
+func (h *slipHandlers) loadRecordSeasonData(
+	w http.ResponseWriter,
+	r *http.Request,
+	groupID int64,
+) (*recordSeasonData, bool) {
+	ctx := r.Context()
+	allSeasons, err := h.deps.Store.SeasonsForGroup(ctx, groupID)
+	if err != nil {
+		h.serverError(w, err)
+		return nil, false
+	}
+	gradedSeasons, err := h.deps.Store.GradedSeasonsForGroup(ctx, groupID)
+	if err != nil {
+		h.serverError(w, err)
+		return nil, false
+	}
+
+	selectedSeason, ok := h.resolveRecordSeason(w, r, allSeasons, gradedSeasons)
+	if !ok {
+		return nil, false
+	}
+
+	slips, err := h.deps.Store.GradedSlipsForGroupSeason(ctx, groupID, selectedSeason)
+	if err != nil {
+		h.serverError(w, err)
+		return nil, false
+	}
+	legs, err := h.deps.Store.GradedLegsForGroupSeason(ctx, groupID, selectedSeason)
+	if err != nil {
+		h.serverError(w, err)
+		return nil, false
+	}
+	users, err := h.deps.Store.RecordUsersForGroupSeason(ctx, groupID, selectedSeason)
+	if err != nil {
+		h.serverError(w, err)
+		return nil, false
+	}
+	wagers, err := h.deps.Store.WagersForGroupSeason(ctx, groupID, selectedSeason)
+	if err != nil {
+		h.serverError(w, err)
+		return nil, false
+	}
+	votes, err := h.deps.Store.VotesForGroupSeason(ctx, groupID, selectedSeason)
+	if err != nil {
+		h.serverError(w, err)
+		return nil, false
+	}
+
+	legGrades := h.loadRecordLegGrades(ctx, groupID, selectedSeason)
+	book := buildRecordBook(selectedSeason, slips, legs, users, wagers, legGrades, votes)
+	return &recordSeasonData{
+		season:     selectedSeason,
+		allSeasons: allSeasons,
+		slips:      slips,
+		legs:       legs,
+		users:      users,
+		legGrades:  legGrades,
+		votes:      votes,
+		book:       book,
+	}, true
+}
+
+func (h *slipHandlers) loadRecordLegGrades(ctx context.Context, groupID int64, season int) map[int64]string {
+	if h.deps.EvalCache == nil {
+		return nil
+	}
+	suite, err := h.deps.EvalCache.GetOrCompute(ctx, h.deps.Store, groupID, season)
+	if err != nil {
+		h.deps.Logger.Warn().
+			Err(err).
+			Int64("group_id", groupID).
+			Int("season", season).
+			Msg("record book: compute eval leg grades")
+		return nil
+	}
+	engineName := ""
+	if h.deps.GradingEngine != nil {
+		engineName = h.deps.GradingEngine.Name()
+	}
+	return suite.LegGrades(engineName)
 }
 
 // resolveRecordSeason picks the season to display from ?season=, falling back
@@ -252,11 +357,135 @@ func buildRecordPage(
 	users []db.User,
 	book record.Book,
 ) RecordPage {
-	userByID := make(map[int64]db.User, len(users))
-	for _, u := range users {
-		userByID[u.ID] = u
+	return RecordPage{
+		Page:          page,
+		GroupName:     group.Name,
+		Season:        selectedSeason,
+		Seasons:       buildSeasonOptions(allSeasons, selectedSeason),
+		HasGroup:      true,
+		HasSlips:      book.TotalSlips > 0,
+		Record:        fmt.Sprintf("%d-%d-%d", book.Wins, book.Losses, book.Pushes),
+		Wins:          book.Wins,
+		Losses:        book.Losses,
+		Pushes:        book.Pushes,
+		TotalSlips:    book.TotalSlips,
+		UnitsPL:       formatUnits(book.UnitsPL),
+		UnitsPositive: book.UnitsPL > 0.005,
+		UnitsNegative: book.UnitsPL < -0.005,
+		LongestWin:    book.LongestWin,
+		LongestLoss:   book.LongestLoss,
+		Leaderboard:   buildLeaderboardViews(users, book),
+	}
+}
+
+func buildRecordMemberPage(
+	page Page,
+	group db.Group,
+	targetUser db.User,
+	loaded *recordSeasonData,
+) RecordMemberPage {
+	leaderboard := buildLeaderboardViews(loaded.users, loaded.book)
+	member := RecordMemberView{
+		UserID:     targetUser.ID,
+		Name:       targetUser.Name,
+		Avatar:     NewUser(targetUser),
+		LegsRecord: "0-0",
+		HitPct:     "–",
+		AvgLegOdds: "–",
+		DollarPL:   "–",
+	}
+	for _, row := range leaderboard {
+		if row.UserID == targetUser.ID {
+			member = row
+			break
+		}
 	}
 
+	return RecordMemberPage{
+		Page:      page,
+		GroupName: group.Name,
+		Season:    loaded.season,
+		Seasons:   buildSeasonOptions(loaded.allSeasons, loaded.season),
+		HasGroup:  true,
+		Member:    member,
+		Bets:      buildMemberBets(targetUser.ID, loaded),
+	}
+}
+
+func buildMemberBets(userID int64, loaded *recordSeasonData) []RecordMemberBetView {
+	legsBySlip := make(map[int64][]db.Leg, len(loaded.slips))
+	for _, leg := range loaded.legs {
+		legsBySlip[leg.SlipID] = append(legsBySlip[leg.SlipID], leg)
+	}
+
+	bets := make([]RecordMemberBetView, 0)
+	// GradedSlipsForGroupSeason returns oldest first; iterate in reverse for newest first.
+	for _, gs := range slices.Backward(loaded.slips) {
+		slipLegs := legsBySlip[gs.Slip.ID]
+		soleKillerLegID := soleKillerLeg(gs.Slip.Result, slipLegs)
+		wLabel := recordWeekLabel(gs.Week)
+
+		for _, leg := range slipLegs {
+			if leg.UserID != userID {
+				continue
+			}
+			grade := loaded.legGrades[leg.ID]
+			var gClass string
+			if grade != "" {
+				gClass = gradeClass(grade)
+			}
+			netVotes := loaded.votes[leg.ID]
+			var netVotesText string
+			if netVotes != 0 {
+				netVotesText = fmt.Sprintf("%+d", netVotes)
+			}
+
+			bets = append(bets, RecordMemberBetView{
+				WeekLabel:        wLabel,
+				SlipID:           gs.Slip.ID,
+				SlipName:         gs.Slip.Name,
+				SlipResult:       string(gs.Slip.Result),
+				SlipResultClass:  resultClass(string(gs.Slip.Result)),
+				Selection:        leg.Selection,
+				MarketLabel:      researchMarketLabel(leg.MarketType),
+				Odds:             formatOdds(leg.Odds),
+				Grade:            grade,
+				GradeClass:       gClass,
+				Result:           string(leg.Result),
+				ResultClass:      resultClass(string(leg.Result)),
+				SoleKiller:       leg.ID == soleKillerLegID,
+				NetVotes:         netVotes,
+				NetVotesText:     netVotesText,
+				NetVotesPositive: netVotes > 0,
+				NetVotesNegative: netVotes < 0,
+			})
+		}
+	}
+	return bets
+}
+
+func soleKillerLeg(slipResult parlay.Result, slipLegs []db.Leg) int64 {
+	if slipResult != parlay.Lost {
+		return 0
+	}
+	var lostID int64
+	lostCount := 0
+	for _, leg := range slipLegs {
+		if leg.Result == parlay.Lost {
+			lostID = leg.ID
+			lostCount++
+			if lostCount > 1 {
+				return 0
+			}
+		}
+	}
+	if lostCount == 1 {
+		return lostID
+	}
+	return 0
+}
+
+func buildSeasonOptions(allSeasons []int, selectedSeason int) []SeasonOption {
 	seasonYears := slices.Clone(allSeasons)
 	if len(seasonYears) > 0 && !slices.Contains(seasonYears, selectedSeason) {
 		seasonYears = append(seasonYears, selectedSeason)
@@ -268,6 +497,14 @@ func buildRecordPage(
 			Year:    year,
 			Current: year == selectedSeason,
 		})
+	}
+	return seasons
+}
+
+func buildLeaderboardViews(users []db.User, book record.Book) []RecordMemberView {
+	userByID := make(map[int64]db.User, len(users))
+	for _, u := range users {
+		userByID[u.ID] = u
 	}
 
 	leaderboard := make([]RecordMemberView, 0, len(book.Leaderboard))
@@ -339,25 +576,37 @@ func buildRecordPage(
 			Tags:            tags,
 		})
 	}
+	return leaderboard
+}
 
-	return RecordPage{
-		Page:          page,
-		GroupName:     group.Name,
-		Season:        selectedSeason,
-		Seasons:       seasons,
-		HasGroup:      true,
-		HasSlips:      book.TotalSlips > 0,
-		Record:        fmt.Sprintf("%d-%d-%d", book.Wins, book.Losses, book.Pushes),
-		Wins:          book.Wins,
-		Losses:        book.Losses,
-		Pushes:        book.Pushes,
-		TotalSlips:    book.TotalSlips,
-		UnitsPL:       formatUnits(book.UnitsPL),
-		UnitsPositive: book.UnitsPL > 0.005,
-		UnitsNegative: book.UnitsPL < -0.005,
-		LongestWin:    book.LongestWin,
-		LongestLoss:   book.LongestLoss,
-		Leaderboard:   leaderboard,
+func findUserByID(users []db.User, userID int64) (db.User, bool) {
+	for _, u := range users {
+		if u.ID == userID {
+			return u, true
+		}
+	}
+	return db.User{}, false
+}
+
+func recordWeekLabel(week db.Week) string {
+	switch week.SeasonType {
+	case 1:
+		return fmt.Sprintf("Preseason Week %d", week.WeekNum)
+	case 3:
+		switch week.WeekNum {
+		case 1:
+			return "Wild Card"
+		case 2:
+			return "Divisional"
+		case 3:
+			return "Conference"
+		case 4, 5:
+			return "Super Bowl"
+		default:
+			return fmt.Sprintf("Postseason Week %d", week.WeekNum)
+		}
+	default:
+		return weekLabel(week)
 	}
 }
 

@@ -243,7 +243,7 @@ sole-killer details, and a phone-first template)
 
 Risk: low (read-only route behind `RequireUser` and `groups.Scope` with explicit 400/404/200 privacy tests)
 
-- [ ] Add `GET /record/members/{id}` in `internal/web/slips.go` and `internal/web/record.go`, register `"record-member"`
+- [x] Add `GET /record/members/{id}` in `internal/web/slips.go` and `internal/web/record.go`, register `"record-member"`
       in `internal/web/render.go`, build `web/templates/record_member.html` with summary strip, clickable tags, and
       newest-first graded leg history, and add scoping and rendering tests in `internal/web/record_test.go`.
 - [ ] Docs: update `docs/concepts/record-book.md` (including fixing its stale front-matter fields) and

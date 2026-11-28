@@ -18,6 +18,7 @@ var pageFiles = map[string]string{
 	"research":         "templates/research.html",
 	"research-bet":     "templates/research_bet.html",
 	"record":           "templates/record.html",
+	"record-member":    "templates/record_member.html",
 	"login":            "templates/login.html",
 	"dev-login":        "templates/dev-login.html",
 	"join":             "templates/join.html",

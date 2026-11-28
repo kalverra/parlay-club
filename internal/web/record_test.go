@@ -219,3 +219,146 @@ func TestRecordBookMatchesAppJSTagExplainIDs(t *testing.T) {
 		)
 	}
 }
+
+func TestRecordMemberHistoryScopingAndRendering(t *testing.T) {
+	t.Parallel()
+
+	f := newSlipFixture(t, 2)
+	ctx := t.Context()
+
+	bob, err := f.store.CreateUserWithIdentity(ctx, "Bob", "bob-member@example.com", "google-bob-member", "")
+	require.NoError(t, err)
+	_, err = f.store.JoinByToken(ctx, bob.ID, f.group.InviteToken)
+	require.NoError(t, err)
+
+	// Outsider belongs only to a different group and must never be accessible via f.group.
+	outsider, err := f.store.CreateUserWithIdentity(ctx, "Outsider", "outsider@example.com", "google-outsider", "")
+	require.NoError(t, err)
+	otherGroup, err := f.store.Create(ctx, outsider.ID, "Other Crew")
+	require.NoError(t, err)
+
+	wkReg1, err := f.store.UpsertWeek(ctx, 2025, 2, 1)
+	require.NoError(t, err)
+	wkReg2, err := f.store.UpsertWeek(ctx, 2025, 2, 2)
+	require.NoError(t, err)
+	wkWildCard, err := f.store.UpsertWeek(ctx, 2025, 3, 1)
+	require.NoError(t, err)
+
+	// Slip 1 (Week 1): Bob has 1 winning leg.
+	slip1, err := f.store.CreateSlip(
+		ctx, f.group.ID, wkReg1.ID, nil, "Week 1", db.SlateScopeFullWeek, 1, []int64{f.user.ID, bob.ID},
+	)
+	require.NoError(t, err)
+	leg1, err := f.store.CreateLeg(ctx, db.Leg{
+		SlipID: slip1.ID, UserID: bob.ID, MarketType: "ML", Selection: "BUF ML", Odds: -115,
+	})
+	require.NoError(t, err)
+	require.NoError(t, f.store.SetLegResult(ctx, leg1.ID, parlay.Won, f.user.Name))
+	require.NoError(t, f.store.SetSlipGrade(ctx, slip1.ID, parlay.Won, db.SlipGraded))
+
+	// Slip 2 (Week 2): Bob is the sole losing leg on a lost slip + receives a downvote.
+	slip2, err := f.store.CreateSlip(
+		ctx, f.group.ID, wkReg2.ID, nil, "Week 2", db.SlateScopeFullWeek, 1, []int64{f.user.ID, bob.ID},
+	)
+	require.NoError(t, err)
+	legAdaWin, err := f.store.CreateLeg(ctx, db.Leg{
+		SlipID: slip2.ID, UserID: f.user.ID, MarketType: "SPREAD", Selection: "KC -3.5", Odds: -110,
+	})
+	require.NoError(t, err)
+	require.NoError(t, f.store.SetLegResult(ctx, legAdaWin.ID, parlay.Won, f.user.Name))
+	legBobSoleLoss, err := f.store.CreateLeg(ctx, db.Leg{
+		SlipID: slip2.ID, UserID: bob.ID, MarketType: "PASS_YDS", Selection: "Josh Allen Over 255.5", Odds: 120,
+	})
+	require.NoError(t, err)
+	require.NoError(t, f.store.SetLegResult(ctx, legBobSoleLoss.ID, parlay.Lost, f.user.Name))
+	require.NoError(t, f.store.SetLegVote(ctx, legBobSoleLoss.ID, f.user.ID, -1, time.Now()))
+	require.NoError(t, f.store.SetSlipGrade(ctx, slip2.ID, parlay.Lost, db.SlipGraded))
+
+	// Slip 3 (Wild Card): newest slip, Bob wins a leg.
+	slip3, err := f.store.CreateSlip(
+		ctx, f.group.ID, wkWildCard.ID, nil, "Wild Card Parlay", db.SlateScopeFullWeek, 1, []int64{bob.ID},
+	)
+	require.NoError(t, err)
+	leg3, err := f.store.CreateLeg(ctx, db.Leg{
+		SlipID: slip3.ID, UserID: bob.ID, MarketType: "TOTAL", Selection: "Over 47.5", Odds: -105,
+	})
+	require.NoError(t, err)
+	require.NoError(t, f.store.SetLegResult(ctx, leg3.ID, parlay.Won, bob.Name))
+	require.NoError(t, f.store.SetSlipGrade(ctx, slip3.ID, parlay.Won, db.SlipGraded))
+
+	// Other group's slip for outsider must not leak.
+	otherSlip, err := f.store.CreateSlip(
+		ctx, otherGroup.ID, wkReg1.ID, nil, "Secret Slip", db.SlateScopeFullWeek, 1, []int64{outsider.ID},
+	)
+	require.NoError(t, err)
+	otherLeg, err := f.store.CreateLeg(ctx, db.Leg{
+		SlipID: otherSlip.ID, UserID: outsider.ID, MarketType: "ML", Selection: "MIA ML", Odds: 150,
+	})
+	require.NoError(t, err)
+	require.NoError(t, f.store.SetLegResult(ctx, otherLeg.ID, parlay.Won, outsider.Name))
+	require.NoError(t, f.store.SetSlipGrade(ctx, otherSlip.ID, parlay.Won, db.SlipGraded))
+
+	// 400 on bad member ID or bad season.
+	badID := httptest.NewRecorder()
+	f.handler.ServeHTTP(badID, httptest.NewRequestWithContext(ctx, http.MethodGet, "/record/members/abc", nil))
+	assert.Equal(t, http.StatusBadRequest, badID.Code)
+
+	badSeason := httptest.NewRecorder()
+	f.handler.ServeHTTP(
+		badSeason,
+		httptest.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("/record/members/%d?season=abc", bob.ID), nil),
+	)
+	assert.Equal(t, http.StatusBadRequest, badSeason.Code)
+
+	// 404 when probing a user outside the active group.
+	notFound := httptest.NewRecorder()
+	outsiderURL := fmt.Sprintf("/record/members/%d?season=2025", outsider.ID)
+	f.handler.ServeHTTP(notFound, httptest.NewRequestWithContext(ctx, http.MethodGet, outsiderURL, nil))
+	assert.Equal(t, http.StatusNotFound, notFound.Code)
+
+	// 200 on Bob's member history for 2025.
+	rec := httptest.NewRecorder()
+	f.handler.ServeHTTP(
+		rec,
+		httptest.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("/record/members/%d?season=2025", bob.ID), nil),
+	)
+	require.Equal(t, http.StatusOK, rec.Code)
+	body := html.UnescapeString(rec.Body.String())
+
+	assert.Contains(t, body, `href="/record?season=2025"`)
+	assert.Contains(t, body, fmt.Sprintf(`action="/record/members/%d"`, bob.ID))
+	assert.Contains(t, body, "Bob")
+	assert.Contains(t, body, "2025 season")
+	assert.Contains(t, body, "2-1")
+	assert.Contains(t, body, "3 graded legs")
+	assert.Contains(t, body, `data-tag-label="Parlay Terrorist"`)
+	assert.Contains(t, body, `<dialog id="tag-explain-dialog" class="leg-sheet"`)
+	assert.Contains(t, body, "Sole killer")
+	assert.Contains(t, body, "-1 votes")
+	assert.Contains(t, body, "Pass Yds")
+	assert.Contains(t, body, "+120")
+	assert.Contains(t, body, fmt.Sprintf(`href="/slips/%d"`, slip1.ID))
+	assert.Contains(t, body, fmt.Sprintf(`href="/slips/%d"`, slip2.ID))
+	assert.Contains(t, body, fmt.Sprintf(`href="/slips/%d"`, slip3.ID))
+	assert.NotContains(t, body, "Secret Slip")
+	assert.NotContains(t, body, "KC -3.5")
+
+	// Verify newest-first ordering: Wild Card (slip3) -> Week 2 (slip2) -> Week 1 (slip1).
+	idx3 := strings.Index(body, "Over 47.5")
+	idx2 := strings.Index(body, "Josh Allen Over 255.5")
+	idx1 := strings.Index(body, "BUF ML")
+	require.Positive(t, idx3)
+	require.Positive(t, idx2)
+	require.Positive(t, idx1)
+	assert.Less(t, idx3, idx2)
+	assert.Less(t, idx2, idx1)
+
+	// Empty state for a season with no graded legs for Bob.
+	rec2026 := httptest.NewRecorder()
+	f.handler.ServeHTTP(
+		rec2026,
+		httptest.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("/record/members/%d?season=2026", bob.ID), nil),
+	)
+	require.Equal(t, http.StatusOK, rec2026.Code)
+	assert.Contains(t, html.UnescapeString(rec2026.Body.String()), "No graded legs for Bob in the 2026 season.")
+}

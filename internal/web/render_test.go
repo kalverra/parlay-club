@@ -125,7 +125,11 @@ func writeTemplates(t *testing.T, content string) string {
 		`{{define "team-logo"}}{{end}}{{define "player-portrait"}}{{end}}{{define "matchup-logos"}}{{end}}`,
 	)
 	writeTemplate(t, dir, "partials.html", "")
-	for _, page := range []string{"home", "week", "slip", "pick", "research", "research_bet", "record", "login", "dev-login", "join", "groups", "profile", "sandbox", "analyzer_guide", "analyzer_results", "docs"} {
+	pages := []string{
+		"home", "week", "slip", "pick", "research", "research_bet", "record", "record_member",
+		"login", "dev-login", "join", "groups", "profile", "sandbox", "analyzer_guide", "analyzer_results", "docs",
+	}
+	for _, page := range pages {
 		writeTemplate(t, dir, page+".html", `{{define "content"}}`+content+`{{end}}`)
 	}
 
