@@ -463,3 +463,104 @@ func TestDetailSortMatchup(t *testing.T) {
 	assert.Equal(t, "TOTAL", linesDetail.Lines[0].Market)
 	assert.Equal(t, board.BadgeFitsSlip, linesDetail.Lines[0].Options[0].Badge)
 }
+
+func TestApplySignalsComboWarning(t *testing.T) {
+	t.Parallel()
+
+	kickoff := at(t, 8, 13, 0)
+	g := game("g1", kickoff)
+	roster := []db.RosterPlayer{
+		{AthleteID: "k1", FullName: "Tyler Bass", Team: "BUF", Position: "K"},
+		{AthleteID: "wr1", FullName: "Khalil Shakir", Team: "BUF", Position: "WR"},
+	}
+
+	buildRow := func(market, team, player, side string, line *float64) board.Row {
+		rows := board.Build(
+			[]db.Game{g},
+			[]db.Odds{odds("g1", "dk", market, team, player, side, line, -110)},
+			roster,
+			"",
+			nil,
+			kickoff.Add(-time.Hour),
+		)
+		require.Len(t, rows, 1)
+		return rows[0]
+	}
+
+	tests := []struct {
+		name        string
+		row         board.Row
+		picked      int64
+		slipLegs    []analyzer.Leg
+		wantSubstr  string
+		wantPresent bool
+	}{
+		{
+			name: "ineligible same-team ML and spread surfaces warning",
+			row:  buildRow("SPREAD", "BUF", "", "TEAM", new(-3.5)),
+			slipLegs: []analyzer.Leg{
+				{ID: 1, GameID: "g1", Market: "ML", Team: "BUF", Side: "TEAM", Odds: -165},
+			},
+			wantPresent: true,
+			wantSubstr:  "BUF ML",
+		},
+		{
+			name: "SGP-restricted kicker prop and game total surfaces warning",
+			row:  buildRow("KICKER_PTS", "BUF", "Tyler Bass", "OVER", new(7.5)),
+			slipLegs: []analyzer.Leg{
+				{ID: 2, GameID: "g1", Market: "TOTAL", Side: "OVER", Line: new(47.5), Odds: -110},
+			},
+			wantPresent: true,
+			wantSubstr:  "Kicking Pts",
+		},
+		{
+			name: "valid same-game combo has no warning",
+			row:  buildRow("REC_YDS", "BUF", "Khalil Shakir", "OVER", new(55.5)),
+			slipLegs: []analyzer.Leg{
+				{
+					ID:         3,
+					GameID:     "g1",
+					Market:     "PASS_YDS",
+					Team:       "BUF",
+					PlayerName: "Josh Allen",
+					Side:       "OVER",
+					Line:       new(255.5),
+				},
+			},
+			wantPresent: false,
+		},
+		{
+			name: "different game leg has no warning",
+			row:  buildRow("SPREAD", "BUF", "", "TEAM", new(-3.5)),
+			slipLegs: []analyzer.Leg{
+				{ID: 4, GameID: "g2", Market: "ML", Team: "BUF", Side: "TEAM", Odds: -165},
+			},
+			wantPresent: false,
+		},
+		{
+			name:   "already picked row skips combo warning",
+			row:    buildRow("SPREAD", "BUF", "", "TEAM", new(-3.5)),
+			picked: 10,
+			slipLegs: []analyzer.Leg{
+				{ID: 1, GameID: "g1", Market: "ML", Team: "BUF", Side: "TEAM", Odds: -165},
+			},
+			wantPresent: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			row := tc.row
+			row.Picked = tc.picked
+			got := board.ApplySignals(g, []board.Row{row}, board.BoardSignals{SlipLegs: tc.slipLegs})
+			require.Len(t, got, 1)
+			if tc.wantPresent {
+				assert.NotEmpty(t, got[0].ComboWarning)
+				assert.Contains(t, got[0].ComboWarning, tc.wantSubstr)
+			} else {
+				assert.Empty(t, got[0].ComboWarning)
+			}
+		})
+	}
+}

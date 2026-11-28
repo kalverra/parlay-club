@@ -181,6 +181,7 @@ type PickRowView struct {
 	AtLimit       bool
 	SwapURL       string
 	Badge         string
+	ComboWarning  string
 	SplitLine     string
 	DriftNote     string
 	CanRefresh    bool
@@ -1498,6 +1499,7 @@ func pickRowView(
 		PickID:        row.Picked,
 		AtLimit:       atLimit,
 		Badge:         row.Badge,
+		ComboWarning:  row.ComboWarning,
 		SplitLine:     splitLineBadge(row.Market, row.DK, row.FD, row.LinesDiffer, homeBook),
 	}
 	if row.Line != nil {

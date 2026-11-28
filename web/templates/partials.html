@@ -1759,8 +1759,8 @@
 {{end}}
 
 {{define "pick-option"}}
+  <div class="space-y-1">
   {{if .PickID}}
-    <div class="space-y-1">
       <form
         hx-delete="/legs/{{.PickID}}?from=board"
         hx-target="closest .pick-line-group"
@@ -1801,7 +1801,6 @@
           {{end}}
         </div>
       {{end}}
-    </div>
   {{else if .UpdateID}}
     <form
       hx-put="/legs/{{.UpdateID}}"
@@ -1867,6 +1866,10 @@
       </button>
     </form>
   {{end}}
+  {{if .ComboWarning}}
+    <p class="rounded-md border border-warning bg-warning-soft px-2 py-1 text-[11px] leading-snug text-warning-ink" data-combo-warning>{{.ComboWarning}}</p>
+  {{end}}
+  </div>
 {{end}}
 
 {{define "pick-body"}}

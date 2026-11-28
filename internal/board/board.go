@@ -178,6 +178,7 @@ type Row struct {
 	BoardDriftNote string
 	TrayDriftNote  string
 	Badge          string
+	ComboWarning   string
 }
 
 // GameCard is one game on the slate: the matchup, its kickoff, the game lines

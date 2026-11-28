@@ -4045,3 +4045,104 @@ func TestPickBoardRendersSplitLinesWithHomeBookFirst(t *testing.T) {
 	panelFD := get(fmt.Sprintf("/slips/%d/panel", fixture.slip.ID))
 	assert.Contains(t, panelFD, "FD 66.5 (-115) · DK 68.5 (-111)")
 }
+
+func TestPickBoardRendersInlineComboWarningWithoutBlocking(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 4)
+	game := addGame(t, fixture, gameKickoff())
+	fetched := time.Now().UTC()
+
+	_, err := fixture.store.UpsertOdds(t.Context(), []db.Odds{
+		{
+			GameID:     game.ID,
+			Book:       "draftkings",
+			MarketType: "ML",
+			Team:       "BUF",
+			Side:       "TEAM",
+			Price:      -165,
+			FetchedAt:  fetched,
+		},
+		{
+			GameID:     game.ID,
+			Book:       "fanduel",
+			MarketType: "ML",
+			Team:       "BUF",
+			Side:       "TEAM",
+			Price:      -165,
+			FetchedAt:  fetched,
+		},
+		{
+			GameID:     game.ID,
+			Book:       "draftkings",
+			MarketType: "SPREAD",
+			Team:       "BUF",
+			Side:       "TEAM",
+			Line:       new(-3.0),
+			Price:      -110,
+			FetchedAt:  fetched,
+		},
+		{
+			GameID:     game.ID,
+			Book:       "fanduel",
+			MarketType: "SPREAD",
+			Team:       "BUF",
+			Side:       "TEAM",
+			Line:       new(-3.0),
+			Price:      -110,
+			FetchedAt:  fetched,
+		},
+		{
+			GameID:     game.ID,
+			Book:       "draftkings",
+			MarketType: "TOTAL",
+			Side:       "OVER",
+			Line:       new(47.5),
+			Price:      -110,
+			FetchedAt:  fetched,
+		},
+		{
+			GameID:     game.ID,
+			Book:       "fanduel",
+			MarketType: "TOTAL",
+			Side:       "OVER",
+			Line:       new(47.5),
+			Price:      -110,
+			FetchedAt:  fetched,
+		},
+	})
+	require.NoError(t, err)
+
+	// Put BUF ML on the open slip so BUF -3.0 conflicts with it on the board.
+	addStoredLeg(t, fixture, db.Leg{
+		UserID:     fixture.user.ID,
+		GameID:     new(game.ID),
+		MarketType: "ML",
+		Selection:  "BUF ML",
+		Team:       new("BUF"),
+		Side:       new("TEAM"),
+		Odds:       -165,
+	})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodGet,
+		fmt.Sprintf("/slips/%d/pick/detail?game=%s&cat=lines", fixture.slip.ID, game.ID),
+		nil,
+	)
+	req.Header.Set("Hx-Request", "true")
+	fixture.handler.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	body := html.UnescapeString(rec.Body.String())
+	assert.Contains(t, body, `data-combo-warning`)
+	assert.Contains(t, body, "usually won't combine BUF -3 with BUF ML")
+
+	// The conflicting BUF -3.0 option remains an enabled, clickable add button.
+	_, spreadSection, ok := strings.Cut(body, `id="pick-line-401772001-SPREAD"`)
+	require.True(t, ok)
+	spreadSection, _, _ = strings.Cut(spreadSection, `id="pick-line-401772001-ML"`)
+	assert.Contains(t, spreadSection, fmt.Sprintf(`hx-post="/slips/%d/legs"`, fixture.slip.ID))
+	assert.NotContains(t, spreadSection, "disabled")
+}

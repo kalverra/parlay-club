@@ -34,7 +34,7 @@ var badgePriority = []string{
 }
 
 // ApplySignals evaluates nflverse, injury, and open-slip signals for one
-// game's rows and returns a copy with Row.Badge populated.
+// game's rows and returns a copy with Row.Badge and Row.ComboWarning populated.
 func ApplySignals(game db.Game, rows []Row, signals BoardSignals) []Row {
 	out := make([]Row, len(rows))
 	copy(out, rows)
@@ -46,8 +46,21 @@ func ApplySignals(game db.Game, rows []Row, signals BoardSignals) []Row {
 		if len(badges) > 0 {
 			out[i].Badge = badges[0]
 		}
+		out[i].ComboWarning = comboWarning(out[i], signals.SlipLegs)
 	}
 	return out
+}
+
+// comboWarning returns a non-blocking sportsbook combo heads-up message when
+// an unpicked board row conflicts with a leg already on the open slip.
+func comboWarning(row Row, slipLegs []analyzer.Leg) string {
+	if row.Picked != 0 || len(slipLegs) == 0 {
+		return ""
+	}
+	if w, ok := analyzer.CheckComboConflict(RowToAnalyzerLeg(row), slipLegs); ok {
+		return w.Message
+	}
+	return ""
 }
 
 func (s BoardSignals) empty() bool {

@@ -110,7 +110,7 @@ note in pick templates).
 
 Risk: low (non-blocking UI indicator backed by unit and handler tests).
 
-- [ ] Wire `analyzer.CheckComboConflict` into `internal/board/signals.go` (`Row.ComboWarning`) and render the compact
+- [x] Wire `analyzer.CheckComboConflict` into `internal/board/signals.go` (`Row.ComboWarning`) and render the compact
       non-blocking heads-up note on conflicting pick options in `web/templates/` and `internal/web/pick.go`, with tests
       in `internal/board/signals_test.go` and `internal/web/pick_test.go`.
 - [ ] Docs: update `docs/concepts/analyzer.md` to document the new combination-eligibility rules and their non-blocking
