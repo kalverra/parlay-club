@@ -504,15 +504,25 @@ func TestResearchLinksOnSlipLegs(t *testing.T) {
 	t.Parallel()
 
 	fixture := newSlipFixture(t, 2)
-	game := addGame(t, fixture, gameKickoff())
+	upcomingGame := addGame(t, fixture, gameKickoff())
+	startedGame, err := fixture.store.UpsertGame(t.Context(), db.Game{
+		ID:        "401772099",
+		WeekID:    fixture.week.ID,
+		HomeTeam:  "NYJ",
+		AwayTeam:  "KC",
+		Kickoff:   time.Now().UTC().Add(-2 * time.Hour),
+		Status:    db.GameFinal,
+		UpdatedAt: time.Now().UTC(),
+	})
+	require.NoError(t, err)
 	refresher := &researchTestRefresher{}
 	handler := researchHandlerWithRefresher(t, fixture, fixture.user, refresher)
 
-	// Add player leg with PlayerID
-	_, err := fixture.store.CreateLeg(t.Context(), db.Leg{
+	// Add upcoming player leg with PlayerID -> /research/bet
+	_, err = fixture.store.CreateLeg(t.Context(), db.Leg{
 		SlipID:     fixture.slip.ID,
 		UserID:     fixture.user.ID,
-		GameID:     &game.ID,
+		GameID:     &upcomingGame.ID,
 		MarketType: "PASS_YDS",
 		Selection:  "Josh Allen Over 265.5 Pass Yds",
 		PlayerID:   new("3918298"),
@@ -523,28 +533,87 @@ func TestResearchLinksOnSlipLegs(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Add game market leg with GameID only
+	// Add upcoming game market leg -> /research/bet
 	_, err = fixture.store.CreateLeg(t.Context(), db.Leg{
 		SlipID:     fixture.slip.ID,
 		UserID:     fixture.user.ID,
-		GameID:     &game.ID,
+		GameID:     &upcomingGame.ID,
 		MarketType: "SPREAD",
+		Team:       new("BUF"),
+		Side:       new("TEAM"),
 		Selection:  "Bills -3.5",
 		Odds:       -110,
 	})
 	require.NoError(t, err)
 
+	// Add OTHER custom leg on upcoming game -> falls back to /research sheet
+	otherLeg, err := fixture.store.CreateLeg(t.Context(), db.Leg{
+		SlipID:     fixture.slip.ID,
+		UserID:     fixture.user.ID,
+		GameID:     &upcomingGame.ID,
+		MarketType: "OTHER",
+		Selection:  "Custom boost",
+		Odds:       150,
+	})
+	require.NoError(t, err)
+
+	// Add kicked-off player leg -> falls back to /research sheet
+	startedLeg, err := fixture.store.CreateLeg(t.Context(), db.Leg{
+		SlipID:     fixture.slip.ID,
+		UserID:     fixture.user.ID,
+		GameID:     &startedGame.ID,
+		MarketType: "RUSH_YDS",
+		Selection:  "Isiah Pacheco Over 60.5 Rush Yds",
+		PlayerID:   new("4361529"),
+		PlayerName: new("Isiah Pacheco"),
+		Side:       new("OVER"),
+		Line:       new(60.5),
+		Odds:       -110,
+	})
+	require.NoError(t, err)
+
 	// Render slip
-	slipPath := "/slips/" + strconv.FormatInt(fixture.slip.ID, 10)
+	slipIDText := strconv.FormatInt(fixture.slip.ID, 10)
+	slipPath := "/slips/" + slipIDText
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, slipPath, nil)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	assert.Equal(t, http.StatusOK, rec.Code)
 	body := rec.Body.String()
 
-	// Verify research links on slip legs
-	assert.Contains(t, body, "/research?leg_id=1&amp;line=265.5&amp;market=PASS_YDS&amp;player_id=3918298")
-	assert.Contains(t, body, "/research?game_id="+game.ID+"&amp;leg_id=2")
+	// Upcoming non-OTHER legs link to /research/bet with from and slip_id.
+	expectedPlayerHref := "/research/bet?" + url.Values{
+		"from":        {slipPath},
+		"game_id":     {upcomingGame.ID},
+		"market":      {"PASS_YDS"},
+		"player_id":   {"3918298"},
+		"player_name": {"Josh Allen"},
+		"side":        {"OVER"},
+		"slip_id":     {slipIDText},
+	}.Encode()
+	expectedSpreadHref := "/research/bet?" + url.Values{
+		"from":    {slipPath},
+		"game_id": {upcomingGame.ID},
+		"market":  {"SPREAD"},
+		"side":    {"TEAM"},
+		"slip_id": {slipIDText},
+		"team":    {"BUF"},
+	}.Encode()
+	escapeAttrURL := func(u string) string {
+		return strings.ReplaceAll(strings.ReplaceAll(u, "&", "&amp;"), "+", "&#43;")
+	}
+	assert.Contains(t, body, escapeAttrURL(expectedPlayerHref))
+	assert.Contains(t, body, escapeAttrURL(expectedSpreadHref))
+	// OTHER and kicked-off legs fall back to /research player or game sheets.
+	assert.Contains(t, body, "/research?game_id="+upcomingGame.ID+"&amp;leg_id="+strconv.FormatInt(otherLeg.ID, 10))
+	assert.Contains(
+		t,
+		body,
+		"/research?leg_id="+strconv.FormatInt(
+			startedLeg.ID,
+			10,
+		)+"&amp;line=60.5&amp;market=RUSH_YDS&amp;player_id=4361529",
+	)
 	assert.Contains(t, body, "Research &rarr;")
 }
 
@@ -2438,4 +2507,94 @@ func TestResearchBetVisualHierarchyAndFDDKSnapshot(t *testing.T) {
 		strings.Index(fdSnapshotBlock, `data-snapshot-book="fanduel"`),
 		strings.Index(fdSnapshotBlock, `data-snapshot-book="draftkings"`),
 	)
+}
+
+func TestBetResearchHrefSharedAcrossSurfaces(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	game := addGame(t, fixture, gameKickoff())
+	seedResearchExplorer(t, fixture, game)
+	handler := researchHandlerWithRefresher(t, fixture, fixture.user, &researchTestRefresher{})
+
+	slipIDText := strconv.FormatInt(fixture.slip.ID, 10)
+
+	// 1. Pick board options (Lines SPREAD and Passing O/U PASS_YDS).
+	pickPath := "/slips/" + slipIDText + "/pick?game=" + game.ID
+	pickRec := httptest.NewRecorder()
+	handler.ServeHTTP(pickRec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, pickPath, nil))
+	require.Equal(t, http.StatusOK, pickRec.Code)
+	pickBody := pickRec.Body.String()
+
+	expectedSpread := "/research/bet?" + url.Values{
+		"from":    {pickPath},
+		"game_id": {game.ID},
+		"market":  {"SPREAD"},
+		"side":    {"TEAM"},
+		"slip_id": {slipIDText},
+		"team":    {"BUF"},
+	}.Encode()
+	assert.Contains(t, pickBody, strings.ReplaceAll(expectedSpread, "&", "&amp;"))
+	assert.Contains(t, pickBody, "Research &rarr;")
+
+	passingRec := httptest.NewRecorder()
+	handler.ServeHTTP(
+		passingRec,
+		httptest.NewRequestWithContext(t.Context(), http.MethodGet, pickPath+"&cat=passing", nil),
+	)
+	require.Equal(t, http.StatusOK, passingRec.Code)
+	passingBody := passingRec.Body.String()
+
+	expectedPassOver := "/research/bet?" + url.Values{
+		"from":        {pickPath},
+		"game_id":     {game.ID},
+		"market":      {"PASS_YDS"},
+		"player_id":   {"3918298"},
+		"player_name": {"Josh Allen"},
+		"side":        {"OVER"},
+		"slip_id":     {slipIDText},
+		"team":        {"BUF"},
+	}.Encode()
+	assert.Contains(
+		t,
+		passingBody,
+		strings.ReplaceAll(strings.ReplaceAll(expectedPassOver, "&", "&amp;"), "+", "&#43;"),
+	)
+	assert.Contains(t, passingBody, "Research &rarr;")
+
+	// 2. Slip highlights strip (single legs and parlay legs).
+	slipPath := "/slips/" + slipIDText
+	slipRec := httptest.NewRecorder()
+	handler.ServeHTTP(slipRec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, slipPath, nil))
+	require.Equal(t, http.StatusOK, slipRec.Code)
+	slipBody := slipRec.Body.String()
+
+	if idx := strings.Index(slipBody, "data-highlights"); idx != -1 {
+		highlightsBlock := slipBody[idx:]
+		assert.Contains(t, highlightsBlock, "/research/bet?")
+		assert.Contains(t, highlightsBlock, "slip_id="+slipIDText)
+		assert.Contains(t, highlightsBlock, "Research &rarr;")
+	}
+
+	// 3. Related bets on /research/bet preserve slip_id and include Research -> link.
+	betURL := "/research/bet?" + url.Values{
+		"from":        {slipPath},
+		"game_id":     {game.ID},
+		"market":      {"PASS_YDS"},
+		"player_id":   {"3918298"},
+		"player_name": {"Josh Allen"},
+		"side":        {"OVER"},
+		"slip_id":     {slipIDText},
+	}.Encode()
+	betRec := httptest.NewRecorder()
+	handler.ServeHTTP(betRec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, betURL, nil))
+	require.Equal(t, http.StatusOK, betRec.Code)
+	betBody := betRec.Body.String()
+
+	relatedIdx := strings.Index(betBody, "More in this game")
+	require.Greater(t, relatedIdx, -1)
+	relatedBlock := betBody[relatedIdx:]
+	assert.Contains(t, relatedBlock, "/research/bet?")
+	assert.Contains(t, relatedBlock, "slip_id="+slipIDText)
+	assert.Contains(t, relatedBlock, "Research &rarr;")
 }

@@ -405,6 +405,11 @@
                       {{if .SplitLine}}
                         <p class="mt-1 font-mono text-[10px] tabular-nums text-ink-muted">{{.SplitLine}}</p>
                       {{end}}
+                      {{if .BetHref}}
+                        <p class="mt-1">
+                          <a href="{{.BetHref}}" class="text-[11px] font-medium text-ink underline decoration-line-strong underline-offset-2 hover:opacity-75">Research &rarr;</a>
+                        </p>
+                      {{end}}
                     </div>
                     <div class="shrink-0 text-right">
                       <span class="inline-block rounded-full border px-1.5 py-0.5 text-[11px] font-semibold {{.GradeClass}}">{{if .GradeLetter}}{{.GradeLetter}}{{else}}&mdash;{{end}}</span>

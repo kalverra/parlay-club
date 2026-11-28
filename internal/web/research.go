@@ -662,8 +662,13 @@ func (h *researchHandlers) buildBetResearch(ctx context.Context, r *http.Request
 		}
 	}
 
-	view.Related = relatedBetCards(game, rows, games, stats, *bet, view.BackHref, homeBook)
-	view.AddSlips = preferBetSlip(h.betAddSlips(ctx, game), query.Get("slip_id"))
+	rawSlipID := query.Get("slip_id")
+	var slipID int64
+	if parsed, err := strconv.ParseInt(strings.TrimSpace(rawSlipID), 10, 64); err == nil && parsed > 0 {
+		slipID = parsed
+	}
+	view.Related = relatedBetCards(game, rows, games, stats, *bet, view.BackHref, homeBook, slipID)
+	view.AddSlips = preferBetSlip(h.betAddSlips(ctx, game), rawSlipID)
 	return view
 }
 
@@ -1226,6 +1231,7 @@ func relatedBetCards(
 	current board.Row,
 	from string,
 	homeBook string,
+	slipID int64,
 ) []ResearchCardView {
 	result := board.Explore(rows, games, stats, board.ExploreQuery{
 		GameID: game.ID,
@@ -1258,7 +1264,7 @@ func relatedBetCards(
 	if len(related) > maxRelated {
 		related = related[:maxRelated]
 	}
-	return researchCards([]db.Game{game}, related, from, homeBook)
+	return researchCards([]db.Game{game}, related, from, homeBook, slipID)
 }
 
 // betAddSlips lists the viewer's open slips that are still in the pick step and
@@ -1630,7 +1636,7 @@ func (h *researchHandlers) buildExplore(
 		Signals:  signals,
 	})
 
-	view.Cards = researchCards(games, result.Rows, researchPushURL(queryFromExplore(view)), homeBook)
+	view.Cards = researchCards(games, result.Rows, researchPushURL(queryFromExplore(view)), homeBook, 0)
 	view.TotalMatched = result.TotalMatched
 	view.HasMore = result.HasMore
 	view.AllStarted = !view.NoGames && board.StartedCount(games, now) == len(games)
@@ -1781,7 +1787,7 @@ func (h *researchHandlers) researchSlipLegs(ctx context.Context, weekID int64) [
 
 // researchCards maps one explorer page to the candidate cards. from is the
 // explorer URL a card's per-bet page returns to.
-func researchCards(games []db.Game, rows []board.ScoredRow, from, homeBook string) []ResearchCardView {
+func researchCards(games []db.Game, rows []board.ScoredRow, from, homeBook string, slipID int64) []ResearchCardView {
 	byID := make(map[string]db.Game, len(games))
 	for _, game := range games {
 		byID[game.ID] = game
@@ -1818,7 +1824,14 @@ func researchCards(games []db.Game, rows []board.ScoredRow, from, homeBook strin
 			AwayLogo:        db.StringValue(game.AwayLogo),
 			HomeLogo:        db.StringValue(game.HomeLogo),
 		}
-		card.BetHref = researchBetHref(card, from)
+		card.BetHref = betResearchHref(db.SelectionKey{
+			GameID:     row.GameID,
+			MarketType: row.Market,
+			Team:       row.Team,
+			PlayerName: row.PlayerName,
+			PlayerID:   row.PlayerID,
+			Side:       row.Side,
+		}, from, slipID)
 		if row.Odds == 0 {
 			card.Odds = "—"
 		}
@@ -1869,26 +1882,32 @@ func researchLineText(line *float64) string {
 	return formatNumber(*line)
 }
 
-// researchBetHref builds a per-bet research link from a candidate card. The
-// line and price stay out of the URL, so a shared link survives line drift.
-func researchBetHref(card ResearchCardView, from string) string {
+// betResearchHref builds a per-bet research link from a SelectionKey. Line and
+// price stay out of the URL so a shared link survives line drift.
+func betResearchHref(sel db.SelectionKey, from string, slipID int64) string {
+	if sel.GameID == "" || sel.MarketType == "" || sel.MarketType == "OTHER" {
+		return ""
+	}
 	values := url.Values{}
-	values.Set("game_id", card.GameID)
-	values.Set("market", card.MarketType)
-	if card.Side != "" {
-		values.Set("side", card.Side)
+	values.Set("game_id", sel.GameID)
+	values.Set("market", sel.MarketType)
+	if sel.Side != "" {
+		values.Set("side", sel.Side)
 	}
-	if card.Team != "" {
-		values.Set("team", card.Team)
+	if sel.Team != "" {
+		values.Set("team", sel.Team)
 	}
-	if card.PlayerID != "" {
-		values.Set("player_id", card.PlayerID)
+	if sel.PlayerID != "" {
+		values.Set("player_id", sel.PlayerID)
 	}
-	if card.PlayerName != "" {
-		values.Set("player_name", card.PlayerName)
+	if sel.PlayerName != "" {
+		values.Set("player_name", sel.PlayerName)
 	}
 	if from != "" {
 		values.Set("from", from)
+	}
+	if slipID > 0 {
+		values.Set("slip_id", strconv.FormatInt(slipID, 10))
 	}
 	return "/research/bet?" + values.Encode()
 }

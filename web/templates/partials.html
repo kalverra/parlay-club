@@ -1885,18 +1885,28 @@
       </button>
     </form>
   {{end}}
-  {{if .Grade.Letter}}
-    <details data-leg-grade data-help-popover>
-      <summary
-        class="inline-flex cursor-pointer list-none items-center gap-1 whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] font-semibold {{.Grade.Class}}"
-        title="Leg grade {{.Grade.Letter}} ({{.Grade.Score}}/100)"
-      >
-        Grade {{.Grade.Letter}}
-      </summary>
-      <div class="absolute left-0 right-0 z-30 mt-1 max-w-full rounded-lg border border-line-strong bg-surface p-2.5 text-xs text-ink shadow-lg">
-        {{template "grade-breakdown" (dict "Grade" .Grade "HeaderLabel" (printf "Leg grade: %s (%d)" .Grade.Letter .Grade.Score) "GuideHref" (printf "/docs/grading?from=/slips/%d/pick#leg-grades" .SlipID) "IsSlip" false "EmptyText" "Baseline 75 — no extra adjustments.")}}
-      </div>
-    </details>
+  {{if or .Grade.Letter .ResearchURL}}
+    <div class="flex flex-wrap items-center gap-2 pt-0.5">
+      {{if .Grade.Letter}}
+        <details data-leg-grade data-help-popover>
+          <summary
+            class="inline-flex cursor-pointer list-none items-center gap-1 whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] font-semibold {{.Grade.Class}}"
+            title="Leg grade {{.Grade.Letter}} ({{.Grade.Score}}/100)"
+          >
+            Grade {{.Grade.Letter}}
+          </summary>
+          <div class="absolute left-0 right-0 z-30 mt-1 max-w-full rounded-lg border border-line-strong bg-surface p-2.5 text-xs text-ink shadow-lg">
+            {{template "grade-breakdown" (dict "Grade" .Grade "HeaderLabel" (printf "Leg grade: %s (%d)" .Grade.Letter .Grade.Score) "GuideHref" (printf "/docs/grading?from=/slips/%d/pick#leg-grades" .SlipID) "IsSlip" false "EmptyText" "Baseline 75 — no extra adjustments.")}}
+          </div>
+        </details>
+      {{end}}
+      {{if .ResearchURL}}
+        <a
+          href="{{.ResearchURL}}"
+          class="text-[11px] font-medium text-ink-muted underline decoration-line-strong underline-offset-2 hover:text-ink"
+        >Research &rarr;</a>
+      {{end}}
+    </div>
   {{end}}
   {{if .ComboWarning}}
     <p class="rounded-md border border-warning bg-warning-soft px-2 py-1 text-[11px] leading-snug text-warning-ink" data-combo-warning>{{.ComboWarning}}</p>
@@ -2475,19 +2485,27 @@
       </button>
     </form>
   {{end}}
-  {{if .Grade.Letter}}
+  {{if or .Grade.Letter .ResearchURL}}
     <div class="flex flex-wrap items-center gap-2 pt-0.5">
-      <details data-leg-grade data-help-popover>
-        <summary
-          class="inline-flex cursor-pointer list-none items-center gap-1 whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] font-semibold {{.Grade.Class}}"
-          title="Leg grade {{.Grade.Letter}} ({{.Grade.Score}}/100)"
-        >
-          Grade {{.Grade.Letter}}
-        </summary>
-        <div class="absolute left-0 right-0 z-30 mt-1 max-w-full rounded-lg border border-line-strong bg-surface p-2.5 text-xs text-ink shadow-lg">
-          {{template "grade-breakdown" (dict "Grade" .Grade "HeaderLabel" (printf "Leg grade: %s (%d)" .Grade.Letter .Grade.Score) "GuideHref" (printf "/docs/grading?from=/slips/%d/pick#leg-grades" .SlipID) "IsSlip" false "EmptyText" "Baseline 75 — no extra adjustments.")}}
-        </div>
-      </details>
+      {{if .Grade.Letter}}
+        <details data-leg-grade data-help-popover>
+          <summary
+            class="inline-flex cursor-pointer list-none items-center gap-1 whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] font-semibold {{.Grade.Class}}"
+            title="Leg grade {{.Grade.Letter}} ({{.Grade.Score}}/100)"
+          >
+            Grade {{.Grade.Letter}}
+          </summary>
+          <div class="absolute left-0 right-0 z-30 mt-1 max-w-full rounded-lg border border-line-strong bg-surface p-2.5 text-xs text-ink shadow-lg">
+            {{template "grade-breakdown" (dict "Grade" .Grade "HeaderLabel" (printf "Leg grade: %s (%d)" .Grade.Letter .Grade.Score) "GuideHref" (printf "/docs/grading?from=/slips/%d/pick#leg-grades" .SlipID) "IsSlip" false "EmptyText" "Baseline 75 — no extra adjustments.")}}
+          </div>
+        </details>
+      {{end}}
+      {{if .ResearchURL}}
+        <a
+          href="{{.ResearchURL}}"
+          class="text-[11px] font-medium text-ink-muted underline decoration-line-strong underline-offset-2 hover:text-ink"
+        >Research &rarr;</a>
+      {{end}}
     </div>
   {{end}}
   {{if .ComboWarning}}
@@ -2844,6 +2862,7 @@
                   <span class="ui-odds">{{.Price}}{{if .ImpliedChance}} <span class="font-normal text-ink-muted" title="Implied chance from odds">({{.ImpliedChance}})</span>{{end}}</span>
                   {{if .ImpliedChance}}{{template "help-bubble" (dict "Href" (printf "/docs/glossary?from=%s#term-implied-prob" $guideFrom) "Label" "What implied chance means")}}{{end}}
                   {{if .SplitLine}}<span class="rounded border border-line-strong bg-surface px-1.5 py-0.5 font-mono text-[10px] font-medium tabular-nums text-ink">{{.SplitLine}}</span>{{end}}
+                  {{if .ResearchURL}}<a href="{{.ResearchURL}}" class="shrink-0 font-medium text-ink underline decoration-line-strong underline-offset-2 hover:opacity-75">Research &rarr;</a>{{end}}
                   {{if .Reason}}<span class="min-w-0 truncate text-ink-muted">{{.Reason}}</span>{{end}}
                 </div>
               </div>
@@ -2941,6 +2960,7 @@
                     <span class="truncate font-medium text-ink">{{.Text}}</span>
                     <span class="ui-odds ml-1.5">{{.Price}}{{if .ImpliedChance}} <span class="font-normal text-ink-muted" title="Implied chance from odds">({{.ImpliedChance}})</span>{{end}}</span>
                     {{if .SplitLine}}<span class="ml-1 rounded border border-line-strong bg-surface px-1.5 py-0.5 font-mono text-[10px] font-medium tabular-nums text-ink">{{.SplitLine}}</span>{{end}}
+                    {{if .ResearchURL}}<a href="{{.ResearchURL}}" class="ml-1.5 font-medium text-ink underline decoration-line-strong underline-offset-2 hover:opacity-75">Research &rarr;</a>{{end}}
                   </div>
                   <form
                     class="shrink-0"

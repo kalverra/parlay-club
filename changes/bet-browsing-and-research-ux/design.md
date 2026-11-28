@@ -260,7 +260,7 @@ chooser dialog, and preserves fallback behavior for kicked-off or `OTHER` legs)
 Risk: medium (adds new add-leg entry points across research and slip views that must enforce slip scope, open status,
 and remaining leg slots consistently with `slips.Service`)
 
-- [ ] Share one `betResearchHref` helper across pick-board options, highlights legs/parlays, slip legs (with fallback
+- [x] Share one `betResearchHref` helper across pick-board options, highlights legs/parlays, slip legs (with fallback
   for kicked-off or `OTHER` legs), research cards, and related bets in `internal/web/` and `web/templates/`, adding
   compact Research links to every bet tile with handler tests.
 - [ ] Add `GET /bets/add-sheet` in `internal/web/research.go`, mount `<dialog id="bet-add-dialog">` in

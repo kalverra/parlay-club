@@ -198,6 +198,7 @@ type PickRowView struct {
 	UpdateID      int64
 	AtLimit       bool
 	SwapURL       string
+	ResearchURL   string
 	Badge         string
 	ComboWarning  string
 	SplitLine     string
@@ -1632,9 +1633,21 @@ func pickRowView(
 		Text:          row.Text,
 		PickID:        row.Picked,
 		AtLimit:       atLimit,
-		Badge:         row.Badge,
-		ComboWarning:  row.ComboWarning,
-		SplitLine:     splitLineBadge(row.Market, row.DK, row.FD, row.LinesDiffer, homeBook),
+		ResearchURL: betResearchHref(
+			db.SelectionKey{
+				GameID:     row.GameID,
+				MarketType: row.Market,
+				Team:       row.Team,
+				PlayerName: row.PlayerName,
+				PlayerID:   row.PlayerID,
+				Side:       row.Side,
+			},
+			pickFromURL(slipID, row.GameID),
+			slipID,
+		),
+		Badge:        row.Badge,
+		ComboWarning: row.ComboWarning,
+		SplitLine:    splitLineBadge(row.Market, row.DK, row.FD, row.LinesDiffer, homeBook),
 	}
 	if row.Line != nil {
 		view.Line = formatFloat(*row.Line)
@@ -1731,11 +1744,19 @@ func pickRowFromLeg(slip db.Slip, leg db.Leg) PickRowView {
 		ImpliedChance: formatImpliedChance(parlay.ImpliedProb(leg.Odds)),
 		Text:          leg.Selection,
 		PickID:        leg.ID,
+		ResearchURL:   betResearchHref(db.LegSelection(leg), pickFromURL(slip.ID, db.StringValue(leg.GameID)), slip.ID),
 	}
 	if leg.Line != nil {
 		view.Line = formatFloat(*leg.Line)
 	}
 	return view
+}
+
+func pickFromURL(slipID int64, gameID string) string {
+	if gameID == "" {
+		return fmt.Sprintf("/slips/%d/pick", slipID)
+	}
+	return fmt.Sprintf("/slips/%d/pick?game=%s", slipID, url.QueryEscape(gameID))
 }
 
 // pickPairRow rebuilds one line's row after a pick from the board, so both
@@ -2145,7 +2166,7 @@ func gameHighlightsView(
 		SameGameOnly:  true,
 		ExcludePicked: true,
 	})
-	view := highlightsView(set, remainingSlots, homeBook)
+	view := highlightsView(set, remainingSlots, homeBook, slip.ID, pickFromURL(slip.ID, gameID))
 	view.SlipID = slip.ID
 	view.FromBoard = true
 	return view

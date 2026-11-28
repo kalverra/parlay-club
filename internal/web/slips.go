@@ -164,6 +164,7 @@ type LegHighlightView struct {
 	Grade         GradeView
 	SplitLine     string
 	Reason        string
+	ResearchURL   string
 }
 
 // ParlayHighlightView is one A-grade 2- or 3-leg combo idea.
@@ -2021,6 +2022,7 @@ func (h *slipHandlers) slipPageData(ctx context.Context, slip db.Slip) (SlipPage
 	votesByLeg := voteViews(votes, viewerID)
 	legProgs, slipProg := evaluateSlipProgress(legs, allWeekGames)
 	legsByUser := legViews(
+		slip.ID,
 		legs,
 		names,
 		gamesByID,
@@ -2033,6 +2035,7 @@ func (h *slipHandlers) slipPageData(ctx context.Context, slip db.Slip) (SlipPage
 		votesByLeg,
 		legProgs,
 		splitLines,
+		now,
 	)
 
 	locked, memberViews := buildSlipMemberViews(members, legsByUser, slip.LegsPerMember, open, hasUser, viewerID)
@@ -2175,24 +2178,30 @@ func (h *slipHandlers) slipHighlights(
 	set := board.SelectHighlights(rows, boardGames, boardStats, board.HighlightOptions{
 		ExcludePicked: true,
 	})
-	view := highlightsView(set, remainingSlots, homeBook)
+	view := highlightsView(set, remainingSlots, homeBook, slip.ID, fmt.Sprintf("/slips/%d", slip.ID))
 	view.SlipID = slip.ID
 	return view
 }
 
-func highlightsView(set board.HighlightSet, remainingSlots int, homeBook string) HighlightsView {
+func highlightsView(
+	set board.HighlightSet,
+	remainingSlots int,
+	homeBook string,
+	slipID int64,
+	from string,
+) HighlightsView {
 	if len(set.Legs) == 0 && len(set.Parlays) == 0 {
 		return HighlightsView{}
 	}
 	legs := make([]LegHighlightView, 0, len(set.Legs))
 	for _, leg := range set.Legs {
-		legs = append(legs, legHighlightView(leg, homeBook))
+		legs = append(legs, legHighlightView(leg, homeBook, slipID, from))
 	}
 	parlays := make([]ParlayHighlightView, 0, len(set.Parlays))
 	for _, p := range set.Parlays {
 		pLegs := make([]LegHighlightView, 0, len(p.Legs))
 		for _, leg := range p.Legs {
-			pLegs = append(pLegs, legHighlightView(leg, homeBook))
+			pLegs = append(pLegs, legHighlightView(leg, homeBook, slipID, from))
 		}
 		parlays = append(parlays, ParlayHighlightView{
 			Legs:            pLegs,
@@ -2213,7 +2222,7 @@ func highlightsView(set board.HighlightSet, remainingSlots int, homeBook string)
 	}
 }
 
-func legHighlightView(h board.LegHighlight, homeBook string) LegHighlightView {
+func legHighlightView(h board.LegHighlight, homeBook string, slipID int64, from string) LegHighlightView {
 	line := ""
 	if h.Row.Line != nil {
 		line = formatFloat(*h.Row.Line)
@@ -2233,6 +2242,14 @@ func legHighlightView(h board.LegHighlight, homeBook string) LegHighlightView {
 		Grade:         LegGradeView(h.Grade),
 		SplitLine:     splitLineBadge(h.Row.Market, h.Row.DK, h.Row.FD, h.Row.LinesDiffer, homeBook),
 		Reason:        h.Reason,
+		ResearchURL: betResearchHref(db.SelectionKey{
+			GameID:     h.Row.GameID,
+			MarketType: h.Row.Market,
+			Team:       h.Row.Team,
+			PlayerName: h.Row.PlayerName,
+			PlayerID:   h.Row.PlayerID,
+			Side:       h.Row.Side,
+		}, from, slipID),
 	}
 }
 
@@ -2337,6 +2354,7 @@ func (h *slipHandlers) legMedia(ctx context.Context, legs []db.Leg, weekGames []
 // legViews groups a slip's legs by owner for the panel, with each leg's vote
 // tally and the viewer's part in it.
 func legViews(
+	slipID int64,
 	legs []db.Leg,
 	names map[int64]string,
 	games map[string]analyzer.Game,
@@ -2347,6 +2365,7 @@ func legViews(
 	votes map[int64]VoteView,
 	legProgs map[int64]progress.LegProgress,
 	splitLines map[int64]string,
+	now time.Time,
 ) map[int64][]LegView {
 	byUser := make(map[int64][]LegView, len(names))
 	for _, leg := range legs {
@@ -2367,7 +2386,7 @@ func legViews(
 			OwnerName:     names[leg.UserID],
 			CanEdit:       open && hasUser && leg.UserID == viewerID,
 			CanGrade:      viewerIsMember,
-			ResearchURL:   legResearchURL(leg),
+			ResearchURL:   legResearchURL(leg, media, slipID, now),
 			Votes:         legVoteView(votes, leg, canVote),
 			Live:          legLiveView(legProgs[leg.ID]),
 		}
@@ -2411,8 +2430,16 @@ func applyLegMedia(view *LegView, leg db.Leg, media legMediaIndex) {
 	}
 }
 
-// legResearchURL links a leg to the research view for its player or game.
-func legResearchURL(leg db.Leg) string {
+// legResearchURL links an active non-OTHER leg to /research/bet and falls back
+// to the player or game research sheet once kicked off or for OTHER legs.
+func legResearchURL(leg db.Leg, media legMediaIndex, slipID int64, now time.Time) string {
+	if leg.MarketType != "" && leg.MarketType != "OTHER" && leg.GameID != nil && *leg.GameID != "" {
+		if game, ok := media.games[*leg.GameID]; ok && now.Before(game.Kickoff) {
+			if href := betResearchHref(db.LegSelection(leg), fmt.Sprintf("/slips/%d", slipID), slipID); href != "" {
+				return href
+			}
+		}
+	}
 	if leg.PlayerID != nil && *leg.PlayerID != "" {
 		u := url.Values{}
 		u.Set("player_id", *leg.PlayerID)
