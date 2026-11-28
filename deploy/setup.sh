@@ -18,7 +18,7 @@ service account, Workload Identity, and billing budget resources. Safe to
 re-run.
 
 Environment overrides:
-  REGION         Cloud Run and bucket region (default us-central1)
+  REGION         Cloud Run and bucket region (default us-east4)
   GITHUB_REPO    repo trusted by Workload Identity (default kalverra/parlay-club)
   SERVICE        Cloud Run service name (default parlay-club)
   AR_REPO        Artifact Registry repository id (default parlay-club)
@@ -40,7 +40,7 @@ if [ -z "$PROJECT_ID" ] || [ -z "$BILLING_ACCOUNT" ]; then
 	exit 2
 fi
 
-REGION="${REGION:-us-central1}"
+REGION="${REGION:-us-east4}"
 GITHUB_REPO="${GITHUB_REPO:-kalverra/parlay-club}"
 SERVICE="${SERVICE:-parlay-club}"
 AR_REPO="${AR_REPO:-parlay-club}"

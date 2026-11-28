@@ -124,7 +124,7 @@ revision leaves the prior revision serving and rollback is immediate)
 - [x] Update `.github/workflows/deploy.yml` to pass `--cpu 2`, `--memory 2Gi`, and `--execution-environment=gen2` in
       `run_deploy`, and add `.github/workflows/deploy.yml` to the `Check for runtime changes` `git diff` path list;
       verify with `actionlint`.
-- [ ] Update the default `REGION` in `deploy/setup.sh` from `us-central1` to `us-east4` (both usage text and fallback
+- [x] Update the default `REGION` in `deploy/setup.sh` from `us-central1` to `us-east4` (both usage text and fallback
   assignment); verify with `bash -n deploy/setup.sh`.
 - [ ] Docs: update `docs/runbooks/deploy.md` and `docs/guides/gcp-setup.md` for the `2 vCPU / 2 GiB / Gen 2` sizing, the
       `deploy.yml` runtime-change trigger, the `us-east4` default region, and updated monthly spend expectations; verify
