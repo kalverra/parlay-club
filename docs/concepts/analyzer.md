@@ -23,7 +23,7 @@ overlay rules, and the v1 rubric live in [Analyzer rules](../reference/analyzer-
 
 ```mermaid
 flowchart LR
-  Inputs["Legs + Games (Weather, nfelo, MarketScript, nflverse, Sharp) + PlayerStats"] --> Rules["AnalyzeSlip (16 Warnings)"]
+  Inputs["Legs + Games (Weather, nfelo, MarketScript, nflverse, Sharp) + PlayerStats"] --> Rules["AnalyzeSlip (18 Warnings)"]
   Inputs --> ModelV2["modelv2 (GBDT Distributions + EB Shrinkage + Calibration)"]
   Inputs --> Overlays["ContextOverlays (Injuries, Weather, Traps, ContextSignal)"]
   ModelV2 --> EngineV2["EngineV2 (Four Pillars + QMC Gaussian Copula)"]
@@ -75,6 +75,38 @@ bears on the pick you are making.
 
 The dock and the tray inside its sheet refresh with the pick board on `tray-updated` and `slip-updated`, so a new leg or
 a fresh forecast brings its grade and warning without a reload. See [Slips](slips.md#the-pick-board).
+
+## Sportsbook combination eligibility
+
+`internal/analyzer/combo_rules.go` checks same-game leg combinations against rules that DraftKings and FanDuel reject
+or frequently restrict on parlays and same-game parlays (SGPs). Like every analyzer check, these rules are strictly
+**non-blocking**: conflicting options stay clickable on the pick board, legs can always be added to a slip, and locks
+are never prevented.
+
+Two rules cover hard blocks and SGP restrictions:
+
+- **`book_combo_ineligible` (Danger)**: Flags combinations DraftKings and FanDuel consistently reject on one slip:
+  - Duplicate selections (same game, market, side, and team or player and line).
+  - Opposite sides of the same market (both teams on spread or moneyline, game total Over and Under, same-team total
+    Over and Under, or same-player prop Over and Under in the same market).
+  - Same-team moneyline paired with that team's spread.
+  - Mutually exclusive moneyline on one team paired with an opponent favorite spread (`< 0`).
+  - Mutually exclusive team totals vs. game total (both teams' team-total Overs summing at or above a game-total Under,
+    or both teams' team-total Unders summing at or below a game-total Over).
+- **`book_combo_restricted` (Warn)**: Flags same-game combinations books frequently drop or restrict in SGP builders:
+  - Duplicate player-market milestones (same player, market, and side at different lines).
+  - Inverse same-player prop pairs on opposite Over/Under sides (`PASS_YDS` with `PASS_TDS`, `REC_YDS` with
+    `RECEPTIONS`, or `RUSH_YDS` with `RUSH_ATT`).
+  - Kicker points (`KICKER_PTS`) paired with a game total or team total in the same game.
+
+These warnings surface in two places using one shared rule set:
+
+- **Slip banner and pick tray**: `AnalyzeSlip` evaluates all legs on the slip and emits `book_combo_ineligible` and
+  `book_combo_restricted` cards alongside game-script warnings (with `#pick-tray` filtering to cards that name one of
+  the viewer's legs).
+- **Inline on the pick board**: `board.ApplySignals` calls `analyzer.CheckComboConflict` for each unpicked board row
+  against `BoardSignals.SlipLegs`, short-circuiting on `Danger` before `Warn`. When a conflict exists, the pick option
+  renders a compact non-blocking heads-up note (`Row.ComboWarning`) while leaving the option addable.
 
 ## Calibrated four-pillar grading (v2)
 
