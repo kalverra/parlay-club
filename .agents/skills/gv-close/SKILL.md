@@ -9,7 +9,8 @@ description: Write a good-vibes close-out in changes/<slug>/closeout.md before t
 record the change leaves, so the close-out keeps what a future reader needs and drops the rest.
 
 When the change ran, `done` also carries the run summary's `## Docs checked` section into the ADR, so the close-out
-mentions a doc only when a judgment needs explaining.
+mentions a doc only when a judgment needs explaining. When the proposal sets `summary`, `done` writes that sentence as
+the ADR summary ahead of the Decision section's first sentence.
 
 ## Steps
 
