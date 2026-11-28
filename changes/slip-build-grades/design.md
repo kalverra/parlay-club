@@ -290,7 +290,7 @@ width)
 Risk: medium (changes primary user-facing grade styling and interactive drawer/popover flows where DOM ergonomics and
 visual contrast are only partially covered by Go template tests)
 
-- [ ] Replace green `.grade-a` tokens with cool/neutral build-grade tokens across all 4 themes in
+- [x] Replace green `.grade-a` tokens with cool/neutral build-grade tokens across all 4 themes in
       `web/tailwind/input.css` (reserving `--positive` strictly for settled wins), run `go generate ./...`, and verify
       no grade badge class maps to `--positive`.
 - [ ] Update `internal/web/analyzer.go` and templates (`partials.html`, `research_bet.html`, `analyzer_guide.html`) to

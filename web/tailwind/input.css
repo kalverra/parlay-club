@@ -37,6 +37,14 @@
   --color-danger-soft: var(--danger-soft);
   --color-danger-ink: var(--danger-ink);
 
+  --color-grade-clean: var(--grade-clean);
+  --color-grade-clean-soft: var(--grade-clean-soft);
+  --color-grade-clean-ink: var(--grade-clean-ink);
+
+  --color-grade-solid: var(--grade-solid);
+  --color-grade-solid-soft: var(--grade-solid-soft);
+  --color-grade-solid-ink: var(--grade-solid-ink);
+
   --font-sans: var(--font-body);
   --font-display: var(--font-head);
   --font-mono: var(--font-code);
@@ -80,6 +88,14 @@
   --danger-soft: #ffe4e6;
   --danger-ink: #881337;
 
+  --grade-clean: #0f766e;
+  --grade-clean-soft: #dff4f3;
+  --grade-clean-ink: #134e4a;
+
+  --grade-solid: #2b547e;
+  --grade-solid-soft: #e2ebf5;
+  --grade-solid-ink: #1e3a5f;
+
   --font-body: "Inter", system-ui, -apple-system, sans-serif;
   --font-head: "Inter", system-ui, -apple-system, sans-serif;
   --font-code: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
@@ -121,6 +137,14 @@
   --danger: #f43f5e;
   --danger-soft: rgb(244 63 94 / 0.15);
   --danger-ink: #fda4af;
+
+  --grade-clean: #14b8a6;
+  --grade-clean-soft: rgb(20 184 166 / 0.15);
+  --grade-clean-ink: #5eead4;
+
+  --grade-solid: #60a5fa;
+  --grade-solid-soft: rgb(96 165 250 / 0.15);
+  --grade-solid-ink: #bfdbfe;
 
   --font-body: "Inter", system-ui, -apple-system, sans-serif;
   --font-head: "Barlow Condensed", "Inter", system-ui, sans-serif;
@@ -164,6 +188,14 @@
   --danger-soft: #fecaca;
   --danger-ink: #7f1d1d;
 
+  --grade-clean: #0e7490;
+  --grade-clean-soft: #a5f3fc;
+  --grade-clean-ink: #164e63;
+
+  --grade-solid: #1d4ed8;
+  --grade-solid-soft: #bfdbfe;
+  --grade-solid-ink: #1e3a8a;
+
   --font-body: "Space Grotesk", system-ui, -apple-system, sans-serif;
   --font-head: "Space Grotesk", system-ui, -apple-system, sans-serif;
   --font-code: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
@@ -206,6 +238,14 @@
   --danger: #c40000;
   --danger-soft: #ffd9d9;
   --danger-ink: #7a0000;
+
+  --grade-clean: #00778a;
+  --grade-clean-soft: #d2f4f7;
+  --grade-clean-ink: #00424d;
+
+  --grade-solid: #004dff;
+  --grade-solid-soft: #dce6ff;
+  --grade-solid-ink: #00237a;
 
   --font-body: "Space Grotesk", system-ui, -apple-system, sans-serif;
   --font-head: "Anton", "Space Grotesk", system-ui, sans-serif;
@@ -432,17 +472,17 @@
     color: var(--warning-ink);
   }
 
-  /* Semantic analyzer grades */
+  /* Semantic analyzer build grades (cool/neutral; --positive is reserved for settled wins) */
   .grade-a {
-    border-color: var(--positive);
-    background-color: var(--positive-soft);
-    color: var(--positive-ink);
+    border-color: var(--grade-clean);
+    background-color: var(--grade-clean-soft);
+    color: var(--grade-clean-ink);
   }
 
   .grade-b {
-    border-color: var(--accent);
-    background-color: var(--accent-soft);
-    color: var(--ink);
+    border-color: var(--grade-solid);
+    background-color: var(--grade-solid-soft);
+    color: var(--grade-solid-ink);
   }
 
   .grade-c {
