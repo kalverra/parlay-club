@@ -21,6 +21,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/kalverra/parlay-club/internal/analyzer"
 	"github.com/kalverra/parlay-club/internal/db"
 	"github.com/kalverra/parlay-club/internal/ingest/espn"
 	"github.com/kalverra/parlay-club/internal/live"
@@ -2460,4 +2461,102 @@ func TestSlipPanelSSERefreshesLiveProgress(t *testing.T) {
 	assert.Contains(t, panelBody, `data-slip-live-progress data-live-state="CASHED"`)
 	assert.Contains(t, panelBody, "52 / 47.5 pts · Q4 2:10")
 	assert.Contains(t, panelBody, "Live chance 100%")
+}
+
+func TestSlipPanelGradeSummaryStripV2AndV1Fallback(t *testing.T) {
+	t.Parallel()
+
+	t.Run("v2 multi-leg slip and legs render summary strip without +EV copy", func(t *testing.T) {
+		t.Parallel()
+
+		fixture := newSlipFixtureWithEngine(t, 2, analyzer.EngineV2)
+		game := addGame(t, fixture, gameKickoff())
+		addGameOdds(t, fixture.store, game.ID)
+		seedAGradeBoardForHubTest(t, fixture, game)
+
+		addStoredLeg(t, fixture, db.Leg{
+			UserID:     fixture.user.ID,
+			GameID:     new(game.ID),
+			MarketType: "PASS_YDS",
+			Selection:  "Josh Allen Over 255.5 Pass Yds",
+			Team:       new("BUF"),
+			PlayerID:   new("3918298"),
+			PlayerName: new("Josh Allen"),
+			Side:       new("OVER"),
+			Line:       new(255.5),
+			Odds:       -110,
+		})
+		addStoredLeg(t, fixture, db.Leg{
+			UserID:     fixture.user.ID,
+			GameID:     new(game.ID),
+			MarketType: "RUSH_YDS",
+			Selection:  "James Cook Over 65.5 Rush Yds",
+			Team:       new("BUF"),
+			PlayerID:   new("4379399"),
+			PlayerName: new("James Cook"),
+			Side:       new("OVER"),
+			Line:       new(65.5),
+			Odds:       -110,
+		})
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequestWithContext(
+			t.Context(),
+			http.MethodGet,
+			fmt.Sprintf("/slips/%d/panel", fixture.slip.ID),
+			nil,
+		)
+		fixture.handler.ServeHTTP(rec, req)
+		require.Equal(t, http.StatusOK, rec.Code)
+
+		body := html.UnescapeString(rec.Body.String())
+		assert.Contains(t, body, "data-grade-summary")
+		assert.Contains(t, body, "Overall")
+		assert.Contains(t, body, "Hit chance")
+		assert.Contains(t, body, "Payout value")
+		assert.GreaterOrEqual(t, strings.Count(body, "data-grade-summary"), 3, "2 legs + 1 slip summary")
+		assert.NotContains(t, body, "+EV")
+	})
+
+	t.Run("v1 fallback omits summary strip", func(t *testing.T) {
+		t.Parallel()
+
+		fixture := newSlipFixtureWithEngine(t, 2, analyzer.EngineV1)
+		game := addGame(t, fixture, gameKickoff())
+
+		addStoredLeg(t, fixture, db.Leg{
+			UserID:     fixture.user.ID,
+			GameID:     new(game.ID),
+			MarketType: "SPREAD",
+			Selection:  "BUF -7.5",
+			Team:       new("BUF"),
+			Side:       new("TEAM"),
+			Line:       new(-7.5),
+			Odds:       -110,
+		})
+		addStoredLeg(t, fixture, db.Leg{
+			UserID:     fixture.user.ID,
+			GameID:     new(game.ID),
+			MarketType: "PASS_YDS",
+			Selection:  "Josh Allen Over 245.5 Pass Yds",
+			Team:       new("BUF"),
+			PlayerName: new("Josh Allen"),
+			Side:       new("OVER"),
+			Line:       new(245.5),
+			Odds:       -110,
+		})
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequestWithContext(
+			t.Context(),
+			http.MethodGet,
+			fmt.Sprintf("/slips/%d/panel", fixture.slip.ID),
+			nil,
+		)
+		fixture.handler.ServeHTTP(rec, req)
+		require.Equal(t, http.StatusOK, rec.Code)
+
+		body := html.UnescapeString(rec.Body.String())
+		assert.NotContains(t, body, "data-grade-summary")
+	})
 }

@@ -911,10 +911,11 @@ func TestGradeBreakdownsRenderFourPillarsAndV1FallbackTemplates(t *testing.T) {
 	require.NoError(t, err)
 
 	v2LegGrade := webui.LegGradeView(analyzer.LegGrade{
-		LegID:     11,
-		Letter:    "B",
-		Score:     77,
-		Uncertain: true,
+		LegID:          11,
+		Letter:         "B",
+		Score:          77,
+		CalibratedProb: 0.54,
+		Uncertain:      true,
 		Pillars: []analyzer.PillarScore{
 			{
 				Key:     analyzer.PillarPriceVig,
@@ -958,6 +959,7 @@ func TestGradeBreakdownsRenderFourPillarsAndV1FallbackTemplates(t *testing.T) {
 		Letter:         "B",
 		Score:          79,
 		Summary:        "Strong 2-leg correlated ticket",
+		CalibratedProb: 0.31,
 		Uncertain:      true,
 		CorrMultiplier: 1.16,
 		LegGrades:      []analyzer.LegGrade{{LegID: 11, Letter: "B"}, {LegID: 12, Letter: "A"}},
@@ -1072,6 +1074,15 @@ func TestGradeBreakdownsRenderFourPillarsAndV1FallbackTemplates(t *testing.T) {
 			"highlights-strip": string(highlightsHTML),
 		} {
 			body := html.UnescapeString(raw)
+			assert.Contains(t, body, "data-grade-summary", name)
+			assert.Contains(t, body, "Overall", name)
+			assert.Contains(t, body, "Hit chance", name)
+			assert.Contains(t, body, "Payout value", name)
+			assert.Contains(t, body, "~54%", name)
+			assert.Contains(t, body, "~31%", name)
+			assert.Contains(t, body, "Strong value", name)
+			assert.Contains(t, body, "Slight juice", name)
+			assert.NotContains(t, body, "+EV", name)
 			assert.Contains(t, body, "data-grade-pillars", name)
 			assert.Contains(t, body, `data-pillar="price_vig"`, name)
 			assert.Contains(t, body, `data-pillar="script_fit"`, name)
@@ -1148,10 +1159,139 @@ func TestGradeBreakdownsRenderFourPillarsAndV1FallbackTemplates(t *testing.T) {
 		assert.Contains(t, body, "+10")
 		assert.Contains(t, body, "Positive stack — Shootout stack aligned.")
 		assert.Contains(t, body, "+8")
+		assert.NotContains(t, body, "data-grade-summary")
 		assert.NotContains(t, body, "data-grade-pillars")
 		assert.NotContains(t, body, "data-grade-why")
 		assert.NotContains(t, body, "data-uncertainty-badge")
 		assert.NotContains(t, body, "data-corr-summary")
+	})
+}
+
+func TestGradeViewSummaryFields(t *testing.T) {
+	t.Parallel()
+
+	t.Run("v2 leg computes hit chance and payout value", func(t *testing.T) {
+		t.Parallel()
+
+		cases := []struct {
+			name      string
+			prob      float64
+			price     int
+			tone      string
+			wantHit   string
+			wantLabel string
+			wantClass string
+		}{
+			{
+				name:      "strong value",
+				prob:      0.614,
+				price:     88,
+				tone:      analyzer.ToneGood,
+				wantHit:   "~61%",
+				wantLabel: "Strong value",
+				wantClass: "text-positive-ink",
+			},
+			{
+				name:      "fair value",
+				prob:      0.502,
+				price:     75,
+				tone:      analyzer.ToneNeutral,
+				wantHit:   "~50%",
+				wantLabel: "Fair value",
+				wantClass: "text-ink-muted",
+			},
+			{
+				name:      "slight juice",
+				prob:      0.002,
+				price:     62,
+				tone:      analyzer.ToneWarn,
+				wantHit:   "<1%",
+				wantLabel: "Slight juice",
+				wantClass: "text-warning-ink",
+			},
+			{
+				name:      "steep juice",
+				prob:      0.997,
+				price:     45,
+				tone:      analyzer.ToneBad,
+				wantHit:   ">99%",
+				wantLabel: "Steep juice",
+				wantClass: "text-danger-ink",
+			},
+		}
+
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+
+				gv := webui.LegGradeView(analyzer.LegGrade{
+					LegID:          1,
+					Letter:         "B",
+					Score:          78,
+					CalibratedProb: tc.prob,
+					Pillars: []analyzer.PillarScore{{
+						Key:   analyzer.PillarPriceVig,
+						Label: analyzer.PillarLabelPriceVig,
+						Score: tc.price,
+						Tone:  tc.tone,
+					}},
+				})
+				assert.Equal(t, tc.wantHit, gv.HitChance)
+				assert.Equal(t, tc.wantLabel, gv.PayoutLabel)
+				assert.Contains(t, gv.PayoutToneClass, tc.wantClass)
+				assert.NotContains(t, gv.PayoutLabel, "+EV")
+			})
+		}
+	})
+
+	t.Run("v2 multi-leg slip computes joint hit chance and payout value", func(t *testing.T) {
+		t.Parallel()
+
+		gv := webui.SlipGradeView(analyzer.SlipGrade{
+			Letter:         "A",
+			Score:          86,
+			Summary:        "2-leg correlated ticket",
+			CalibratedProb: 0.342,
+			CorrMultiplier: 1.12,
+			LegGrades:      []analyzer.LegGrade{{LegID: 1, Letter: "A"}, {LegID: 2, Letter: "B"}},
+			Pillars: []analyzer.PillarScore{{
+				Key:   analyzer.PillarPriceVig,
+				Label: analyzer.PillarLabelPriceVig,
+				Score: 86,
+				Tone:  analyzer.ToneGood,
+			}},
+		})
+		assert.Equal(t, "~34%", gv.HitChance)
+		assert.Equal(t, "Strong value", gv.PayoutLabel)
+		assert.Contains(t, gv.PayoutToneClass, "text-positive-ink")
+		assert.NotContains(t, gv.PayoutLabel, "+EV")
+	})
+
+	t.Run("v1 fallback leaves hit chance and payout value empty", func(t *testing.T) {
+		t.Parallel()
+
+		legV1 := webui.LegGradeView(analyzer.LegGrade{
+			LegID:  1,
+			Letter: "B",
+			Score:  75,
+			Factors: []analyzer.GradeFactor{{
+				Rule:  "hit_rate",
+				Label: "Hit rate",
+				Delta: 5,
+			}},
+		})
+		assert.Empty(t, legV1.HitChance)
+		assert.Empty(t, legV1.PayoutLabel)
+		assert.Empty(t, legV1.PayoutToneClass)
+
+		slipV1 := webui.SlipGradeView(analyzer.SlipGrade{
+			Letter:  "B",
+			Score:   75,
+			Summary: "1 graded leg",
+		})
+		assert.Empty(t, slipV1.HitChance)
+		assert.Empty(t, slipV1.PayoutLabel)
+		assert.Empty(t, slipV1.PayoutToneClass)
 	})
 }
 
@@ -1263,6 +1403,11 @@ func TestSlipPanelTrayAndGuideWithEngineV2Handler(t *testing.T) {
 		body := html.UnescapeString(rec.Body.String())
 		assert.Contains(t, body, "data-leg-grade", path)
 		assert.Contains(t, body, "data-slip-grade", path)
+		assert.Contains(t, body, "data-grade-summary", path)
+		assert.Contains(t, body, "Overall", path)
+		assert.Contains(t, body, "Hit chance", path)
+		assert.Contains(t, body, "Payout value", path)
+		assert.NotContains(t, body, "+EV", path)
 		assert.Contains(t, body, "data-grade-pillars", path)
 		assert.Contains(t, body, "Price & Vig", path)
 		assert.Contains(t, body, "Script Fit", path)

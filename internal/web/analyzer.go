@@ -23,15 +23,18 @@ type AnalyzerView struct {
 
 // GradeView is a clickable A-F grade pill with an inline breakdown.
 type GradeView struct {
-	Letter      string
-	Score       int
-	Class       string
-	Summary     string
-	Uncertain   bool
-	CorrSummary string
-	Pillars     []PillarView
-	Why         []string
-	Factors     []GradeFactorView
+	Letter          string
+	Score           int
+	Class           string
+	Summary         string
+	HitChance       string // e.g. "~61%" or "<1%"; empty when CalibratedProb <= 0
+	PayoutLabel     string // "Strong value" | "Fair value" | "Slight juice" | "Steep juice"
+	PayoutToneClass string // matches Price & Vig pillar tone
+	Uncertain       bool
+	CorrSummary     string
+	Pillars         []PillarView
+	Why             []string
+	Factors         []GradeFactorView
 }
 
 // PillarView is one v2 scoring pillar inside a grade breakdown popover.
@@ -278,6 +281,7 @@ func LegGradeView(lg analyzer.LegGrade) GradeView {
 		lg.Letter,
 		lg.Score,
 		"",
+		lg.CalibratedProb,
 		lg.Uncertain,
 		0,
 		false,
@@ -292,6 +296,7 @@ func SlipGradeView(sg analyzer.SlipGrade) GradeView {
 		sg.Letter,
 		sg.Score,
 		sg.Summary,
+		sg.CalibratedProb,
 		sg.Uncertain,
 		sg.CorrMultiplier,
 		len(sg.LegGrades) > 1,
@@ -304,6 +309,7 @@ func buildGradeView(
 	letter string,
 	score int,
 	summary string,
+	calibratedProb float64,
 	uncertain bool,
 	corrMult float64,
 	multiLeg bool,
@@ -346,18 +352,57 @@ func buildGradeView(
 			corrSummary = formatCorrSummary(corrMult)
 		}
 	}
+	payoutLabel, payoutToneClass := payoutValueFromPillars(pillars)
 
 	return GradeView{
-		Letter:      letter,
-		Score:       score,
-		Class:       gradeClass(letter),
-		Summary:     summary,
-		Uncertain:   uncertain,
-		CorrSummary: corrSummary,
-		Pillars:     pillarViews,
-		Why:         why,
-		Factors:     factorViews,
+		Letter:          letter,
+		Score:           score,
+		Class:           gradeClass(letter),
+		Summary:         summary,
+		HitChance:       formatHitChance(calibratedProb),
+		PayoutLabel:     payoutLabel,
+		PayoutToneClass: payoutToneClass,
+		Uncertain:       uncertain,
+		CorrSummary:     corrSummary,
+		Pillars:         pillarViews,
+		Why:             why,
+		Factors:         factorViews,
 	}
+}
+
+func formatHitChance(prob float64) string {
+	if prob <= 0 || prob >= 1 || math.IsNaN(prob) {
+		return ""
+	}
+	if prob < 0.005 {
+		return "<1%"
+	}
+	if prob > 0.995 {
+		return ">99%"
+	}
+	return fmt.Sprintf("~%d%%", int(math.Round(prob*100)))
+}
+
+func payoutValueFromPillars(pillars []analyzer.PillarScore) (label, toneClass string) {
+	for _, p := range pillars {
+		if p.Key != analyzer.PillarPriceVig {
+			continue
+		}
+		score := clampScore(p.Score)
+		switch {
+		case score >= 85:
+			label = "Strong value"
+		case score >= 73:
+			label = "Fair value"
+		case score >= 58:
+			label = "Slight juice"
+		default:
+			label = "Steep juice"
+		}
+		toneClass, _ = pillarToneClasses(p.Tone)
+		return label, toneClass
+	}
+	return "", ""
 }
 
 func clampScore(score int) int {
