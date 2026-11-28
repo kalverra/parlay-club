@@ -4478,9 +4478,9 @@ func TestPickDetailRendersGroupBySwitcherAllChipsSectionsAndSiblingGradePopovers
 	assert.Contains(t, catBody, `data-section="passing"`)
 	assert.Contains(t, catBody, `data-section="rushing"`)
 	assert.Contains(t, catBody, `data-grade-scope data-leg-grade`)
-	assert.Contains(t, catBody, `Grade `)
+	assert.Contains(t, catBody, `data-grade-drawer-trigger`)
 	assert.Contains(t, catBody, `data-grade-drawer`)
-	assert.Contains(t, catBody, `data-grade-summary`)
+	assert.Contains(t, catBody, `data-market-reality`)
 	assert.Contains(t, catBody, `data-grade-pillars`)
 	assertNoPopoverInFormOrButton(t, catBody)
 

@@ -817,7 +817,12 @@ func collectWhyBullets(pillars []analyzer.PillarScore) []string {
 
 	specific := make([]string, 0, maxWhyBullets)
 	fallback := make([]string, 0, maxWhyBullets)
-	seen := make(map[string]struct{}, len(pillars)*2)
+	seen := make(map[string]struct{}, len(pillars)*3)
+	for _, p := range pillars {
+		if s := strings.TrimSpace(p.Summary); s != "" {
+			seen[s] = struct{}{}
+		}
+	}
 
 	for _, p := range ordered {
 		for _, r := range p.Reasons {

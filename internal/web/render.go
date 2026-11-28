@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"html/template"
 	"io/fs"
+	"strings"
 )
 
 // pageFiles maps a page name to the template file that defines its content.
@@ -148,13 +149,63 @@ func (r *Renderer) template(name string) (*template.Template, error) {
 // templateFuncs are the helpers every template set shares.
 func templateFuncs() template.FuncMap {
 	return template.FuncMap{
-		"asset":       AssetURL,
-		"dict":        templateDict,
-		"list":        func(values ...string) []string { return values },
-		"inc":         func(value int) int { return value + 1 },
-		"resultClass": resultClass,
-		"resultLabel": resultLabel,
+		"asset":          AssetURL,
+		"dict":           templateDict,
+		"list":           func(values ...string) []string { return values },
+		"inc":            func(value int) int { return value + 1 },
+		"resultClass":    resultClass,
+		"resultLabel":    resultLabel,
+		"parseSplitLine": parseSplitLine,
 	}
+}
+
+// SplitLineParts holds a parsed split-line badge broken into an optional prefix
+// (such as "Spread") and ordered per-book quotes for rendering FD/DK logos.
+type SplitLineParts struct {
+	Raw    string
+	Prefix string
+	Items  []SplitLineItem
+}
+
+// SplitLineItem is one book's portion of a split-line comparison.
+type SplitLineItem struct {
+	Book  string // "draftkings" or "fanduel"
+	Code  string // "DK" or "FD"
+	Value string // e.g. "200.5 (-114)"
+}
+
+// parseSplitLine splits a formatted split-line string (e.g.
+// "FD 200.5 (-114) · DK 197.5 (-113)" or "Spread: DK -3.5 · FD -3") into
+// structured items so templates can render official book logos.
+func parseSplitLine(raw string) SplitLineParts {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return SplitLineParts{}
+	}
+	parts := SplitLineParts{Raw: raw}
+	body := raw
+	if prefix, rest, ok := strings.Cut(raw, ": "); ok {
+		parts.Prefix = strings.TrimSpace(prefix)
+		body = strings.TrimSpace(rest)
+	}
+	for chunk := range strings.SplitSeq(body, "·") {
+		chunk = strings.TrimSpace(chunk)
+		switch {
+		case strings.HasPrefix(chunk, "FD "):
+			parts.Items = append(parts.Items, SplitLineItem{
+				Book:  "fanduel",
+				Code:  "FD",
+				Value: strings.TrimSpace(strings.TrimPrefix(chunk, "FD ")),
+			})
+		case strings.HasPrefix(chunk, "DK "):
+			parts.Items = append(parts.Items, SplitLineItem{
+				Book:  "draftkings",
+				Code:  "DK",
+				Value: strings.TrimSpace(strings.TrimPrefix(chunk, "DK ")),
+			})
+		}
+	}
+	return parts
 }
 
 // templateDict builds a map from alternating key/value pairs for template calls.

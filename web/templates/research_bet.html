@@ -42,12 +42,12 @@
             </div>
             <div class="shrink-0 text-right">
               {{if .View.Grade.Letter}}
-                {{template "build-grade-l1" (dict "Grade" .View.Grade "HeaderLabel" (printf "Build grade: %s (%d/100)" .View.Grade.DisplayGrade .View.Grade.Score) "GuideHref" (printf "/docs/grading?from=%s#leg-grades" .View.ReturnURL) "IsSlip" false "Label" "" "EmptyText" "No scoring factors were applied to this bet." "ShowVegas" false)}}
+                {{template "build-grade-l1" (dict "Grade" .View.Grade "HeaderLabel" (printf "Build grade: %s (%d/100)" .View.Grade.DisplayGrade .View.Grade.Score) "GuideHref" (printf "/docs/grading?from=%s#leg-grades" .View.ReturnURL) "IsSlip" false "Label" "" "Compact" true "EmptyText" "No scoring factors were applied to this bet." "ShowVegas" false)}}
               {{else}}
                 <span class="inline-block rounded-full border px-2 py-0.5 text-sm font-semibold {{.View.Grade.Class}}">&mdash;</span>
               {{end}}
               <p class="mt-1 text-xs text-ink-muted">
-                {{if .View.ImpliedHuman}}<span class="text-[10px] font-semibold uppercase tracking-wide text-ink-subtle" data-provenance="Vegas Implied">Vegas Implied</span> <span class="font-medium text-ink">{{.View.ImpliedHuman}}</span> &middot; {{end}}<span class="font-mono text-sm font-semibold tabular-nums text-ink">{{.View.OddsText}}</span>
+                {{if .View.Implied}}<span class="font-medium text-ink" title="Implied chance from odds">{{.View.Implied}} implied</span> &middot; {{end}}<span class="font-mono text-sm font-semibold tabular-nums text-ink">{{.View.OddsText}}</span>
               </p>
             </div>
           </div>
@@ -55,7 +55,7 @@
             {{template "side-badge" .View}}
             <span class="rounded-full border border-line-strong bg-surface-2 px-1.5 py-0.5 text-ink-muted">{{.View.MarketLabel}}</span>
             {{if .View.SplitLine}}
-              <span class="rounded border border-line-strong bg-surface-2 px-1.5 py-0.5 font-mono text-[10px] font-medium tabular-nums text-ink">{{.View.SplitLine}}</span>
+              {{template "split-line-badge" .View.SplitLine}}
             {{end}}
             {{if .View.Badge}}
               <span class="rounded-full border border-accent bg-accent-soft px-1.5 py-0.5 font-medium text-ink">{{.View.Badge}}</span>
@@ -413,7 +413,7 @@
                         {{.Market}}{{if .Reason}} &middot; {{.Reason}}{{end}}
                       </p>
                       {{if .SplitLine}}
-                        <p class="mt-1 font-mono text-[10px] tabular-nums text-ink-muted">{{.SplitLine}}</p>
+                        <div class="mt-1">{{template "split-line-badge" .SplitLine}}</div>
                       {{end}}
                       {{if or .BetHref .AddPostURL .AddHref}}
                         <div class="mt-1.5 flex flex-wrap items-center gap-3">

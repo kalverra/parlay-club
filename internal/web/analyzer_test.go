@@ -1143,10 +1143,8 @@ func TestGradeBreakdownsRenderFourPillarsAndV1FallbackTemplates(t *testing.T) {
 			assert.Contains(t, body, `data-provenance="Vegas Implied"`, name)
 			assert.Contains(t, body, `data-provenance="Fair No-Vig Est."`, name)
 			assert.Contains(t, body, `data-provenance="Model Context"`, name)
-			assert.Contains(t, body, "data-grade-summary", name)
-			assert.Contains(t, body, "Overall", name)
 			assert.Contains(t, body, "Model Context", name)
-			assert.Contains(t, body, "Book pricing", name)
+			assert.Contains(t, body, "Book hold / vig", name)
 			assert.Contains(t, body, "~54%", name)
 			assert.Contains(t, body, "~31%", name)
 			assert.Contains(t, body, "Clean price", name)
@@ -1491,10 +1489,8 @@ func TestSlipPanelTrayAndGuideWithEngineV2Handler(t *testing.T) {
 		assert.Contains(t, body, "data-ground-rule-banner", path)
 		assert.Contains(t, body, "data-market-reality", path)
 		assert.Contains(t, body, "data-slip-diagnostics", path)
-		assert.Contains(t, body, "data-grade-summary", path)
-		assert.Contains(t, body, "Overall", path)
 		assert.Contains(t, body, "Model Context", path)
-		assert.Contains(t, body, "Book pricing", path)
+		assert.Contains(t, body, "Book hold / vig", path)
 		assert.Contains(t, body, `data-provenance="Vegas Implied"`, path)
 		assert.Contains(t, body, `data-provenance="Fair No-Vig Est."`, path)
 		assert.Contains(t, body, `data-provenance="Model Context"`, path)
@@ -1647,4 +1643,114 @@ func newSlipFixtureWithEngine(t *testing.T, legsPerMember int, engine analyzer.G
 		week:    week,
 		slip:    slip,
 	}
+}
+
+func TestGradeDrawerDeduplicationCompactPreviewCardsAndBookLogos(t *testing.T) {
+	t.Parallel()
+
+	renderer, err := webui.NewRenderer(assets.Templates, false)
+	require.NoError(t, err)
+
+	legGrade := webui.LegGradeView(analyzer.LegGrade{
+		LegID:            42,
+		Letter:           "C",
+		Score:            65,
+		CalibratedProb:   0.47,
+		VegasImpliedProb: 0.53,
+		Pillars: []analyzer.PillarScore{
+			{
+				Key:     analyzer.PillarPriceVig,
+				Label:   "Price & Vig",
+				Score:   45,
+				Tone:    analyzer.ToneBad,
+				Summary: "Paying -114 vs. fair price near +111 — steep juice.",
+				Reasons: []string{"Paying -114 vs. fair price near +111 — steep juice."},
+			},
+			{
+				Key:     analyzer.PillarScriptFit,
+				Label:   "Script Fit",
+				Score:   75,
+				Tone:    analyzer.ToneNeutral,
+				Summary: "Neutral single-leg game script.",
+				Reasons: []string{"Neutral single-leg game script."},
+			},
+		},
+		Diagnostics: analyzer.BuildDiagnostics{
+			DisplayGrade:     "C",
+			Descriptor:       "Vig Trap",
+			VegasImpliedProb: 0.53,
+			HoldPct:          11.0,
+			SignalPills: []analyzer.SignalPill{
+				{
+					Key:    analyzer.PillSharpPrice,
+					Icon:   "+",
+					Label:  "Clean Price",
+					Tone:   analyzer.ToneGood,
+					Target: "book_cut",
+				},
+			},
+		},
+	})
+
+	// Pillar summaries should not be duplicated into Why bullets.
+	assert.Empty(t, legGrade.Why, "reasons already shown in pillar summaries are deduplicated out of Why")
+
+	rawHTML, err := renderer.RenderPartial("slip-panel", webui.SlipPage{
+		Slip: &webui.SlipView{
+			ID:     7,
+			Name:   "Sunday Ticket",
+			Status: "OPEN",
+		},
+		Highlights: webui.HighlightsView{
+			Has:    true,
+			SlipID: 7,
+			Legs: []webui.LegHighlightView{{
+				Text:          "Michael Penix Jr. Under 200.5 Pass Yds",
+				Price:         "-114",
+				ImpliedChance: "53%",
+				ImpliedHuman:  "53% implied · ~1 in 2",
+				SplitLine:     "FD 200.5 (-114) · DK 197.5 (-113)",
+				Reason:        "Strong price edge, Steady hit profile",
+				Odds:          -114,
+				Grade:         legGrade,
+			}},
+		},
+	})
+	require.NoError(t, err)
+	body := html.UnescapeString(string(rawHTML))
+
+	// Compact preview card hides truncated reason and keeps signal pills inside the drawer.
+	assert.NotContains(t, body, "Strong price edge, Steady hit profile")
+	assert.Contains(t, body, "53% implied")
+	drawerIdx := strings.Index(body, "<dialog")
+	require.Positive(t, drawerIdx)
+	cardSurface := body[:drawerIdx]
+	drawerContent := body[drawerIdx:]
+	assert.NotContains(t, cardSurface, "data-signal-pill", "signal pills stay inside drawer on compact preview cards")
+	assert.Contains(
+		t,
+		drawerContent,
+		`data-signal-pill="sharp_price"`,
+		"signal pills appear once the grade drawer opens",
+	)
+
+	// Drawer deduplicates header, single-leg synergy, hold/price summary, and Why list.
+	assert.Equal(t, 1, strings.Count(drawerContent, "Paying -114 vs. fair price near +111 — steep juice."),
+		"price summary renders once on the Price & Vig pillar, not repeated in Book's Cut or Why")
+	assert.Equal(t, 1, strings.Count(drawerContent, "Neutral single-leg game script."),
+		"single-leg script summary renders once on the Script Fit pillar")
+	assert.Equal(t, 1, strings.Count(drawerContent, "11.0% hold"),
+		"book hold renders once in Market Reality")
+	assert.NotContains(t, drawerContent, "data-grade-why")
+	assert.Contains(t, drawerContent, "Leg Diagnostics")
+
+	// Split-line badge renders official FD and DK inline SVG logos in viewer order.
+	assert.Contains(t, body, `data-split-line`)
+	assert.Contains(t, body, `data-book-logo="fanduel"`)
+	assert.Contains(t, body, `data-book-logo="draftkings"`)
+	assert.Less(t,
+		strings.Index(body, `data-book-logo="fanduel"`),
+		strings.Index(body, `data-book-logo="draftkings"`),
+		"FD logo precedes DK logo when FD is first in SplitLine",
+	)
 }

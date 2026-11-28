@@ -132,6 +132,7 @@ type ResearchCardView struct {
 	GradeDescriptor string
 	GradeScore      int
 	GradeClass      string
+	Grade           GradeView
 	Reason          string
 	Badge           string
 	SplitLine       string
@@ -1947,12 +1948,14 @@ func researchCards(games []db.Game, rows []board.ScoredRow, from, homeBook strin
 			KickoffFallback: kickoffFallback(row.Kickoff),
 			Odds:            formatOdds(row.Odds),
 			OddsValue:       row.Odds,
+			Implied:         formatImpliedChance(parlay.ImpliedProb(row.Odds)),
 			ImpliedHuman:    formatImpliedHuman(parlay.ImpliedProb(row.Odds)),
 			GradeLetter:     scored.Grade.Letter,
 			GradeDisplay:    scored.Grade.Diagnostics.DisplayGrade,
 			GradeDescriptor: scored.Grade.Diagnostics.Descriptor,
 			GradeScore:      scored.Grade.Score,
 			GradeClass:      gradeClass(scored.Grade.Letter),
+			Grade:           LegGradeView(scored.Grade),
 			Reason:          scored.Reason,
 			Badge:           row.Badge,
 			SplitLine:       splitLineBadge(row.Market, row.DK, row.FD, row.LinesDiffer, homeBook),

@@ -251,7 +251,7 @@
                     </div>
                     <div class="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-ink-muted">
                       <span class="ui-odds">{{.Odds}}</span>
-                      {{if .SplitLine}}<span class="rounded border border-line-strong bg-surface-2 px-1.5 py-0.5 font-mono text-[10px] font-medium tabular-nums text-ink">{{.SplitLine}}</span>{{end}}
+                      {{if .SplitLine}}{{template "split-line-badge" .SplitLine}}{{end}}
                       {{if .CanGrade}}
                         <details class="relative">
                           <summary
@@ -532,9 +532,9 @@
                   <p class="min-w-0 truncate text-sm font-medium">{{.Selection}}</p>
                 </div>
                 <div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-ink-muted">
-                {{if .ImpliedHuman}}<span class="inline-flex items-center gap-1"><span class="rounded border border-line bg-surface-2 px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-ink-subtle" data-provenance="Vegas Implied">Vegas Implied</span> <span class="font-medium text-ink" title="Implied chance from odds">{{.ImpliedHuman}}</span></span>{{end}}
+                {{if .ImpliedChance}}<span class="font-medium text-ink" title="Implied chance from odds">{{.ImpliedChance}} implied</span>{{end}}
                 <span class="ui-odds">{{.Odds}}</span>
-                {{if .SplitLine}}<span class="rounded border border-line-strong bg-surface-2 px-1.5 py-0.5 font-mono text-[10px] font-medium tabular-nums text-ink">{{.SplitLine}}</span>{{end}}
+                {{if .SplitLine}}{{template "split-line-badge" .SplitLine}}{{end}}
                 {{if .ImpliedChance}}{{template "help-bubble" (dict "Href" (printf "/docs/glossary?from=/slips/%d#term-implied-prob" $.Slip.ID) "Label" "What implied chance means")}}{{end}}
                 {{if .Votes.Has}}
                   <span class="flex items-center gap-1" data-votes>
@@ -605,7 +605,7 @@
                   </span>
                 {{end}}
                 {{if .Grade.Letter}}
-                  {{template "build-grade-l1" (dict "Grade" .Grade "HeaderLabel" (printf "Leg build grade: %s (%d)" .Grade.DisplayGrade .Grade.Score) "GuideHref" (printf "/docs/grading?from=/slips/%d#leg-grades" $.Slip.ID) "IsSlip" false "Label" "Grade" "EmptyText" "Baseline 75 — no extra adjustments." "ShowVegas" false)}}
+                  {{template "build-grade-l1" (dict "Grade" .Grade "HeaderLabel" (printf "Leg build grade: %s (%d)" .Grade.DisplayGrade .Grade.Score) "GuideHref" (printf "/docs/grading?from=/slips/%d#leg-grades" $.Slip.ID) "IsSlip" false "Label" "" "Compact" true "EmptyText" "Baseline 75 — no extra adjustments." "ShowVegas" false)}}
                 {{end}}
                 {{if .CanGrade}}
                   <details class="relative">
@@ -1586,23 +1586,26 @@
                 </p>
               </div>
               <div class="shrink-0 text-right">
-                <span class="inline-block rounded-full border px-1.5 py-0.5 text-[11px] font-semibold {{.GradeClass}}" title="Build grade {{if .GradeDisplay}}{{.GradeDisplay}}{{else}}{{.GradeLetter}}{{end}} ({{.GradeScore}}/100)">
-                  {{if .GradeDisplay}}{{.GradeDisplay}}{{else if .GradeLetter}}{{.GradeLetter}}{{else}}&mdash;{{end}}{{if .GradeDescriptor}} &middot; {{.GradeDescriptor}}{{end}}
-                </span>
+                {{if .Grade.Letter}}
+                  {{template "build-grade-l1" (dict "Grade" .Grade "HeaderLabel" (printf "Build grade: %s (%d/100)" .Grade.DisplayGrade .Grade.Score) "GuideHref" "/docs/grading?from=/research#leg-grades" "IsSlip" false "Label" "" "Compact" true "EmptyText" "No scoring factors were applied to this bet." "ShowVegas" false)}}
+                {{else}}
+                  <span class="inline-block rounded-full border px-1.5 py-0.5 text-[11px] font-semibold {{.GradeClass}}" title="Build grade {{if .GradeDisplay}}{{.GradeDisplay}}{{else}}{{.GradeLetter}}{{end}} ({{.GradeScore}}/100)">
+                    {{if .GradeDisplay}}{{.GradeDisplay}}{{else if .GradeLetter}}{{.GradeLetter}}{{else}}&mdash;{{end}}{{if .GradeDescriptor}} &middot; {{.GradeDescriptor}}{{end}}
+                  </span>
+                {{end}}
                 <p class="mt-0.5 text-xs text-ink-muted">
-                  {{if .ImpliedHuman}}<span class="text-[10px] font-semibold uppercase tracking-wide text-ink-subtle" data-provenance="Vegas Implied">Vegas Implied</span> <span class="font-medium text-ink">{{.ImpliedHuman}}</span> &middot; {{end}}<span class="font-mono font-semibold tabular-nums text-ink">{{.Odds}}</span>
+                  {{if .Implied}}<span class="font-medium text-ink" title="Implied chance from odds">{{.Implied}} implied</span> &middot; {{end}}<span class="font-mono font-semibold tabular-nums text-ink">{{.Odds}}</span>
                 </p>
               </div>
             </div>
             <div class="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px]">
               {{if .SplitLine}}
-                <span class="rounded border border-line-strong bg-surface-2 px-1.5 py-0.5 font-mono text-[10px] font-medium tabular-nums text-ink">{{.SplitLine}}</span>
+                {{template "split-line-badge" .SplitLine}}
               {{end}}
               {{if .Badge}}
                 <span class="rounded-full border border-accent bg-accent-soft px-1.5 py-0.5 font-medium text-ink">{{.Badge}}</span>
               {{end}}
               <span class="rounded-full border border-line-strong bg-surface-2 px-1.5 py-0.5 text-ink-muted">{{.Market}}</span>
-              <span class="min-w-0 truncate text-ink-muted">{{.Reason}}</span>
             </div>
             <div class="mt-1.5 flex flex-wrap items-center gap-3 text-[11px] font-medium">
               {{if .BetHref}}
@@ -2077,8 +2080,8 @@
           class="w-full rounded-lg border border-positive bg-positive-soft px-3 py-2 text-left text-sm font-medium text-positive-ink hover:opacity-90"
         >
           <span class="block truncate">{{.Text}}</span>
-          <span class="mt-0.5 block text-xs font-normal opacity-85">{{if .ImpliedHuman}}<span class="text-[10px] font-semibold uppercase tracking-wide opacity-80" data-provenance="Vegas Implied">Vegas Implied</span> <span title="Implied chance from odds">{{.ImpliedHuman}}</span> {{end}}<span class="ui-odds">{{.Price}}</span> &middot; tap to remove</span>
-          {{if .SplitLine}}<span class="mt-1 inline-block rounded border border-line-strong bg-surface px-1.5 py-0.5 font-mono text-[10px] font-medium tabular-nums text-ink">{{.SplitLine}}</span>{{end}}
+          <span class="mt-0.5 block text-xs font-normal opacity-85">{{if .ImpliedChance}}<span title="Implied chance from odds">{{.ImpliedChance}} implied</span> {{end}}<span class="ui-odds">{{.Price}}</span> &middot; tap to remove</span>
+          {{if .SplitLine}}<span class="mt-1 inline-block">{{template "split-line-badge" .SplitLine}}</span>{{end}}
           {{if .Badge}}<span class="mt-1 inline-block rounded-full border border-line-strong bg-surface px-1.5 py-0.5 text-[10px] font-medium text-ink">{{.Badge}}</span>{{end}}
         </button>
       </form>
@@ -2129,8 +2132,8 @@
         class="w-full rounded-lg border border-line-strong bg-surface-2 px-3 py-2 text-left text-sm font-medium text-ink hover:border-accent"
       >
         <span class="block truncate">{{.Text}}</span>
-        <span class="mt-0.5 block text-xs font-normal text-ink-muted">{{if .ImpliedHuman}}<span class="text-[10px] font-semibold uppercase tracking-wide text-ink-subtle" data-provenance="Vegas Implied">Vegas Implied</span> <span class="text-ink" title="Implied chance from odds">{{.ImpliedHuman}}</span> {{end}}<span class="ui-odds">{{.Price}}</span> &middot; tap to switch</span>
-        {{if .SplitLine}}<span class="mt-1 inline-block rounded border border-line-strong bg-surface px-1.5 py-0.5 font-mono text-[10px] font-medium tabular-nums text-ink">{{.SplitLine}}</span>{{end}}
+        <span class="mt-0.5 block text-xs font-normal text-ink-muted">{{if .ImpliedChance}}<span class="text-ink" title="Implied chance from odds">{{.ImpliedChance}} implied</span> {{end}}<span class="ui-odds">{{.Price}}</span> &middot; tap to switch</span>
+        {{if .SplitLine}}<span class="mt-1 inline-block">{{template "split-line-badge" .SplitLine}}</span>{{end}}
         {{if .Badge}}<span class="mt-1 inline-block rounded-full border border-accent bg-accent-soft px-1.5 py-0.5 text-[10px] font-medium text-ink">{{.Badge}}</span>{{end}}
       </button>
     </form>
@@ -2143,8 +2146,8 @@
       hx-swap="innerHTML"
     >
       <span class="block truncate">{{.Text}}</span>
-      <span class="mt-0.5 block text-xs font-normal text-ink-muted">{{if .ImpliedHuman}}<span class="text-[10px] font-semibold uppercase tracking-wide text-ink-subtle" data-provenance="Vegas Implied">Vegas Implied</span> <span class="text-ink" title="Implied chance from odds">{{.ImpliedHuman}}</span> {{end}}<span class="ui-odds">{{.Price}}</span> &middot; swap in</span>
-      {{if .SplitLine}}<span class="mt-1 inline-block rounded border border-line-strong bg-surface px-1.5 py-0.5 font-mono text-[10px] font-medium tabular-nums text-ink">{{.SplitLine}}</span>{{end}}
+      <span class="mt-0.5 block text-xs font-normal text-ink-muted">{{if .ImpliedChance}}<span class="text-ink" title="Implied chance from odds">{{.ImpliedChance}} implied</span> {{end}}<span class="ui-odds">{{.Price}}</span> &middot; swap in</span>
+      {{if .SplitLine}}<span class="mt-1 inline-block">{{template "split-line-badge" .SplitLine}}</span>{{end}}
       {{if .Badge}}<span class="mt-1 inline-block rounded-full border border-accent bg-accent-soft px-1.5 py-0.5 text-[10px] font-medium text-ink">{{.Badge}}</span>{{end}}
     </button>
   {{else}}
@@ -2169,8 +2172,8 @@
         class="w-full rounded-lg border border-line-strong bg-surface-2 px-3 py-2 text-left text-sm font-medium text-ink hover:border-accent"
       >
         <span class="block truncate">{{.Text}}</span>
-        <span class="mt-0.5 block text-xs font-normal text-ink-muted">{{if .ImpliedHuman}}<span class="text-[10px] font-semibold uppercase tracking-wide text-ink-subtle" data-provenance="Vegas Implied">Vegas Implied</span> <span class="text-ink" title="Implied chance from odds">{{.ImpliedHuman}}</span> {{end}}<span class="ui-odds">{{.Price}}</span> &middot; tap to add</span>
-        {{if .SplitLine}}<span class="mt-1 inline-block rounded border border-line-strong bg-surface px-1.5 py-0.5 font-mono text-[10px] font-medium tabular-nums text-ink">{{.SplitLine}}</span>{{end}}
+        <span class="mt-0.5 block text-xs font-normal text-ink-muted">{{if .ImpliedChance}}<span class="text-ink" title="Implied chance from odds">{{.ImpliedChance}} implied</span> {{end}}<span class="ui-odds">{{.Price}}</span> &middot; tap to add</span>
+        {{if .SplitLine}}<span class="mt-1 inline-block">{{template "split-line-badge" .SplitLine}}</span>{{end}}
         {{if .Badge}}<span class="mt-1 inline-block rounded-full border border-accent bg-accent-soft px-1.5 py-0.5 text-[10px] font-medium text-ink">{{.Badge}}</span>{{end}}
       </button>
     </form>
@@ -2178,7 +2181,7 @@
   {{if or .Grade.Letter .ResearchURL}}
     <div class="flex flex-wrap items-center gap-2 pt-0.5">
       {{if .Grade.Letter}}
-        {{template "build-grade-l1" (dict "Grade" .Grade "HeaderLabel" (printf "Leg build grade: %s (%d)" .Grade.DisplayGrade .Grade.Score) "GuideHref" (printf "/docs/grading?from=/slips/%d/pick#leg-grades" .SlipID) "IsSlip" false "Label" "Grade" "EmptyText" "Baseline 75 — no extra adjustments." "ShowVegas" false)}}
+        {{template "build-grade-l1" (dict "Grade" .Grade "HeaderLabel" (printf "Leg build grade: %s (%d)" .Grade.DisplayGrade .Grade.Score) "GuideHref" (printf "/docs/grading?from=/slips/%d/pick#leg-grades" .SlipID) "IsSlip" false "Label" "" "Compact" true "EmptyText" "Baseline 75 — no extra adjustments." "ShowVegas" false)}}
       {{end}}
       {{if .ResearchURL}}
         <a
@@ -2329,9 +2332,9 @@
               {{if .Moneyline}}<div class="min-w-0"><dt class="text-ink-subtle">Moneyline</dt><dd class="truncate font-mono text-ink">{{.Moneyline}}</dd></div>{{end}}
             </dl>
             {{if or .SpreadSplit .TotalSplit}}
-              <div class="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 font-mono text-[11px] tabular-nums text-ink-muted">
-                {{if .SpreadSplit}}<span>{{.SpreadSplit}}</span>{{end}}
-                {{if .TotalSplit}}<span>{{.TotalSplit}}</span>{{end}}
+              <div class="mt-1.5 flex flex-wrap gap-1.5">
+                {{if .SpreadSplit}}{{template "split-line-badge" .SpreadSplit}}{{end}}
+                {{if .TotalSplit}}{{template "split-line-badge" .TotalSplit}}{{end}}
               </div>
             {{end}}
           {{end}}
@@ -2615,7 +2618,7 @@
     <div class="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
       {{if .Label}}<p class="text-[11px] font-semibold uppercase tracking-wide text-ink-muted">{{.Label}}{{if .SharedLine}} &middot; <span class="font-mono tabular-nums text-ink">{{.SharedLine}}</span>{{end}}</p>{{end}}
       {{if .SplitLine}}
-        <span class="rounded border border-line-strong bg-surface-2 px-1.5 py-0.5 font-mono text-[10px] font-medium tabular-nums text-ink">{{.SplitLine}}</span>
+        {{template "split-line-badge" .SplitLine}}
       {{end}}
     </div>
     <div class="mt-1 grid grid-cols-2 gap-1.5">
@@ -2660,7 +2663,7 @@
           </span>
           <span class="shrink-0 text-xs font-semibold" aria-hidden="true">&#10003;</span>
         </span>
-        <span class="mt-0.5 block text-xs font-normal opacity-85">{{if .ImpliedHuman}}<span class="text-[10px] font-semibold uppercase tracking-wide opacity-80" data-provenance="Vegas Implied">Vegas Implied</span> <span title="Implied chance from odds">{{.ImpliedHuman}}</span> {{end}}<span class="ui-odds">{{.Price}}</span></span>
+        <span class="mt-0.5 block text-xs font-normal opacity-85">{{if .ImpliedChance}}<span title="Implied chance from odds">{{.ImpliedChance}} implied</span> {{end}}<span class="ui-odds">{{.Price}}</span></span>
         {{if .Badge}}<span class="mt-1 inline-block rounded-full border border-line-strong bg-surface px-1.5 py-0.5 text-[10px] font-medium text-ink">{{.Badge}}</span>{{end}}
       </button>
     </form>
@@ -2715,7 +2718,7 @@
           <span aria-hidden="true">{{if eq .Side "OVER"}}&#9650;{{else}}&#9660;{{end}}</span>
           <span>{{if eq .Side "OVER"}}Over{{else}}Under{{end}}{{if and (not $sharedLine) .Line}} {{.Line}}{{end}}</span>
         </span>
-        <span class="mt-0.5 block text-xs font-normal text-ink-muted">{{if .ImpliedHuman}}<span class="text-[10px] font-semibold uppercase tracking-wide text-ink-subtle" data-provenance="Vegas Implied">Vegas Implied</span> <span class="text-ink" title="Implied chance from odds">{{.ImpliedHuman}}</span> {{end}}<span class="ui-odds">{{.Price}}</span></span>
+        <span class="mt-0.5 block text-xs font-normal text-ink-muted">{{if .ImpliedChance}}<span class="text-ink" title="Implied chance from odds">{{.ImpliedChance}} implied</span> {{end}}<span class="ui-odds">{{.Price}}</span></span>
         {{if .Badge}}<span class="mt-1 inline-block rounded-full border border-accent bg-accent-soft px-1.5 py-0.5 text-[10px] font-medium text-ink">{{.Badge}}</span>{{end}}
       </button>
     </form>
@@ -2732,7 +2735,7 @@
         <span aria-hidden="true">{{if eq .Side "OVER"}}&#9650;{{else}}&#9660;{{end}}</span>
         <span>{{if eq .Side "OVER"}}Over{{else}}Under{{end}}{{if and (not $sharedLine) .Line}} {{.Line}}{{end}}</span>
       </span>
-      <span class="mt-0.5 block text-xs font-normal text-ink-muted">{{if .ImpliedHuman}}<span class="text-[10px] font-semibold uppercase tracking-wide text-ink-subtle" data-provenance="Vegas Implied">Vegas Implied</span> <span class="text-ink" title="Implied chance from odds">{{.ImpliedHuman}}</span> {{end}}<span class="ui-odds">{{.Price}}</span></span>
+      <span class="mt-0.5 block text-xs font-normal text-ink-muted">{{if .ImpliedChance}}<span class="text-ink" title="Implied chance from odds">{{.ImpliedChance}} implied</span> {{end}}<span class="ui-odds">{{.Price}}</span></span>
       {{if .Badge}}<span class="mt-1 inline-block rounded-full border border-accent bg-accent-soft px-1.5 py-0.5 text-[10px] font-medium text-ink">{{.Badge}}</span>{{end}}
     </button>
   {{else}}
@@ -2760,7 +2763,7 @@
           <span aria-hidden="true">{{if eq .Side "OVER"}}&#9650;{{else}}&#9660;{{end}}</span>
           <span>{{if eq .Side "OVER"}}Over{{else}}Under{{end}}{{if and (not $sharedLine) .Line}} {{.Line}}{{end}}</span>
         </span>
-        <span class="mt-0.5 block text-xs font-normal text-ink-muted">{{if .ImpliedHuman}}<span class="text-[10px] font-semibold uppercase tracking-wide text-ink-subtle" data-provenance="Vegas Implied">Vegas Implied</span> <span class="text-ink" title="Implied chance from odds">{{.ImpliedHuman}}</span> {{end}}<span class="ui-odds">{{.Price}}</span></span>
+        <span class="mt-0.5 block text-xs font-normal text-ink-muted">{{if .ImpliedChance}}<span class="text-ink" title="Implied chance from odds">{{.ImpliedChance}} implied</span> {{end}}<span class="ui-odds">{{.Price}}</span></span>
         {{if .Badge}}<span class="mt-1 inline-block rounded-full border border-accent bg-accent-soft px-1.5 py-0.5 text-[10px] font-medium text-ink">{{.Badge}}</span>{{end}}
       </button>
     </form>
@@ -2768,7 +2771,7 @@
   {{if or .Grade.Letter .ResearchURL}}
     <div class="flex flex-wrap items-center gap-2 pt-0.5">
       {{if .Grade.Letter}}
-        {{template "build-grade-l1" (dict "Grade" .Grade "HeaderLabel" (printf "Leg build grade: %s (%d)" .Grade.DisplayGrade .Grade.Score) "GuideHref" (printf "/docs/grading?from=/slips/%d/pick#leg-grades" .SlipID) "IsSlip" false "Label" "Grade" "EmptyText" "Baseline 75 — no extra adjustments." "ShowVegas" false)}}
+        {{template "build-grade-l1" (dict "Grade" .Grade "HeaderLabel" (printf "Leg build grade: %s (%d)" .Grade.DisplayGrade .Grade.Score) "GuideHref" (printf "/docs/grading?from=/slips/%d/pick#leg-grades" .SlipID) "IsSlip" false "Label" "" "Compact" true "EmptyText" "Baseline 75 — no extra adjustments." "ShowVegas" false)}}
       {{end}}
       {{if .ResearchURL}}
         <a
@@ -2817,12 +2820,12 @@
             <p class="min-w-0 truncate text-sm font-medium">{{.Selection}}</p>
           </div>
           <div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-ink-muted">
-            {{if .ImpliedHuman}}<span class="inline-flex items-center gap-1"><span class="rounded border border-line bg-surface-2 px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-ink-subtle" data-provenance="Vegas Implied">Vegas Implied</span> <span class="font-medium text-ink" title="Implied chance from odds">{{.ImpliedHuman}}</span></span>{{end}}
+            {{if .ImpliedChance}}<span class="font-medium text-ink" title="Implied chance from odds">{{.ImpliedChance}} implied</span>{{end}}
             <span class="ui-odds">{{.Odds}}</span>
             {{if .ImpliedChance}}{{template "help-bubble" (dict "Href" (printf "/docs/glossary?from=/slips/%d/pick#term-implied-prob" $.SlipID) "Label" "What implied chance means")}}{{end}}
-            {{if .SplitLine}}<span class="rounded border border-line-strong bg-surface-2 px-1.5 py-0.5 font-mono text-[10px] font-medium tabular-nums text-ink">{{.SplitLine}}</span>{{end}}
+            {{if .SplitLine}}{{template "split-line-badge" .SplitLine}}{{end}}
             {{if .Grade.Letter}}
-              {{template "build-grade-l1" (dict "Grade" .Grade "HeaderLabel" (printf "Leg build grade: %s (%d)" .Grade.DisplayGrade .Grade.Score) "GuideHref" (printf "/docs/grading?from=/slips/%d/pick#leg-grades" $.SlipID) "IsSlip" false "Label" "Grade" "EmptyText" "Baseline 75 — no extra adjustments." "ShowVegas" false)}}
+              {{template "build-grade-l1" (dict "Grade" .Grade "HeaderLabel" (printf "Leg build grade: %s (%d)" .Grade.DisplayGrade .Grade.Score) "GuideHref" (printf "/docs/grading?from=/slips/%d/pick#leg-grades" $.SlipID) "IsSlip" false "Label" "" "Compact" true "EmptyText" "Baseline 75 — no extra adjustments." "ShowVegas" false)}}
             {{end}}
           </div>
           {{if .DriftNote}}
@@ -3163,13 +3166,11 @@
               <div class="min-w-0 flex-1 space-y-1">
                 <p class="truncate text-sm font-medium text-ink">{{.Text}}</p>
                 <div class="flex flex-wrap items-center gap-1.5 text-xs text-ink-muted">
-                  {{template "build-grade-l1" (dict "Grade" .Grade "HeaderLabel" (printf "Leg build grade: %s (%d)" .Grade.DisplayGrade .Grade.Score) "GuideHref" (printf "/docs/grading?from=%s#leg-grades" $guideFrom) "IsSlip" false "Label" "" "EmptyText" "Baseline 75 — no extra adjustments." "ShowVegas" false)}}
-                  {{if .ImpliedHuman}}<span class="inline-flex items-center gap-1"><span class="rounded border border-line bg-surface px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-ink-subtle" data-provenance="Vegas Implied">Vegas Implied</span> <span class="font-medium text-ink" title="Implied chance from odds">{{.ImpliedHuman}}</span></span>{{end}}
+                  {{template "build-grade-l1" (dict "Grade" .Grade "HeaderLabel" (printf "Leg build grade: %s (%d)" .Grade.DisplayGrade .Grade.Score) "GuideHref" (printf "/docs/grading?from=%s#leg-grades" $guideFrom) "IsSlip" false "Label" "" "Compact" true "EmptyText" "Baseline 75 — no extra adjustments." "ShowVegas" false)}}
+                  {{if .ImpliedChance}}<span class="font-medium text-ink" title="Implied chance from odds">{{.ImpliedChance}} implied</span>{{end}}
                   <span class="ui-odds">{{.Price}}</span>
-                  {{if .ImpliedChance}}{{template "help-bubble" (dict "Href" (printf "/docs/glossary?from=%s#term-implied-prob" $guideFrom) "Label" "What implied chance means")}}{{end}}
-                  {{if .SplitLine}}<span class="rounded border border-line-strong bg-surface px-1.5 py-0.5 font-mono text-[10px] font-medium tabular-nums text-ink">{{.SplitLine}}</span>{{end}}
+                  {{if .SplitLine}}{{template "split-line-badge" .SplitLine}}{{end}}
                   {{if .ResearchURL}}<a href="{{.ResearchURL}}" class="shrink-0 font-medium text-ink underline decoration-line-strong underline-offset-2 hover:opacity-75">Research &rarr;</a>{{end}}
-                  {{if .Reason}}<span class="min-w-0 truncate text-ink-muted">{{.Reason}}</span>{{end}}
                 </div>
               </div>
               <form
@@ -3207,9 +3208,9 @@
             <div class="flex items-start justify-between gap-2">
               <div class="min-w-0 flex-1">
                 <div class="flex flex-wrap items-center gap-2 text-xs">
-                  {{template "build-grade-l1" (dict "Grade" .Grade "HeaderLabel" (printf "Slip build grade: %s (%d)" .Grade.DisplayGrade .Grade.Score) "GuideHref" (printf "/docs/grading?from=%s#slip-grade" $guideFrom) "IsSlip" true "Label" "" "EmptyText" "Weighted leg average with no extra correlation or drag adjustments." "ShowVegas" false)}}
+                  {{template "build-grade-l1" (dict "Grade" .Grade "HeaderLabel" (printf "Slip build grade: %s (%d)" .Grade.DisplayGrade .Grade.Score) "GuideHref" (printf "/docs/grading?from=%s#slip-grade" $guideFrom) "IsSlip" true "Label" "" "Compact" true "EmptyText" "Weighted leg average with no extra correlation or drag adjustments." "ShowVegas" false)}}
                   <span class="font-semibold text-ink">{{.Label}}</span>
-                  {{if .CombinedImpliedHuman}}<span class="inline-flex items-center gap-1 text-xs text-ink-muted"><span class="rounded border border-line bg-surface px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-ink-subtle" data-provenance="Vegas Implied">Vegas Implied</span> <span class="font-medium text-ink" title="Implied chance from combined odds">{{.CombinedImpliedHuman}}</span></span>{{end}}
+                  {{if .CombinedImplied}}<span class="font-medium text-ink" title="Implied chance from combined odds">{{.CombinedImplied}} implied</span>{{end}}
                   <span class="ui-odds">{{.CombinedOdds}}</span>
                 </div>
                 {{if .Reason}}<p class="mt-1 text-xs text-ink-muted">{{.Reason}}</p>{{end}}
@@ -3253,12 +3254,12 @@
             <ul class="mt-2 space-y-1.5 border-t border-line pt-2">
               {{range .Legs}}
                 <li class="flex items-center justify-between gap-2 text-xs">
-                  <div class="min-w-0 flex-1">
+                  <div class="min-w-0 flex-1 flex flex-wrap items-center gap-1.5">
                     <span class="truncate font-medium text-ink">{{.Text}}</span>
-                    {{if .ImpliedHuman}}<span class="ml-1.5 text-ink-muted" title="Implied chance from odds">{{.ImpliedHuman}}</span>{{end}}
-                    <span class="ui-odds ml-1">{{.Price}}</span>
-                    {{if .SplitLine}}<span class="ml-1 rounded border border-line-strong bg-surface px-1.5 py-0.5 font-mono text-[10px] font-medium tabular-nums text-ink">{{.SplitLine}}</span>{{end}}
-                    {{if .ResearchURL}}<a href="{{.ResearchURL}}" class="ml-1.5 font-medium text-ink underline decoration-line-strong underline-offset-2 hover:opacity-75">Research &rarr;</a>{{end}}
+                    {{if .ImpliedChance}}<span class="text-ink-muted" title="Implied chance from odds">{{.ImpliedChance}}</span>{{end}}
+                    <span class="ui-odds">{{.Price}}</span>
+                    {{if .SplitLine}}{{template "split-line-badge" .SplitLine}}{{end}}
+                    {{if .ResearchURL}}<a href="{{.ResearchURL}}" class="font-medium text-ink underline decoration-line-strong underline-offset-2 hover:opacity-75">Research &rarr;</a>{{end}}
                   </div>
                   <form
                     class="shrink-0"
@@ -3347,48 +3348,53 @@
     <span>{{if .Label}}{{.Label}} {{end}}{{.Grade.DisplayGrade}}</span>
     {{if .Grade.Descriptor}}<span class="font-normal opacity-90" data-build-descriptor>&middot; {{.Grade.Descriptor}}</span>{{end}}
   </button>
-  {{if and .ShowVegas .Grade.VegasImplied}}
+  {{if and (not .Compact) .ShowVegas .Grade.VegasImplied}}
     <span class="inline-flex items-center gap-1 rounded-full border border-line bg-surface px-1.5 py-0.5 text-[11px] text-ink-muted">
       <span class="text-[9px] font-semibold uppercase tracking-wide text-ink-subtle" data-provenance="Vegas Implied">Vegas Implied</span>
       <span class="font-mono font-medium tabular-nums text-ink">{{.Grade.VegasImplied}}</span>
     </span>
   {{end}}
-  {{range .Grade.SignalPills}}
-    <button
-      type="button"
-      data-grade-drawer-trigger
-      data-signal-pill="{{.Key}}"
-      data-focus-diag="{{.Target}}"
-      aria-haspopup="dialog"
-      title="{{.Detail}}"
-      class="inline-flex max-w-full cursor-pointer items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-semibold {{.ToneClass}}"
-    >
-      <span aria-hidden="true">{{.Icon}}</span>
-      <span>{{.Label}}</span>
-    </button>
+  {{if not .Compact}}
+    {{range .Grade.SignalPills}}
+      <button
+        type="button"
+        data-grade-drawer-trigger
+        data-signal-pill="{{.Key}}"
+        data-focus-diag="{{.Target}}"
+        aria-haspopup="dialog"
+        title="{{.Detail}}"
+        class="inline-flex max-w-full cursor-pointer items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-semibold {{.ToneClass}}"
+      >
+        <span aria-hidden="true">{{.Icon}}</span>
+        <span>{{.Label}}</span>
+      </button>
+    {{end}}
   {{end}}
   <dialog class="leg-sheet" data-grade-drawer aria-label="{{.HeaderLabel}}">
     <div class="max-h-[85dvh] overflow-y-auto rounded-t-2xl border border-line bg-surface p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] text-ink shadow-2xl sm:rounded-2xl">
       <div class="flex items-start justify-between gap-3 border-b border-line pb-2.5">
         <div class="min-w-0">
-          <div class="flex flex-wrap items-center gap-1.5">
+          <p class="text-[11px] font-medium text-ink-muted">{{if .IsSlip}}Slip build grade{{else}}Leg build grade{{end}}</p>
+          <div class="mt-1 flex flex-wrap items-center gap-1.5">
             <span class="inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-semibold {{.Grade.Class}}">
               {{.Grade.DisplayGrade}}{{if .Grade.Descriptor}} &middot; {{.Grade.Descriptor}}{{end}}
             </span>
             <span class="font-mono text-xs font-medium tabular-nums text-ink-muted">{{.Grade.Score}}/100</span>
           </div>
-          <p class="mt-1 text-xs font-semibold text-ink">{{.HeaderLabel}}</p>
         </div>
-        <button
-          type="button"
-          class="shrink-0 rounded-md border border-line-strong px-2 py-1 text-xs text-ink-muted hover:bg-surface-2 hover:text-ink"
-          data-close-grade-drawer
-        >
-          Close
-        </button>
+        <div class="flex shrink-0 items-center gap-2">
+          {{if .GuideHref}}{{template "help-bubble" (dict "Href" .GuideHref "Label" "See the full grading rubric")}}{{end}}
+          <button
+            type="button"
+            class="rounded-md border border-line-strong px-2 py-1 text-xs text-ink-muted hover:bg-surface-2 hover:text-ink"
+            data-close-grade-drawer
+          >
+            Close
+          </button>
+        </div>
       </div>
       <div class="mt-3 text-xs">
-        {{template "grade-breakdown" .}}
+        {{template "grade-breakdown" (dict "Grade" .Grade "HeaderLabel" .HeaderLabel "GuideHref" .GuideHref "IsSlip" .IsSlip "EmptyText" .EmptyText "InDrawer" true "ShowDrawerPills" .Compact)}}
       </div>
     </div>
   </dialog>
@@ -3397,16 +3403,32 @@
 
 {{define "grade-breakdown"}}
 <div class="min-w-0 space-y-2.5">
-  <div class="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 border-b border-line pb-1.5">
-    <span class="font-semibold text-ink">{{.HeaderLabel}}</span>
-    {{template "help-bubble" (dict "Href" .GuideHref "Label" "See the full grading rubric")}}
-  </div>
+  {{if not .InDrawer}}
+    <div class="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 border-b border-line pb-1.5">
+      <span class="font-semibold text-ink">{{.HeaderLabel}}</span>
+      {{template "help-bubble" (dict "Href" .GuideHref "Label" "See the full grading rubric")}}
+    </div>
+  {{end}}
   {{if .Grade.GroundRule}}
-    <p class="rounded-lg border border-line bg-surface-2 px-2.5 py-2 text-[11px] font-medium text-ink" data-ground-rule-banner>
+    <p class="text-[11px] text-ink-muted" data-ground-rule-banner>
       {{.Grade.GroundRule}}
     </p>
   {{end}}
-  {{if .Grade.HasMarketBox}}
+  {{if and .ShowDrawerPills .Grade.SignalPills}}
+    <div class="flex flex-wrap items-center gap-1.5">
+      {{range .Grade.SignalPills}}
+        <span
+          data-signal-pill="{{.Key}}"
+          title="{{.Detail}}"
+          class="inline-flex max-w-full items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-semibold {{.ToneClass}}"
+        >
+          <span aria-hidden="true">{{.Icon}}</span>
+          <span>{{.Label}}</span>
+        </span>
+      {{end}}
+    </div>
+  {{end}}
+  {{if or .Grade.HasMarketBox .Grade.HitChance .Grade.PayoutLabel}}
     <div class="rounded-lg border border-line bg-surface-2 p-2.5 space-y-1.5" data-market-reality>
       <p class="text-[10px] font-semibold uppercase tracking-wide text-ink-subtle">Market Reality</p>
       <dl class="space-y-1 text-[11px]">
@@ -3428,10 +3450,22 @@
             <dd class="font-mono font-semibold tabular-nums text-ink">{{.Grade.FairNoVig}}</dd>
           </div>
         {{end}}
-        {{if .Grade.HoldText}}
+        {{if .Grade.HitChance}}
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <dt class="flex items-center gap-1 text-ink-muted">
+              <span class="rounded border border-line bg-surface px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-ink-subtle" data-provenance="Model Context">Model Context</span>
+              <span>Est. hit rate</span>
+            </dt>
+            <dd class="font-mono font-semibold tabular-nums text-ink">{{.Grade.HitChance}}</dd>
+          </div>
+        {{end}}
+        {{if or .Grade.HoldText .Grade.PayoutLabel}}
           <div class="flex flex-wrap items-center justify-between gap-2">
             <dt class="text-ink-muted">Book hold / vig</dt>
-            <dd class="font-mono font-semibold tabular-nums text-ink">{{.Grade.HoldText}}</dd>
+            <dd class="flex flex-wrap items-center gap-1.5">
+              {{if .Grade.HoldText}}<span class="font-mono font-semibold tabular-nums text-ink">{{.Grade.HoldText}}</span>{{end}}
+              {{if .Grade.PayoutLabel}}<span class="inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10px] font-semibold leading-tight {{.Grade.PayoutToneClass}}">{{.Grade.PayoutLabel}}</span>{{end}}
+            </dd>
           </div>
         {{end}}
       </dl>
@@ -3439,31 +3473,7 @@
   {{end}}
   {{if .Grade.Pillars}}
     <div class="space-y-2.5 rounded-lg border border-line bg-surface p-2.5" data-slip-diagnostics>
-      <p class="text-[10px] font-semibold uppercase tracking-wide text-ink-subtle">Slip Diagnostics</p>
-      {{if or .Grade.HitChance .Grade.PayoutLabel}}
-        <div class="grid grid-cols-3 gap-1.5" data-grade-summary>
-          <div class="min-w-0 rounded-md border border-line bg-surface-2 px-1.5 py-1">
-            <p class="text-[10px] font-medium text-ink-subtle">Overall</p>
-            <p class="mt-0.5">
-              <span class="inline-flex items-center rounded-full border px-1.5 py-0.5 text-[11px] font-semibold tabular-nums {{.Grade.Class}}">{{.Grade.DisplayGrade}} ({{.Grade.Score}})</span>
-            </p>
-          </div>
-          <div class="min-w-0 rounded-md border border-line bg-surface-2 px-1.5 py-1">
-            <p class="text-[10px] font-medium text-ink-subtle">Model Context</p>
-            <p class="mt-0.5 font-mono text-xs font-semibold tabular-nums text-ink">{{if .Grade.HitChance}}{{.Grade.HitChance}}{{else}}&mdash;{{end}}</p>
-          </div>
-          <div class="min-w-0 rounded-md border border-line bg-surface-2 px-1.5 py-1">
-            <p class="text-[10px] font-medium text-ink-subtle">Book pricing</p>
-            {{if .Grade.PayoutLabel}}
-              <p class="mt-0.5">
-                <span class="inline-flex max-w-full items-center rounded-full border px-1.5 py-0.5 text-[10px] font-semibold leading-tight {{.Grade.PayoutToneClass}}">{{.Grade.PayoutLabel}}</span>
-              </p>
-            {{else}}
-              <p class="mt-0.5 text-xs text-ink-muted">&mdash;</p>
-            {{end}}
-          </div>
-        </div>
-      {{end}}
+      <p class="text-[10px] font-semibold uppercase tracking-wide text-ink-subtle">{{if .IsSlip}}Slip Diagnostics{{else}}Leg Diagnostics{{end}}</p>
 
       {{if .Grade.RealismLabel}}
         <div class="rounded-md border border-line bg-surface-2 p-2 space-y-1 transition" data-diag-row="hit_rate">
@@ -3481,34 +3491,23 @@
         </div>
       {{end}}
 
-      {{if or .Grade.CorrSummary .Grade.SynergySummary}}
+      {{if .Grade.CorrSummary}}
         <div class="rounded-md border border-line bg-surface-2 p-2 space-y-0.5 transition" data-diag-row="synergy">
           <p class="text-[11px] font-medium text-ink">Leg Synergy</p>
-          {{if .Grade.CorrSummary}}
-            <p class="text-[11px] font-medium text-ink-muted break-words" data-corr-summary>{{.Grade.CorrSummary}}</p>
-          {{end}}
-          {{if .Grade.SynergySummary}}
-            <p class="text-[11px] text-ink-muted break-words">{{.Grade.SynergySummary}}</p>
-          {{end}}
+          <p class="text-[11px] font-medium text-ink-muted break-words" data-corr-summary>{{.Grade.CorrSummary}}</p>
         </div>
       {{end}}
 
-      {{if or .Grade.HoldText .Grade.CorrTaxText .Grade.BookCutSummary}}
+      {{if .Grade.CorrTaxText}}
         <div class="rounded-md border border-line bg-surface-2 p-2 space-y-1 transition" data-diag-row="book_cut">
           <div class="flex flex-wrap items-center justify-between gap-1.5 text-[11px]">
-            <span class="font-medium text-ink">The Book&rsquo;s Cut</span>
-            <div class="flex flex-wrap items-center gap-1">
-              {{if .Grade.HoldText}}<span class="rounded border border-line bg-surface px-1.5 py-0.5 font-mono text-[10px] text-ink">{{.Grade.HoldText}}</span>{{end}}
-              {{if .Grade.CorrTaxText}}<span class="rounded border border-warning bg-warning-soft px-1.5 py-0.5 font-mono text-[10px] font-semibold text-warning-ink">{{.Grade.CorrTaxText}}</span>{{end}}
-            </div>
+            <span class="font-medium text-ink">Correlation Tax</span>
+            <span class="rounded border border-warning bg-warning-soft px-1.5 py-0.5 font-mono text-[10px] font-semibold text-warning-ink">{{.Grade.CorrTaxText}}</span>
           </div>
-          {{if .Grade.BookCutSummary}}
-            <p class="text-[11px] text-ink-muted break-words">{{.Grade.BookCutSummary}}</p>
-          {{end}}
         </div>
       {{end}}
 
-      {{if or .Grade.Uncertain .Grade.ContextRadar .Grade.ContextSummary}}
+      {{if or .Grade.Uncertain .Grade.ContextRadar}}
         <div class="rounded-md border border-line bg-surface-2 p-2 space-y-1.5 transition" data-diag-row="context">
           <div class="flex flex-wrap items-center justify-between gap-1.5 text-[11px]">
             <span class="font-medium text-ink">Context Radar</span>
@@ -3533,15 +3532,19 @@
                 </li>
               {{end}}
             </ul>
-          {{else if .Grade.ContextSummary}}
-            <p class="text-[11px] text-ink-muted break-words">{{.Grade.ContextSummary}}</p>
           {{end}}
         </div>
       {{end}}
 
-      <ul class="space-y-2 pt-1" data-grade-pillars>
+      <ul class="space-y-2 pt-0.5" data-grade-pillars>
         {{range .Grade.Pillars}}
-          <li class="min-w-0 space-y-1" data-pillar="{{.Key}}">
+          <li
+            class="min-w-0 space-y-1 rounded transition"
+            data-pillar="{{.Key}}"
+            {{if and (eq .Key "price_vig") (not $.Grade.CorrTaxText)}}data-diag-row="book_cut"{{end}}
+            {{if and (eq .Key "script_fit") (not $.Grade.CorrSummary)}}data-diag-row="synergy"{{end}}
+            {{if and (eq .Key "context_traps") (not (or $.Grade.Uncertain $.Grade.ContextRadar))}}data-diag-row="context"{{end}}
+          >
             <div class="flex items-center justify-between gap-2">
               <span class="min-w-0 truncate font-medium text-ink">{{.Label}}</span>
               <span class="shrink-0 rounded-full border px-1.5 py-0.5 text-[10px] font-semibold tabular-nums {{.ToneClass}}">{{.Score}}</span>
@@ -3557,7 +3560,7 @@
       </ul>
       {{if .Grade.Why}}
         <div class="border-t border-line pt-1.5" data-grade-why>
-          <p class="text-[10px] font-semibold uppercase tracking-wide text-ink-subtle">Why</p>
+          <p class="text-[10px] font-semibold uppercase tracking-wide text-ink-subtle">More details</p>
           <ul class="mt-1 list-disc space-y-0.5 pl-4 text-[11px] leading-snug text-ink-muted break-words">
             {{range .Grade.Why}}
               <li>{{.}}</li>

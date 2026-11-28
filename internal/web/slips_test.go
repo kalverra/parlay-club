@@ -2524,11 +2524,10 @@ func TestSlipPanelGradeSummaryStripV2AndV1Fallback(t *testing.T) {
 		require.Equal(t, http.StatusOK, rec.Code)
 
 		body := html.UnescapeString(rec.Body.String())
-		assert.Contains(t, body, "data-grade-summary")
-		assert.Contains(t, body, "Overall")
+		assert.Contains(t, body, "data-market-reality")
 		assert.Contains(t, body, "Model Context")
-		assert.Contains(t, body, "Book pricing")
-		assert.GreaterOrEqual(t, strings.Count(body, "data-grade-summary"), 3, "2 legs + 1 slip summary")
+		assert.Contains(t, body, "Book hold / vig")
+		assert.GreaterOrEqual(t, strings.Count(body, "data-market-reality"), 3, "2 legs + 1 slip market reality")
 		assert.NotContains(t, body, "+EV")
 	})
 
@@ -2571,7 +2570,7 @@ func TestSlipPanelGradeSummaryStripV2AndV1Fallback(t *testing.T) {
 		require.Equal(t, http.StatusOK, rec.Code)
 
 		body := html.UnescapeString(rec.Body.String())
-		assert.NotContains(t, body, "data-grade-summary")
+		assert.NotContains(t, body, "data-market-reality")
 	})
 }
 
