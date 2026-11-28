@@ -129,3 +129,7 @@ revision leaves the prior revision serving and rollback is immediate)
 - [x] Docs: update `docs/runbooks/deploy.md` and `docs/guides/gcp-setup.md` for the `2 vCPU / 2 GiB / Gen 2` sizing, the
       `deploy.yml` runtime-change trigger, the `us-east4` default region, and updated monthly spend expectations; verify
       with `good-vibes docs lint`.
+
+## Reviews
+
+- [x] Final review: agy@gemini-4-neon-low

@@ -65,7 +65,7 @@ file in dev). Use a copy or a Litestream restore when you can, so the live insta
 | `parlay.db` plus `parlay.db-wal`   | under 150 MB | 200 MB   |
 | `SELECT sum(size) FROM api_bodies` | under 1 GB   | 1.5 GB   |
 
-The file size is the number that matters. The instance has 512 Mi of memory and the database file lives in it, so a file
+The file size is the number that matters. The instance has 2 GiB of memory and the database file lives in it, so a file
 near the memory limit leaves no room for the server, the WAL, or Litestream during a sync. The uncompressed body total
 is the early warning, because gzip hides most of its size.
 
