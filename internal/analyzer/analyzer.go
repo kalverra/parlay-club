@@ -449,6 +449,8 @@ var rules = []ruleSpec{
 	{ruleShrinkingRole, shrinkingRole},
 	{rulePaceClash, paceClash},
 	{ruleTDSpikeRisk, tdSpikeRisk},
+	{ruleBookComboIneligible, bookComboIneligible},
+	{ruleBookComboRestricted, bookComboRestricted},
 }
 
 // analysis is the filtered input shared by every rule.

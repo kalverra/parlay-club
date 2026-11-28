@@ -333,6 +333,9 @@ func TestTotalContradiction(t *testing.T) {
 				leg(2, "Adam", "buf-mia", "ANYTIME_TD", "BUF", "James Cook", "YES", nil, -110),
 				leg(3, "Adam", "buf-mia", "KICKER_PTS", "BUF", "Tyler Bass", "OVER", new(6.5), -110),
 			},
+			want: []want{{
+				rule: "book_combo_restricted", severity: analyzer.Warn, ids: []int64{1, 3},
+			}},
 		},
 		{
 			name: "under with one scoring leg stays quiet",
@@ -418,13 +421,18 @@ func TestStackClockDrain(t *testing.T) {
 				leg(4, "Adam", "buf-mia", "TEAM_TOTAL", "MIA", "", "UNDER", new(20.5), -110),
 				leg(5, "Adam", "buf-mia", "TEAM_TOTAL", "MIA", "", "UNDER", new(10.5), -110),
 			},
-			want: []want{{
-				rule: "stack_clock_drain", severity: analyzer.Info, ids: []int64{1, 2, 3, 4, 5},
-				contains: []string{
-					"James Cook and James Cook grind the clock",
-					"MIA Team Total Under 20.5 and MIA Team Total Under 10.5 stay quiet",
+			want: []want{
+				{
+					rule: "book_combo_ineligible", severity: analyzer.Danger, ids: []int64{4, 5},
 				},
-			}},
+				{
+					rule: "stack_clock_drain", severity: analyzer.Info, ids: []int64{1, 2, 3, 4, 5},
+					contains: []string{
+						"James Cook and James Cook grind the clock",
+						"MIA Team Total Under 20.5 and MIA Team Total Under 10.5 stay quiet",
+					},
+				},
+			},
 		},
 		{
 			name: "spread team missing from the game stays quiet",
@@ -667,10 +675,15 @@ func TestWind(t *testing.T) {
 				leg(2, "Adam", "buf-mia", "KICKER_PTS", "BUF", "", "OVER", new(6.5), -110),
 				leg(3, "Adam", "buf-mia", "TOTAL", "", "", "OVER", new(48.5), -110),
 			},
-			want: []want{{
-				rule: "wind", severity: analyzer.Danger, ids: []int64{1, 2, 3},
-				contains: []string{"BUF Over 6.5 Kicking Pts", "get tougher"},
-			}},
+			want: []want{
+				{
+					rule: "wind", severity: analyzer.Danger, ids: []int64{1, 2, 3},
+					contains: []string{"BUF Over 6.5 Kicking Pts", "get tougher"},
+				},
+				{
+					rule: "book_combo_restricted", severity: analyzer.Warn, ids: []int64{2, 3},
+				},
+			},
 		},
 		{
 			name:  "mixed owners are named",
@@ -805,10 +818,15 @@ func TestFakeWeather(t *testing.T) {
 				leg(1, "Adam", "buf-mia", "TOTAL", "", "", "UNDER", new(45.5), -110),
 				leg(2, "Sam", "buf-mia", "TOTAL", "", "", "UNDER", new(45.5), -110),
 			},
-			want: []want{{
-				rule: "fake_weather", severity: analyzer.Info, ids: []int64{1, 2},
-				contains: []string{"Adam's Under 45.5 and Sam's Under 45.5 get no extra help"},
-			}},
+			want: []want{
+				{
+					rule: "book_combo_ineligible", severity: analyzer.Danger, ids: []int64{1, 2},
+				},
+				{
+					rule: "fake_weather", severity: analyzer.Info, ids: []int64{1, 2},
+					contains: []string{"Adam's Under 45.5 and Sam's Under 45.5 get no extra help"},
+				},
+			},
 		},
 	}
 	for _, test := range tests {
@@ -906,7 +924,7 @@ func TestHook(t *testing.T) {
 			name: "two hooks get two warnings",
 			legs: []analyzer.Leg{
 				leg(1, "Adam", "buf-mia", "SPREAD", "BUF", "", "TEAM", new(-3.5), -110),
-				leg(2, "Adam", "buf-mia", "SPREAD", "MIA", "", "TEAM", new(2.5), -110),
+				leg(2, "Adam", "dal-phi", "SPREAD", "DAL", "", "TEAM", new(2.5), -110),
 			},
 			want: []want{
 				{rule: "hook", severity: analyzer.Warn, ids: []int64{1}},
@@ -1032,17 +1050,31 @@ func TestTotalKeyNumber(t *testing.T) {
 			name: "every key number triggers",
 			legs: []analyzer.Leg{
 				leg(1, "Adam", "buf-mia", "TOTAL", "", "", "OVER", new(37.0), -110),
-				leg(2, "Adam", "buf-mia", "TOTAL", "", "", "OVER", new(41.0), -110),
-				leg(3, "Adam", "buf-mia", "TOTAL", "", "", "OVER", new(44.0), -110),
-				leg(4, "Adam", "buf-mia", "TOTAL", "", "", "OVER", new(47.0), -110),
-				leg(5, "Adam", "buf-mia", "TOTAL", "", "", "OVER", new(51.0), -110),
+				leg(2, "Adam", "dal-phi", "TOTAL", "", "", "OVER", new(41.0), -110),
 			},
 			want: []want{
 				{rule: "total_key_number", severity: analyzer.Info, ids: []int64{1}},
 				{rule: "total_key_number", severity: analyzer.Info, ids: []int64{2}},
-				{rule: "total_key_number", severity: analyzer.Info, ids: []int64{3}},
-				{rule: "total_key_number", severity: analyzer.Info, ids: []int64{4}},
-				{rule: "total_key_number", severity: analyzer.Info, ids: []int64{5}},
+			},
+		},
+		{
+			name: "remaining key numbers trigger",
+			legs: []analyzer.Leg{
+				leg(1, "Adam", "buf-mia", "TOTAL", "", "", "OVER", new(44.0), -110),
+				leg(2, "Adam", "dal-phi", "TOTAL", "", "", "OVER", new(47.0), -110),
+			},
+			want: []want{
+				{rule: "total_key_number", severity: analyzer.Info, ids: []int64{1}},
+				{rule: "total_key_number", severity: analyzer.Info, ids: []int64{2}},
+			},
+		},
+		{
+			name: "fifty one key number triggers",
+			legs: []analyzer.Leg{
+				leg(1, "Adam", "buf-mia", "TOTAL", "", "", "OVER", new(51.0), -110),
+			},
+			want: []want{
+				{rule: "total_key_number", severity: analyzer.Info, ids: []int64{1}},
 			},
 		},
 		{
@@ -1321,7 +1353,7 @@ func TestNilNfeloKeepsTheOldSentences(t *testing.T) {
 	t.Parallel()
 	legs := []analyzer.Leg{
 		leg(1, "Adam", "buf-mia", "SPREAD", "BUF", "", "TEAM", new(-7.5), -110),
-		leg(2, "Adam", "buf-mia", "ML", "BUF", "", "TEAM", nil, -300),
+		leg(2, "Adam", "dal-phi", "ML", "DAL", "", "TEAM", nil, -300),
 	}
 
 	got := analyzer.AnalyzeSlip(legs, games(), nil)
@@ -1340,7 +1372,7 @@ func TestOutputOrderAcrossRuleSets(t *testing.T) {
 		leg(1, "Adam", "buf-mia", "SPREAD", "BUF", "", "TEAM", new(-7.5), -110),
 		leg(2, "Adam", "buf-mia", "PASS_YDS", "BUF", "Josh Allen", "OVER", new(245.5), -110),
 		leg(3, "Adam", "buf-mia", "TOTAL", "", "", "UNDER", new(43.5), -110),
-		leg(4, "Adam", "buf-mia", "ML", "BUF", "", "TEAM", nil, -300),
+		leg(4, "Adam", "dal-phi", "ML", "DAL", "", "TEAM", nil, -300),
 	}
 
 	got := analyzer.AnalyzeSlip(legs, games(), nil)

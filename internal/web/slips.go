@@ -1973,22 +1973,9 @@ func (h *slipHandlers) slipPageData(ctx context.Context, slip db.Slip) (SlipPage
 		homeBook = *user.HomeBook
 	}
 	next := slips.NextStep(slip, members, legs, games, viewerID, now)
-	var boardRows []board.Row
-	if open && len(games) > 0 && (len(legs) > 0 || next.Step == slips.StepPick) {
-		odds, err := h.deps.Store.OddsForWeek(ctx, slip.WeekID)
-		if err != nil {
-			return SlipPage{}, err
-		}
-		if len(odds) > 0 {
-			roster, err := h.deps.Store.RosterForTeams(ctx, weekTeams(games))
-			if err != nil {
-				return SlipPage{}, err
-			}
-			mine := legsForUser(legs, viewerID)
-			boardStart := time.Now()
-			boardRows = board.BuildDualBook(games, odds, roster, homeBook, mine, now)
-			AddBoardTiming(ctx, time.Since(boardStart))
-		}
+	boardRows, err := h.slipBoardRows(ctx, slip, games, legs, next.Step == slips.StepPick, viewerID, homeBook, now)
+	if err != nil {
+		return SlipPage{}, err
 	}
 	var splitLines map[int64]string
 	if open && len(legs) > 0 && len(boardRows) > 0 {
@@ -2011,26 +1998,7 @@ func (h *slipHandlers) slipPageData(ctx context.Context, slip db.Slip) (SlipPage
 		splitLines,
 	)
 
-	locked := 0
-	for _, member := range members {
-		if member.LockedAt != nil {
-			locked++
-		}
-	}
-
-	memberViews := make([]SlipMemberView, 0, len(members))
-	for _, member := range members {
-		own := legsByUser[member.User.ID]
-		isCurrent := hasUser && member.User.ID == user.ID
-		memberViews = append(memberViews, SlipMemberView{
-			User:      NewUser(member.User),
-			Locked:    member.LockedAt != nil,
-			IsCurrent: isCurrent,
-			CanLockIn: open && isCurrent && member.LockedAt == nil && len(own) == slip.LegsPerMember,
-			Legs:      own,
-			LegCount:  len(own),
-		})
-	}
+	locked, memberViews := buildSlipMemberViews(members, legsByUser, slip.LegsPerMember, open, hasUser, viewerID)
 
 	activity := make([]ActivityView, 0, len(entries))
 	for _, entry := range entries {
@@ -2074,6 +2042,64 @@ func (h *slipHandlers) slipPageData(ctx context.Context, slip db.Slip) (SlipPage
 		Highlights: highlights,
 		Siblings:   siblings,
 	}, nil
+}
+
+func (h *slipHandlers) slipBoardRows(
+	ctx context.Context,
+	slip db.Slip,
+	games []db.Game,
+	legs []db.Leg,
+	stepIsPick bool,
+	viewerID int64,
+	homeBook string,
+	now time.Time,
+) ([]board.Row, error) {
+	if slip.Status != db.SlipOpen || len(games) == 0 || (len(legs) == 0 && !stepIsPick) {
+		return nil, nil
+	}
+	odds, err := h.deps.Store.OddsForWeek(ctx, slip.WeekID)
+	if err != nil {
+		return nil, err
+	}
+	if len(odds) == 0 {
+		return nil, nil
+	}
+	roster, err := h.deps.Store.RosterForTeams(ctx, weekTeams(games))
+	if err != nil {
+		return nil, err
+	}
+	mine := legsForUser(legs, viewerID)
+	boardStart := time.Now()
+	boardRows := board.BuildDualBook(games, odds, roster, homeBook, mine, now)
+	AddBoardTiming(ctx, time.Since(boardStart))
+	return boardRows, nil
+}
+
+func buildSlipMemberViews(
+	members []db.SlipMember,
+	legsByUser map[int64][]LegView,
+	legsPerMember int,
+	open, hasUser bool,
+	viewerID int64,
+) (int, []SlipMemberView) {
+	locked := 0
+	memberViews := make([]SlipMemberView, 0, len(members))
+	for _, member := range members {
+		if member.LockedAt != nil {
+			locked++
+		}
+		own := legsByUser[member.User.ID]
+		isCurrent := hasUser && member.User.ID == viewerID
+		memberViews = append(memberViews, SlipMemberView{
+			User:      NewUser(member.User),
+			Locked:    member.LockedAt != nil,
+			IsCurrent: isCurrent,
+			CanLockIn: open && isCurrent && member.LockedAt == nil && len(own) == legsPerMember,
+			Legs:      own,
+			LegCount:  len(own),
+		})
+	}
+	return locked, memberViews
 }
 
 func slipLegSplitLines(rows []board.Row, legs []db.Leg, homeBook string) map[int64]string {

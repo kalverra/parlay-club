@@ -189,6 +189,24 @@ func RuleDocs() []RuleDoc {
 			Rationale: "Touchdowns are the noisiest box-score stat; high TD output on low share or negative EPA tends to regress toward opportunity.",
 			Example:   "Dawson Knox has 3 TDs in the last 3 games on a 11% target share and 0 carries/game — TD luck can cool off.",
 		},
+		{
+			ID:        ruleBookComboIneligible,
+			Title:     "Sportsbook-ineligible parlay combo",
+			Severity:  Danger,
+			Category:  "Sportsbook Eligibility",
+			Threshold: "Same-game duplicate selection, opposite sides of the same market, same-team ML + spread, ML + opponent favorite spread (< 0), or mutually exclusive team totals vs. game total",
+			Rationale: "DraftKings and FanDuel reject mutually exclusive, duplicate, or redundant same-game legs on one parlay or SGP.",
+			Example:   "Heads up: DraftKings and FanDuel usually won't combine BUF ML with BUF -3.5 on the same slip.",
+		},
+		{
+			ID:        ruleBookComboRestricted,
+			Title:     "Sportsbook-restricted SGP combo",
+			Severity:  Warn,
+			Category:  "Sportsbook Eligibility",
+			Threshold: "Same-player inverse prop pairs (PASS_YDS vs. PASS_TDS, REC_YDS vs. RECEPTIONS, RUSH_YDS vs. RUSH_ATT), duplicate player-market milestones, or KICKER_PTS paired with TOTAL/TEAM_TOTAL",
+			Rationale: "Books frequently drop or block kicker props alongside totals and inverse or duplicate same-player prop combinations from SGP builders.",
+			Example:   "Heads up: DraftKings and FanDuel frequently block combining Tyler Bass Over 7.5 Kicking Pts with Over 47.5 on an SGP.",
+		},
 	}
 }
 

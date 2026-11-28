@@ -99,7 +99,7 @@ without false positives on valid SGPs).
 
 Risk: low (pure deterministic Go logic with exhaustive unit tests and no persistent state or external calls).
 
-- [ ] Implement `book_combo_ineligible` (`Danger`) and `book_combo_restricted` (`Warn`) plus `CheckComboConflict` in
+- [x] Implement `book_combo_ineligible` (`Danger`) and `book_combo_restricted` (`Warn`) plus `CheckComboConflict` in
       `internal/analyzer/combo_rules.go`, register them in `internal/analyzer/analyzer.go` and
       `internal/analyzer/docs.go`, and add table-driven unit tests in `internal/analyzer/combo_rules_test.go`.
 
