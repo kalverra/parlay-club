@@ -260,7 +260,7 @@ Risk: low (pure deterministic Go logic with zero I/O or schema changes, fully co
       and `SlipGrade` in `internal/analyzer`, with comprehensive unit tests.
 - [x] Add `ClassifyProcessOutcome` (`Clean Hit`, `Tough Beat`, `Total Bailout`, `Book Donation`) in `internal/analyzer`
   with tests covering all 4 matrix states and ungraded/push edge cases.
-- [ ] Docs: add `Build grade`, `Correlation tax`, and `Process vs. Outcome` terms to `GLOSSARY.md`.
+- [x] Docs: add `Build grade`, `Correlation tax`, and `Process vs. Outcome` terms to `GLOSSARY.md`.
 
 ### Phase 2: Dual-track evals — Explaining Vegas vs. Beating Vegas
 

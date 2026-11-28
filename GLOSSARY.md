@@ -36,3 +36,22 @@ moved kickoff or a later kickoff wave cannot send a second reminder. A slip's ne
 forward to the next kickoff still ahead.
 
 _Avoid:_ first game, deadline
+
+## Build grade
+
+A pre-kickoff letter grade (`A` through `F` with `+`/`-` subdivisions and a two-word descriptor) that scores how cleanly
+a leg or slip is constructed across price vig, leg synergy, hit-rate realism, and priced-in context. It measures
+structural quality, not predictive edge over Vegas.
+
+_Avoid:_ edge score, lock
+
+## Correlation tax
+
+The payout shave a sportsbook takes on a same-game parlay relative to multiplying the legs' independent odds, expressed
+as a percentage.
+
+## Process vs. Outcome
+
+A post-game 2x2 classification pairing a pre-kickoff build grade (`A`–`B` vs. `C`–`F`) with a settled `Won` or `Lost`
+result: `Clean Hit`, `Tough Beat`, `Total Bailout`, or `Book Donation`. Pushed, voided, pending, and ungraded entries
+are left unclassified.
