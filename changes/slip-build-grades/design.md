@@ -275,7 +275,7 @@ Risk: low (read-only evaluation and reporting code backed by deterministic repla
       `MarketProb`) and `MarketBeatingMetrics` (raw vs. blended vs. market log loss, skill scores, ROI, and
       `AlphaGatePassed`) plus `SuiteReport.SlipGrades` in `internal/eval`, with unit tests verifying zero-error
       matching, missing-benchmark skipping, and alpha-gate thresholds.
-- [ ] Surface both "1. Explaining Vegas (Match First)" and "2. Beating Vegas (Alpha Gate)" scorecards in `cmd/eval`
+- [x] Surface both "1. Explaining Vegas (Match First)" and "2. Beating Vegas (Alpha Gate)" scorecards in `cmd/eval`
       output and on `/docs/evals` (`internal/web/eval_results.go` and `web/templates/analyzer_results.html`), with
       handler and render tests.
 

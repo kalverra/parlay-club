@@ -34,6 +34,8 @@ type EvalResultsPage struct {
 	ShowEngineDiffs   bool
 	Overview          EvalOverviewView
 	EngineComparisons []EvalEngineComparisonView
+	MarketExplanation EvalMarketExplanationView
+	MarketBeating     EvalMarketBeatingView
 	Calibration       EvalCalibrationView
 	Monotonic         bool
 	MonotonicStatus   string
@@ -159,6 +161,41 @@ type EvalEngineComparisonView struct {
 	SGPLiftPos    bool
 	SGPLiftNeg    bool
 	Monotonic     bool
+}
+
+// EvalMarketExplanationView formats Track 1 ("1. Explaining Vegas (Match First)")
+// metrics comparing standalone RawModelProb against de-vigged sharp MarketProb.
+type EvalMarketExplanationView struct {
+	HasData          bool
+	SampleCount      int
+	SampleLabel      string
+	MeanAbsError     string
+	RMSE             string
+	MeanKLDivergence string
+	CorrelationR     string
+	Within5ppRate    string
+}
+
+// EvalMarketBeatingView formats Track 2 ("2. Beating Vegas (Alpha Gate)")
+// metrics comparing raw and blended model skill against the sharp market baseline.
+type EvalMarketBeatingView struct {
+	HasData         bool
+	SampleCount     int
+	SampleLabel     string
+	RawModelLogLoss string
+	BlendedLogLoss  string
+	MarketLogLoss   string
+	LogLossSkill    string
+	LogLossPositive bool
+	LogLossNegative bool
+	BrierSkill      string
+	BrierPositive   bool
+	BrierNegative   bool
+	FlatROI         string
+	ROIPositive     bool
+	ROINegative     bool
+	AlphaGatePassed bool
+	AlphaGateLabel  string
 }
 
 // EvalCalibrationView formats proper scoring rules, market baselines,
@@ -568,6 +605,8 @@ func buildEvalResultsPage(
 		ShowEngineDiffs:   len(suite.Diffs) > 0,
 		Overview:          buildEvalOverview(report, calView),
 		EngineComparisons: buildEvalEngineComparisons(suite, report.RubricName, sourceStr, seasonParam, backURL),
+		MarketExplanation: buildEvalMarketExplanation(report.MarketExplanation),
+		MarketBeating:     buildEvalMarketBeating(report.MarketBeating),
 		Calibration:       calView,
 		Monotonic:         report.LegMonotonic,
 		MonotonicStatus:   monotonicStatus,
@@ -959,6 +998,73 @@ func buildEvalCalibration(c eval.CalibrationMetrics) EvalCalibrationView {
 	}
 
 	return view
+}
+
+func buildEvalMarketExplanation(m eval.MarketExplanationMetrics) EvalMarketExplanationView {
+	if m.SampleCount <= 0 {
+		return EvalMarketExplanationView{
+			MeanAbsError:     "–",
+			RMSE:             "–",
+			MeanKLDivergence: "–",
+			CorrelationR:     "–",
+			Within5ppRate:    "–",
+		}
+	}
+	sampleLabel := fmt.Sprintf("%d legs", m.SampleCount)
+	if m.SampleCount == 1 {
+		sampleLabel = "1 leg"
+	}
+	return EvalMarketExplanationView{
+		HasData:          true,
+		SampleCount:      m.SampleCount,
+		SampleLabel:      sampleLabel,
+		MeanAbsError:     fmt.Sprintf("%.4f", m.MeanAbsError),
+		RMSE:             fmt.Sprintf("%.4f", m.RMSE),
+		MeanKLDivergence: fmt.Sprintf("%.4f", m.MeanKLDivergence),
+		CorrelationR:     fmt.Sprintf("%.4f", m.CorrelationR),
+		Within5ppRate:    fmt.Sprintf("%.1f%%", m.Within5ppRate*100),
+	}
+}
+
+func buildEvalMarketBeating(m eval.MarketBeatingMetrics) EvalMarketBeatingView {
+	if m.SampleCount <= 0 {
+		return EvalMarketBeatingView{
+			RawModelLogLoss: "–",
+			BlendedLogLoss:  "–",
+			MarketLogLoss:   "–",
+			LogLossSkill:    "–",
+			BrierSkill:      "–",
+			FlatROI:         "–",
+			AlphaGateLabel:  "Alpha Gate: FAIL",
+		}
+	}
+	sampleLabel := fmt.Sprintf("%d legs", m.SampleCount)
+	if m.SampleCount == 1 {
+		sampleLabel = "1 leg"
+	}
+	gateLabel := "Alpha Gate: FAIL"
+	if m.AlphaGatePassed {
+		gateLabel = "Alpha Gate: PASS"
+	}
+	return EvalMarketBeatingView{
+		HasData:         true,
+		SampleCount:     m.SampleCount,
+		SampleLabel:     sampleLabel,
+		RawModelLogLoss: fmt.Sprintf("%.4f", m.RawModelLogLoss),
+		BlendedLogLoss:  fmt.Sprintf("%.4f", m.BlendedLogLoss),
+		MarketLogLoss:   fmt.Sprintf("%.4f", m.MarketLogLoss),
+		LogLossSkill:    fmt.Sprintf("%+.4f", m.LogLossSkill),
+		LogLossPositive: m.LogLossSkill > 0.00005,
+		LogLossNegative: m.LogLossSkill < -0.00005,
+		BrierSkill:      fmt.Sprintf("%+.4f", m.BrierSkill),
+		BrierPositive:   m.BrierSkill > 0.00005,
+		BrierNegative:   m.BrierSkill < -0.00005,
+		FlatROI:         fmt.Sprintf("%+.1f%%", m.FlatROI*100),
+		ROIPositive:     m.FlatROI > 0.0005,
+		ROINegative:     m.FlatROI < -0.0005,
+		AlphaGatePassed: m.AlphaGatePassed,
+		AlphaGateLabel:  gateLabel,
+	}
 }
 
 func buildEvalReliabilityBins(bins []eval.ReliabilityBin) []EvalReliabilityBinView {

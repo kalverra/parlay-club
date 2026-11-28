@@ -316,6 +316,26 @@ func writeReportText(w io.Writer, r eval.Report) error {
 		}
 	}
 
+	if r.MarketExplanation.SampleCount > 0 {
+		ew.println("\n1. Explaining Vegas (Match First):")
+		if ew.err != nil {
+			return ew.err
+		}
+		if err := writeMarketExplanationText(w, r.MarketExplanation); err != nil {
+			return err
+		}
+	}
+
+	if r.MarketBeating.SampleCount > 0 {
+		ew.println("\n2. Beating Vegas (Alpha Gate):")
+		if ew.err != nil {
+			return ew.err
+		}
+		if err := writeMarketBeatingText(w, r.MarketBeating); err != nil {
+			return err
+		}
+	}
+
 	ew.println("\nFactor Attribution:")
 	if ew.err != nil {
 		return ew.err
@@ -610,6 +630,16 @@ func writeReportSectionsMarkdown(ew *errWriter, r eval.Report) {
 		writeCalibrationMarkdown(ew, r.Calibration)
 	}
 
+	if r.MarketExplanation.SampleCount > 0 {
+		ew.printf("\n#### 1. Explaining Vegas (Match First)\n\n")
+		writeMarketExplanationMarkdown(ew, r.MarketExplanation)
+	}
+
+	if r.MarketBeating.SampleCount > 0 {
+		ew.printf("\n#### 2. Beating Vegas (Alpha Gate)\n\n")
+		writeMarketBeatingMarkdown(ew, r.MarketBeating)
+	}
+
 	if hasBandTotals(r.SlipBands) {
 		ew.printf("\n#### Slip Calibration\n\n")
 		writeBandsMarkdown(ew, r.SlipBands)
@@ -762,6 +792,40 @@ func writeCalibrationText(w io.Writer, c eval.CalibrationMetrics) error {
 	return tw.Flush()
 }
 
+func writeMarketExplanationText(w io.Writer, m eval.MarketExplanationMetrics) error {
+	ew := &errWriter{w: w}
+	ew.printf(
+		"  Samples=%d  MAE=%.4f  RMSE=%.4f  KL=%.4f  PearsonR=%.4f  Within5pp=%.1f%%\n",
+		m.SampleCount,
+		m.MeanAbsError,
+		m.RMSE,
+		m.MeanKLDivergence,
+		m.CorrelationR,
+		m.Within5ppRate*100,
+	)
+	return ew.err
+}
+
+func writeMarketBeatingText(w io.Writer, m eval.MarketBeatingMetrics) error {
+	ew := &errWriter{w: w}
+	gateStatus := "FAIL"
+	if m.AlphaGatePassed {
+		gateStatus = "PASS"
+	}
+	ew.printf(
+		"  Samples=%d  RawLL=%.4f  BlendedLL=%.4f  MarketLL=%.4f  LogLossSkill=%+.4f  BrierSkill=%+.4f  FlatROI=%+.2f%%  AlphaGate=%s\n",
+		m.SampleCount,
+		m.RawModelLogLoss,
+		m.BlendedLogLoss,
+		m.MarketLogLoss,
+		m.LogLossSkill,
+		m.BrierSkill,
+		m.FlatROI*100,
+		gateStatus,
+	)
+	return ew.err
+}
+
 func writeEngineComparisonTable(w io.Writer, reports []eval.Report) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	ew := &errWriter{w: tw}
@@ -837,6 +901,34 @@ func writeCalibrationMarkdown(ew *errWriter, c eval.CalibrationMetrics) {
 			)
 		}
 	}
+}
+
+func writeMarketExplanationMarkdown(ew *errWriter, m eval.MarketExplanationMetrics) {
+	ew.println("| Metric | Value |")
+	ew.println("| --- | ---: |")
+	ew.printf("| Samples | %d |\n", m.SampleCount)
+	ew.printf("| MAE (Raw vs. Market) | %.4f |\n", m.MeanAbsError)
+	ew.printf("| RMSE | %.4f |\n", m.RMSE)
+	ew.printf("| KL Divergence | %.4f |\n", m.MeanKLDivergence)
+	ew.printf("| Pearson r | %.4f |\n", m.CorrelationR)
+	ew.printf("| Within 5pp | %.1f%% |\n", m.Within5ppRate*100)
+}
+
+func writeMarketBeatingMarkdown(ew *errWriter, m eval.MarketBeatingMetrics) {
+	gateStatus := "FAIL"
+	if m.AlphaGatePassed {
+		gateStatus = "PASS"
+	}
+	ew.println("| Metric | Value |")
+	ew.println("| --- | ---: |")
+	ew.printf("| Samples | %d |\n", m.SampleCount)
+	ew.printf("| Raw Model Log Loss | %.4f |\n", m.RawModelLogLoss)
+	ew.printf("| Blended Log Loss | %.4f |\n", m.BlendedLogLoss)
+	ew.printf("| Market Log Loss | %.4f |\n", m.MarketLogLoss)
+	ew.printf("| Log Loss Skill | %+.4f |\n", m.LogLossSkill)
+	ew.printf("| Brier Skill | %+.4f |\n", m.BrierSkill)
+	ew.printf("| Flat ROI | %+.2f%% |\n", m.FlatROI*100)
+	ew.printf("| Alpha Gate (n>=250, LL Skill>0, ROI>0) | %s |\n", gateStatus)
 }
 
 func writeEngineComparisonMarkdown(ew *errWriter, reports []eval.Report) {

@@ -226,6 +226,107 @@
       <p class="text-xs text-page-muted">Raw calibration metrics, grade tables, engine comparisons, weekly history, and factor attribution.</p>
     </div>
 
+    <div class="grid grid-cols-1 gap-4 lg:grid-cols-2" data-eval-dual-track>
+      <section class="ui-card space-y-4 p-4" data-eval-track="explaining-vegas">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h2 class="text-base font-semibold text-ink">1. Explaining Vegas (Match First)</h2>
+            <p class="text-xs text-ink-muted">How closely our standalone model reproduces de-vigged sharp market prices.</p>
+          </div>
+          {{if .MarketExplanation.HasData}}
+            <span class="rounded-full border border-line-strong bg-surface-2 px-2.5 py-0.5 font-mono text-xs tabular-nums text-ink-muted">
+              {{.MarketExplanation.SampleLabel}}
+            </span>
+          {{end}}
+        </div>
+        {{if .MarketExplanation.HasData}}
+          <div class="grid grid-cols-2 gap-2 text-xs sm:grid-cols-3">
+            <div class="rounded-lg border border-line bg-surface-2 p-3">
+              <p class="text-ink-muted">MAE</p>
+              <p class="mt-1 font-mono text-base font-semibold tabular-nums text-ink">{{.MarketExplanation.MeanAbsError}}</p>
+              <p class="mt-0.5 text-[11px] text-ink-subtle">Mean |Raw &minus; Market|</p>
+            </div>
+            <div class="rounded-lg border border-line bg-surface-2 p-3">
+              <p class="text-ink-muted">RMSE</p>
+              <p class="mt-1 font-mono text-base font-semibold tabular-nums text-ink">{{.MarketExplanation.RMSE}}</p>
+              <p class="mt-0.5 text-[11px] text-ink-subtle">Root mean sq error</p>
+            </div>
+            <div class="rounded-lg border border-line bg-surface-2 p-3">
+              <p class="text-ink-muted">KL Divergence</p>
+              <p class="mt-1 font-mono text-base font-semibold tabular-nums text-ink">{{.MarketExplanation.MeanKLDivergence}}</p>
+              <p class="mt-0.5 text-[11px] text-ink-subtle">D_KL(Market || Raw)</p>
+            </div>
+            <div class="rounded-lg border border-line bg-surface-2 p-3">
+              <p class="text-ink-muted">Pearson r</p>
+              <p class="mt-1 font-mono text-base font-semibold tabular-nums text-ink">{{.MarketExplanation.CorrelationR}}</p>
+              <p class="mt-0.5 text-[11px] text-ink-subtle">Linear market fit</p>
+            </div>
+            <div class="rounded-lg border border-line bg-surface-2 p-3 col-span-2 sm:col-span-2">
+              <p class="text-ink-muted">Within 5pp</p>
+              <p class="mt-1 font-mono text-base font-semibold tabular-nums text-ink">{{.MarketExplanation.Within5ppRate}}</p>
+              <p class="mt-0.5 text-[11px] text-ink-subtle">Share within &plusmn;5.0 percentage points of Vegas</p>
+            </div>
+          </div>
+        {{else}}
+          <p class="text-xs text-ink-muted">
+            No paired standalone model probabilities and de-vigged sharp market lines in this sample yet.
+          </p>
+        {{end}}
+      </section>
+
+      <section class="ui-card space-y-4 p-4" data-eval-track="beating-vegas">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h2 class="text-base font-semibold text-ink">2. Beating Vegas (Alpha Gate)</h2>
+            <p class="text-xs text-ink-muted">Whether standalone model skill beats sharp market lines on settled outcomes.</p>
+          </div>
+          {{if .MarketBeating.HasData}}
+            <span class="rounded-full border px-2.5 py-0.5 text-xs font-semibold {{if .MarketBeating.AlphaGatePassed}}border-positive bg-positive-soft text-positive-ink{{else}}border-line-strong bg-surface-2 text-ink-muted{{end}}">
+              {{.MarketBeating.AlphaGateLabel}}
+            </span>
+          {{end}}
+        </div>
+        {{if .MarketBeating.HasData}}
+          <div class="grid grid-cols-2 gap-2 text-xs sm:grid-cols-3">
+            <div class="rounded-lg border border-line bg-surface-2 p-3">
+              <p class="text-ink-muted">Raw Model LL</p>
+              <p class="mt-1 font-mono text-base font-semibold tabular-nums text-ink">{{.MarketBeating.RawModelLogLoss}}</p>
+              <p class="mt-0.5 text-[11px] text-ink-subtle">Unblended</p>
+            </div>
+            <div class="rounded-lg border border-line bg-surface-2 p-3">
+              <p class="text-ink-muted">Blended LL</p>
+              <p class="mt-1 font-mono text-base font-semibold tabular-nums text-ink">{{.MarketBeating.BlendedLogLoss}}</p>
+              <p class="mt-0.5 text-[11px] text-ink-subtle">70/30 blend</p>
+            </div>
+            <div class="rounded-lg border border-line bg-surface-2 p-3">
+              <p class="text-ink-muted">Market LL</p>
+              <p class="mt-1 font-mono text-base font-semibold tabular-nums text-ink">{{.MarketBeating.MarketLogLoss}}</p>
+              <p class="mt-0.5 text-[11px] text-ink-subtle">Sharp baseline</p>
+            </div>
+            <div class="rounded-lg border border-line bg-surface-2 p-3">
+              <p class="text-ink-muted">Log Loss Skill</p>
+              <p class="mt-1 font-mono text-base font-semibold tabular-nums {{if .MarketBeating.LogLossPositive}}text-positive-ink{{else if .MarketBeating.LogLossNegative}}text-danger-ink{{else}}text-ink{{end}}">{{.MarketBeating.LogLossSkill}}</p>
+              <p class="mt-0.5 text-[11px] text-ink-subtle">&gt;0 beats market</p>
+            </div>
+            <div class="rounded-lg border border-line bg-surface-2 p-3">
+              <p class="text-ink-muted">Brier Skill</p>
+              <p class="mt-1 font-mono text-base font-semibold tabular-nums {{if .MarketBeating.BrierPositive}}text-positive-ink{{else if .MarketBeating.BrierNegative}}text-danger-ink{{else}}text-ink{{end}}">{{.MarketBeating.BrierSkill}}</p>
+              <p class="mt-0.5 text-[11px] text-ink-subtle">&gt;0 beats market</p>
+            </div>
+            <div class="rounded-lg border border-line bg-surface-2 p-3">
+              <p class="text-ink-muted">Flat ROI</p>
+              <p class="mt-1 font-mono text-base font-semibold tabular-nums {{if .MarketBeating.ROIPositive}}text-positive-ink{{else if .MarketBeating.ROINegative}}text-danger-ink{{else}}text-ink{{end}}">{{.MarketBeating.FlatROI}}</p>
+              <p class="mt-0.5 text-[11px] text-ink-subtle">{{.MarketBeating.SampleLabel}} · n&ge;250 gate</p>
+            </div>
+          </div>
+        {{else}}
+          <p class="text-xs text-ink-muted">
+            Needs settled outcomes with both standalone model probabilities and de-vigged sharp market lines.
+          </p>
+        {{end}}
+      </section>
+    </div>
+
     <section class="ui-card space-y-4 p-4">
       <div class="flex flex-wrap items-center justify-between gap-2">
         <h2 class="text-base font-semibold text-ink">Probability Calibration ({{.SelectedEngine}})</h2>

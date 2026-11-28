@@ -1007,6 +1007,22 @@ func TestEvalResultsEngineSelectionAndCalibration(t *testing.T) {
 	assert.Contains(t, bodyMktV2, "Probability Calibration (v2)")
 	assert.Contains(t, bodyMktV2, "Reliability Table (10% Bins)")
 	assert.NotContains(t, bodyMktV2, "SGP Correlation Lift")
+
+	// /docs/evals serves the same dual-track scorecards.
+	recDocs := httptest.NewRecorder()
+	f.handler.ServeHTTP(
+		recDocs,
+		httptest.NewRequestWithContext(
+			ctx,
+			http.MethodGet,
+			"/docs/evals?source=slips&season=2026&engine=v2",
+			nil,
+		),
+	)
+	require.Equal(t, http.StatusOK, recDocs.Code)
+	bodyDocs := html.UnescapeString(recDocs.Body.String())
+	assert.Contains(t, bodyDocs, "1. Explaining Vegas (Match First)")
+	assert.Contains(t, bodyDocs, "2. Beating Vegas (Alpha Gate)")
 }
 
 func TestAnalyzerResultsTemplateRendersCalibrationAndPhoneWidthLayout(t *testing.T) {
@@ -1059,6 +1075,32 @@ func TestAnalyzerResultsTemplateRendersCalibrationAndPhoneWidthLayout(t *testing
 				SGPLiftPos:    true,
 				Monotonic:     true,
 			},
+		},
+		MarketExplanation: webui.EvalMarketExplanationView{
+			HasData:          true,
+			SampleCount:      260,
+			SampleLabel:      "260 legs",
+			MeanAbsError:     "0.0234",
+			RMSE:             "0.0312",
+			MeanKLDivergence: "0.0045",
+			CorrelationR:     "0.9412",
+			Within5ppRate:    "88.5%",
+		},
+		MarketBeating: webui.EvalMarketBeatingView{
+			HasData:         true,
+			SampleCount:     260,
+			SampleLabel:     "260 legs",
+			RawModelLogLoss: "0.6102",
+			BlendedLogLoss:  "0.6150",
+			MarketLogLoss:   "0.6250",
+			LogLossSkill:    "+0.0148",
+			LogLossPositive: true,
+			BrierSkill:      "+0.0062",
+			BrierPositive:   true,
+			FlatROI:         "+4.2%",
+			ROIPositive:     true,
+			AlphaGatePassed: true,
+			AlphaGateLabel:  "Alpha Gate: PASS",
 		},
 		Calibration: webui.EvalCalibrationView{
 			HasData:           true,
@@ -1170,6 +1212,21 @@ func TestAnalyzerResultsTemplateRendersCalibrationAndPhoneWidthLayout(t *testing
 	assert.Contains(t, body, "+2.9 pp")
 	assert.Contains(t, body, "0–10%")
 	assert.Contains(t, body, "0 legs")
+	assert.Contains(t, body, "1. Explaining Vegas (Match First)")
+	assert.Contains(t, body, "260 legs")
+	assert.Contains(t, body, "0.0234")
+	assert.Contains(t, body, "0.0312")
+	assert.Contains(t, body, "0.0045")
+	assert.Contains(t, body, "0.9412")
+	assert.Contains(t, body, "88.5%")
+	assert.Contains(t, body, "2. Beating Vegas (Alpha Gate)")
+	assert.Contains(t, body, "Alpha Gate: PASS")
+	assert.Contains(t, body, "0.6102")
+	assert.Contains(t, body, "0.6150")
+	assert.Contains(t, body, "0.6250")
+	assert.Contains(t, body, "+0.0148")
+	assert.Contains(t, body, "+0.0062")
+	assert.Contains(t, body, "+4.2%")
 	assert.Contains(t, body, "Notable band migrations")
 	assert.Contains(t, body, "sm:hidden")
 	assert.Contains(t, body, "hidden sm:block")

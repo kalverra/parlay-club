@@ -579,3 +579,52 @@ func TestEvalCLIMarketMode(t *testing.T) {
 		assert.Contains(t, err.Error(), "--mode cannot be combined with --dataset")
 	})
 }
+
+func TestWriteReportDualTrackScorecards(t *testing.T) {
+	t.Parallel()
+
+	report := eval.Report{
+		RubricName: "v2",
+		Coverage:   eval.DataCoverage{TotalLegs: 260, WithSharp: 260},
+		MarketExplanation: eval.MarketExplanationMetrics{
+			SampleCount:      260,
+			MeanAbsError:     0.0234,
+			RMSE:             0.0312,
+			MeanKLDivergence: 0.0045,
+			CorrelationR:     0.9412,
+			Within5ppRate:    0.885,
+		},
+		MarketBeating: eval.MarketBeatingMetrics{
+			SampleCount:     260,
+			RawModelLogLoss: 0.6102,
+			BlendedLogLoss:  0.6150,
+			MarketLogLoss:   0.6250,
+			LogLossSkill:    0.0148,
+			BrierSkill:      0.0062,
+			FlatROI:         0.0425,
+			AlphaGatePassed: true,
+		},
+	}
+
+	var textBuf bytes.Buffer
+	require.NoError(t, writeReportText(&textBuf, report))
+	text := textBuf.String()
+	assert.Contains(t, text, "1. Explaining Vegas (Match First):")
+	assert.Contains(t, text, "Samples=260  MAE=0.0234  RMSE=0.0312  KL=0.0045  PearsonR=0.9412  Within5pp=88.5%")
+	assert.Contains(t, text, "2. Beating Vegas (Alpha Gate):")
+	assert.Contains(
+		t,
+		text,
+		"Samples=260  RawLL=0.6102  BlendedLL=0.6150  MarketLL=0.6250  LogLossSkill=+0.0148  BrierSkill=+0.0062  FlatROI=+4.25%  AlphaGate=PASS",
+	)
+
+	var mdBuf bytes.Buffer
+	require.NoError(t, writeReportMarkdown(&mdBuf, report))
+	md := mdBuf.String()
+	assert.Contains(t, md, "#### 1. Explaining Vegas (Match First)")
+	assert.Contains(t, md, "| MAE (Raw vs. Market) | 0.0234 |")
+	assert.Contains(t, md, "| Within 5pp | 88.5% |")
+	assert.Contains(t, md, "#### 2. Beating Vegas (Alpha Gate)")
+	assert.Contains(t, md, "| Raw Model Log Loss | 0.6102 |")
+	assert.Contains(t, md, "| Alpha Gate (n>=250, LL Skill>0, ROI>0) | PASS |")
+}
