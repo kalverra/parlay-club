@@ -41,6 +41,7 @@ type SeasonOption struct {
 
 // RecordMemberView is one member's row on the Record Book leaderboard.
 type RecordMemberView struct {
+	UserID          int64
 	Rank            int
 	Name            string
 	Avatar          User
@@ -48,6 +49,7 @@ type RecordMemberView struct {
 	TotalLegs       int
 	DecidedLegs     int
 	HitPct          string
+	ImpliedLift     string
 	Qualified       bool
 	AvgLegOdds      string
 	TerroristCount  int
@@ -56,6 +58,17 @@ type RecordMemberView struct {
 	DollarPL        string
 	DollarPositive  bool
 	DollarNegative  bool
+	Tags            []RecordTagView
+}
+
+// RecordTagView is one earned Record Book tag rendered on a member row or profile.
+type RecordTagView struct {
+	Key         string
+	Label       string
+	Tone        string
+	IsPraise    bool
+	Rule        string
+	Explanation string
 }
 
 // recordBook renders the active group's season Record Book at GET /record?season=.
@@ -109,8 +122,31 @@ func (h *slipHandlers) recordBook(w http.ResponseWriter, r *http.Request) {
 		h.serverError(w, err)
 		return
 	}
+	votes, err := h.deps.Store.VotesForGroupSeason(ctx, group.ID, selectedSeason)
+	if err != nil {
+		h.serverError(w, err)
+		return
+	}
 
-	book := buildRecordBook(selectedSeason, slips, legs, users, wagers)
+	var legGrades map[int64]string
+	if h.deps.EvalCache != nil {
+		suite, err := h.deps.EvalCache.GetOrCompute(ctx, h.deps.Store, group.ID, selectedSeason)
+		if err != nil {
+			h.deps.Logger.Warn().
+				Err(err).
+				Int64("group_id", group.ID).
+				Int("season", selectedSeason).
+				Msg("record book: compute eval leg grades")
+		} else {
+			engineName := ""
+			if h.deps.GradingEngine != nil {
+				engineName = h.deps.GradingEngine.Name()
+			}
+			legGrades = suite.LegGrades(engineName)
+		}
+	}
+
+	book := buildRecordBook(selectedSeason, slips, legs, users, wagers, legGrades, votes)
 	data := buildRecordPage(page, group, selectedSeason, allSeasons, users, book)
 	h.renderPage(w, "record", data)
 }
@@ -156,6 +192,8 @@ func buildRecordBook(
 	legs []db.Leg,
 	users []db.User,
 	wagers []db.Wager,
+	legGrades map[int64]string,
+	votes map[int64]int,
 ) record.Book {
 	recSlips := make([]record.Slip, 0, len(slips))
 	for _, gs := range slips {
@@ -173,10 +211,13 @@ func buildRecordBook(
 	recLegs := make([]record.Leg, 0, len(legs))
 	for _, leg := range legs {
 		recLegs = append(recLegs, record.Leg{
-			SlipID: leg.SlipID,
-			UserID: leg.UserID,
-			Odds:   leg.Odds,
-			Result: leg.Result,
+			ID:       leg.ID,
+			SlipID:   leg.SlipID,
+			UserID:   leg.UserID,
+			Odds:     leg.Odds,
+			Result:   leg.Result,
+			Grade:    legGrades[leg.ID],
+			NetVotes: votes[leg.ID],
 		})
 	}
 
@@ -247,6 +288,11 @@ func buildRecordPage(
 			qualified = true
 		}
 
+		impliedLift := ""
+		if row.ImpliedLift != nil {
+			impliedLift = fmt.Sprintf("%+.1f pts", *row.ImpliedLift)
+		}
+
 		avgOdds := "–"
 		if row.AvgLegOdds != 0 {
 			avgOdds = formatOdds(row.AvgLegOdds)
@@ -260,7 +306,20 @@ func buildRecordPage(
 			dollarNeg = *row.DollarPL < -0.005
 		}
 
+		tags := make([]RecordTagView, 0, len(row.Tags))
+		for _, tag := range row.Tags {
+			tags = append(tags, RecordTagView{
+				Key:         tag.Key,
+				Label:       tag.Label,
+				Tone:        string(tag.Tone),
+				IsPraise:    tag.Tone == record.TagTonePraise,
+				Rule:        tag.Rule,
+				Explanation: tag.Explanation,
+			})
+		}
+
 		leaderboard = append(leaderboard, RecordMemberView{
+			UserID:          row.UserID,
 			Rank:            i + 1,
 			Name:            row.Name,
 			Avatar:          NewUser(u),
@@ -268,6 +327,7 @@ func buildRecordPage(
 			TotalLegs:       row.TotalLegs,
 			DecidedLegs:     row.DecidedLegs,
 			HitPct:          hitPct,
+			ImpliedLift:     impliedLift,
 			Qualified:       qualified,
 			AvgLegOdds:      avgOdds,
 			TerroristCount:  row.TerroristCount,
@@ -276,6 +336,7 @@ func buildRecordPage(
 			DollarPL:        dollarPL,
 			DollarPositive:  dollarPos,
 			DollarNegative:  dollarNeg,
+			Tags:            tags,
 		})
 	}
 

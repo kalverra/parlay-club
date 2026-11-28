@@ -249,7 +249,7 @@ func buildGroupOverviewPage(in groupOverviewInput) GroupOverviewPage {
 }
 
 func buildGroupRecordSnapshot(season int, gradedSlips []db.GradedSlip) GroupRecordSnapshot {
-	book := buildRecordBook(season, gradedSlips, nil, nil, nil)
+	book := buildRecordBook(season, gradedSlips, nil, nil, nil, nil, nil)
 	rec := fmt.Sprintf("%d-%d", book.Wins, book.Losses)
 	if book.Pushes > 0 {
 		rec = fmt.Sprintf("%d-%d-%d", book.Wins, book.Losses, book.Pushes)

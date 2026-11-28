@@ -229,7 +229,7 @@ Complexity: low (follows existing handler, template, and `dialog.leg-sheet` patt
 
 Risk: low (read-only view updates on `/record` covered by handler HTML tests and `layout_test.go`)
 
-- [ ] Wire `EvalCache.GetOrCompute` leg grades (fail-soft) and `VotesForGroupSeason` into `GET /record` in
+- [x] Wire `EvalCache.GetOrCompute` leg grades (fail-soft) and `VotesForGroupSeason` into `GET /record` in
       `internal/web/record.go`, populate `RecordMemberView.UserID`, `ImpliedLift`, and `Tags`, and link each member row
       to `/record/members/{id}?season=` without nesting tag buttons inside links.
 - [ ] Render interactive praise/insult tag chips in `web/templates/record.html`, add the shared `tag-explain-dialog`
