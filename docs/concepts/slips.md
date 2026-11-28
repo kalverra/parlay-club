@@ -197,15 +197,15 @@ line, American odds, and a display `selection` generated from those fields.
 - A leg needs a game, except on a slip for a past week, where the game is optional and `OTHER` is the usual market.
 - `OTHER` legs skip the analyzer and grade by hand.
 
-The slip panel draws each leg as a row: a leading media badge when available, then the selection, the odds with a muted
-implied percentage chance (e.g., `-110 (52%)`), a "Research &rarr;" link when the leg has a resolved player or game, the
-model chip, the grade pill, and the result. The grade pill opens that leg's four-pillar breakdown, and its `?` bubble
-opens the standing explanation in Docs; the implied chance and the nfelo model chip carry glossary bubbles. A matched
-player leg shows the player's portrait (or the team logo, or player initials); a team-scoped leg shows the team logo; a
-game `TOTAL` leg shows paired away and home logos; and an unlinked custom or historical leg stays plain text. A `SPREAD`
-or `ML` leg with a fresh nfelo model shows it beside the odds, from that leg's team's side: `nfelo -5.0` for a spread or
-`nfelo 76%` for a moneyline. Totals and props show no chip, and a missing row, a fetch older than 72 hours, or a live
-game leaves it off. `db.Store.CreateLeg` starts every leg `PENDING` and treats an odds value of 0 as -110.
+The slip panel draws each leg as a row: a leading media badge when available, then the selection with an Over/Under
+badge on totals and O/U props, the odds with a muted implied percentage chance (e.g., `-110 (52%)`), a "Research &rarr;"
+link (to `/research/bet` for upcoming non-`OTHER` legs, falling back to player or game research for kicked-off or
+`OTHER` legs), `+ Add` (opening the eligible-slip chooser on other slips), the model chip, the grade pill, and the
+result. The grade pill opens that leg's four-pillar breakdown, and its `?` bubble opens Docs; the implied chance and
+nfelo model chip carry glossary bubbles. A matched player leg shows the player's portrait (or team logo, or initials); a
+team leg shows the team logo; a `TOTAL` leg shows paired away and home logos; an unlinked leg stays plain text. A
+`SPREAD` or `ML` leg with a fresh nfelo model shows it beside the odds (`nfelo -5.0` or `nfelo 76%`), omitted when
+missing, stale (>72h), or live. `db.Store.CreateLeg` starts every leg `PENDING` and treats odds 0 as -110.
 
 The slip's **reference odds** multiply each leg's reference price: the median of the prices the slip members' home books
 carry for that leg via `db.MatchBookOdds` (one price per book, preferring an exact `Line` match and falling back to the
@@ -278,20 +278,23 @@ An unknown game, a kicked-off game, or a game the window hides falls back to the
 
 **Group by** (`?group=`) controls how the detail sections are built:
 
-- **Category (default):** One section per non-empty category (Lines shows paired game lines then team totals; prop
-  categories cluster by player with portrait, position, team, and short buttons like "Over 245.5" or "Yes").
-- **Player:** Combines all prop markets for each player onto one card across categories, with a Game lines section.
-- **Grade:** Buckets individual options into Grade A through Grade F (omitting empty buckets) sorted by score so Over
-  and Under can land in different tiers.
+- **Category (default):** Collapsible sections per non-empty category (Lines shows game lines then team totals; prop
+  categories cluster by player with portrait, position, team). Paired Over/Under rows hoist the shared or split line
+  once in the row header above compact Over and Under buttons.
+- **Player:** Combines all prop markets for each player onto one collapsible card, with a Game lines section.
+- **Grade:** Buckets individual options into collapsible Grade A through Grade F sections (omitting empty buckets)
+  sorted by score so Over and Under can land in different tiers.
 
-Every gradable option carries a sibling Grade A–F popover (outside the pick button/form so tapping it never submits a
-pick) powered by `board.ScoreRows` over cached SQLite signals—including at-limit swap views and `from=board` refreshes,
-with zero external API calls. Option buttons pair price with implied chance (-110 (52%)).
+Sections start collapsed when search is empty and open automatically when searching; `app.js` preserves open section
+keys across HTMX swaps and resets them when the game changes. Every gradable option carries a sibling Grade A–F popover
+and a compact "Research &rarr;" link outside the pick button and form, powered by `board.ScoreRows` over cached SQLite
+signals with zero external API calls. Option buttons pair price with implied chance (-110 (52%)).
 
-Search filters the open game's rows. Sorts are Player (default), Grade, Odds, Line, and Matchup. Grouping, category, and
-sort chips swap `#pick-detail` and out-of-band sync the hidden group, category, and sort inputs for the next search; the
-back link drops game and category, keeps search and window, and swaps `#pick-body`. A live board signal refreshes detail
-and slate on their own URLs so the active view stays put.
+Search filters the open game's rows. Sorts are Popular (default), Grade, Player, Odds, Line, and Matchup. `SortPopular`
+ranks game lines by visibility tier (spread, total, moneyline, team total) and player props by cached player usage,
+market breadth, and line/price prominence, breaking ties by grade and name. Grouping, category, and sort chips swap
+`#pick-detail` and out-of-band sync the hidden inputs for the next search; the back link drops game and category, keeps
+search and window, and swaps `#pick-body`. A live board signal refreshes detail and slate on their own URLs.
 
 When fresh nflverse stats, ESPN injury lists, or open-slip legs are present, `internal/board` passes `BoardSignals`
 through `ApplySignals` and `Detail` to attach suggestion pills (`Row.Badge` on options and up to two `PlayerGroup.Tags`
@@ -365,9 +368,9 @@ synced. When only some games have started, one line says how many are hidden.
 The dock shows "Your picks", `Picked of Limit`, the combined price, and its implied percentage chance (e.g.,
 `1 of 2 · 1.91x (-110) · 52%`), plus a "Slip" button. The combined price uses `parlay.CombinedOdds` and
 `parlay.DecimalToAmerican`, matching the payout card; an empty slip shows only the count and omits the implied chance.
-The button loads `GET /slips/{id}/tray` into a `dialog` sheet showing the viewer's legs (each with odds and muted implied
-chance), remove buttons (or "Locked" after kickoff), progress ("1 of 2"), analyzer warnings for those legs, and "Done"
-or "Review and lock in" at the limit. Both the dock (`GET /slips/{id}/pick/dock`) and tray watch `tray-updated` and
+The button loads `GET /slips/{id}/tray` into a `dialog` sheet showing the viewer's legs (each with an Over/Under
+badge when applicable, odds, and muted implied chance), remove buttons (or "Locked" after kickoff), progress ("1 of 2"),
+analyzer warnings for those legs, and "Done" or "Review and lock in" at the limit. Both the dock (`GET /slips/{id}/pick/dock`) and tray watch `tray-updated` and
 `slip-updated` so any leg change updates the count and price without a reload.
 
 `GET /games` is a 303 to the active group's week, so old links still land somewhere useful. `GET /games/{id}/props`
@@ -397,7 +400,7 @@ for the Record Book.
 Research (`GET /research`) is a primary tab: a slate-wide explorer of every cached bet this week, with a targeted game or
 player sheet below it when a link names one.
 
-- **Explorer and per-bet view:** `board.BuildDualBook` and `board.Explore` filter cached rows to selections quoted by both DraftKings and FanDuel and score them with `analyzer.ScoreLeg`, so browsing, searching, filtering, and sorting spend no paid API credits. When DK and FD lines differ, explorer cards and `/research/bet` render the split-line badge with the viewer's `homeBook` first. Each card opens `/research/bet`, which keys on `db.SameSelection` rather than line or price, so shared links survive drift. An open slip in the `pick` step offers `+ Add to slip`, which posts the normal add-leg route; filters and sorts are in [the routes](../reference/routes.md#research).
+- **Explorer and visual-first per-bet view:** `board.BuildDualBook` and `board.Explore` filter cached rows to selections quoted by both DraftKings and FanDuel and score them with `analyzer.ScoreLeg` with zero paid API credits. Each card links to `/research/bet` (keyed by `db.SameSelection` so links survive drift) and offers "+ Add" via `GET /bets/add-sheet` into `#bet-add-dialog`. `/research/bet` leads with the bet summary (with Over/Under badge) and add-to-slip actions, then a 2-column FD vs DK snapshot (home book first), de-vig edge, 4-pillar bars, and warnings, followed by visual player/team charts, lower-fold full breakdown with a collapsed "Compare all N books" section, and related bets (direct "+ Add" when `slip_id` is an eligible active slip, or `#bet-add-dialog` otherwise); filters and sorts are in [the routes](../reference/routes.md#research).
 - **Sheets:** `GET /research/games/{id}` reads cached injuries and fixes unmatched prop names;
   `GET /research/players/{espnID}` reads the cached game log and shows the matchup strip, L5 and season hit rates, the
   last-5 range and median, and the opposing-defense chart. Logos and portraits fall back to initials or text, and Research

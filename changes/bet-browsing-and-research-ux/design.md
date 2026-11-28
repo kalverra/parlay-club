@@ -267,6 +267,10 @@ and remaining leg slots consistently with `slips.Service`)
   `web/templates/layout.html` and `web/static/app.js`, and wire `+ Add` buttons on research cards, related bets, and
   cross-slip leg mentions to open the chooser (or add directly when picking for an active slip), with tests in
   `internal/web/research_test.go` and `internal/web/slips_test.go`.
-- [ ] Docs: update `docs/concepts/slips.md` and `docs/reference/routes.md` for collapsed groups, popularity-first
+- [x] Docs: update `docs/concepts/slips.md` and `docs/reference/routes.md` for collapsed groups, popularity-first
   sorting, compact O/U controls and slip badges, visual-first bet research, and `GET /bets/add-sheet`, then run
   `good-vibes docs lint`.
+
+## Reviews
+
+- [x] Final review: agy@gemini-4-neon-medium

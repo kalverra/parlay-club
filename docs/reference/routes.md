@@ -189,8 +189,9 @@ The leg form takes `market_type`, `selection`, `team`, `player_name`, `player_id
 props boards. When a player market leg is saved, the handler automatically resolves `player_id` (ESPN athlete ID) and
 `team` via `ResolvePlayerMatch`. The game picker lists the week's games that have not kicked off; a past week lists them
 all and allows no game. When `selection` is blank, the handler builds the display text from the market fields. Each leg
-row on the slip panel includes a "Research &rarr;" link to `/research` when it has a resolved player or game. An
-unreadable number is 422 with "Odds need to be a number.", "Line needs to be a number.", or a similar short message.
+row on the slip panel carries an `OVER`/`UNDER` badge on O/U legs, a "Research &rarr;" link (`/research/bet` for
+upcoming non-`OTHER` legs, falling back to `/research` for kicked-off or `OTHER` legs), and `+ Add` to open
+`GET /bets/add-sheet`. An unreadable number is 422 with "Odds need to be a number.", "Line needs to be a number.", or a similar short message.
 
 `?quick=1` turns the form into a quick add: the target becomes the game card's `#quick-add-{gameID}` element, and a
 successful `POST` answers with the `leg-added` partial instead of the slip panel.
@@ -263,7 +264,7 @@ The board's query contract:
 | `cat`     | detail        | Optional category filter: empty/`All` (default, shows all non-empty sections), `lines`, `passing`, `rushing`, `receiving`, `tds`, or `kicking`. `team_totals` folds into `lines`. |
 | `q`       | slate, detail | Search text. Matches a matchup, team, venue, or roster player on the slate, and a row in the open game. |
 | `win`     | slate         | Kickoff window: `thursday`, `sun_morning`, `sun_early`, `sun_late`, `sun_night`, or `monday`, in Eastern time. Unknown values fall back to any time. |
-| `sort`    | detail        | `player` (default), `grade` (highest score first), `odds` (shortest price first), `line` (highest line first), or `matchup` (strongest suggestion signal and softest opposing defense first). Unknown values resolve to `player`. |
+| `sort`    | detail        | `popular` (default, visibility tier for game lines and usage/breadth/prominence for props), `grade` (highest score first), `player`, `odds` (shortest price first), `line` (highest line first), or `matchup` (strongest suggestion signal and softest opposing defense first). Unknown values resolve to `popular`. |
 
 The slate shows one card per upcoming game, ordered by kickoff, with the matchup, venue, kickoff, spread, total,
 moneyline, an `"N A-grade"` pill when that game has unpicked A-grade legs, and either "Explore N props" or "No props
@@ -280,17 +281,19 @@ without touching the open detail.
 Inside the open game, the detail has a pinned header with the back link, matchup, kickoff, venue, a Research link, and a
 horizontal category chip bar (`All` plus non-empty categories). Below—when the slip is `OPEN` and the viewer has open
 slots—sits the `"Top plays in this game"` strip (up to 3 A-grade legs and 1 same-game A-grade combo), followed by the
-`Group by` switcher (`Category` default, `Player`, `Grade`) and sort chips (`Player`, `Grade`, `Odds`, `Line`,
+`Group by` switcher (`Category` default, `Player`, `Grade`) and sort chips (`Popular`, `Grade`, `Player`, `Odds`, `Line`,
 `Matchup`). Category, `Group by`, and sort chips swap `#pick-detail` and push the full page URL, leaving the slate and
 its scroll alone. `#pick-detail` re-fetches itself on `board-updated`, and a `#pick-detail` swap out-of-band syncs the
 search form's hidden `group`, `cat`, and `sort` (`#pick-group`, `#pick-cat`, `#pick-sort`). The "All games" back link
 drops `game` and `cat`, keeps `q` and `win`, and swaps `#pick-body`.
 
 `GET /slips/{id}/pick/detail` answers with `#pick-detail`: the open game's header, category chips, `Group by` and sort
-chips, and grouped `Sections` (`Lines` or `Players` in `Category`/`Player` modes, or single-side `Options` bucketed
-`Grade A`–`F` in `Grade` mode). `board.ScoreRows` scores every gradable row from cached SQLite signals (even at
-`remainingSlots == 0`) so options render sibling `Grade A–F` `<details>` popovers outside the pick `<form>`. Without
-an open game the route renders the "Pick a game" placeholder, not the slate.
+chips, and collapsible `<details data-section=... data-keep-open=...>` sections (`Lines` or `Players` in `Category`/`Player`
+modes, or `Grade A`–`F` in `Grade` mode; collapsed when `q == ""` and expanded when `q != ""`). Paired `OVER`/`UNDER`
+rows hoist the shared or split line into the row header above compact `Over`/`Under` buttons. `board.ScoreRows` scores
+every gradable row from cached SQLite signals (even at `remainingSlots == 0`) so options render sibling `Grade A–F`
+`<details>` popovers and compact `Research ->` links outside the pick `<form>`. Without an open game the route renders
+the "Pick a game" placeholder, not the slate.
 
 In `Category` and `Player` modes, options use `from=board` (`POST /slips/{id}/legs` with `quick=1&from=board`,
 `DELETE /legs/{id}?from=board`, `PUT /legs/{id}` with `from=board`) and swap `closest .pick-line-group` with the
@@ -342,6 +345,7 @@ opens the same leg form with `game_id` set and `quick=1`.
 | `GET /research`                   | Research tab: the explorer plus a targeted game or player sheet            | Full page, or an HTMX sheet partial |
 | `GET /research/explore`           | `#research-explore` for a search, chip, or sort change                     | Explorer partial with `HX-Push-Url` |
 | `GET /research/bet`               | Per-bet research: cached prices, grade, and the research for the bet's market | Full page; 404 for a selection not on the cached slate |
+| `GET /bets/add-sheet`             | Eligible-slip chooser sheet for a bet selection                            | `bet-add-sheet` partial into `#bet-add-dialog-body`; 404 if missing game or `OTHER` |
 | `GET /research/games/{id}`        | Game research: filtered injuries and prop player match list                | Partial |
 | `GET /research/players/{espnID}`  | Player research: matchup strip, L5 and opp-defense charts, hit rates, usage | Partial |
 | `POST /research/games/{id}/props` | Load one game's props from an explicit tap                                 | Explorer partial with `HX-Push-Url` |
@@ -379,17 +383,16 @@ lines, every game started, or nothing matches. A targeted game with lines but no
 refreshed explorer partial with `HX-Push-Url`. It is the only paid research route; a non-HTMX post is refused by the
 CSRF guard before it reaches the handler.
 
-`GET /research/bet` matches the query's selection to one cached row with `db.SameSelection`, so it ignores `line` and
-`odds`, and answers 404 with a short reason when the game is unknown, has kicked off, or the selection is not on the
-board. The page shows the summary with grade, odds, and implied chance; cached home-book, consensus, and best prices
-with a de-vigged edge when both sides are cached; the full analyzer breakdown; and the research for its market. Player
-props reuse the player sheet scoped to the bet's market and line; game markets (`SPREAD`, `ML`, `TOTAL`, `TEAM_TOTAL`)
-render `TeamBetContextView` with nfelo's model spread and win chances against the market, both teams' EPA ranks, venue,
-weather, and key injuries. Up to five related bets follow, same player first. `?from=` restores the explorer on the back
-link.
+`GET /research/bet` matches the query's selection via `db.SameSelection`, ignoring `line` and `odds`, and answers 404
+when the game is unknown, kicked off, or absent from the board. It renders visual-first: bet summary (`OVER`/`UNDER`
+badge, grade, odds, implied chance, `+ Add to slip`); 2-column FD vs DK snapshot (`homeBook` first), de-vig edge,
+4-pillar bars, and warnings; visual player L5/opp-defense charts or `TeamBetContextView`; lower-fold full breakdown with
+a collapsed `"Compare all N books"` `<details>`; and up to 5 related bets with `Research ->` and `+ Add`.
 
-`+ Add to slip` appears for each `OPEN` slip whose next step is `pick` and whose slate includes the game. Each button
-posts `POST /slips/{id}/legs` with `from=research` and the bet page as `return`; an optional `?slip_id=` narrows it.
+`GET /bets/add-sheet` reads `game_id`, `market` (or `market_type`), `side`, `team`, `player_id`, `player_name`, `line`,
+`odds`, `selection`, and `return` (`safeReturnPath`, default `/research`), returning 404 if `game_id`, `market`, or the
+game is missing or `market=OTHER`. It renders `bet-add-sheet` into `#bet-add-dialog-body` with eligible `OPEN` slips in
+`StepPick` (`POST /slips/{id}/legs` with `quick=1&from=research`), or an empty state linking to `/slips/new?week={weekID}`.
 
 `GET /research/games/{id}` reads cached injuries and rosters and renders injuries filtered to key positions (`QB`, `RB`,
 `WR`, `TE`, `LT`, `OT`, `C`, `CB`, `S`), plus sportsbook prop names against their matched athlete.
