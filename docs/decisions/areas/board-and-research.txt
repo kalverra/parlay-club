@@ -11,6 +11,7 @@
 - [Game-first pick board](../game-first-board.md): Rebuild the pick board as a game-first master-detail screen with a game slate, category tabs, paired over/under line rows grouped by player, and a pick dock.
 - [Team Logos and Player Portraits](../logos-and-portraits.md): Capture official team logo and player headshot URLs from the existing ESPN scoreboard and roster syncs, store them alongside our game and roster records, and surface them in view models for screens where visual identity aids scanning.
 - [Speed up pick board and page loads](../pick-board-performance.md): Pre-index roster lookups per board build, move pick-time odds refreshes off the request path via SSE, and enable concurrent SQLite WAL readers so page loads stay fast.
+- [Pick board grouping, pre-pick grades, and grade breakdown](../pick-board-ux.md): Pick board grouping, pre-pick grades, and grade breakdown
 - [Player research charts and matchup context](../player-research-qol.md): Retain per-game opponent metadata in ESPN and nflverse syncs to render position-specific defense ranks, stat tiles, and shared O/U lines on player Last-5 charts.
 - [Props and research](../props-research.md): Load player props for a game when someone opens it, within the Odds API budget.
 - [Dedicated research view for picking legs](../research-explorer-view.md): Promote Research to a primary navigation tab with a dual-mode bet explorer for search or slate-wide filtering by bet type, grade, and player plus per-bet detail.
