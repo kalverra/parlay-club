@@ -146,6 +146,7 @@ jobs:
             if git diff --quiet "$deployed_sha" "$TARGET_SHA" -- \
               cmd/ internal/ web/ seed/ \
               deploy/litestream.yml deploy/entrypoint.sh \
+              .github/workflows/deploy.yml \
               Dockerfile .dockerignore go.mod go.sum; then
               echo "should_deploy=false" >> "$GITHUB_OUTPUT"
               echo "::notice::no runtime files changed between live revision ${deployed_sha:0:7} and ${TARGET_SHA:0:7}; skipping deploy"
@@ -398,8 +399,9 @@ jobs:
               --min-instances 0 \
               --max-instances 1 \
               --concurrency 80 \
-              --cpu 1 \
-              --memory 512Mi \
+              --cpu 2 \
+              --memory 2Gi \
+              --execution-environment=gen2 \
               --timeout 3600 \
               --cpu-boost \
               --scaling=auto \
