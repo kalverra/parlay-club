@@ -138,6 +138,7 @@ type Sort string
 
 // The ways the pick board can order its rows.
 const (
+	SortPopular Sort = "popular"
 	SortGrade   Sort = "grade"
 	SortPlayer  Sort = "player"
 	SortOdds    Sort = "odds"
@@ -146,12 +147,14 @@ const (
 )
 
 // DetailSorts lists the open game's sort chips in display order. One game has
-// one kickoff, so kickoff drops out and player is the default.
-var DetailSorts = []Sort{SortGrade, SortPlayer, SortOdds, SortLine, SortMatchup}
+// one kickoff, so kickoff drops out and popular is the default.
+var DetailSorts = []Sort{SortPopular, SortGrade, SortPlayer, SortOdds, SortLine, SortMatchup}
 
 // Label is the chip text.
 func (s Sort) Label() string {
 	switch s {
+	case SortPopular:
+		return "Popular"
 	case SortGrade:
 		return "Grade"
 	case SortPlayer:
@@ -1009,6 +1012,7 @@ func Detail(game db.Game, rows []Row, q Query) GameDetail {
 	narrowCat, narrowed := narrowCategory(q.Category)
 	mode := detailSort(q.Sort)
 	groupBy := detailGroupBy(q.GroupBy)
+	breadth := playerMarketBreadth(gameRows)
 	detail := GameDetail{
 		Game:     cardFor(game, gameRows),
 		GroupBy:  groupBy,
@@ -1029,9 +1033,9 @@ func Detail(game db.Game, rows []Row, q Query) GameDetail {
 
 	tabRows := filterRowsByCategory(visible, category)
 	if category == CategoryLines {
-		detail.Lines = lineGroups(game, tabRows, mode, q.Signals)
+		detail.Lines = lineGroups(game, tabRows, mode, q.Signals, breadth)
 	} else {
-		detail.Players = playerGroups(game, tabRows, mode, q.Signals)
+		detail.Players = playerGroups(game, tabRows, mode, q.Signals, breadth)
 	}
 
 	sectionRows := visible
@@ -1040,11 +1044,11 @@ func Detail(game db.Game, rows []Row, q Query) GameDetail {
 	}
 	switch groupBy {
 	case GroupByCategory:
-		detail.Sections = categorySections(game, sectionRows, mode, q.Signals)
+		detail.Sections = categorySections(game, sectionRows, mode, q.Signals, breadth)
 	case GroupByPlayer:
-		detail.Sections = playerSections(game, sectionRows, mode, q.Signals)
+		detail.Sections = playerSections(game, sectionRows, mode, q.Signals, breadth)
 	case GroupByGrade:
-		detail.Sections = gradeSections(game, sectionRows, mode, q.Signals)
+		detail.Sections = gradeSections(game, sectionRows, mode, q.Signals, breadth)
 	}
 	return detail
 }
@@ -1083,7 +1087,13 @@ func filterRowsByCategory(rows []Row, category Category) []Row {
 	return out
 }
 
-func categorySections(game db.Game, rows []Row, mode Sort, signals BoardSignals) []DetailSection {
+func categorySections(
+	game db.Game,
+	rows []Row,
+	mode Sort,
+	signals BoardSignals,
+	breadth map[string]int,
+) []DetailSection {
 	byCategory := make(map[Category][]Row, len(tabCategories))
 	for _, row := range rows {
 		cat := foldCategory(row.Category)
@@ -1105,16 +1115,16 @@ func categorySections(game db.Game, rows []Row, mode Sort, signals BoardSignals)
 			Count: len(catRows),
 		}
 		if cat == CategoryLines {
-			sec.Lines = lineGroups(game, catRows, mode, signals)
+			sec.Lines = lineGroups(game, catRows, mode, signals, breadth)
 		} else {
-			sec.Players = playerGroups(game, catRows, mode, signals)
+			sec.Players = playerGroups(game, catRows, mode, signals, breadth)
 		}
 		sections = append(sections, sec)
 	}
 	return sections
 }
 
-func playerSections(game db.Game, rows []Row, mode Sort, signals BoardSignals) []DetailSection {
+func playerSections(game db.Game, rows []Row, mode Sort, signals BoardSignals, breadth map[string]int) []DetailSection {
 	var playerRows, gameLineRows []Row
 	for _, row := range rows {
 		if isPlayerMarket(row.Market) || row.PlayerName != "" {
@@ -1129,7 +1139,7 @@ func playerSections(game db.Game, rows []Row, mode Sort, signals BoardSignals) [
 			Key:     "players",
 			Label:   "Players",
 			Count:   len(playerRows),
-			Players: playerGroups(game, playerRows, mode, signals),
+			Players: playerGroups(game, playerRows, mode, signals, breadth),
 		})
 	}
 	if len(gameLineRows) > 0 {
@@ -1137,7 +1147,7 @@ func playerSections(game db.Game, rows []Row, mode Sort, signals BoardSignals) [
 			Key:   "lines",
 			Label: "Game lines",
 			Count: len(gameLineRows),
-			Lines: lineGroups(game, gameLineRows, mode, signals),
+			Lines: lineGroups(game, gameLineRows, mode, signals, breadth),
 		})
 	}
 	return sections
@@ -1145,7 +1155,7 @@ func playerSections(game db.Game, rows []Row, mode Sort, signals BoardSignals) [
 
 var gradeBucketOrder = []string{"A", "B", "C", "D", "F"}
 
-func gradeSections(game db.Game, rows []Row, mode Sort, signals BoardSignals) []DetailSection {
+func gradeSections(game db.Game, rows []Row, mode Sort, signals BoardSignals, breadth map[string]int) []DetailSection {
 	buckets := make(map[string][]Row, len(gradeBucketOrder)+1)
 	for _, row := range rows {
 		letter := row.Grade.Letter
@@ -1162,7 +1172,7 @@ func gradeSections(game db.Game, rows []Row, mode Sort, signals BoardSignals) []
 		if len(bucketRows) == 0 {
 			continue
 		}
-		sortGradeRows(game, bucketRows, mode, signals)
+		sortGradeRows(game, bucketRows, mode, signals, breadth)
 		sections = append(sections, DetailSection{
 			Key:     "grade_" + strings.ToLower(letter),
 			Label:   "Grade " + letter,
@@ -1172,7 +1182,7 @@ func gradeSections(game db.Game, rows []Row, mode Sort, signals BoardSignals) []
 		})
 	}
 	if ungraded := buckets[""]; len(ungraded) > 0 {
-		sortGradeRows(game, ungraded, mode, signals)
+		sortGradeRows(game, ungraded, mode, signals, breadth)
 		sections = append(sections, DetailSection{
 			Key:     "ungraded",
 			Label:   "Ungraded",
@@ -1183,13 +1193,19 @@ func gradeSections(game db.Game, rows []Row, mode Sort, signals BoardSignals) []
 	return sections
 }
 
-func sortGradeRows(game db.Game, rows []Row, mode Sort, signals BoardSignals) {
+func sortGradeRows(game db.Game, rows []Row, mode Sort, signals BoardSignals, breadth map[string]int) {
 	sort.SliceStable(rows, func(i, j int) bool {
 		left, right := rows[i], rows[j]
 		if left.Grade.Score != right.Grade.Score {
 			return left.Grade.Score > right.Grade.Score
 		}
 		switch mode {
+		case SortPopular:
+			leftPop := rowPopularityScore(left, signals, breadth)
+			rightPop := rowPopularityScore(right, signals, breadth)
+			if leftPop != rightPop {
+				return leftPop > rightPop
+			}
 		case SortOdds:
 			if a, b := rowDecimalPrice(left), rowDecimalPrice(right); a != b {
 				return a < b
@@ -1286,13 +1302,13 @@ func tabCategory(requested Category, counts map[Category]int) Category {
 }
 
 // detailSort resolves the open game's sort. Kickoff and category drop out, so
-// anything unknown reads as player.
+// anything unknown reads as popular.
 func detailSort(mode Sort) Sort {
 	switch mode {
-	case SortGrade, SortPlayer, SortOdds, SortLine, SortMatchup:
+	case SortPopular, SortGrade, SortPlayer, SortOdds, SortLine, SortMatchup:
 		return mode
 	default:
-		return SortPlayer
+		return SortPopular
 	}
 }
 
@@ -1357,9 +1373,9 @@ func LineGroupForLeg(game db.Game, rows []Row, leg db.Leg, signals BoardSignals)
 
 // lineGroups pairs rows into one group per line and then orders the groups for
 // the detail's sort.
-func lineGroups(game db.Game, rows []Row, mode Sort, signals BoardSignals) []LineGroup {
+func lineGroups(game db.Game, rows []Row, mode Sort, signals BoardSignals, breadth map[string]int) []LineGroup {
 	groups := Pair(game, rows)
-	sortLineGroups(game, groups, mode, signals)
+	sortLineGroups(game, groups, mode, signals, breadth)
 	return groups
 }
 
@@ -1481,10 +1497,19 @@ func lineText(line *float64) string {
 
 // sortLineGroups orders line groups by the detail's sort, falling back to the
 // market order for ties.
-func sortLineGroups(game db.Game, groups []LineGroup, mode Sort, signals BoardSignals) {
+func sortLineGroups(game db.Game, groups []LineGroup, mode Sort, signals BoardSignals, breadth map[string]int) {
 	sort.SliceStable(groups, func(i, j int) bool {
 		left, right := groups[i], groups[j]
 		switch mode {
+		case SortPopular:
+			leftPop := groupPopularityScore(left, signals, breadth)
+			rightPop := groupPopularityScore(right, signals, breadth)
+			if leftPop != rightPop {
+				return leftPop > rightPop
+			}
+			if a, b := groupGradeScore(left), groupGradeScore(right); a != b {
+				return a > b
+			}
 		case SortGrade:
 			if a, b := groupGradeScore(left), groupGradeScore(right); a != b {
 				return a > b
@@ -1596,7 +1621,7 @@ func lineValue(line *float64) float64 {
 
 // playerGroups folds prop rows into one card per player, clustering a player's
 // markets under their name.
-func playerGroups(game db.Game, rows []Row, mode Sort, signals BoardSignals) []PlayerGroup {
+func playerGroups(game db.Game, rows []Row, mode Sort, signals BoardSignals, breadth map[string]int) []PlayerGroup {
 	order := make([]string, 0, len(rows))
 	byPlayer := make(map[string][]Row, len(rows))
 	for _, row := range rows {
@@ -1618,10 +1643,10 @@ func playerGroups(game db.Game, rows []Row, mode Sort, signals BoardSignals) []P
 			HeadshotURL: first.HeadshotURL,
 			Team:        first.Team,
 			Tags:        playerTags(game, playerRows, signals),
-			Lines:       lineGroups(game, playerRows, mode, signals),
+			Lines:       lineGroups(game, playerRows, mode, signals, breadth),
 		})
 	}
-	sortPlayers(game, players, mode, signals)
+	sortPlayers(game, players, mode, signals, breadth)
 	return players
 }
 
@@ -1643,10 +1668,19 @@ func canonicalPlayerKey(playerID, playerName, team string) string {
 
 // sortPlayers orders player cards for the sort, falling back to the player's
 // name.
-func sortPlayers(game db.Game, players []PlayerGroup, mode Sort, signals BoardSignals) {
+func sortPlayers(game db.Game, players []PlayerGroup, mode Sort, signals BoardSignals, breadth map[string]int) {
 	sort.SliceStable(players, func(i, j int) bool {
 		left, right := players[i], players[j]
 		switch mode {
+		case SortPopular:
+			leftPop := playerPopularityScore(left, signals, breadth)
+			rightPop := playerPopularityScore(right, signals, breadth)
+			if leftPop != rightPop {
+				return leftPop > rightPop
+			}
+			if a, b := playerGradeScore(left), playerGradeScore(right); a != b {
+				return a > b
+			}
 		case SortGrade:
 			if a, b := playerGradeScore(left), playerGradeScore(right); a != b {
 				return a > b
@@ -1666,6 +1700,150 @@ func sortPlayers(game db.Game, players []PlayerGroup, mode Sort, signals BoardSi
 		}
 		return playerLess(left, right)
 	})
+}
+
+func playerMarketBreadth(rows []Row) map[string]int {
+	markets := make(map[string]map[string]struct{}, len(rows))
+	for _, row := range rows {
+		if !isPlayerMarket(row.Market) && row.PlayerName == "" {
+			continue
+		}
+		key := playerKey(row)
+		set := markets[key]
+		if set == nil {
+			set = make(map[string]struct{})
+			markets[key] = set
+		}
+		set[row.Market] = struct{}{}
+	}
+	counts := make(map[string]int, len(markets))
+	for key, set := range markets {
+		counts[key] = len(set)
+	}
+	return counts
+}
+
+func gameLinePopularityTier(market string) (int, bool) {
+	switch market {
+	case "SPREAD":
+		return 400, true
+	case "TOTAL":
+		return 300, true
+	case "ML":
+		return 200, true
+	case "TEAM_TOTAL":
+		return 100, true
+	default:
+		return 0, false
+	}
+}
+
+func playerUsagePopularityScore(playerID string, signals BoardSignals) int {
+	if playerID == "" || len(signals.PlayerUsage) == 0 {
+		return 0
+	}
+	usage := signals.PlayerUsage[playerID]
+	if usage == nil {
+		return 0
+	}
+	snap := clamp01(usage.EffectiveSnapAvg())
+	targets := clamp01(usage.EffectiveTargetShare() / 0.30)
+	wopr := clamp01(usage.RecentWOPR() / 0.75)
+	carries := clamp01(usage.AverageCarries() / 20.0)
+	return int(math.Round(snap*20 + targets*15 + wopr*15 + carries*10))
+}
+
+func marketBreadthScore(key string, breadth map[string]int) int {
+	return min(breadth[key]*5, 25)
+}
+
+func lineProminenceScore(market string, line *float64, bestImplied float64) int {
+	if market == "ANYTIME_TD" || line == nil {
+		if bestImplied <= 0 {
+			return 0
+		}
+		return int(math.Round(clamp01(bestImplied) * 15))
+	}
+	scale := 100.0
+	switch market {
+	case "PASS_YDS":
+		scale = 300.0
+	case "RUSH_YDS", "REC_YDS":
+		scale = 100.0
+	case "PASS_ATT":
+		scale = 40.0
+	case "PASS_COMP":
+		scale = 28.0
+	case "RUSH_ATT":
+		scale = 22.0
+	case "RECEPTIONS":
+		scale = 8.0
+	case "PASS_TDS", "RUSH_TDS", "REC_TDS":
+		scale = 3.0
+	case "KICKER_PTS", "FG_MADE":
+		scale = 10.0
+	}
+	return int(math.Round(clamp01(*line/scale) * 15))
+}
+
+func groupBestImpliedProb(group LineGroup) float64 {
+	best := 0.0
+	for _, option := range group.Options {
+		if option.Odds == 0 {
+			continue
+		}
+		if prob := parlay.ImpliedProb(option.Odds); prob > best {
+			best = prob
+		}
+	}
+	return best
+}
+
+func groupPopularityScore(group LineGroup, signals BoardSignals, breadth map[string]int) int {
+	if tier, ok := gameLinePopularityTier(group.Market); ok {
+		return tier
+	}
+	key := canonicalPlayerKey(group.PlayerID, group.Player, group.Team)
+	return playerUsagePopularityScore(group.PlayerID, signals) +
+		marketBreadthScore(key, breadth) +
+		lineProminenceScore(group.Market, group.Line, groupBestImpliedProb(group))
+}
+
+func playerPopularityScore(player PlayerGroup, signals BoardSignals, breadth map[string]int) int {
+	key := canonicalPlayerKey(player.PlayerID, player.Name, player.Team)
+	bestProminence := 0
+	for _, line := range player.Lines {
+		if p := lineProminenceScore(line.Market, line.Line, groupBestImpliedProb(line)); p > bestProminence {
+			bestProminence = p
+		}
+	}
+	return playerUsagePopularityScore(player.PlayerID, signals) +
+		marketBreadthScore(key, breadth) +
+		bestProminence
+}
+
+func rowPopularityScore(row Row, signals BoardSignals, breadth map[string]int) int {
+	if tier, ok := gameLinePopularityTier(row.Market); ok {
+		return tier
+	}
+	key := playerKey(row)
+	implied := 0.0
+	if row.Odds != 0 {
+		implied = parlay.ImpliedProb(row.Odds)
+	}
+	return playerUsagePopularityScore(row.PlayerID, signals) +
+		marketBreadthScore(key, breadth) +
+		lineProminenceScore(row.Market, row.Line, implied)
+}
+
+func clamp01(v float64) float64 {
+	if v < 0 {
+		return 0
+	}
+	if v > 1 {
+		return 1
+	}
+	return v
 }
 
 func playerGradeScore(player PlayerGroup) int {

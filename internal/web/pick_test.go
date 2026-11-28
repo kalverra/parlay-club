@@ -225,17 +225,23 @@ func TestPickBoardShowsSearchChipsSortsAndDock(t *testing.T) {
 	assert.Contains(t, body, "Any time")
 	assert.Contains(t, body, "Group by")
 	assert.Contains(t, body, "Category")
-	assert.Contains(t, body, "Player", "the open game's sort chips start at player")
+	assert.Contains(t, body, "Popular", "the open game's sort chips start at popular")
+	assert.Less(
+		t,
+		strings.Index(body, "sort=popular\""),
+		strings.Index(body, "sort=grade\""),
+		"Popular is first and Grade is second",
+	)
 	assert.Contains(t, body, "BUF -3")
 	assert.Contains(t, body, fmt.Sprintf(
-		`hx-get="/slips/%d/pick/detail?cat=passing&game=%s&sort=player"`, fixture.slip.ID, game.ID))
+		`hx-get="/slips/%d/pick/detail?cat=passing&game=%s&sort=popular"`, fixture.slip.ID, game.ID))
 	assert.Contains(t, body, `name="from" value="board"`)
 	assert.Contains(t, body, `hx-target="closest .pick-line-group"`)
 	assert.Contains(t, body, `id="pick-body"`)
 	assert.Contains(t, body, `id="pick-detail"`)
 	assert.Contains(t, body, `data-group="category"`, "an open game defaults to Category grouping")
 	assert.Contains(t, body, `data-category=""`, "an open game starts on All categories")
-	assert.Contains(t, body, `data-sort="player"`)
+	assert.Contains(t, body, `data-sort="popular"`)
 	assert.Contains(t, body, `hx-trigger="board-updated from:body"`, "a fresh prop sync refreshes the board")
 	assert.Contains(t, body, `hx-sync="this:drop"`, "board-updated refreshes drop duplicate in-flight requests")
 	assert.Contains(t, body, `hx-disinherit="hx-include hx-sync"`, "pick-slate does not pass hx-sync to child controls")
@@ -1208,7 +1214,7 @@ func TestPickOneGameViewPairsBothSides(t *testing.T) {
 	assert.Contains(
 		t,
 		body,
-		fmt.Sprintf(`hx-get="/slips/%d/pick/detail?cat=lines&game=%s&sort=player"`, fixture.slip.ID, game.ID),
+		fmt.Sprintf(`hx-get="/slips/%d/pick/detail?cat=lines&game=%s&sort=popular"`, fixture.slip.ID, game.ID),
 		"the detail's tab and sort links ask for the detail alone",
 	)
 }
@@ -1274,7 +1280,7 @@ func TestPickDetailReturnsOnlyTheOpenGamesDetail(t *testing.T) {
 	assert.NotContains(t, body, `placeholder="Search a team or player"`)
 	assert.Contains(t, body, `id="pick-detail"`)
 	assert.Contains(t, body, `data-category="passing"`)
-	assert.Contains(t, body, `data-sort="player"`)
+	assert.Contains(t, body, `data-sort="popular"`)
 	assert.Contains(t, body, `hx-target="#pick-detail"`)
 	assert.Contains(t, body, "overflow-x-auto", "the tab bar scrolls sideways on a phone")
 
@@ -1325,13 +1331,80 @@ func TestPickDetailLinesTabShowsGameLinesThenTeamTotals(t *testing.T) {
 	require.GreaterOrEqual(t, total, 0, "the Lines tab names its total")
 	require.GreaterOrEqual(t, buffalo, 0, "the team total keeps its team")
 	require.GreaterOrEqual(t, miami, 0, "the team total keeps its team")
-	assert.Less(t, spread, moneyline, "the game lines come first")
-	assert.Less(t, moneyline, total)
-	assert.Less(t, total, buffalo, "team totals come after the game lines")
-	assert.Less(t, buffalo, miami)
+	assert.Less(t, spread, total, "the game lines come first")
+	assert.Less(t, total, moneyline)
+	assert.Less(t, moneyline, buffalo, "team totals come after the game lines")
+	assert.Less(t, moneyline, miami, "team totals come after the game lines")
 	assert.Contains(t, body, "BUF Team Total Over 24.5")
 	assert.Contains(t, body, "MIA Team Total Over 20.5")
 	assert.Contains(t, body, "grid-cols-2", "both sides of a line sit in one row")
+}
+
+func TestPickDetailPopularSortUsesCachedUsageAndShowsPopularThenGradeFirst(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	now := gameKickoff().Add(-time.Hour)
+	game := addGame(t, fixture, gameKickoff())
+	require.NoError(t, fixture.store.UpsertRosterPlayers(t.Context(), []db.RosterPlayer{
+		{AthleteID: "wr-alpha", FullName: "Alpha Reserve", Team: "BUF", Position: "WR", UpdatedAt: now},
+		{AthleteID: "wr-star", FullName: "Zed Star", Team: "BUF", Position: "WR", UpdatedAt: now},
+	}))
+	var playerWeeks []db.NFLversePlayerWeek
+	for wk := 1; wk <= 3; wk++ {
+		playerWeeks = append(playerWeeks,
+			db.NFLversePlayerWeek{
+				Season:      2026,
+				SeasonType:  2,
+				WeekNum:     wk,
+				ESPNID:      "wr-star",
+				Team:        "BUF",
+				OffensePct:  0.92,
+				TargetShare: 0.28,
+				WOPR:        0.70,
+				UpdatedAt:   now,
+			},
+			db.NFLversePlayerWeek{
+				Season:      2026,
+				SeasonType:  2,
+				WeekNum:     wk,
+				ESPNID:      "wr-alpha",
+				Team:        "BUF",
+				OffensePct:  0.25,
+				TargetShare: 0.05,
+				WOPR:        0.10,
+				UpdatedAt:   now,
+			},
+		)
+	}
+	_, err := fixture.store.UpsertNFLversePlayerWeeks(t.Context(), playerWeeks)
+	require.NoError(t, err)
+	require.NoError(t, fixture.store.RecordSync(t.Context(), "nflverse:season:2026", now, nil))
+
+	addPropOdds(t, fixture.store, game.ID, "REC_YDS", "Alpha Reserve", 25.5, -110)
+	addPropOdds(t, fixture.store, game.ID, "REC_YDS", "Zed Star", 74.5, -110)
+	addPropOdds(t, fixture.store, game.ID, "RECEPTIONS", "Zed Star", 5.5, -115)
+	addPropOdds(t, fixture.store, game.ID, "ANYTIME_TD", "Zed Star", 0, 120)
+
+	recorder := pickDetail(t, fixture, "game="+game.ID+"&cat=receiving")
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	body := html.UnescapeString(recorder.Body.String())
+
+	assert.Contains(t, body, `data-sort="popular"`)
+	popularIdx := strings.Index(body, "sort=popular\"")
+	gradeIdx := strings.Index(body, "sort=grade\"")
+	playerIdx := strings.Index(body, "sort=player\"")
+	require.GreaterOrEqual(t, popularIdx, 0)
+	require.GreaterOrEqual(t, gradeIdx, 0)
+	require.GreaterOrEqual(t, playerIdx, 0)
+	assert.Less(t, popularIdx, gradeIdx, "Popular sort chip comes first and Grade second")
+	assert.Less(t, gradeIdx, playerIdx)
+
+	starIdx := strings.Index(body, "Zed Star")
+	alphaIdx := strings.Index(body, "Alpha Reserve")
+	require.GreaterOrEqual(t, starIdx, 0)
+	require.GreaterOrEqual(t, alphaIdx, 0)
+	assert.Less(t, starIdx, alphaIdx, "high-usage multi-market star sorts ahead of reserve")
 }
 
 func TestPickDetailKeepsTheOpenTabAndSortInEveryLink(t *testing.T) {
@@ -1485,8 +1558,12 @@ func TestPickDetailSortsByOddsAndLine(t *testing.T) {
 	}
 
 	player := order("player")
-	assert.Less(t, player[0], player[2], "the default sort is by player name")
+	assert.Less(t, player[0], player[2], "player sort orders alphabetically by name")
 	assert.Less(t, player[2], player[1])
+
+	popular := order("")
+	assert.Less(t, popular[2], popular[1], "popular sort ranks higher primary line first when usage is absent")
+	assert.Less(t, popular[1], popular[0])
 
 	odds := order("odds")
 	assert.Less(t, odds[1], odds[2], "the shortest price comes first")

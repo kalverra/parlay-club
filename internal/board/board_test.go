@@ -439,7 +439,7 @@ func TestDetailOrdersTabsAndFoldsTeamTotals(t *testing.T) {
 
 	detail := board.Detail(g, built, board.Query{Now: now})
 	assert.Equal(t, board.CategoryLines, detail.Category, "an empty category opens Lines")
-	assert.Equal(t, board.SortPlayer, detail.Sort, "player is the default detail sort")
+	assert.Equal(t, board.SortPopular, detail.Sort, "popular is the default detail sort")
 	assert.Equal(t, "401", detail.Game.ID)
 	assert.Equal(t, "MIA @ BUF", detail.Game.Matchup)
 
@@ -485,15 +485,15 @@ func TestDetailLinesShowGameLinesThenTeamTotals(t *testing.T) {
 	assert.Equal(t, "BUF", detail.Lines[0].Options[1].Team)
 	assert.Empty(t, detail.Lines[0].Team, "a game-wide line carries no team")
 
-	assert.Equal(t, "ML", detail.Lines[1].Market)
+	assert.Equal(t, "TOTAL", detail.Lines[1].Market)
 	require.Len(t, detail.Lines[1].Options, 2)
-	assert.Equal(t, "MIA", detail.Lines[1].Options[0].Team)
+	assert.Equal(t, "OVER", detail.Lines[1].Options[0].Side, "Over comes before Under")
+	assert.Equal(t, "UNDER", detail.Lines[1].Options[1].Side)
+	assert.Empty(t, detail.Lines[1].Team)
 
-	assert.Equal(t, "TOTAL", detail.Lines[2].Market)
+	assert.Equal(t, "ML", detail.Lines[2].Market)
 	require.Len(t, detail.Lines[2].Options, 2)
-	assert.Equal(t, "OVER", detail.Lines[2].Options[0].Side, "Over comes before Under")
-	assert.Equal(t, "UNDER", detail.Lines[2].Options[1].Side)
-	assert.Empty(t, detail.Lines[2].Team)
+	assert.Equal(t, "MIA", detail.Lines[2].Options[0].Team)
 
 	assert.Equal(t, "TEAM_TOTAL", detail.Lines[3].Market)
 	assert.Equal(t, "Team total", detail.Lines[3].Label)
@@ -525,12 +525,12 @@ func TestDetailClustersPlayerLinesAcrossMarkets(t *testing.T) {
 	require.Len(t, detail.Players, 2, "each receive picks one player card")
 	assert.Empty(t, detail.Lines)
 
-	assert.Equal(t, "Keon Coleman", detail.Players[0].Name)
-	shakir := detail.Players[1]
+	shakir := detail.Players[0]
 	assert.Equal(t, "Khalil Shakir", shakir.Name)
 	assert.Equal(t, "10", shakir.PlayerID)
 	assert.Equal(t, "WR", shakir.Position)
 	assert.Equal(t, "BUF", shakir.Team)
+	assert.Equal(t, "Keon Coleman", detail.Players[1].Name)
 
 	require.Len(t, shakir.Lines, 2, "yards and receptions share one card")
 	assert.Equal(t, "Rec Yds", shakir.Lines[0].Label)
@@ -604,8 +604,13 @@ func TestDetailSorts(t *testing.T) {
 	now := at(t, 7, 12, 0)
 	built := board.Build(games, rows, nil, "", nil, now)
 
-	player := board.Detail(g, built, board.Query{Sort: board.Sort("kickoff"), Now: now})
-	assert.Equal(t, board.SortPlayer, player.Sort, "kickoff drops out for one game")
+	popular := board.Detail(g, built, board.Query{Sort: board.Sort("kickoff"), Now: now})
+	assert.Equal(t, board.SortPopular, popular.Sort, "kickoff drops out for one game")
+	require.Len(t, popular.Players, 2)
+	assert.Equal(t, "Khalil Shakir", popular.Players[0].Name)
+
+	player := board.Detail(g, built, board.Query{Sort: board.SortPlayer, Now: now})
+	assert.Equal(t, board.SortPlayer, player.Sort)
 	require.Len(t, player.Players, 2)
 	assert.Equal(t, "Keon Coleman", player.Players[0].Name)
 
@@ -1636,8 +1641,124 @@ func TestGroupByAndSortGradeLabels(t *testing.T) {
 	assert.Equal(t, "Grade", board.GroupByGrade.Label())
 	assert.Equal(t, "custom", board.GroupBy("custom").Label())
 
-	assert.Contains(t, board.DetailSorts, board.SortGrade)
+	assert.Equal(t, []board.Sort{
+		board.SortPopular,
+		board.SortGrade,
+		board.SortPlayer,
+		board.SortOdds,
+		board.SortLine,
+		board.SortMatchup,
+	}, board.DetailSorts)
+	assert.Equal(t, "Popular", board.SortPopular.Label())
 	assert.Equal(t, "Grade", board.SortGrade.Label())
+}
+
+func TestDetailPopularSortRanksByUsageBreadthProminenceAndTieBreakers(t *testing.T) {
+	t.Parallel()
+
+	kickoff := at(t, 8, 13, 0)
+	g := game("401", kickoff)
+	now := kickoff.Add(-time.Hour)
+
+	rows := []db.Odds{
+		// Backup WR: 1 market, low line, no usage
+		odds("401", "draftkings", "REC_YDS", "BUF", "Curtis Samuel", "OVER", new(18.5), -110),
+		// Star WR: 3 markets (receiving + anytime TD), high usage
+		odds("401", "draftkings", "REC_YDS", "BUF", "Khalil Shakir", "OVER", new(62.5), -110),
+		odds("401", "draftkings", "RECEPTIONS", "BUF", "Khalil Shakir", "OVER", new(5.5), -115),
+		odds("401", "draftkings", "ANYTIME_TD", "BUF", "Khalil Shakir", "YES", nil, 140),
+		// Mid WR: 1 market, medium line, lower usage than Shakir
+		odds("401", "draftkings", "REC_YDS", "BUF", "Keon Coleman", "OVER", new(45.5), -110),
+		// Two QBs with identical usage/breadth, differing primary line
+		odds("401", "draftkings", "PASS_YDS", "BUF", "Josh Allen", "OVER", new(265.5), -110),
+		odds("401", "draftkings", "PASS_YDS", "MIA", "Tua Tagovailoa", "OVER", new(195.5), -110),
+		// Anytime TDs with no usage, differing implied probability
+		odds("401", "draftkings", "ANYTIME_TD", "MIA", "De'Von Achane", "YES", nil, -150),
+		odds("401", "draftkings", "ANYTIME_TD", "MIA", "Alec Ingold", "YES", nil, 800),
+	}
+	roster := []db.RosterPlayer{
+		{AthleteID: "p-shakir", Team: "BUF", FullName: "Khalil Shakir", Position: "WR"},
+		{AthleteID: "p-coleman", Team: "BUF", FullName: "Keon Coleman", Position: "WR"},
+		{AthleteID: "p-samuel", Team: "BUF", FullName: "Curtis Samuel", Position: "WR"},
+		{AthleteID: "p-allen", Team: "BUF", FullName: "Josh Allen", Position: "QB"},
+		{AthleteID: "p-tua", Team: "MIA", FullName: "Tua Tagovailoa", Position: "QB"},
+		{AthleteID: "p-achane", Team: "MIA", FullName: "De'Von Achane", Position: "RB"},
+		{AthleteID: "p-ingold", Team: "MIA", FullName: "Alec Ingold", Position: "FB"},
+	}
+	built := board.Build([]db.Game{g}, rows, roster, "", nil, now)
+	signals := board.BoardSignals{
+		PlayerUsage: map[string]*analyzer.PlayerUsage{
+			"p-shakir": {
+				Last3SnapAvg:     0.88,
+				Last3TargetShare: 0.27,
+				Last3WOPR:        0.65,
+			},
+			"p-coleman": {
+				Last3SnapAvg:     0.60,
+				Last3TargetShare: 0.14,
+				Last3WOPR:        0.35,
+			},
+		},
+	}
+
+	// Narrowed to Receiving, Shakir still keeps his 3-market breadth from the game.
+	recDetail := board.Detail(g, built, board.Query{
+		Category: board.CategoryReceiving,
+		Now:      now,
+		Signals:  signals,
+	})
+	assert.Equal(t, board.SortPopular, recDetail.Sort)
+	require.Len(t, recDetail.Players, 3)
+	assert.Equal(t, "Khalil Shakir", recDetail.Players[0].Name)
+	assert.Equal(t, "Keon Coleman", recDetail.Players[1].Name)
+	assert.Equal(t, "Curtis Samuel", recDetail.Players[2].Name)
+
+	// Passing: higher primary line (265.5 > 195.5) breaks the tie.
+	passDetail := board.Detail(g, built, board.Query{
+		Category: board.CategoryPassing,
+		Now:      now,
+		Signals:  signals,
+	})
+	require.Len(t, passDetail.Players, 2)
+	assert.Equal(t, "Josh Allen", passDetail.Players[0].Name)
+	assert.Equal(t, "Tua Tagovailoa", passDetail.Players[1].Name)
+
+	// Anytime TD: shorter implied probability (-150 > +800) ranks higher.
+	tdDetail := board.Detail(g, built, board.Query{
+		Category: board.CategoryTDs,
+		Now:      now,
+		Signals:  signals,
+	})
+	require.Len(t, tdDetail.Players, 3)
+	assert.Equal(t, "Khalil Shakir", tdDetail.Players[0].Name)
+	assert.Equal(t, "De'Von Achane", tdDetail.Players[1].Name)
+	assert.Equal(t, "Alec Ingold", tdDetail.Players[2].Name)
+
+	// Equal popularity falls back to Grade.Score descending, then alphabetical name.
+	tiedRows := []db.Odds{
+		odds("401", "draftkings", "REC_YDS", "BUF", "Zay Flowers", "OVER", new(50.5), -110),
+		odds("401", "draftkings", "REC_YDS", "BUF", "Alpha Beta", "OVER", new(50.5), -110),
+		odds("401", "draftkings", "REC_YDS", "BUF", "Mid Grade", "OVER", new(50.5), -110),
+	}
+	tiedBuilt := board.Build([]db.Game{g}, tiedRows, nil, "", nil, now)
+	for i := range tiedBuilt {
+		switch tiedBuilt[i].PlayerName {
+		case "Zay Flowers":
+			tiedBuilt[i].Grade = analyzer.LegGrade{Letter: "A", Score: 92}
+		case "Alpha Beta":
+			tiedBuilt[i].Grade = analyzer.LegGrade{Letter: "B", Score: 80}
+		case "Mid Grade":
+			tiedBuilt[i].Grade = analyzer.LegGrade{Letter: "B", Score: 80}
+		}
+	}
+	tiedDetail := board.Detail(g, tiedBuilt, board.Query{
+		Category: board.CategoryReceiving,
+		Now:      now,
+	})
+	require.Len(t, tiedDetail.Players, 3)
+	assert.Equal(t, "Zay Flowers", tiedDetail.Players[0].Name, "higher grade breaks popularity ties")
+	assert.Equal(t, "Alpha Beta", tiedDetail.Players[1].Name, "alphabetical name breaks remaining ties")
+	assert.Equal(t, "Mid Grade", tiedDetail.Players[2].Name)
 }
 
 func TestScoreRowsPopulatesGradesAndSkipsOtherOrMissingGames(t *testing.T) {
