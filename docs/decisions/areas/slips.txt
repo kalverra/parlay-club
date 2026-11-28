@@ -4,6 +4,7 @@
 
 ## Live
 
+- [Dedicated Live view for locked parlays](../dedicated-live-view.md) (2026-11-28): Dedicated Live view for locked parlays
 - [Dynamic NFL schedule slip management and data loading](../dynamic-nfl-schedule-slips.md): Replace weekday-hardcoded automation with a **game-day-driven** model: the stored NFL scoreboard is the source of truth for when slates exist, when recurring slips should be created, and when morning pre-fill should run.
 - [Auto-grading and Record Book](../grading-record-book.md): Grade legs automatically from ESPN box scores once games end, with hand overrides.
 - [Redesign per-group landing page](../group-landing-overview.md): Turn the per-group entry point into a state-aware group landing page that always renders a coherent overview, elevating active or soon-upcoming slips into a hero spotlight when present.
