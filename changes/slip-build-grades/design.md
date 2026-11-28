@@ -258,7 +258,7 @@ Risk: low (pure deterministic Go logic with zero I/O or schema changes, fully co
       unblended `RawModelProb`, `VegasImpliedProb`, `FairNoVigProb`, and `BuildDiagnostics` (2-word descriptor, max 3
       `SignalPills`, max 2 `ContextRadar` notes tagged priced-in, and optional 1-line `CleanupNudge`) onto `LegGrade`
       and `SlipGrade` in `internal/analyzer`, with comprehensive unit tests.
-- [ ] Add `ClassifyProcessOutcome` (`Clean Hit`, `Tough Beat`, `Total Bailout`, `Book Donation`) in `internal/analyzer`
+- [x] Add `ClassifyProcessOutcome` (`Clean Hit`, `Tough Beat`, `Total Bailout`, `Book Donation`) in `internal/analyzer`
   with tests covering all 4 matrix states and ungraded/push edge cases.
 - [ ] Docs: add `Build grade`, `Correlation tax`, and `Process vs. Outcome` terms to `GLOSSARY.md`.
 

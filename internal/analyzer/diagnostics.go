@@ -121,6 +121,20 @@ func ClassifyProcessOutcome(letter string, won bool) ProcessOutcome {
 	}
 }
 
+// ClassifyProcessResult maps a pre-kickoff grade letter and settled parlay.Result
+// onto the 2x2 Process vs. Outcome matrix. Pushed, voided, pending, and
+// ungraded slips or legs return the zero value.
+func ClassifyProcessResult(letter string, result parlay.Result) ProcessOutcome {
+	switch result {
+	case parlay.Won:
+		return ClassifyProcessOutcome(letter, true)
+	case parlay.Lost:
+		return ClassifyProcessOutcome(letter, false)
+	default:
+		return ProcessOutcome{}
+	}
+}
+
 func displayGradeForScore(score int, cfg V2Config) string {
 	letter := letterForScore(score, cfg)
 	switch letter {

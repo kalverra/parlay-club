@@ -300,18 +300,79 @@ func TestClassifyProcessOutcome(t *testing.T) {
 		won       bool
 		wantKey   string
 		wantLabel string
+		wantTone  string
 	}{
-		{name: "A won is Clean Hit", letter: "A", won: true, wantKey: "clean_hit", wantLabel: "Clean Hit"},
-		{name: "A- won is Clean Hit", letter: "A-", won: true, wantKey: "clean_hit", wantLabel: "Clean Hit"},
-		{name: "B+ lost is Tough Beat", letter: "B+", won: false, wantKey: "tough_beat", wantLabel: "Tough Beat"},
-		{name: "B lost is Tough Beat", letter: "B", won: false, wantKey: "tough_beat", wantLabel: "Tough Beat"},
-		{name: "C won is Total Bailout", letter: "C", won: true, wantKey: "total_bailout", wantLabel: "Total Bailout"},
+		{
+			name:      "A won is Clean Hit",
+			letter:    "A",
+			won:       true,
+			wantKey:   "clean_hit",
+			wantLabel: "Clean Hit",
+			wantTone:  "positive",
+		},
+		{
+			name:      "A- won is Clean Hit",
+			letter:    "A-",
+			won:       true,
+			wantKey:   "clean_hit",
+			wantLabel: "Clean Hit",
+			wantTone:  "positive",
+		},
+		{
+			name:      "B won is Clean Hit",
+			letter:    "B",
+			won:       true,
+			wantKey:   "clean_hit",
+			wantLabel: "Clean Hit",
+			wantTone:  "positive",
+		},
+		{
+			name:      "A lost is Tough Beat",
+			letter:    "A",
+			won:       false,
+			wantKey:   "tough_beat",
+			wantLabel: "Tough Beat",
+			wantTone:  "neutral",
+		},
+		{
+			name:      "B+ lost is Tough Beat",
+			letter:    "B+",
+			won:       false,
+			wantKey:   "tough_beat",
+			wantLabel: "Tough Beat",
+			wantTone:  "neutral",
+		},
+		{
+			name:      "B lost is Tough Beat",
+			letter:    "B",
+			won:       false,
+			wantKey:   "tough_beat",
+			wantLabel: "Tough Beat",
+			wantTone:  "neutral",
+		},
+		{
+			name:      "C won is Total Bailout",
+			letter:    "C",
+			won:       true,
+			wantKey:   "total_bailout",
+			wantLabel: "Total Bailout",
+			wantTone:  "warn",
+		},
 		{
 			name:      "D- won is Total Bailout",
 			letter:    "D-",
 			won:       true,
 			wantKey:   "total_bailout",
 			wantLabel: "Total Bailout",
+			wantTone:  "warn",
+		},
+		{
+			name:      "F won is Total Bailout",
+			letter:    "F",
+			won:       true,
+			wantKey:   "total_bailout",
+			wantLabel: "Total Bailout",
+			wantTone:  "warn",
 		},
 		{
 			name:      "F lost is Book Donation",
@@ -319,15 +380,26 @@ func TestClassifyProcessOutcome(t *testing.T) {
 			won:       false,
 			wantKey:   "book_donation",
 			wantLabel: "Book Donation",
+			wantTone:  "bad",
 		},
 		{
-			name:      "C+ lost is Book Donation",
-			letter:    "c+",
+			name:      "D lost is Book Donation",
+			letter:    "D",
 			won:       false,
 			wantKey:   "book_donation",
 			wantLabel: "Book Donation",
+			wantTone:  "bad",
+		},
+		{
+			name:      "C+ lost is Book Donation",
+			letter:    " c+ ",
+			won:       false,
+			wantKey:   "book_donation",
+			wantLabel: "Book Donation",
+			wantTone:  "bad",
 		},
 		{name: "empty letter is zero", letter: "", won: true, wantKey: "", wantLabel: ""},
+		{name: "whitespace letter is zero", letter: "   ", won: false, wantKey: "", wantLabel: ""},
 		{name: "unknown letter is zero", letter: "X", won: false, wantKey: "", wantLabel: ""},
 	}
 
@@ -338,10 +410,46 @@ func TestClassifyProcessOutcome(t *testing.T) {
 			got := analyzer.ClassifyProcessOutcome(tt.letter, tt.won)
 			assert.Equal(t, tt.wantKey, got.Key)
 			assert.Equal(t, tt.wantLabel, got.Label)
+			assert.Equal(t, tt.wantTone, got.Tone)
 			if tt.wantKey != "" {
 				assert.NotEmpty(t, got.Summary)
 				assertFriendlyV2Tone(t, got.Label, got.Summary)
+			} else {
+				assert.Empty(t, got.Summary)
 			}
+		})
+	}
+}
+
+func TestClassifyProcessResult(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		letter    string
+		result    parlay.Result
+		wantKey   string
+		wantLabel string
+	}{
+		{name: "A won", letter: "A", result: parlay.Won, wantKey: "clean_hit", wantLabel: "Clean Hit"},
+		{name: "B- lost", letter: "B-", result: parlay.Lost, wantKey: "tough_beat", wantLabel: "Tough Beat"},
+		{name: "C won", letter: "C", result: parlay.Won, wantKey: "total_bailout", wantLabel: "Total Bailout"},
+		{name: "F lost", letter: "F", result: parlay.Lost, wantKey: "book_donation", wantLabel: "Book Donation"},
+		{name: "push returns zero", letter: "A", result: parlay.Push, wantKey: "", wantLabel: ""},
+		{name: "bad grade push returns zero", letter: "F", result: parlay.Push, wantKey: "", wantLabel: ""},
+		{name: "void returns zero", letter: "B", result: parlay.Void, wantKey: "", wantLabel: ""},
+		{name: "pending returns zero", letter: "A", result: parlay.Pending, wantKey: "", wantLabel: ""},
+		{name: "needs grading returns zero", letter: "C", result: parlay.NeedsGrading, wantKey: "", wantLabel: ""},
+		{name: "ungraded won returns zero", letter: "", result: parlay.Won, wantKey: "", wantLabel: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := analyzer.ClassifyProcessResult(tt.letter, tt.result)
+			assert.Equal(t, tt.wantKey, got.Key)
+			assert.Equal(t, tt.wantLabel, got.Label)
 		})
 	}
 }
