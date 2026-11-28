@@ -3,8 +3,10 @@ package web_test
 import (
 	"fmt"
 	"html"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +16,7 @@ import (
 
 	"github.com/kalverra/parlay-club/internal/db"
 	"github.com/kalverra/parlay-club/internal/parlay"
+	assets "github.com/kalverra/parlay-club/web"
 )
 
 func TestRecordBookEmptyStateAndInvalidSeason(t *testing.T) {
@@ -121,8 +124,11 @@ func TestRecordBookSeasonSelectionLeaderboardAndGroupIsolation(t *testing.T) {
 	assert.Contains(t, body, `data-tag-explain`)
 	assert.Contains(t, body, `data-tag-label="Parlay Terrorist"`)
 	assert.Contains(t, body, `data-tag-tone="insult"`)
+	assert.Contains(t, body, `data-tag-rule=`)
 	assert.Contains(t, body, `data-tag-label="Heater"`)
 	assert.Contains(t, body, `data-tag-tone="praise"`)
+	assert.Contains(t, body, `<dialog id="tag-explain-dialog" class="leg-sheet"`)
+	assert.Contains(t, body, `data-close-tag-explain`)
 
 	// Tag buttons must never be nested inside member <a> links.
 	for rest := body; ; {
@@ -183,4 +189,33 @@ func TestRecordBookVotesAndEvalGradesFailSoft(t *testing.T) {
 	body := html.UnescapeString(rec.Body.String())
 	assert.Contains(t, body, `data-tag-label="Told You So"`)
 	assert.Contains(t, body, `Won 3 of 3 net-downvoted picks (100.0%).`)
+}
+
+func TestRecordBookMatchesAppJSTagExplainIDs(t *testing.T) {
+	t.Parallel()
+
+	source, err := fs.ReadFile(assets.Static, "static/app.js")
+	require.NoError(t, err)
+
+	matches := regexp.MustCompile(`getElementById\("(tag-explain-[^"]+)"\)`).FindAllStringSubmatch(string(source), -1)
+	require.NotEmpty(t, matches)
+
+	f := newSlipFixture(t, 2)
+	rec := httptest.NewRecorder()
+	f.handler.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/record", nil))
+	require.Equal(t, http.StatusOK, rec.Code)
+	body := rec.Body.String()
+
+	assert.Contains(t, body, `<dialog id="tag-explain-dialog" class="leg-sheet"`)
+	assert.Contains(t, body, `data-close-tag-explain`)
+	for _, match := range matches {
+		id := match[1]
+		assert.Contains(
+			t,
+			body,
+			`id="`+id+`"`,
+			"app.js references #%s which is missing from rendered /record page",
+			id,
+		)
+	}
 }

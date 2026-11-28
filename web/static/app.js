@@ -657,6 +657,15 @@ document.addEventListener("click", (event) => {
     closeBugDialog();
     return;
   }
+  const tagExplainButton = event.target.closest("[data-tag-explain]");
+  if (tagExplainButton) {
+    openTagExplainDialog(tagExplainButton);
+    return;
+  }
+  if (event.target.closest("[data-close-tag-explain]")) {
+    closeTagExplainDialog();
+    return;
+  }
   closeGroupSwitcher(event);
   closeHelpPopovers(event);
 });
@@ -761,6 +770,57 @@ if (betAddDialog) {
     }
   });
   document.body.addEventListener("slip-updated", closeBetAddDialog);
+}
+
+const tagExplainDialog = document.getElementById("tag-explain-dialog");
+const tagExplainTone = document.getElementById("tag-explain-tone");
+const tagExplainTitle = document.getElementById("tag-explain-title");
+const tagExplainBody = document.getElementById("tag-explain-body");
+const tagExplainRule = document.getElementById("tag-explain-rule");
+
+function openTagExplainDialog(button) {
+  if (!tagExplainDialog) {
+    return;
+  }
+  const label = button.getAttribute("data-tag-label") || "";
+  const tone = button.getAttribute("data-tag-tone") || "praise";
+  const explanation = button.getAttribute("data-tag-explanation") || "";
+  const rule = button.getAttribute("data-tag-rule") || "";
+
+  if (tagExplainTone) {
+    tagExplainTone.textContent = tone === "insult" ? "Insult" : "Praise";
+    tagExplainTone.className =
+      "ui-stamp inline-block text-[11px] " +
+      (tone === "insult"
+        ? "bg-danger-soft text-danger-ink"
+        : "bg-positive-soft text-positive-ink");
+  }
+  if (tagExplainTitle) {
+    tagExplainTitle.textContent = label;
+  }
+  if (tagExplainBody) {
+    tagExplainBody.textContent = explanation;
+  }
+  if (tagExplainRule) {
+    tagExplainRule.textContent = rule;
+  }
+  if (!tagExplainDialog.open) {
+    tagExplainDialog.showModal();
+  }
+}
+
+function closeTagExplainDialog() {
+  if (tagExplainDialog && tagExplainDialog.open) {
+    tagExplainDialog.close();
+  }
+}
+
+if (tagExplainDialog) {
+  tagExplainDialog.addEventListener("click", (event) => {
+    if (event.target === tagExplainDialog) {
+      closeTagExplainDialog();
+    }
+  });
 }
 
 // HTMX leaves a 4xx response in place by default. Rule refusals answer 422

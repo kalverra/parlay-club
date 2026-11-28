@@ -232,7 +232,7 @@ Risk: low (read-only view updates on `/record` covered by handler HTML tests and
 - [x] Wire `EvalCache.GetOrCompute` leg grades (fail-soft) and `VotesForGroupSeason` into `GET /record` in
       `internal/web/record.go`, populate `RecordMemberView.UserID`, `ImpliedLift`, and `Tags`, and link each member row
       to `/record/members/{id}?season=` without nesting tag buttons inside links.
-- [ ] Render interactive praise/insult tag chips in `web/templates/record.html`, add the shared `tag-explain-dialog`
+- [x] Render interactive praise/insult tag chips in `web/templates/record.html`, add the shared `tag-explain-dialog`
       bottom sheet in `web/templates/partials.html` with its delegated click handler in `web/static/app.js`, and add
       handler tests in `internal/web/record_test.go`.
 

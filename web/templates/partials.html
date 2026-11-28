@@ -3204,3 +3204,33 @@
   {{end}}
 </div>
 {{end}}
+
+{{define "tag-explain-dialog"}}
+<dialog id="tag-explain-dialog" class="leg-sheet" aria-labelledby="tag-explain-title">
+  <div
+    class="rounded-t-2xl border border-line bg-surface p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] text-ink shadow-2xl sm:rounded-2xl"
+  >
+    <div class="flex items-start justify-between gap-3">
+      <div class="space-y-1.5">
+        <span
+          id="tag-explain-tone"
+          class="ui-stamp inline-block text-[11px]"
+        ></span>
+        <h2 id="tag-explain-title" class="font-display text-lg font-semibold"></h2>
+      </div>
+      <button
+        type="button"
+        class="rounded-md border border-line-strong px-2 py-1 text-xs text-ink-muted hover:bg-surface-2 hover:text-ink"
+        data-close-tag-explain
+      >
+        Close
+      </button>
+    </div>
+    <p id="tag-explain-body" class="mt-3 text-sm text-ink"></p>
+    <div class="mt-3 rounded-lg border border-line bg-surface-2 px-3 py-2 text-xs text-ink-muted">
+      <span class="font-semibold text-ink">Rule:</span>
+      <span id="tag-explain-rule"></span>
+    </div>
+  </div>
+</dialog>
+{{end}}
