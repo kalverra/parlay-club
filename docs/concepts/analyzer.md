@@ -16,10 +16,10 @@ computes deterministic calibrated A–F quality grades for each leg and for the 
 every leg stays allowed.
 
 `internal/analyzer`'s rule and grading functions (`AnalyzeSlip`, `EvaluateSlip`, `ScoreLeg`, `ScoreSlip`) are pure Go:
-no I/O, no clock, no network calls, and no LLM. The active engine is `EngineV2` (the calibrated four-pillar model,
-with `EngineV1` kept for side-by-side comparison and offline evals). Grading runs on every slip and tray render, and
-the same engine powers board-wide A-grade highlights using cached SQLite data only. Exact thresholds, pillar weights,
-overlay rules, and the v1 rubric live in [Analyzer rules](../reference/analyzer-rules.md).
+no I/O, no clock, no network calls, and no LLM. The active engine is `EngineV2` (the calibrated four-pillar model, with
+`EngineV1` kept for side-by-side comparison and offline evals). Grading runs on every slip and tray render, and the same
+engine powers board-wide A-grade highlights using cached SQLite data only. Exact thresholds, pillar weights, overlay
+rules, and the v1 rubric live in [Analyzer rules](../reference/analyzer-rules.md).
 
 ```mermaid
 flowchart LR
@@ -47,21 +47,21 @@ Pre-kickoff grades are **Build Grades**, not win predictions. Every letter (A–
 two-word structural descriptor (Clean Build, Tight Build, Longshot, Vig Trap, Self-Sabotage) that names what drives the
 ticket's construction quality—price vig, leg synergy, hit-rate realism, or priced-in context.
 
-To keep pre-kickoff grades visually distinct from settled outcomes across all four themes, `.grade-a` maps to cool teal
+To keep pre-kickoff grades visually distinct from settled outcomes across all three themes, `.grade-a` maps to cool teal
 (`--grade-clean`) and `.grade-b` maps to slate/blue (`--grade-solid`), while C uses amber and D/F use coral/rose.
 `--positive` green is reserved strictly for actual settled wins and Clean Hit outcome stamps.
 
 Across the slip panel, pick tray, highlights strip, and bet research view, `GradeView` (`internal/web/analyzer.go`)
 delivers diagnostics in three phone-first (375px) layers:
 
-- **Layer 1 (Glance Card)**: Displays the Build Grade and two-word descriptor, human-first hit probability (e.g.,
-  "13% implied · ~1 in 8", tagged Vegas Implied) ahead of secondary American odds, and up to three clickable Signal Pills
+- **Layer 1 (Glance Card)**: Displays the Build Grade and two-word descriptor, human-first hit probability (e.g., "13%
+  implied · ~1 in 8", tagged Vegas Implied) ahead of secondary American odds, and up to three clickable Signal Pills
   (Conflicting Legs, Heavy SGP Tax, Leg Bloat, Priced-In Narrative, and related structural flags).
-- **Layer 2 (Breakdown Drawer)**: Tapping the Build Grade or any Signal Pill opens a `.leg-sheet` `<dialog>` drawer
-  with a pinned one-sentence Ground-Rule Banner, a separated **Market Reality** box (Vegas Implied, Fair No-Vig Est.,
-  and sportsbook hold) vs. **Slip Diagnostics** (Hit-Rate Realism bar from Likely Side / Coin Flip to Lottery Ticket,
-  Leg Synergy, The Book's Cut / Correlation Tax, Context Radar features tagged Already in the line or Likely Priced In,
-  and the four 0–100 pillar meters), plus an optional one-line "What would make this cleaner?" cleanup nudge.
+- **Layer 2 (Breakdown Drawer)**: Tapping the Build Grade or any Signal Pill opens a `.leg-sheet` `<dialog>` drawer with
+  a pinned one-sentence Ground-Rule Banner, a separated **Market Reality** box (Vegas Implied, Fair No-Vig Est., and
+  sportsbook hold) vs. **Slip Diagnostics** (Hit-Rate Realism bar from Likely Side / Coin Flip to Lottery Ticket, Leg
+  Synergy, The Book's Cut / Correlation Tax, Context Radar features tagged Already in the line or Likely Priced In, and
+  the four 0–100 pillar meters), plus an optional one-line "What would make this cleaner?" cleanup nudge.
 - **Layer 3 (Inline "Why?" Popovers & Model Card)**: Inline `<details>` triggers inside Layer 2 explain Implied
   Probability, Vig / Hold, Correlation Tax, and Already in the line using the live slip's actual numbers, paired with a
   four-bullet Model Card ("How this grade works").
@@ -168,10 +168,10 @@ market anchor (up to 95%) and surfaces the "High uncertainty" badge in the UI.
 
 ### Rolling up the four pillars
 
-Legs combine Price & Vig (40%), Stability & Tail Risk (25%), and Context & Traps (35%)—or 30/15/25/30% when
-single-leg script alignment applies. Slips combine Price & Vig (35%), Script Fit (25%), Stability & Tail Risk (20%),
-and Context & Traps (20%). Severe Danger overlays, negative correlation (< 0.85), or extreme vig cap scores below B,
-while Warn conflicts or uncertainty cap slips below A. Exact band ranges and caps live in
+Legs combine Price & Vig (40%), Stability & Tail Risk (25%), and Context & Traps (35%)—or 30/15/25/30% when single-leg
+script alignment applies. Slips combine Price & Vig (35%), Script Fit (25%), Stability & Tail Risk (20%), and Context &
+Traps (20%). Severe Danger overlays, negative correlation (< 0.85), or extreme vig cap scores below B, while Warn
+conflicts or uncertainty cap slips below A. Exact band ranges and caps live in
 [Analyzer rules](../reference/analyzer-rules.md#pillar-rollup-weights-and-score-caps).
 
 ## Cleanest builds (highlights)
@@ -180,21 +180,21 @@ While a slip is open and the viewer still needs picks, `board.SelectHighlights` 
 surfaces top A-grade plays ("Cleanest builds on the board") from cached SQLite odds using `LoadBoardSignals` and
 non-green Build Grade tokens, without triggering any external API calls:
 
-- **Leg selection**: scores unpicked, non-OTHER board rows with `ScoreLeg`, keeps A-grade legs (`>= 85`), ranks by
-  score and payout, and caps at 1 leg per player (up to 3 legs).
-- **Bounded combo generation**: evaluates conflict-free 2- and 3-leg combos from up to 12 top A-grade legs (plus up
-  to 6 B-grade same-game partners), keeping A-grade combos (up to 2 on the hub, or 1 same-game combo in `#pick-detail`).
+- **Leg selection**: scores unpicked, non-OTHER board rows with `ScoreLeg`, keeps A-grade legs (`>= 85`), ranks by score
+  and payout, and caps at 1 leg per player (up to 3 legs).
+- **Bounded combo generation**: evaluates conflict-free 2- and 3-leg combos from up to 12 top A-grade legs (plus up to 6
+  B-grade same-game partners), keeping A-grade combos (up to 2 on the hub, or 1 same-game combo in `#pick-detail`).
 - **Consistency**: because highlights run through `ActiveEngine`, adding a highlighted leg or combo lands on the slip
   with the exact same grade. When nothing reaches A, the strip hides cleanly.
 
 ## Post-game Process vs. Outcome
 
 Once a slip settles, pre-kickoff Build Grades pair with the settled Won or Lost result on `/slips/{id}`, `/record`, and
-`/record/members/{id}` to separate decision quality from variance: A–B grades yield **Clean Hit** (Won) or **Tough
-Beat** (Lost), while C–F grades yield **Total Bailout** (Won) or **Book Donation** (Lost). `ClassifyProcessOutcome` and
-`ClassifyProcessResult` (`internal/analyzer/diagnostics.go`) compute this 2×2 matrix from leak-free pre-kickoff grades
-reconstructed by `SuiteReport.SlipGrades` (`internal/eval/metrics.go`), leaving pushed, voided, pending, and ungraded
-entries unclassified.
+`/record/members/{id}` to separate decision quality from variance: A–B grades yield **Clean Hit** (Won) or
+**Tough Beat** (Lost), while C–F grades yield **Total Bailout** (Won) or **Book Donation** (Lost).
+`ClassifyProcessOutcome` and `ClassifyProcessResult` (`internal/analyzer/diagnostics.go`) compute this 2×2 matrix from
+leak-free pre-kickoff grades reconstructed by `SuiteReport.SlipGrades` (`internal/eval/metrics.go`), leaving pushed,
+voided, pending, and ungraded entries unclassified.
 
 ### Offline evals and engine comparison
 

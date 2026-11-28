@@ -66,7 +66,7 @@ func TestBuildGradeThemeTokensAndClasses(t *testing.T) {
 	require.NoError(t, err)
 	compiledCSS := string(compiledRaw)
 
-	themes := []string{"paper-turf", "redzone", "almanac", "connor-mode"}
+	themes := []string{"paper-turf", "redzone", "almanac"}
 	requiredTokens := []string{
 		"--grade-clean",
 		"--grade-clean-soft",

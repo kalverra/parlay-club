@@ -584,9 +584,6 @@ const themeCatalog = [
   { id: "paper-turf", label: "Paper & Turf", shortLabel: "Paper", colorScheme: "dark", themeColor: "#0f1e16" },
   { id: "redzone", label: "RedZone", shortLabel: "RedZone", colorScheme: "dark", themeColor: "#090a0c" },
   { id: "almanac", label: "90s Almanac", shortLabel: "Almanac", colorScheme: "light", themeColor: "#fff8e7" },
-  // BEGIN Connor Mode
-  { id: "connor-mode", label: "Connor Mode", shortLabel: "Connor", colorScheme: "light", themeColor: "#e40303" },
-  // END Connor Mode
 ];
 
 function applyTheme(theme) {
@@ -615,14 +612,6 @@ function applyTheme(theme) {
     cookie += "; Secure";
   }
   document.cookie = cookie;
-
-  // BEGIN Connor Mode
-  // Marks pc_theme as an explicit switcher choice. The server uses this to
-  // tell a real preference apart from a cookie that predates Connor Mode.
-  document.cookie = `pc_theme_chosen=1; Path=/; Max-Age=31536000; SameSite=Lax${
-    window.location.protocol === "https:" ? "; Secure" : ""
-  }`;
-  // END Connor Mode
 }
 
 function cycleTheme() {

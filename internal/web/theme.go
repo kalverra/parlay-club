@@ -53,13 +53,6 @@ var allowedThemes = map[ThemeID]Theme{
 	},
 }
 
-// personalThemeFor lets a temporary per-person theme claim a request before the
-// shared cookie logic. It is a variable so a theme can register itself from its
-// own file and be removed by deleting that file.
-var personalThemeFor = func(*http.Request, string) (Theme, bool) {
-	return Theme{}, false
-}
-
 // themeOrDefault returns the allowlisted theme for id, falling back to
 // ThemePaperTurf for empty or unrecognized IDs.
 func themeOrDefault(id ThemeID) Theme {
@@ -77,19 +70,6 @@ func ThemeFromRequest(r *http.Request) Theme {
 		return defaultTheme
 	}
 	return themeOrDefault(id)
-}
-
-// ThemeForRequest returns the theme for a signed-in person's page. A personal
-// theme registered by a temporary easter egg wins first, then an explicit
-// pc_theme cookie, then ThemePaperTurf.
-func ThemeForRequest(r *http.Request, name string) Theme {
-	if t, ok := personalThemeFor(r, name); ok {
-		return t
-	}
-	if id, ok := cookieThemeID(r); ok {
-		return themeOrDefault(id)
-	}
-	return defaultTheme
 }
 
 // cookieThemeID reports the allowlisted theme ID stored in the pc_theme

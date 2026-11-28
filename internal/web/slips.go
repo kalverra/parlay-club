@@ -3155,7 +3155,7 @@ func (h *slipHandlers) pageWithTab(r *http.Request, title string, tab Tab) Page 
 	if user, ok := h.user(r.Context()); ok {
 		view := NewUser(user)
 		page.User = &view
-		page.Theme = ThemeForRequest(r, user.Name).ID
+		page.Theme = ThemeFromRequest(r).ID
 	}
 	if h.deps.GroupsFrom != nil {
 		page.Groups = h.deps.GroupsFrom(r.Context())

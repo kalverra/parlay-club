@@ -455,7 +455,7 @@ func (r *sandboxRuntime) controls(w http.ResponseWriter, req *http.Request) {
 			Title:  "Sandbox",
 			User:   &view,
 			Groups: groups.Options(req.Context()),
-			Theme:  webui.ThemeForRequest(req, user.Name).ID,
+			Theme:  webui.ThemeFromRequest(req).ID,
 		},
 		Stage:        string(state.Stage),
 		WhenISO:      state.Now.UTC().Format(time.RFC3339),

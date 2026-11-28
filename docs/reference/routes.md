@@ -534,8 +534,7 @@ confirmation even when GitHub is unconfigured or unreachable.
 ### `pc_theme` cookie
 
 Every full-page handler reads the `pc_theme` cookie and sets `Page.Theme` before rendering `web/templates/layout.html`.
-Handlers that know the signed-in user call `web.ThemeForRequest(r, user.Name)`; sign-in pages call
-`web.ThemeFromRequest(r)`. The cookie is an unsigned UI preference validated against an allowlist in
+Handlers call `web.ThemeFromRequest(r)`. The cookie is an unsigned UI preference validated against an allowlist in
 `internal/web/theme.go`:
 
 | `pc_theme` value | Label | `color-scheme` | `theme-color` | Notes |
@@ -543,21 +542,10 @@ Handlers that know the signed-in user call `web.ThemeForRequest(r, user.Name)`; 
 | `paper-turf` | Paper & Turf | `dark` | `#0f1e16` | Default. Deep stadium felt chrome with cream ticket cards. |
 | `redzone` | RedZone | `dark` | `#090a0c` | Obsidian broadcast dark with turf green and gold accents. |
 | `almanac` | 90s Almanac | `light` | `#fff8e7` | Warm cream sports almanac with crisp white cards and ink borders. |
-| `connor-mode` | Connor Mode | `light` | `#e40303` | Temporary joke theme. Full-saturation pride flags, parade-poster type, and unicorns. |
 
 Missing or unrecognized cookie values fall back to `paper-turf`. `layout.html` renders
 `data-theme="{{.ActiveTheme.ID}}"` on `<html>` along with `<meta name="color-scheme">` and `<meta name="theme-color">`,
 so SSR pages paint with the chosen theme immediately and without flicker.
-
-<!-- BEGIN Connor Mode -->
-Temporary themes register themselves from their own file. Connor Mode is a temporary joke theme. A page for a person
-whose first name is `Connor` falls back to `connor-mode` instead. That personal default lives in `connorPersonalTheme`
-(`internal/web/connor_mode.go`) and re-applies on every request, so it is not a one-time choice. A `pc_theme` cookie
-that predates Connor Mode is ignored for Connor unless the browser also carries the `pc_theme_chosen=1` marker, which
-the theme switcher writes. That keeps an old saved theme from hiding his default while still letting him switch away on
-purpose. Everyone else keeps their existing `pc_theme` preference. Run `scripts/remove-connor-mode.sh` to delete the
-theme, its tests, and its marked code blocks.
-<!-- END Connor Mode -->
 
 Clicking `[data-theme-cycle]` in the header cycles through the theme catalog in `web/static/app.js`, updates
 `document.documentElement.dataset.theme` and the meta tags in place, and writes `pc_theme=<id>` with

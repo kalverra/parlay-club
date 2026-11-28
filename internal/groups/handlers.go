@@ -269,7 +269,7 @@ func (h *Handlers) renderGroups(w http.ResponseWriter, r *http.Request, user db.
 			Title:  "Groups",
 			User:   &view,
 			Groups: Options(r.Context()),
-			Theme:  webui.ThemeForRequest(r, user.Name).ID,
+			Theme:  webui.ThemeFromRequest(r).ID,
 		},
 		Cards: cards,
 	}
@@ -321,7 +321,7 @@ func (h *Handlers) joinForm(w http.ResponseWriter, r *http.Request) {
 			Title:  "Join " + group.Name,
 			User:   &view,
 			Groups: Options(r.Context()),
-			Theme:  webui.ThemeForRequest(r, user.Name).ID,
+			Theme:  webui.ThemeFromRequest(r).ID,
 		},
 		GroupName: group.Name,
 		Members:   memberViews(members),
