@@ -10,6 +10,7 @@
 - [Implied percentage chances on legs and parlays](../implied-chance-display.md): Compute implied win percentages from displayed leg and combined parlay decimal odds in the math module and show them beside odds across slip and board views.
 - [Live parlay and leg progress bars with live hit probability](../live-parlay-progress.md): Poll live ESPN game clocks and in-progress box scores for active slip legs to render deterministic leg progress bars and live parlay hit probabilities.
 - [Smooth out one-off slip flow](../one-off-slip-flow.md): Keep the single-slip redirect for normal weeks, and expose a clean, optional path to add a one-off slip directly on the slip hub.
+- [Record Book member tags and bet history](../record-book-tags-and-member-history.md): Record Book member tags and bet history
 - [Redesign slip creation UX](../slip-creation-ux.md): Unify slip creation around upcoming weeks and split the scope controls by slip type: recurring slips pick a repeating slate rule, while one-off slips pick exact games with slate shortcuts.
 - [Live shared slips](../slips-live.md): Add shared slips: each week has one or more slips, each slip has members, and every member adds the same number of legs.
 - [Thursday Night Games and Multi-Slip Events](../thursday-and-multi-slips.md): Extend the game slate to ingest Thursday night football games.

@@ -11,5 +11,5 @@
 - [Export](areas/export.txt): Sportsbook bet-slip export and DraftKings or FanDuel deep-link enrichment. 3 live.
 - [Infra-and-dev](areas/infra-and-dev.txt): Cloud Run deployment, GCP cost controls, hot-reload local dev, and the offline Sunday sandbox. 6 live.
 - [Odds-and-refresh](areas/odds-and-refresh.txt): Odds and prop API providers, raw response archiving, morning pre-fill triggers, and refresh scheduling. 7 live.
-- [Slips](areas/slips.txt): Shared parlay slips, weekly and dynamic game-day schedules, slip creation UX, live progress, and the Record Book. 10 live.
+- [Slips](areas/slips.txt): Shared parlay slips, weekly and dynamic game-day schedules, slip creation UX, live progress, and the Record Book. 11 live.
 - [Ui-and-notifications](areas/ui-and-notifications.txt): Installable PWA shell, Web Push reminders, semantic site themes, FAQ and Docs hub, and in-app bug reports. 4 live.
