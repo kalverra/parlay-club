@@ -288,5 +288,5 @@ button/popover separation are only partially verified by HTML/handler tests)
       Tailwind CSS if needed) to render the `Group by` switcher (`Category` default, `Player`, `Grade`), `All` +
       category filter chips, grouped sections, and sibling pre-pick `Grade A–F` popovers anchored to full card width at
       375px, with template/DOM assertions in `internal/web/pick_test.go`.
-- [ ] Docs: update `docs/concepts/slips.md` (staying within its line budget) and `docs/reference/routes.md` to document
+- [x] Docs: update `docs/concepts/slips.md` (staying within its line budget) and `docs/reference/routes.md` to document
   default pick-board grouping (`?group=`), pre-pick grades, and `from=detail`.

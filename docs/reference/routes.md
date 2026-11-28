@@ -158,9 +158,9 @@ slip outside every group is 404.
 | `POST /slips`                              | Create a one-off `custom` slip (`mode=one_off` with upcoming `week_id` and `game_id`s) or a recurring schedule (`mode=recurring` with repeating `slate_scope`) | 303 to `/slips/{id}` (or `/groups/{id}/week` for recurring with no upcoming match); 422 on validation errors. |
 | `GET /slips/{id}`                          | Full slip page                                                  | Full page, with the payout form at the default stake. |
 | `GET /slips/{id}/pick`                     | Focused pick board: the game slate, the open game's picks, and the dock | Full page; no bottom bar. |
-| `GET /slips/{id}/pick/results`             | `#pick-body` for a search, window, or game change                | Optional `?q=`, `?cat=`, `?win=`, `?sort=`, and `?game=`; `#pick-body` partial. |
-| `GET /slips/{id}/pick/detail`              | `#pick-detail` for a tab or sort change                          | Optional `?q=`, `?cat=`, `?sort=`, `?win=`, and `?game=`; `#pick-detail` partial, or the "Pick a game" placeholder without an open game. |
-| `POST /slips/{id}/pick/refresh`            | Force a pick-time odds refresh on an `OPEN` slip                 | Optional `game`, `q`, `cat`, `win`, `sort`; `#pick-body` partial (2m cooldown). Returns 422 when the slip is not `OPEN`. |
+| `GET /slips/{id}/pick/results`             | `#pick-body` for a search, window, or game change                | Optional `?q=`, `?group=`, `?cat=`, `?win=`, `?sort=`, and `?game=`; `#pick-body` partial. |
+| `GET /slips/{id}/pick/detail`              | `#pick-detail` for a group, category, or sort change             | Optional `?q=`, `?group=`, `?cat=`, `?sort=`, `?win=`, and `?game=`; `#pick-detail` partial, or the "Pick a game" placeholder without an open game. |
+| `POST /slips/{id}/pick/refresh`            | Force a pick-time odds refresh on an `OPEN` slip                 | Optional `game`, `q`, `group`, `cat`, `win`, `sort`; `#pick-body` partial (2m cooldown). Returns 422 when the slip is not `OPEN`. |
 | `GET /slips/{id}/pick/swap`                | Swap sheet for one unpicked row                                 | Row fields in the query; swap partial. |
 | `GET /slips/{id}/pick/dock`                | The fixed dock's count and combined price                       | Dock partial. Refreshes on `tray-updated` and `slip-updated`. |
 | `GET /slips/{id}/tray`                     | The viewer's picks, warnings, and one action, loaded into the dock's sheet | Tray partial. Refreshes on `tray-updated` and `slip-updated`. |
@@ -171,13 +171,13 @@ slip outside every group is 404.
 | `POST /slips/{id}/members`                 | Add a group member from `user_id`                               | Panel partial. |
 | `DELETE /slips/{id}/members/{userID}`      | Remove a member                                                 | Panel partial. |
 | `PATCH /slips/{id}`                        | Change `name` or `legs_per_member`                              | Panel partial. |
-| `POST /slips/{id}/legs`                    | Add the signed-in member's leg                                  | Panel partial, the `leg-added` partial for a quick add, the refreshed pair row for `from=board` (`Hx-Trigger: tray-updated`), `#pick-body` for `from=pick` (`Hx-Trigger: tray-updated, slip-updated`), or `HX-Redirect` back to `return` (default `/research`) for `from=research` (`Hx-Trigger: slip-updated`). |
+| `POST /slips/{id}/legs`                    | Add the signed-in member's leg                                  | Panel partial, `leg-added` for quick add, refreshed pair row for `from=board` (`Hx-Trigger: tray-updated`), OOB `#pick-detail` for `from=detail` (`Hx-Trigger: tray-updated, slip-updated`), `#pick-body` for `from=pick` (`Hx-Trigger: tray-updated, slip-updated`), or `HX-Redirect` to `return` (default `/research`) for `from=research` (`Hx-Trigger: slip-updated`). |
 | `POST /slips/{id}/legs/batch`              | Atomically add a combo of legs for the signed-in member         | Panel partial (`Hx-Trigger: slip-updated`), `#pick-body` for `from=board` or `from=pick` (`Hx-Trigger: tray-updated, slip-updated`), or `pick-dock` for `from=dock` (`Hx-Trigger: tray-updated, board-updated, slip-updated`). |
 | `GET /legs/{id}/edit`                      | Edit form filled from the leg with player autocomplete          | Leg form partial. |
-| `PUT /legs/{id}`                           | Save the leg's pick fields                                      | Panel partial with `Hx-Trigger: leg-saved`, or the refreshed pair row with `Hx-Trigger: tray-updated` for `from=board` (plus `board-updated` when the leg moves to another line). |
+| `PUT /legs/{id}`                           | Save the leg's pick fields                                      | Panel partial with `Hx-Trigger: leg-saved`, refreshed pair row with `Hx-Trigger: tray-updated` for `from=board` (plus `board-updated` when moving lines), or OOB `#pick-detail` with `Hx-Trigger: tray-updated, slip-updated` for `from=detail`. |
 | `PUT /legs/{id}/result`                    | Grade the leg from an upper-case `result`                       | Panel partial. Any member may grade any leg; an unknown result is 422. |
 | `POST /legs/{id}/vote`                     | Vote on someone else's leg with `value` 1, -1, or 0 to clear   | Panel partial. Only slip members vote, not on their own pick; a closed slip is 422. |
-| `DELETE /legs/{id}`                        | Delete the leg                                                  | Panel partial; `?from=board` answers the refreshed pair row, `?from=tray` the tray. |
+| `DELETE /legs/{id}`                        | Delete the leg                                                  | Panel partial; `?from=board` answers refreshed pair row, `?from=detail` answers OOB `#pick-detail` (`Hx-Trigger: tray-updated, slip-updated`), `?from=tray` answers the tray. |
 | `POST /slips/{id}/lock`                    | Record the signed-in member's lock in                           | Panel partial with `Hx-Trigger: slip-updated`. |
 | `POST /slips/{id}/unlock`                  | Clear every member's lock                                       | Panel partial with `Hx-Trigger: slip-updated`. |
 | `PUT /slips/{id}/wagers/me`                | Save or update the signed-in group member's personal wager      | `slip-wager` partial; invalid inputs answer 422. |
@@ -234,7 +234,7 @@ bar in the header with links to each sibling slip and their status summaries (`(
 | `GET /slips/{id}/pick`          | Focused pick board: the game slate, the open game's picks, and the dock   | Full page, no bottom bar |
 | `GET /slips/{id}/pick/results`  | `#pick-body` for a search, window, or game change                         | `#pick-body` partial |
 | `GET /slips/{id}/pick/slate`    | `#pick-slate` for a live board update                                     | Slate partial |
-| `GET /slips/{id}/pick/detail`   | `#pick-detail` for a tab or sort change                                   | `#pick-detail` partial, or the "Pick a game" placeholder |
+| `GET /slips/{id}/pick/detail`   | `#pick-detail` for a group, category, or sort change                      | `#pick-detail` partial, or the "Pick a game" placeholder |
 | `POST /slips/{id}/pick/refresh` | Manual pick-time odds refresh for an `OPEN` slip with upcoming games      | `#pick-body` partial (2m cooldown); 422 when not `OPEN`  |
 | `GET /slips/{id}/pick/swap`     | Swap sheet for one unpicked row                                          | Swap partial |
 | `GET /slips/{id}/pick/dock`     | The fixed dock's count and combined price                                | Dock partial |
@@ -259,10 +259,11 @@ The board's query contract:
 | Parameter | Screen        | Meaning |
 | --------- | ------------- | ------- |
 | `game`    | slate, detail | The open game. Absent shows the slate. An unknown game, a kicked-off game, or a game the window hides is dropped. |
-| `cat`     | detail        | The open tab: `lines`, `passing`, `rushing`, `receiving`, `tds`, or `kicking`. `team_totals` folds into `lines`. An unknown value opens `lines` when it has rows, otherwise the first tab that does. |
+| `group`   | detail        | Grouping mode: `category` (default), `player`, or `grade`. Empty or unknown values resolve to `category`. |
+| `cat`     | detail        | Optional category filter: empty/`All` (default, shows all non-empty sections), `lines`, `passing`, `rushing`, `receiving`, `tds`, or `kicking`. `team_totals` folds into `lines`. |
 | `q`       | slate, detail | Search text. Matches a matchup, team, venue, or roster player on the slate, and a row in the open game. |
 | `win`     | slate         | Kickoff window: `thursday`, `sun_morning`, `sun_early`, `sun_late`, `sun_night`, or `monday`, in Eastern time. Unknown values fall back to any time. |
-| `sort`    | detail        | `player` (default), `odds` (shortest price first), `line` (highest line first), or `matchup` (strongest suggestion signal and softest opposing defense first). Kickoff, category, and unknown values resolve to `player`. |
+| `sort`    | detail        | `player` (default), `grade` (highest score first), `odds` (shortest price first), `line` (highest line first), or `matchup` (strongest suggestion signal and softest opposing defense first). Unknown values resolve to `player`. |
 
 The slate shows one card per upcoming game, ordered by kickoff, with the matchup, venue, kickoff, spread, total,
 moneyline, an `"N A-grade"` pill when that game has unpicked A-grade legs, and either "Explore N props" or "No props
@@ -277,36 +278,29 @@ covers and appears only when it has rows. A card is a link with a plain `href` t
 without touching the open detail.
 
 Inside the open game, the detail has a pinned header with the back link, matchup, kickoff, venue, a Research link, and a
-horizontal tab bar. Below the pinned header and tab bar—when the slip is `OPEN` and the viewer has open slots—sits the
-`"Top plays in this game"` strip (up to 3 A-grade legs and 1 same-game A-grade combo), followed by the sort chips. The
-tabs are Lines, Passing, Rushing, Receiving, TDs, and Kicking. Team totals fold into Lines, a tab appears only when it
-has rows or is open, and each badge counts its rows, so the Lines badge includes both sides of each line. Tab and sort
-chips swap `#pick-detail` and push the full page URL, leaving the slate and its scroll alone. `#pick-detail` re-fetches
-itself from its resolved tab and sort on `board-updated`, and a tab or sort response out-of-band syncs the search form's
-hidden `cat` and `sort`, so a later search or live refresh keeps the open tab. An unknown category opens Lines when it
-has rows, otherwise the first tab that does; `sort` resolves to `player`, `odds`, `line`, or `matchup`, and anything
-else reads as `player`. The "All games" back link drops `game` and `cat`, keeps `q` and `win`, and swaps `#pick-body`. A
-search filters the open game's rows. An unknown game, a kicked-off game, or a game the window hides falls back to the
-slate instead of a 404.
+horizontal category chip bar (`All` plus non-empty categories). Below—when the slip is `OPEN` and the viewer has open
+slots—sits the `"Top plays in this game"` strip (up to 3 A-grade legs and 1 same-game A-grade combo), followed by the
+`Group by` switcher (`Category` default, `Player`, `Grade`) and sort chips (`Player`, `Grade`, `Odds`, `Line`,
+`Matchup`). Category, `Group by`, and sort chips swap `#pick-detail` and push the full page URL, leaving the slate and
+its scroll alone. `#pick-detail` re-fetches itself on `board-updated`, and a `#pick-detail` swap out-of-band syncs the
+search form's hidden `group`, `cat`, and `sort` (`#pick-group`, `#pick-cat`, `#pick-sort`). The "All games" back link
+drops `game` and `cat`, keeps `q` and `win`, and swaps `#pick-body`.
 
-`GET /slips/{id}/pick/detail` answers with `#pick-detail`: the open game's header, tabs, sort chips, and the active
-tab's rows. The Lines tab shows the game lines first, then team totals grouped by team; a prop tab shows one card per
-player with position and team and every market that player has in the tab. Without an open game the route renders the
-"Pick a game" placeholder, not the slate.
+`GET /slips/{id}/pick/detail` answers with `#pick-detail`: the open game's header, category chips, `Group by` and sort
+chips, and grouped `Sections` (`Lines` or `Players` in `Category`/`Player` modes, or single-side `Options` bucketed
+`Grade A`–`F` in `Grade` mode). `board.ScoreRows` scores every gradable row from cached SQLite signals (even at
+`remainingSlots == 0`) so options render sibling `Grade A–F` `<details>` popovers outside the pick `<form>`. Without
+an open game the route renders the "Pick a game" placeholder, not the slate.
 
-A side of an unpicked line posts `POST /slips/{id}/legs` with `quick=1&from=board`; the picked side sends
-`DELETE /legs/{id}?from=board`. The other side of a line that already holds a pick sends `PUT /legs/{id}` with the new
-side's fields, so the pair keeps one leg. All three answer with the same partial: the refreshed `pick-line-group` for
-that line, both sides carrying their current picks, plus `Hx-Trigger: tray-updated`. The row swaps with
-`hx-target="closest .pick-line-group"` and `hx-swap="outerHTML"`, so only that line changes. A line the board can no
-longer rebuild, such as a hand-typed leg with no stored odds, answers one option for that leg so the row still adds,
-removes, or switches.
+In `Category` and `Player` modes, options use `from=board` (`POST /slips/{id}/legs` with `quick=1&from=board`,
+`DELETE /legs/{id}?from=board`, `PUT /legs/{id}` with `from=board`) and swap `closest .pick-line-group` with the
+refreshed pair row (including pre-pick grade pills via `pickPairRow`) plus `Hx-Trigger: tray-updated`. In `Grade` mode,
+options use `from=detail` (carrying `#pick-q, #pick-cat, #pick-win, #pick-sort, #pick-group, #pick-game`) and return an
+out-of-band `#pick-detail` swap with `Hx-Trigger: tray-updated, slip-updated`.
 
-At the limit, a line with neither side picked opens `GET /slips/{id}/pick/swap`, which lists the viewer's unlocked legs;
-a choice sends `PUT /legs/{old}` with `from=board` and the new pick's fields. The sheet sits outside the row, so its
-form targets the row's `pick-line-...` id instead of `closest`, and the handler answers with the same refreshed pair row
-and `Hx-Trigger: tray-updated`. A switch that moves the leg to another line adds `board-updated` to the trigger, so the
-line left behind loses its stale delete button.
+At the limit, an unpicked option opens `GET /slips/{id}/pick/swap`, which lists unlocked legs; choosing one sends
+`PUT /legs/{old}` with `from=board` (targeting `pick-line-...`) or `from=detail` in `Grade` mode (targeting
+`#pick-detail`). A switch across lines in `from=board` adds `board-updated` to `Hx-Trigger`.
 
 `GET /slips/{id}/tray` renders the viewer's legs with remove buttons (`DELETE /legs/{id}?from=tray`), progress, the
 analyzer warnings that name one of their legs, and one action back to the hub. It loads into the dock's sheet and

@@ -267,33 +267,31 @@ either "Explore N props" or "No props yet", and the open game is highlighted. Ca
 full page URL.
 
 A card opens the detail: a pinned header with paired matchup logos, the matchup, kickoff, venue, a Research link, an
-"All games" back link, and a horizontal tab bar. Below the pinned header and tab bar—when the slip is `OPEN` and the
-viewer has open slots—sits a **"Top plays in this game"** strip (up to 3 A-grade legs and up to 1 same-game A-grade
-parlay combo with one-tap `+ Add`), followed by the sort chips. The header and tab bar stay below the top bar while
-the rows scroll, and the tab bar scrolls sideways on a phone with no visible scrollbar.
+"All games" back link, and a horizontal category chip bar (All plus non-empty categories). Below—when the slip is
+OPEN with open slots—sits **"Top plays in this game"** (up to 3 A-grade legs and 1 same-game A-grade combo with
+one-tap + Add), followed by the **Group by** switcher (Category default, Player, Grade) and sort chips. The header and
+chips stay below the top bar while rows scroll sideways on a phone with no visible scrollbar.
 
-The tabs are Lines, Passing, Rushing, Receiving, TDs, and Kicking. Team totals fold into Lines, so they have no tab of
-their own. A tab appears only when it has rows or is open, and its badge counts the rows it holds, so the Lines count
-includes both sides of a spread and both team totals. An empty or unknown `cat` opens Lines when it has rows, otherwise
-the first tab that does. An unknown game, a kicked-off game, or a game the window hides falls back to the slate instead
-of a 404.
+Category chips are All (default when `cat` is omitted or empty), Lines, Passing, Rushing, Receiving, TDs, and Kicking.
+Team totals fold into Lines; a category chip appears only when it has rows or is active, and its badge counts its rows.
+An unknown game, a kicked-off game, or a game the window hides falls back to the slate instead of 404.
 
-The Lines tab shows the game lines first (spread, moneyline, total) and then team totals grouped by team. Each line sits
-with its sides beside each other: away before home on a spread or moneyline, Over before Under on a total or a prop, and
-the one Yes on an anytime touchdown. A side with no stored price leaves one full-width button instead of a dead half.
+**Group by** (`?group=`) controls how the detail sections are built:
 
-A prop tab clusters that tab's rows by player. One card carries the player's portrait (or initials), name, position, and
-team (with team logo), and every market that player has in the tab sits under it, so Receiving Yards and Receptions
-share a card. Prop buttons stay text-only and read short ("Over 245.5", "Yes") because the card already names the
-player; the pick they post is unchanged. Every pick-board option button (`tap to add`, `tap to remove`, `tap to switch`,
-and `swap in`) pairs its price with its implied percentage chance (e.g., `-110 (52%)`).
+- **Category (default):** One section per non-empty category (Lines shows paired game lines then team totals; prop
+  categories cluster by player with portrait, position, team, and short buttons like "Over 245.5" or "Yes").
+- **Player:** Combines all prop markets for each player onto one card across categories, with a Game lines section.
+- **Grade:** Buckets individual options into Grade A through Grade F (omitting empty buckets) sorted by score so Over
+  and Under can land in different tiers.
 
-The search text also filters the open game's rows. Sorts are player (default), odds (shortest price first), line
-(highest line first), and matchup (strongest suggestion signal and softest opposing defense EPA rank first). Kickoff and
-category drop out because one game has one kickoff. Tab and sort chips swap `#pick-detail` only, so the slate keeps its
-scroll and search; the back link drops `game` and `cat`, keeps `q` and `win`, and swaps the whole body. A live board
-signal refreshes the detail and the slate on their own URLs, so the open tab and sort stay put. A tab or sort swap also
-syncs the search form's hidden tab and sort for the next search.
+Every gradable option carries a sibling Grade A–F popover (outside the pick button/form so tapping it never submits a
+pick) powered by `board.ScoreRows` over cached SQLite signals—including at-limit swap views and `from=board` refreshes,
+with zero external API calls. Option buttons pair price with implied chance (-110 (52%)).
+
+Search filters the open game's rows. Sorts are Player (default), Grade, Odds, Line, and Matchup. Grouping, category, and
+sort chips swap `#pick-detail` and out-of-band sync the hidden group, category, and sort inputs for the next search; the
+back link drops game and category, keeps search and window, and swaps `#pick-body`. A live board signal refreshes detail
+and slate on their own URLs so the active view stays put.
 
 When fresh nflverse stats, ESPN injury lists, or open-slip legs are present, `internal/board` passes `BoardSignals`
 through `ApplySignals` and `Detail` to attach suggestion pills (`Row.Badge` on options and up to two `PlayerGroup.Tags`
@@ -330,16 +328,13 @@ fixed order, never in input order: away then home on a spread or moneyline, Over
 single Yes on an anytime touchdown. A line with no stored price on one side keeps one option, and a line with both sides
 picked, which the custom form can produce, paints both and lets either be removed.
 
-Tapping a side of an unpicked line adds it with the normal add-leg route (`quick=1&from=board`), and tapping a picked
-side removes that leg. Tapping the other side of a line that already holds a pick sends `PUT /legs/{id}` with the new
-side's fields, so the pair holds one leg instead of two; `UpdateLeg` enforces the owner, the lock in, and kickoff on
-both games, and its activity entry reads "Adam changed X to Y". Add, update, and delete answer the same way: the
-refreshed pair row for that line, both sides with their current picks, plus `tray-updated`. Only that row swaps, and the
-dock and the tray refresh without a reload. A switch that moves the leg to another line also fires `board-updated`,
-because the old line's row is still on screen and must lose its delete button. At the limit, a line with neither side
-picked opens "Swap which pick?" and lists the viewer's legs that are not kickoff-locked. Choosing one sends
-`PUT /legs/{old}` with the new pick's fields; a line that already holds a pick switches sides in place and needs no free
-slot.
+Tapping a side of an unpicked line adds it (with `quick=1&from=board`), tapping a picked side removes it, and tapping
+the other side of a picked line sends `PUT /legs/{id}` so the pair holds one leg instead of two (`UpdateLeg` enforces
+owner, lock in, and kickoff). In Category and Player modes, add, update, and delete return the refreshed pair row with
+pre-pick grade pills plus tray-updated, swapping only that row; a switch across lines also fires board-updated. In
+Grade mode (where opposite sides can sit in different grade buckets), options use `from=detail` and return an out-of-band
+`#pick-detail` swap plus tray-updated and slip-updated. At the limit, an unpicked option opens "Swap which pick?" for
+unlocked legs.
 
 When a saved non-`OTHER` leg's `Line` or `Odds` differ from the current board row (`board.Row.Drifted`), `board.BuildDualBook`
 populates `BoardDriftNote` (`Slip ... · now ...`) and `TrayDriftNote` (`Now ...`) so both the board option and the pick
