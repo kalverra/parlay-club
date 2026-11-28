@@ -702,6 +702,11 @@
   display: none;
 }
 
+/* Anchor pre-pick grade popovers to the full line-group card width on mobile. */
+.pick-line-group {
+  position: relative;
+}
+
 /* The leg form is a bottom sheet on phones and a centered card from sm up. */
 dialog.leg-sheet {
   margin: auto 0 0;

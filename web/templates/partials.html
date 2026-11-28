@@ -1762,8 +1762,9 @@
   <div class="space-y-1">
   {{if .PickID}}
       <form
-        hx-delete="/legs/{{.PickID}}?from=board"
-        hx-target="closest .pick-line-group"
+        hx-delete="/legs/{{.PickID}}?from={{if .FromDetail}}detail{{else}}board{{end}}"
+        {{if .FromDetail}}hx-include="#pick-q, #pick-cat, #pick-win, #pick-sort, #pick-group, #pick-game"{{end}}
+        hx-target="{{if .FromDetail}}#pick-detail{{else}}closest .pick-line-group{{end}}"
         hx-swap="outerHTML"
       >
         <button
@@ -1782,10 +1783,11 @@
           {{if .CanRefresh}}
             <form
               hx-put="/legs/{{.PickID}}"
-              hx-target="closest .pick-line-group"
+              {{if .FromDetail}}hx-include="#pick-q, #pick-cat, #pick-win, #pick-sort, #pick-group, #pick-game"{{end}}
+              hx-target="{{if .FromDetail}}#pick-detail{{else}}closest .pick-line-group{{end}}"
               hx-swap="outerHTML"
             >
-              <input type="hidden" name="from" value="board">
+              <input type="hidden" name="from" value="{{if .FromDetail}}detail{{else}}board{{end}}">
               <input type="hidden" name="game_id" value="{{.GameID}}">
               <input type="hidden" name="market_type" value="{{.Market}}">
               <input type="hidden" name="team" value="{{.Team}}">
@@ -1804,10 +1806,11 @@
   {{else if .UpdateID}}
     <form
       hx-put="/legs/{{.UpdateID}}"
-      hx-target="closest .pick-line-group"
+      {{if .FromDetail}}hx-include="#pick-q, #pick-cat, #pick-win, #pick-sort, #pick-group, #pick-game"{{end}}
+      hx-target="{{if .FromDetail}}#pick-detail{{else}}closest .pick-line-group{{end}}"
       hx-swap="outerHTML"
     >
-      <input type="hidden" name="from" value="board">
+      <input type="hidden" name="from" value="{{if .FromDetail}}detail{{else}}board{{end}}">
       <input type="hidden" name="game_id" value="{{.GameID}}">
       <input type="hidden" name="market_type" value="{{.Market}}">
       <input type="hidden" name="team" value="{{.Team}}">
@@ -1842,11 +1845,12 @@
   {{else}}
     <form
       hx-post="/slips/{{.SlipID}}/legs"
-      hx-target="closest .pick-line-group"
+      {{if .FromDetail}}hx-include="#pick-q, #pick-cat, #pick-win, #pick-sort, #pick-group, #pick-game"{{end}}
+      hx-target="{{if .FromDetail}}#pick-detail{{else}}closest .pick-line-group{{end}}"
       hx-swap="outerHTML"
     >
       <input type="hidden" name="quick" value="1">
-      <input type="hidden" name="from" value="board">
+      <input type="hidden" name="from" value="{{if .FromDetail}}detail{{else}}board{{end}}">
       <input type="hidden" name="game_id" value="{{.GameID}}">
       <input type="hidden" name="market_type" value="{{.Market}}">
       <input type="hidden" name="team" value="{{.Team}}">
@@ -1865,6 +1869,19 @@
         {{if .Badge}}<span class="mt-1 inline-block rounded-full border border-accent bg-accent-soft px-1.5 py-0.5 text-[10px] font-medium text-ink">{{.Badge}}</span>{{end}}
       </button>
     </form>
+  {{end}}
+  {{if .Grade.Letter}}
+    <details data-leg-grade data-help-popover>
+      <summary
+        class="inline-flex cursor-pointer list-none items-center gap-1 whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] font-semibold {{.Grade.Class}}"
+        title="Leg grade {{.Grade.Letter}} ({{.Grade.Score}}/100)"
+      >
+        Grade {{.Grade.Letter}}
+      </summary>
+      <div class="absolute left-0 right-0 z-30 mt-1 max-w-full rounded-lg border border-line-strong bg-surface p-2.5 text-xs text-ink shadow-lg">
+        {{template "grade-breakdown" (dict "Grade" .Grade "HeaderLabel" (printf "Leg grade: %s (%d)" .Grade.Letter .Grade.Score) "GuideHref" (printf "/docs/grading?from=/slips/%d/pick#leg-grades" .SlipID) "IsSlip" false "EmptyText" "Baseline 75 — no extra adjustments.")}}
+      </div>
+    </details>
   {{end}}
   {{if .ComboWarning}}
     <p class="rounded-md border border-warning bg-warning-soft px-2 py-1 text-[11px] leading-snug text-warning-ink" data-combo-warning>{{.ComboWarning}}</p>
@@ -1896,7 +1913,7 @@
   data-keep-scroll
   hx-get="{{.RefreshURL}}"
   hx-trigger="board-updated from:body"
-  hx-include="#pick-q, #pick-cat, #pick-win, #pick-sort, #pick-game"
+  hx-include="#pick-q, #pick-cat, #pick-win, #pick-sort, #pick-group, #pick-game"
   hx-sync="this:drop"
   hx-disinherit="hx-include hx-sync"
   hx-swap="outerHTML"
@@ -1922,6 +1939,7 @@
         autocomplete="off"
         class="w-full rounded-md border border-line-strong bg-surface-2 px-3 py-2 text-sm text-ink placeholder:text-ink-subtle"
       >
+      <input id="pick-group" type="hidden" name="group" value="{{.GroupBy}}">
       <input id="pick-cat" type="hidden" name="cat" value="{{.Category}}">
       <input id="pick-win" type="hidden" name="win" value="{{.Window}}">
       <input id="pick-sort" type="hidden" name="sort" value="{{.Sort}}">
@@ -1946,7 +1964,7 @@
         <button
           type="button"
           hx-post="/slips/{{.SlipID}}/pick/refresh"
-          hx-include="#pick-q, #pick-cat, #pick-win, #pick-sort, #pick-game"
+          hx-include="#pick-q, #pick-cat, #pick-win, #pick-sort, #pick-group, #pick-game"
           hx-target="#pick-body"
           hx-swap="outerHTML"
           hx-disabled-elt="this"
@@ -2068,6 +2086,7 @@
 {{define "pick-detail"}}
 <section
   id="pick-detail"
+  data-group="{{.GroupBy}}"
   data-category="{{.Category}}"
   data-sort="{{.Sort}}"
   class="min-w-0 space-y-3 lg:min-h-0 lg:overflow-y-auto lg:pl-1"
@@ -2094,7 +2113,7 @@
           <button
             type="button"
             hx-post="/slips/{{.SlipID}}/pick/refresh"
-            hx-include="#pick-q, #pick-cat, #pick-win, #pick-sort, #pick-game"
+            hx-include="#pick-q, #pick-cat, #pick-win, #pick-sort, #pick-group, #pick-game"
             hx-target="#pick-body"
             hx-swap="outerHTML"
             hx-disabled-elt="this"
@@ -2140,20 +2159,38 @@
 
   {{template "highlights-strip" .Highlights}}
 
-  <div class="flex flex-wrap items-center gap-1.5">
-    <span class="text-[11px] font-semibold uppercase tracking-wide text-page-muted">Sort</span>
-    {{range .Sorts}}
-      <a
-        href="{{.PushURL}}"
-        hx-get="{{.Href}}"
-        hx-target="#pick-detail"
-        hx-swap="outerHTML"
-        hx-push-url="{{.PushURL}}"
-        {{if .Active}}aria-current="true"{{end}}
-        class="inline-flex min-h-12 items-center rounded-full px-2 py-0.5 text-xs font-medium {{if .Active}}text-page-ink underline decoration-accent decoration-2 underline-offset-4{{else}}text-page-muted hover:text-page-ink{{end}}"
-        >{{.Label}}</a
-      >
-    {{end}}
+  <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+    <div class="flex flex-wrap items-center gap-1.5" role="group" aria-label="Group by">
+      <span class="text-[11px] font-semibold uppercase tracking-wide text-page-muted">Group by</span>
+      {{range .Groups}}
+        <a
+          href="{{.PushURL}}"
+          hx-get="{{.Href}}"
+          hx-target="#pick-detail"
+          hx-swap="outerHTML"
+          hx-push-url="{{.PushURL}}"
+          {{if .Active}}aria-current="true"{{end}}
+          class="inline-flex min-h-12 items-center rounded-full px-2 py-0.5 text-xs font-medium {{if .Active}}text-page-ink underline decoration-accent decoration-2 underline-offset-4{{else}}text-page-muted hover:text-page-ink{{end}}"
+          >{{.Label}}</a
+        >
+      {{end}}
+    </div>
+
+    <div class="flex flex-wrap items-center gap-1.5" role="group" aria-label="Sort">
+      <span class="text-[11px] font-semibold uppercase tracking-wide text-page-muted">Sort</span>
+      {{range .Sorts}}
+        <a
+          href="{{.PushURL}}"
+          hx-get="{{.Href}}"
+          hx-target="#pick-detail"
+          hx-swap="outerHTML"
+          hx-push-url="{{.PushURL}}"
+          {{if .Active}}aria-current="true"{{end}}
+          class="inline-flex min-h-12 items-center rounded-full px-2 py-0.5 text-xs font-medium {{if .Active}}text-page-ink underline decoration-accent decoration-2 underline-offset-4{{else}}text-page-muted hover:text-page-ink{{end}}"
+          >{{.Label}}</a
+        >
+      {{end}}
+    </div>
   </div>
 
   {{if .Unloaded}}
@@ -2172,40 +2209,64 @@
     </div>
   {{end}}
 
-  {{if .Lines}}
-    <div class="ui-card space-y-3 p-3">
-      {{range .Lines}}
-        {{template "pick-line-group" .}}
-      {{end}}
-    </div>
-  {{end}}
-
-  {{range .Players}}
-    <section class="ui-card p-3">
-      <header class="flex items-center justify-between gap-3">
-        <div class="flex min-w-0 items-center gap-2.5">
-          {{template "player-portrait" (dict "URL" .HeadshotURL "Initials" .Initials "Size" "h-8 w-8")}}
-          <h3 class="min-w-0 truncate text-sm font-semibold">{{.Name}}</h3>
+  {{range .Sections}}
+    <section class="space-y-2" data-section="{{.Key}}">
+      <header class="flex items-center justify-between gap-2 px-1">
+        <div class="flex items-center gap-2">
+          {{if .Badge}}
+            <span class="inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-semibold {{.BadgeClass}}">{{.Badge}}</span>
+          {{end}}
+          <h3 class="font-display text-sm font-semibold text-page-ink">{{.Label}}</h3>
         </div>
-        {{if or .Position .Team .TeamLogo}}
-          <p class="flex shrink-0 items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-ink-muted">
-            {{template "team-logo" (dict "URL" .TeamLogo "Size" "h-4 w-4")}}
-            <span>{{.Position}}{{if and .Position .Team}} &middot; {{end}}{{.Team}}</span>
-          </p>
+        {{if .Count}}
+          <span class="font-mono text-[11px] tabular-nums text-page-muted">{{.Count}}</span>
         {{end}}
       </header>
-      {{if .Tags}}
-        <div class="mt-2 flex flex-wrap gap-1.5">
-          {{range .Tags}}
-            <span class="rounded-full border border-positive bg-positive-soft px-2 py-0.5 text-[10px] font-medium text-positive-ink">{{.}}</span>
+
+      {{if .Lines}}
+        <div class="ui-card space-y-3 p-3">
+          {{range .Lines}}
+            {{template "pick-line-group" .}}
           {{end}}
         </div>
       {{end}}
-      <div class="mt-2 space-y-2">
-        {{range .Lines}}
-          {{template "pick-line-group" .}}
-        {{end}}
-      </div>
+
+      {{range .Players}}
+        <section class="ui-card p-3">
+          <header class="flex items-center justify-between gap-3">
+            <div class="flex min-w-0 items-center gap-2.5">
+              {{template "player-portrait" (dict "URL" .HeadshotURL "Initials" .Initials "Size" "h-8 w-8")}}
+              <h4 class="min-w-0 truncate text-sm font-semibold">{{.Name}}</h4>
+            </div>
+            {{if or .Position .Team .TeamLogo}}
+              <p class="flex shrink-0 items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-ink-muted">
+                {{template "team-logo" (dict "URL" .TeamLogo "Size" "h-4 w-4")}}
+                <span>{{.Position}}{{if and .Position .Team}} &middot; {{end}}{{.Team}}</span>
+              </p>
+            {{end}}
+          </header>
+          {{if .Tags}}
+            <div class="mt-2 flex flex-wrap gap-1.5">
+              {{range .Tags}}
+                <span class="rounded-full border border-positive bg-positive-soft px-2 py-0.5 text-[10px] font-medium text-positive-ink">{{.}}</span>
+              {{end}}
+            </div>
+          {{end}}
+          <div class="mt-2 space-y-2">
+            {{range .Lines}}
+              {{template "pick-line-group" .}}
+            {{end}}
+          </div>
+        </section>
+      {{end}}
+
+      {{if .Options}}
+        <div class="space-y-2">
+          {{range .Options}}
+            <div class="pick-grade-row ui-card relative p-3">{{template "pick-option" .}}</div>
+          {{end}}
+        </div>
+      {{end}}
     </section>
   {{end}}
 
@@ -2216,6 +2277,7 @@
   {{end}}
 
   {{if .OOB}}
+    <input id="pick-group" type="hidden" name="group" value="{{.GroupBy}}" hx-swap-oob="true">
     <input id="pick-cat" type="hidden" name="cat" value="{{.Category}}" hx-swap-oob="true">
     <input id="pick-sort" type="hidden" name="sort" value="{{.Sort}}" hx-swap-oob="true">
   {{end}}
@@ -2412,8 +2474,9 @@
         hx-target="{{$.Target}}"
         hx-swap="outerHTML"
       >
-        <input type="hidden" name="from" value="board">
+        <input type="hidden" name="from" value="{{if eq $.Group "grade"}}detail{{else}}board{{end}}">
         <input type="hidden" name="q" value="{{$.Q}}">
+        <input type="hidden" name="group" value="{{$.Group}}">
         <input type="hidden" name="cat" value="{{$.Cat}}">
         <input type="hidden" name="win" value="{{$.Win}}">
         <input type="hidden" name="sort" value="{{$.Sort}}">

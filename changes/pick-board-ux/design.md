@@ -284,7 +284,7 @@ button/popover separation are only partially verified by HTML/handler tests)
 - [x] Wire `GroupBy`, `SortGrade`, and `board.ScoreRows` through `internal/web/pick.go` and `internal/web/slips.go`
       (including at-limit `pickDetailData`, `pickPairRow`, and `from=detail` add/update/delete swaps for
       `GroupByGrade`), with handler and zero-extra-refresh tests in `internal/web/pick_test.go`.
-- [ ] Update `pick-detail`, `pick-line-group`, and `pick-option` in `web/templates/partials.html` (and regenerate
+- [x] Update `pick-detail`, `pick-line-group`, and `pick-option` in `web/templates/partials.html` (and regenerate
       Tailwind CSS if needed) to render the `Group by` switcher (`Category` default, `Player`, `Grade`), `All` +
       category filter chips, grouped sections, and sibling pre-pick `Grade A–F` popovers anchored to full card width at
       375px, with template/DOM assertions in `internal/web/pick_test.go`.

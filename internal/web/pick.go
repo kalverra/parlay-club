@@ -202,6 +202,7 @@ type PickRowView struct {
 	SplitLine     string
 	DriftNote     string
 	CanRefresh    bool
+	FromDetail    bool
 	Grade         GradeView
 }
 
@@ -525,13 +526,17 @@ func (h *slipHandlers) pickSwap(w http.ResponseWriter, r *http.Request) {
 		Odds:       intFromString(r.URL.Query().Get("odds")),
 		Text:       r.URL.Query().Get("text"),
 	}
-	view.Target = "#" + pickLineID(
-		view.Fields.GameID,
-		view.Fields.Market,
-		view.Fields.Team,
-		view.Fields.PlayerName,
-		floatPointer(view.Fields.Line),
-	)
+	if view.Group == string(board.GroupByGrade) {
+		view.Target = "#pick-detail"
+	} else {
+		view.Target = "#" + pickLineID(
+			view.Fields.GameID,
+			view.Fields.Market,
+			view.Fields.Team,
+			view.Fields.PlayerName,
+			floatPointer(view.Fields.Line),
+		)
+	}
 	h.renderPartial(w, "pick-swap", view)
 }
 
@@ -919,9 +924,14 @@ func pickDetailView(
 	canRefresh bool,
 	homeBook string,
 ) PickDetailView {
+	activeCategory := q.Category
+	if activeCategory == board.CategoryTeamTotals {
+		activeCategory = board.CategoryLines
+	}
+
 	linkQuery := q
 	linkQuery.GroupBy = q.GroupBy
-	linkQuery.Category = q.Category
+	linkQuery.Category = activeCategory
 	linkQuery.Sort = model.Sort
 
 	view := PickDetailView{
@@ -937,7 +947,7 @@ func pickDetailView(
 		KickoffFallback: kickoffFallback(model.Game.Kickoff),
 		Search:          q.Q,
 		GroupBy:         string(model.GroupBy),
-		Category:        string(model.Category),
+		Category:        string(activeCategory),
 		Sort:            string(model.Sort),
 		RefreshURL:      detailHref(slipID, linkQuery, "", ""),
 		BackHref:        pickBackHref(slipID, q),
@@ -948,9 +958,15 @@ func pickDetailView(
 		view.Groups = append(view.Groups, detailChip(
 			slipID, linkQuery, "group", string(option), option.Label(), 0, option == model.GroupBy))
 	}
+	totalCount := 0
+	for _, tab := range model.Tabs {
+		totalCount += tab.Count
+	}
+	view.Tabs = append(view.Tabs, detailChip(
+		slipID, linkQuery, "cat", "", "All", totalCount, activeCategory == ""))
 	for _, tab := range model.Tabs {
 		view.Tabs = append(view.Tabs, detailChip(
-			slipID, linkQuery, "cat", string(tab.Category), tab.Label, tab.Count, tab.Active))
+			slipID, linkQuery, "cat", string(tab.Category), tab.Label, tab.Count, tab.Category == activeCategory))
 	}
 	for _, option := range board.DetailSorts {
 		view.Sorts = append(view.Sorts, detailChip(
@@ -996,6 +1012,7 @@ func pickDetailView(
 		}
 		for _, row := range sec.Options {
 			option := pickRowView(slipID, row, atLimit, linkQuery, canRefresh, homeBook)
+			option.FromDetail = model.GroupBy == board.GroupByGrade
 			if option.PickID == 0 && model.GroupBy == board.GroupByGrade {
 				key := row.PlayerID + "|" + board.LineKey(row.Market, row.Team, row.PlayerName, row.Line)
 				if pickedCountByLine[key] == 1 {

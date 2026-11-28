@@ -219,9 +219,12 @@ func TestPickBoardShowsSearchChipsSortsAndDock(t *testing.T) {
 
 	assert.Contains(t, body, `placeholder="Search a team or player"`)
 	assert.Contains(t, body, fmt.Sprintf(`hx-get="/slips/%d/pick/results"`, fixture.slip.ID))
+	assert.Contains(t, body, "All")
 	assert.Contains(t, body, "Lines")
 	assert.Contains(t, body, "Passing")
 	assert.Contains(t, body, "Any time")
+	assert.Contains(t, body, "Group by")
+	assert.Contains(t, body, "Category")
 	assert.Contains(t, body, "Player", "the open game's sort chips start at player")
 	assert.Contains(t, body, "BUF -3")
 	assert.Contains(t, body, fmt.Sprintf(
@@ -230,7 +233,8 @@ func TestPickBoardShowsSearchChipsSortsAndDock(t *testing.T) {
 	assert.Contains(t, body, `hx-target="closest .pick-line-group"`)
 	assert.Contains(t, body, `id="pick-body"`)
 	assert.Contains(t, body, `id="pick-detail"`)
-	assert.Contains(t, body, `data-category="lines"`, "an open game starts on the Lines tab")
+	assert.Contains(t, body, `data-group="category"`, "an open game defaults to Category grouping")
+	assert.Contains(t, body, `data-category=""`, "an open game starts on All categories")
 	assert.Contains(t, body, `data-sort="player"`)
 	assert.Contains(t, body, `hx-trigger="board-updated from:body"`, "a fresh prop sync refreshes the board")
 	assert.Contains(t, body, `hx-sync="this:drop"`, "board-updated refreshes drop duplicate in-flight requests")
@@ -1283,7 +1287,7 @@ func TestPickDetailReturnsOnlyTheOpenGamesDetail(t *testing.T) {
 	assert.Less(t, lines, passing, "the tabs keep the board order")
 	assert.Less(t, passing, receiving)
 
-	assert.Equal(t, 1, strings.Count(body, ">Josh Allen</h3>"),
+	assert.Equal(t, 1, strings.Count(body, ">Josh Allen</h4>"),
 		"one player card clusters both of his passing markets")
 	assert.Contains(t, body, "Pass TDs")
 	assert.Contains(t, body, "Pass Yds")
@@ -1306,7 +1310,7 @@ func TestPickDetailLinesTabShowsGameLinesThenTeamTotals(t *testing.T) {
 	addTeamTotal(t, fixture.store, game.ID, "MIA", "OVER", 20.5)
 	addTeamTotal(t, fixture.store, game.ID, "MIA", "UNDER", 20.5)
 
-	recorder := pickDetail(t, fixture, "game="+game.ID)
+	recorder := pickDetail(t, fixture, "game="+game.ID+"&cat=lines")
 	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
 	body := html.UnescapeString(recorder.Body.String())
 
@@ -1376,7 +1380,7 @@ func TestPickDetailKeepsTheTabThroughALiveRefreshAndSearch(t *testing.T) {
 		fmt.Sprintf(`hx-get="/slips/%d/pick/detail?cat=passing&game=%s&sort=odds"`, fixture.slip.ID, game.ID),
 		"the detail refreshes itself from the resolved tab and sort",
 	)
-	assert.Contains(t, boardBody, `hx-include="#pick-q, #pick-cat, #pick-win, #pick-sort, #pick-game"`,
+	assert.Contains(t, boardBody, `hx-include="#pick-q, #pick-cat, #pick-win, #pick-sort, #pick-group, #pick-game"`,
 		"the slate refresh sends the current filters")
 
 	detailBody := html.UnescapeString(pickDetail(t, fixture, query).Body.String())
@@ -1519,16 +1523,19 @@ func TestPickDetailFallsBackFromTeamTotalsAndUnknownTabs(t *testing.T) {
 	addGameOdds(t, fixture.store, game.ID)
 	addTeamTotal(t, fixture.store, game.ID, "BUF", "OVER", 24.5)
 
-	for _, query := range []string{
-		"game=" + game.ID + "&cat=team_totals",
-		"game=" + game.ID + "&cat=bogus",
+	for _, tc := range []struct {
+		query string
+		cat   string
+	}{
+		{"game=" + game.ID + "&cat=team_totals", "lines"},
+		{"game=" + game.ID + "&cat=bogus", ""},
 	} {
-		recorder := pickDetail(t, fixture, query)
+		recorder := pickDetail(t, fixture, tc.query)
 		require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
 		body := html.UnescapeString(recorder.Body.String())
 
-		assert.Contains(t, body, `data-category="lines"`, query)
-		assert.Contains(t, body, "BUF team total", query)
+		assert.Contains(t, body, fmt.Sprintf(`data-category="%s"`, tc.cat), tc.query)
+		assert.Contains(t, body, "BUF team total", tc.query)
 	}
 }
 
@@ -4189,7 +4196,7 @@ func TestPickDetailGroupByAndSortGradePreserveQueryAndZeroExtraRefresh(t *testin
 	require.Equal(t, http.StatusOK, resRec.Code, resRec.Body.String())
 	assert.Equal(
 		t,
-		fmt.Sprintf("/slips/%d/pick?cat=lines&game=%s&group=grade&sort=grade", fixture.slip.ID, game.ID),
+		fmt.Sprintf("/slips/%d/pick?game=%s&group=grade&sort=grade", fixture.slip.ID, game.ID),
 		resRec.Header().Get("Hx-Push-Url"),
 	)
 	assert.Empty(t, refresher.linesCalls, "results switch should not trigger line refresh")
@@ -4348,4 +4355,105 @@ func TestPickFromDetailAddUpdateDeleteSwapsAndZeroExtraRefresh(t *testing.T) {
 	require.Equal(t, http.StatusOK, boardRec.Code, boardRec.Body.String())
 	assert.Contains(t, boardRec.Body.String(), `class="pick-line-group"`)
 	assert.Zero(t, refresher.totalCalls(), "from=board pickPairRow must not trigger external refresh")
+}
+
+func TestPickDetailRendersGroupBySwitcherAllChipsSectionsAndSiblingGradePopovers(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 3)
+	game := addGame(t, fixture, gameKickoff())
+	addGameOdds(t, fixture.store, game.ID)
+	addPropOdds(t, fixture.store, game.ID, "PASS_YDS", "Josh Allen", 245.5, -110)
+	addPropOdds(t, fixture.store, game.ID, "RUSH_YDS", "Josh Allen", 35.5, -115)
+
+	assertNoPopoverInFormOrButton := func(t *testing.T, body string) {
+		t.Helper()
+		for _, chunk := range strings.Split(body, "<form")[1:] {
+			formBody, _, _ := strings.Cut(chunk, "</form>")
+			assert.NotContains(t, formBody, "data-leg-grade", "grade popover must not nest inside <form>")
+		}
+		for _, chunk := range strings.Split(body, "<button")[1:] {
+			btnBody, _, _ := strings.Cut(chunk, "</button>")
+			assert.NotContains(t, btnBody, "data-leg-grade", "grade popover must not nest inside <button>")
+		}
+	}
+
+	// Default: Group by Category, All categories active.
+	catRec := pickDetail(t, fixture, "game="+game.ID)
+	require.Equal(t, http.StatusOK, catRec.Code, catRec.Body.String())
+	catBody := html.UnescapeString(catRec.Body.String())
+
+	assert.Contains(t, catBody, `data-group="category"`)
+	assert.Contains(t, catBody, `data-category=""`)
+	assert.Contains(t, catBody, `aria-label="Group by"`)
+	assert.Contains(t, catBody, `>All<span`)
+	assert.Contains(t, catBody, `data-section="lines"`)
+	assert.Contains(t, catBody, `data-section="passing"`)
+	assert.Contains(t, catBody, `data-section="rushing"`)
+	assert.Contains(t, catBody, `data-leg-grade data-help-popover`)
+	assert.Contains(t, catBody, `Grade `)
+	assert.Contains(t, catBody, `absolute left-0 right-0 z-30 mt-1 max-w-full`)
+	assert.Contains(t, catBody, `data-grade-summary`)
+	assert.Contains(t, catBody, `data-grade-pillars`)
+	assertNoPopoverInFormOrButton(t, catBody)
+
+	// Group by Player: merges Josh Allen's passing and rushing props onto one card.
+	playerRec := pickDetail(t, fixture, "game="+game.ID+"&group=player")
+	require.Equal(t, http.StatusOK, playerRec.Code, playerRec.Body.String())
+	playerBody := html.UnescapeString(playerRec.Body.String())
+
+	assert.Contains(t, playerBody, `data-group="player"`)
+	assert.Contains(t, playerBody, `data-section="players"`)
+	assert.Contains(t, playerBody, `data-section="lines"`)
+	assert.Equal(t, 1, strings.Count(playerBody, ">Josh Allen</h4>"))
+	assert.Contains(t, playerBody, "Pass Yds")
+	assert.Contains(t, playerBody, "Rush Yds")
+	assert.Contains(t, playerBody, `id="pick-group" type="hidden" name="group" value="player" hx-swap-oob="true"`)
+
+	// Group by Grade: single-side cards with from=detail and full-width popover anchor.
+	gradeRec := pickDetail(t, fixture, "game="+game.ID+"&group=grade")
+	require.Equal(t, http.StatusOK, gradeRec.Code, gradeRec.Body.String())
+	gradeBody := html.UnescapeString(gradeRec.Body.String())
+
+	assert.Contains(t, gradeBody, `data-group="grade"`)
+	assert.Contains(t, gradeBody, `class="pick-grade-row ui-card relative p-3"`)
+	assert.Contains(t, gradeBody, `name="from" value="detail"`)
+	assert.Contains(t, gradeBody, `hx-target="#pick-detail"`)
+	assert.Contains(t, gradeBody, `hx-include="#pick-q, #pick-cat, #pick-win, #pick-sort, #pick-group, #pick-game"`)
+	assert.Contains(t, gradeBody, `id="pick-group" type="hidden" name="group" value="grade" hx-swap-oob="true"`)
+	assertNoPopoverInFormOrButton(t, gradeBody)
+}
+
+func TestPickSwapInGroupByGradeTargetsPickDetail(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 1)
+	game := addGame(t, fixture, gameKickoff())
+	addGameOdds(t, fixture.store, game.ID)
+	addStoredLeg(t, fixture, db.Leg{
+		UserID:     fixture.user.ID,
+		GameID:     new(game.ID),
+		MarketType: "ML",
+		Selection:  "BUF ML",
+		Team:       new("BUF"),
+		Side:       new("TEAM"),
+		Odds:       -130,
+	})
+
+	swapPath := fmt.Sprintf(
+		"/slips/%d/pick/swap?game=%s&group=grade&sort=grade&game_id=%s&market=SPREAD&team=BUF&side=TEAM&line=-3&odds=-110&text=BUF+-3",
+		fixture.slip.ID,
+		game.ID,
+		game.ID,
+	)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, swapPath, nil)
+	req.Header.Set("Hx-Request", "true")
+	rec := httptest.NewRecorder()
+	fixture.handler.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	body := html.UnescapeString(rec.Body.String())
+	assert.Contains(t, body, `hx-target="#pick-detail"`)
+	assert.Contains(t, body, `name="from" value="detail"`)
+	assert.Contains(t, body, `name="group" value="grade"`)
 }
