@@ -266,7 +266,7 @@ func isInversePlayerPropPair(left, right Leg) bool {
 	switch {
 	case m1 == marketPassTDs && m2 == marketPassYds:
 		return true
-	case m1 == marketRecYds && m2 == marketReceptions:
+	case m1 == marketReceptions && m2 == marketRecYds:
 		return true
 	case m1 == marketRushAtt && m2 == marketRushYds:
 		return true

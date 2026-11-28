@@ -115,3 +115,7 @@ Risk: low (non-blocking UI indicator backed by unit and handler tests).
       in `internal/board/signals_test.go` and `internal/web/pick_test.go`.
 - [x] Docs: update `docs/concepts/analyzer.md` to document the new combination-eligibility rules and their non-blocking
   behavior.
+
+## Reviews
+
+- [x] Final review: agy@gemini-4-neon-medium

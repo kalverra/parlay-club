@@ -2,7 +2,7 @@
 id: analyzer-rules
 title: Analyzer rules
 type: reference
-summary: The stable IDs, severities, triggers, and example messages for all 16 analyzer rules, plus the v2 calibrated four-pillar grading model, Gaussian copula script scoring, extensible context overlays, and v1 rubric reference.
+summary: The stable IDs, severities, triggers, and example messages for all 18 analyzer rules, plus the v2 calibrated four-pillar grading model, Gaussian copula script scoring, extensible context overlays, and v1 rubric reference.
 tags: [analyzer, rules, grades, pillars, copula, overlays, rubric, warnings, correlation, severity, slips, nfelo, nflverse, model, quarterback, props, player-stats]
 ---
 
@@ -246,6 +246,25 @@ Touchdown scoring outpacing underlying opportunity over the last 3 games (requir
 - `PASS_TDS` `OVER`: `>= 6` passing TDs in the last 3 games with `<= 0` average `TotalEPA` over the last 3 games.
 
 > Dawson Knox has 3 TDs in the last 3 games on a 11% target share and 0 carries/game — TD luck can cool off.
+
+## Sportsbook eligibility
+
+| Rule | Severity | Fires when |
+| ---- | -------- | ---------- |
+| `book_combo_ineligible` | `Danger` | Same-game duplicate selection, opposite sides of the same market, same-team `ML` + `SPREAD`, `ML` + opponent favorite `SPREAD` (`< 0`), or mutually exclusive `TEAM_TOTAL`s vs. `TOTAL`. |
+| `book_combo_restricted` | `Warn` | Same-player inverse prop pair (`PASS_YDS` vs. `PASS_TDS`, `REC_YDS` vs. `RECEPTIONS`, `RUSH_YDS` vs. `RUSH_ATT`), duplicate player-market milestones, or `KICKER_PTS` paired with `TOTAL` or `TEAM_TOTAL`. |
+
+### `book_combo_ineligible` — Danger
+
+Same-game combinations that DraftKings and FanDuel reject on a single parlay or SGP: duplicate selections, opposite sides of the same market (`SPREAD`, `ML`, `TOTAL`, `TEAM_TOTAL`, or same-player prop `OVER`/`UNDER`), same-team `ML` + `SPREAD`, `ML` on one team paired with a favorite `SPREAD` (`< 0`) on the opponent, or mutually exclusive `TEAM_TOTAL`s against a game `TOTAL`. Also powers inline pick-board heads-up notes via `analyzer.CheckComboConflict`.
+
+> Heads up: DraftKings and FanDuel usually won't combine BUF ML with BUF -3.5 on the same slip.
+
+### `book_combo_restricted` — Warn
+
+Same-game combinations that DraftKings or FanDuel frequently drop or block from SGP builders: `KICKER_PTS` paired with `TOTAL` or `TEAM_TOTAL`, same-player inverse prop pairs (`PASS_YDS` vs. `PASS_TDS`, `REC_YDS` vs. `RECEPTIONS`, `RUSH_YDS` vs. `RUSH_ATT` on opposite `OVER`/`UNDER` sides), and duplicate player-market milestones.
+
+> Heads up: DraftKings and FanDuel frequently block combining Tyler Bass Over 7.5 Kicking Pts with Over 47.5 on an SGP.
 
 ## Score Bands and Pillar Tones
 

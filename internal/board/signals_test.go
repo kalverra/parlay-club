@@ -563,4 +563,40 @@ func TestApplySignalsComboWarning(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("tap-to-switch opposite side excludes replaced leg", func(t *testing.T) {
+		t.Parallel()
+
+		pickedRow := buildRow("SPREAD", "BUF", "", "TEAM", new(-3.5))
+		pickedRow.Picked = 10
+		switchRow := buildRow("SPREAD", "MIA", "", "TEAM", new(3.5))
+
+		got := board.ApplySignals(g, []board.Row{pickedRow, switchRow}, board.BoardSignals{
+			SlipLegs: []analyzer.Leg{
+				{ID: 10, GameID: "g1", Market: "SPREAD", Team: "BUF", Side: "TEAM", Line: new(-3.5), Odds: -110},
+			},
+		})
+		require.Len(t, got, 2)
+		assert.Empty(t, got[0].ComboWarning)
+		assert.Empty(t, got[1].ComboWarning)
+	})
+
+	t.Run("tap-to-switch opposite side still warns on conflict with other slip leg", func(t *testing.T) {
+		t.Parallel()
+
+		pickedRow := buildRow("SPREAD", "BUF", "", "TEAM", new(-3.5))
+		pickedRow.Picked = 10
+		switchRow := buildRow("SPREAD", "MIA", "", "TEAM", new(3.5))
+
+		got := board.ApplySignals(g, []board.Row{pickedRow, switchRow}, board.BoardSignals{
+			SlipLegs: []analyzer.Leg{
+				{ID: 10, GameID: "g1", Market: "SPREAD", Team: "BUF", Side: "TEAM", Line: new(-3.5), Odds: -110},
+				{ID: 20, GameID: "g1", Market: "ML", Team: "MIA", Side: "TEAM", Odds: 145},
+			},
+		})
+		require.Len(t, got, 2)
+		assert.Empty(t, got[0].ComboWarning)
+		assert.NotEmpty(t, got[1].ComboWarning)
+		assert.Contains(t, got[1].ComboWarning, "MIA ML")
+	})
 }

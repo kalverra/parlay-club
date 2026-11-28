@@ -202,6 +202,40 @@ func TestComboRulesAnalyzeSlip(t *testing.T) {
 			wantContains: []string{"inverse same-player props"},
 		},
 		{
+			name: "restricted inverse same player rec yds over and receptions under",
+			legs: []analyzer.Leg{
+				withPlayerID(
+					leg(1, "Adam", "buf-mia", "REC_YDS", "BUF", "Khalil Shakir", "OVER", new(55.5), -110),
+					"shakir",
+				),
+				withPlayerID(
+					leg(2, "Adam", "buf-mia", "RECEPTIONS", "BUF", "Khalil Shakir", "UNDER", new(4.5), -110),
+					"shakir",
+				),
+			},
+			wantRule:     "book_combo_restricted",
+			wantSeverity: analyzer.Warn,
+			wantIDs:      []int64{1, 2},
+			wantContains: []string{"inverse same-player props"},
+		},
+		{
+			name: "restricted inverse same player rush yds over and rush att under",
+			legs: []analyzer.Leg{
+				withPlayerID(
+					leg(1, "Adam", "buf-mia", "RUSH_YDS", "BUF", "James Cook", "OVER", new(64.5), -110),
+					"cook",
+				),
+				withPlayerID(
+					leg(2, "Adam", "buf-mia", "RUSH_ATT", "BUF", "James Cook", "UNDER", new(14.5), -110),
+					"cook",
+				),
+			},
+			wantRule:     "book_combo_restricted",
+			wantSeverity: analyzer.Warn,
+			wantIDs:      []int64{1, 2},
+			wantContains: []string{"inverse same-player props"},
+		},
+		{
 			name: "restricted duplicate player milestone",
 			legs: []analyzer.Leg{
 				withPlayerID(

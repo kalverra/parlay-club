@@ -41,23 +41,51 @@ func ApplySignals(game db.Game, rows []Row, signals BoardSignals) []Row {
 	if signals.empty() {
 		return out
 	}
+	var pickedByKey map[string]int64
+	if len(signals.SlipLegs) > 0 {
+		pickedByKey = pickedLegByLineKey(out)
+	}
 	for i := range out {
 		badges := rowBadges(game, out[i], signals)
 		if len(badges) > 0 {
 			out[i].Badge = badges[0]
 		}
-		out[i].ComboWarning = comboWarning(out[i], signals.SlipLegs)
+		out[i].ComboWarning = comboWarning(out[i], signals.SlipLegs, pickedByKey[lineKey(out[i])])
 	}
 	return out
 }
 
+// pickedLegByLineKey maps each lineKey to the sole viewer-picked leg ID in that
+// group. Groups with zero or multiple picked rows map to <= 0 so only
+// unambiguous tap-to-switch targets are treated as replacements.
+func pickedLegByLineKey(rows []Row) map[string]int64 {
+	byKey := make(map[string]int64, len(rows))
+	for _, row := range rows {
+		if row.Picked == 0 {
+			continue
+		}
+		key := lineKey(row)
+		if _, seen := byKey[key]; seen {
+			byKey[key] = -1
+			continue
+		}
+		byKey[key] = row.Picked
+	}
+	return byKey
+}
+
 // comboWarning returns a non-blocking sportsbook combo heads-up message when
-// an unpicked board row conflicts with a leg already on the open slip.
-func comboWarning(row Row, slipLegs []analyzer.Leg) string {
+// an unpicked board row conflicts with a leg already on the open slip,
+// excluding the leg it would replace when switching sides in a line group.
+func comboWarning(row Row, slipLegs []analyzer.Leg, replacedID int64) string {
 	if row.Picked != 0 || len(slipLegs) == 0 {
 		return ""
 	}
-	if w, ok := analyzer.CheckComboConflict(RowToAnalyzerLeg(row), slipLegs); ok {
+	candidate := RowToAnalyzerLeg(row)
+	if replacedID > 0 {
+		candidate.ID = replacedID
+	}
+	if w, ok := analyzer.CheckComboConflict(candidate, slipLegs); ok {
 		return w.Message
 	}
 	return ""
