@@ -38,10 +38,46 @@ function formatTimes(root) {
 // back to the top on every game switch. Save the pane marked for it before an
 // HTMX swap and put the position back after.
 let keptScrollTop = null;
+let keptDetailGame = null;
+let keptDetailOpenKeys = new Set();
+
+function snapshotPickDetailOpenState(target) {
+  const detail = document.getElementById("pick-detail");
+  if (!detail || !target || (target.id !== "pick-detail" && !target.contains(detail))) {
+    keptDetailGame = null;
+    keptDetailOpenKeys = new Set();
+    return;
+  }
+
+  keptDetailGame = detail.getAttribute("data-game") || "";
+  keptDetailOpenKeys = new Set(
+    Array.from(detail.querySelectorAll("details[data-keep-open][open]"))
+      .map((section) => section.getAttribute("data-keep-open"))
+      .filter(Boolean),
+  );
+}
+
+function restorePickDetailOpenState() {
+  const detail = document.getElementById("pick-detail");
+  if (detail && keptDetailOpenKeys.size > 0) {
+    const gameID = detail.getAttribute("data-game") || "";
+    if (gameID !== "" && gameID === keptDetailGame) {
+      for (const section of detail.querySelectorAll("details[data-keep-open]")) {
+        const key = section.getAttribute("data-keep-open");
+        if (key && keptDetailOpenKeys.has(key)) {
+          section.setAttribute("open", "");
+        }
+      }
+    }
+  }
+  keptDetailGame = null;
+  keptDetailOpenKeys = new Set();
+}
 
 document.addEventListener("htmx:beforeSwap", (event) => {
   const pane = document.querySelector("[data-keep-scroll]");
   keptScrollTop = pane ? pane.scrollTop : null;
+  snapshotPickDetailOpenState(event.detail && event.detail.target);
 
   if (formForEvent(event)?.id === "bug-report-form" && event.detail?.xhr?.status === 400) {
     const errorSlot = document.getElementById("bug-report-error");
@@ -64,6 +100,7 @@ document.addEventListener("htmx:afterSwap", (event) => {
     pane.scrollTop = keptScrollTop;
   }
   keptScrollTop = null;
+  restorePickDetailOpenState();
 
   if (target && target.id === "leg-sheet-body") {
     openLegSheet();

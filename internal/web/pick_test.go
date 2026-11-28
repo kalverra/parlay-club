@@ -4548,3 +4548,40 @@ func TestPickDetailShowsEmptyStateAndActiveChipForEmptyNarrowedCategory(t *testi
 	assert.Contains(t, body, `data-category="passing"`)
 	assert.Contains(t, body, `aria-current="true"`)
 }
+
+func TestPickDetailSectionsCollapseByDefaultAndAutoOpenWhenSearching(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	game := addGame(t, fixture, gameKickoff())
+	addGameOdds(t, fixture.store, game.ID)
+	addPropOdds(t, fixture.store, game.ID, "PASS_YDS", "Josh Allen", 245.5, -110)
+
+	sectionTag := func(t *testing.T, body, key string) string {
+		t.Helper()
+		marker := `data-section="` + key + `"`
+		idx := strings.Index(body, marker)
+		require.NotEqual(t, -1, idx, "missing section %s", key)
+		start := strings.LastIndex(body[:idx], "<details")
+		require.NotEqual(t, -1, start, "section %s must be a <details> element", key)
+		end := strings.Index(body[idx:], ">")
+		require.NotEqual(t, -1, end)
+		return body[start : idx+end+1]
+	}
+
+	// Default (no search): sections render as collapsed <details> with data-keep-open and <summary>.
+	defaultBody := html.UnescapeString(pickDetail(t, fixture, "game="+game.ID).Body.String())
+	assert.Contains(t, defaultBody, fmt.Sprintf(`data-game="%s"`, game.ID))
+	for _, key := range []string{"lines", "passing"} {
+		tag := sectionTag(t, defaultBody, key)
+		assert.Contains(t, tag, fmt.Sprintf(`data-keep-open="%s"`, key))
+		assert.NotContains(t, tag, " open", "section %s should start collapsed when not searching", key)
+	}
+	assert.Contains(t, defaultBody, "<summary")
+
+	// Searching (q != ""): matching sections auto-open.
+	searchBody := html.UnescapeString(pickDetail(t, fixture, "game="+game.ID+"&q=allen").Body.String())
+	passingTag := sectionTag(t, searchBody, "passing")
+	assert.Contains(t, passingTag, fmt.Sprintf(`data-keep-open="%s"`, "passing"))
+	assert.Contains(t, passingTag, " open", "section should auto-open when searching")
+}

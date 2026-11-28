@@ -2086,6 +2086,7 @@
 {{define "pick-detail"}}
 <section
   id="pick-detail"
+  data-game="{{.GameID}}"
   data-group="{{.GroupBy}}"
   data-category="{{.Category}}"
   data-sort="{{.Sort}}"
@@ -2210,18 +2211,37 @@
   {{end}}
 
   {{range .Sections}}
-    <section class="space-y-2" data-section="{{.Key}}">
-      <header class="flex items-center justify-between gap-2 px-1">
+    <details
+      class="group/section space-y-2"
+      data-section="{{.Key}}"
+      data-keep-open="{{.Key}}"
+      {{if $.Search}}open{{end}}
+    >
+      <summary class="flex min-h-11 cursor-pointer list-none items-center justify-between gap-2 rounded-lg px-1 py-1 hover:bg-chrome/50 [&::-webkit-details-marker]:hidden">
         <div class="flex items-center gap-2">
           {{if .Badge}}
             <span class="inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-semibold {{.BadgeClass}}">{{.Badge}}</span>
           {{end}}
           <h3 class="font-display text-sm font-semibold text-page-ink">{{.Label}}</h3>
         </div>
-        {{if .Count}}
-          <span class="font-mono text-[11px] tabular-nums text-page-muted">{{.Count}}</span>
-        {{end}}
-      </header>
+        <div class="flex items-center gap-2">
+          {{if .Count}}
+            <span class="font-mono text-[11px] tabular-nums text-page-muted">{{.Count}}</span>
+          {{end}}
+          <svg
+            aria-hidden="true"
+            viewBox="0 0 20 20"
+            fill="currentColor"
+            class="h-4 w-4 shrink-0 text-page-muted transition-transform duration-150 group-open/section:rotate-180"
+          >
+            <path
+              fill-rule="evenodd"
+              d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z"
+              clip-rule="evenodd"
+            />
+          </svg>
+        </div>
+      </summary>
 
       {{if .Lines}}
         <div class="ui-card space-y-3 p-3">
@@ -2267,7 +2287,7 @@
           {{end}}
         </div>
       {{end}}
-    </section>
+    </details>
   {{end}}
 
   {{if .Empty}}

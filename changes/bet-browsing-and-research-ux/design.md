@@ -219,7 +219,7 @@ is only partially covered by Go HTML tests)
 - [x] Add `SortPopular` as the default pick-board detail sort (with `SortGrade` second) in `internal/board/board.go`
   using cached `PlayerUsage`, market breadth, and line prominence signals, and update `internal/web/pick.go` and
   `internal/board/board_test.go` + `internal/web/pick_test.go`.
-- [ ] Convert `pick-detail` sections in `web/templates/partials.html` to collapsed-by-default `<details>` headers
+- [x] Convert `pick-detail` sections in `web/templates/partials.html` to collapsed-by-default `<details>` headers
   (auto-opened when searching) and preserve expanded section keys across `#pick-detail` HTMX swaps in
   `web/static/app.js`, with template tests in `internal/web/pick_test.go`.
 
