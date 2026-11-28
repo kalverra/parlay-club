@@ -13,16 +13,19 @@ tags: [record-book, record, leaderboard, streaks, units, wagers, parlay-terroris
 ```mermaid
 flowchart LR
   DB[("SQLite: slips, legs, leg_votes, wagers")] --> Web["internal/web/record.go"]
-  Eval["eval.Cache: pre-kickoff leg grades"] -. "fail-soft" .-> Web
+  Eval["eval.Cache: pre-kickoff leg & slip grades"] -. "fail-soft" .-> Web
   Web --> Build["record.Build (pure stats & 14 tags)"]
+  Web --> Outcome["analyzer.ClassifyProcessResult"]
   Build --> Board["GET /record?season="]
+  Outcome --> Board
   Build --> Member["GET /record/members/{id}?season="]
+  Outcome --> Member
 ```
 
 The Record Book (`GET /record?season=`) turns a group's graded slips for one NFL season into a group summary, a
-member leaderboard with earned tags, and per-member bet history drill-downs (`GET /record/members/{id}?season=`). All
-aggregation and tag evaluation live in the pure `internal/record` package (`record.Build`), with no database, HTTP, or
-clock dependencies.
+member leaderboard with earned tags, a graded slips list with Process vs. Outcome badges, and per-member bet history
+drill-downs (`GET /record/members/{id}?season=`). All aggregation and tag evaluation live in the pure
+`internal/record` package (`record.Build`), with no database, HTTP, or clock dependencies.
 
 ## Season selection and group scope
 
@@ -35,8 +38,9 @@ Every query (`internal/db/record.go`) is scoped to the active group:
 - `RecordUsersForGroupSeason` includes every current group member and any user who authored a leg on a graded slip in
   that group and season, so members who leave a group keep their historical stats on the leaderboard.
 - `VotesForGroupSeason` sums net vote tallies per leg on graded slips in that group and season.
-- Pre-kickoff leg grades (A–F) come from `eval.Cache.GetOrCompute` via `SuiteReport.LegGrades`. If replay fails or
-  no cache is configured, the handler logs a warning and passes nil grades so non-grade stats and tags still render.
+- Pre-kickoff leg and slip Build Grades (A–F) come from `eval.Cache.GetOrCompute` via `SuiteReport.LegGrades` and
+  `SuiteReport.SlipGrades`. If replay fails or no cache is configured, the handler logs a warning and passes nil grades
+  so non-grade stats and tags still render.
 
 ## Group totals and streaks
 
@@ -99,6 +103,18 @@ tapping a tag never triggers navigation. Tapping any tag opens the shared `#tag-
 (`web/templates/partials.html` and `web/static/app.js`), showing the tone pill, tag name, the member's specific
 qualifying stats (Explanation), and the plain-English Rule.
 
+## Graded slips
+
+Below the member leaderboard, `/record?season=` lists the season's graded slips newest first (`GET /record` reverses the
+oldest-first `GradedSlipsForGroupSeason` slice). Each card links to `/slips/{id}` and shows:
+
+- **Week and slip name**
+- **Build Grade pill** (`Build A`–`Build F`, omitted when ungraded in `SuiteReport.SlipGrades`)
+- **Process vs. Outcome stamp and summary** (`analyzer.ClassifyProcessResult` from the pre-kickoff Build Grade and
+  settled slip result: `Clean Hit`, `Tough Beat`, `Total Bailout`, or `Book Donation`; omitted for pushes or ungraded
+  slips)
+- **Slip result pill** (`WON`, `LOST`, or `PUSH`)
+
 ## Member bet history
 
 `GET /record/members/{id}?season=` (`web/templates/record_member.html`) drills into one member's season performance:
@@ -109,9 +125,10 @@ qualifying stats (Explanation), and the plain-English Rule.
   clickable Tags strip, and a 4-stat summary strip (Legs, Hit % with implied-odds lift, Avg odds, Dollar P/L).
 - **Graded leg log:** Lists every leg authored by the member on graded slips in that season, ordered newest week and
   slip first (Season DESC, SeasonType DESC, WeekNum DESC, CreatedAt DESC, SlipID DESC, LegID ASC). Each card links to
-  `/slips/{id}` and shows the week label, slip name and result, selection, market label, odds, pre-kickoff grade badge
-  (omitted when ungraded), net vote tally (when non-zero), a Sole killer badge when that leg was the sole loser on a
-  lost slip, and the leg result.
+  `/slips/{id}` and shows the week label, slip name, slip result, slip Build Grade (`Build {Grade}` when present), slip
+  Process vs. Outcome stamp (`Clean Hit`, `Tough Beat`, `Total Bailout`, or `Book Donation`), selection, market label,
+  odds, leg pre-kickoff grade badge (omitted when ungraded), net vote tally (when non-zero), a Sole killer badge when
+  that leg was the sole loser on a lost slip, and the leg result.
 
 ## Related
 

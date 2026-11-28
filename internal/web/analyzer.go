@@ -450,7 +450,7 @@ func buildGradeView(in gradeBuildInput) GradeView {
 	corrTaxText := formatCorrTaxText(diag.CorrTaxPct)
 
 	hasMarketBox := len(in.pillars) > 0 &&
-		(vegasImplied != "" || fairNoVig != "" || rawModel != "" || hitReality != "" || holdText != "")
+		(vegasImplied != "" || fairNoVig != "" || holdText != "")
 
 	realismProb := firstPositiveProb(in.calibratedProb, vegasProb)
 	realismLabel, realismPct := computeRealism(realismProb)

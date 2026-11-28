@@ -3434,15 +3434,6 @@
             <dd class="font-mono font-semibold tabular-nums text-ink">{{.Grade.HoldText}}</dd>
           </div>
         {{end}}
-        {{if or .Grade.RawModel .Grade.HitReality}}
-          <div class="flex flex-wrap items-center justify-between gap-2">
-            <dt class="flex items-center gap-1 text-ink-muted">
-              <span class="rounded border border-line bg-surface px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-ink-subtle" data-provenance="Model Context">Model Context</span>
-              <span>{{if .Grade.RawModel}}Raw model{{else}}Projection{{end}}</span>
-            </dt>
-            <dd class="font-mono font-semibold tabular-nums text-ink">{{if .Grade.RawModel}}{{.Grade.RawModel}}{{else}}{{.Grade.HitReality}}{{end}}</dd>
-          </div>
-        {{end}}
       </dl>
     </div>
   {{end}}

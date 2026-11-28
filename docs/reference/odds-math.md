@@ -113,8 +113,15 @@ probabilities) and returns `0` when no legs count (`CombinedOdds` returns `1`).
 
 ### Implied chance display
 
-`internal/web` formats raw implied probabilities with `formatImpliedChance` as compact percentages beside American and
-parlay odds:
+`internal/web` formats raw implied probabilities in two ways depending on the surface:
+
+- **Human-first (`formatImpliedHuman`):** Leads with the implied percentage and plain-English frequency via
+  `parlay.FormatOneIn` (`"%s implied · %s"`, e.g. `"52% implied · ~1 in 2"` or `"13% implied · ~1 in 8"`) ahead of
+  secondary American odds on slip leg rows, pick board options, highlights, and research cards. In the Build Grade
+  drawer's Market Reality box, `parlay.FormatImpliedReality` formats the full sentence (`"13% implied (hits ~1 in 8 times)"`,
+  `"<1% implied (hits ...)"`, or `">99% implied (hits almost every time)"`).
+- **Compact percentage (`formatImpliedChance`):** Formats percentages for tight numeric chips and as the prefix inside
+  `formatImpliedHuman`:
 
 | Condition (`pct = prob × 100`)     | Output    | Examples                          |
 | ---------------------------------- | --------- | --------------------------------- |
@@ -325,8 +332,9 @@ UNDER:
 
 ## Where it shows up
 
-The Slip tab uses reference odds and `Payout` for its payout calculator, and displays `formatImpliedChance` (via
-`ImpliedProb` and `DecimalImpliedProb`) on leg rows, payout combined/reference odds, and A-grade highlights. Quick-add
+The Slip tab uses reference odds and `Payout` for its payout calculator, and displays `formatImpliedHuman` (via
+`ImpliedProb`, `DecimalImpliedProb`, and `parlay.FormatOneIn`) on leg rows, payout combined/reference odds, and
+cleanest-build highlights, with `parlay.FormatImpliedReality` in the Build Grade drawer's Market Reality box. Quick-add
 pills prefill the user's home-book price, or the median across all books when the user has no home book or no price
 there. The record book uses the same profit term, `stake × (D − 1) × (1 + boost/100)`, for dollar P/L on slips where a
 person logged a wager.
@@ -341,6 +349,8 @@ person logged a wager.
 | `DecimalToAmerican(decimal float64) int`                    | Rounded American price, or `0` for `d ≤ 1`.                     |
 | `DecimalImpliedProb(decimal float64) float64`               | Raw implied probability in `(0, 1)`, or `0` for `d ≤ 1`, `NaN`, or `Inf`. |
 | `ImpliedProb(american int) float64`                         | Raw implied probability in `(0, 1)`, or `0` for `0`.            |
+| `FormatOneIn(prob float64) string`                          | Human-friendly frequency ratio (`"~1 in 8"`, `"~2 in 3"`, `"almost every time"`), or `""`. |
+| `FormatImpliedReality(prob float64) string`                 | Plain-English implied reality (`"13% implied (hits ~1 in 8 times)"`), or `""`. |
 | `DevigTwoWay(priceA, priceB int) (float64, float64, bool)` | Multiplicative fair probabilities `(probA, probB)` and `ok`. |
 | `DevigTwoWayPower(priceA, priceB int) (float64, float64, float64, bool)` | Power-method fair probabilities `(probA, probB, vig, ok)`. |
 | `DevigTwoWayShin(priceA, priceB int) (float64, float64, float64, bool)` | Shin-model fair probabilities `(probA, probB, vig, ok)`. |

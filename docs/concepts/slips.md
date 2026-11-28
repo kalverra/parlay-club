@@ -17,9 +17,9 @@ budget:
 ```mermaid
 flowchart LR
   Week["Week & Slate Scope"] --> Hub["Slip Hub (GET /slips/{id})"]
-  Hub -->|"Pick step + Open slots"| Highlights["Top A-Grade Ideas"]
+  Hub -->|"Pick step + Open slots"| Highlights["Cleanest Builds on the Board"]
   Hub -->|"Primary action"| Pick["Pick Board (/slips/{id}/pick)"]
-  Pick -->|"Game card + detail"| GameHighlights["Top Plays in Game"]
+  Pick -->|"Game card + detail"| GameHighlights["Cleanest Builds in This Game"]
   Highlights -->|"+ Add / Batch"| Hub
   GameHighlights -->|"+ Add / Batch"| Pick
   Pick -->|"All legs picked"| Lock["Lock In -> Export -> Grade"]
@@ -52,12 +52,13 @@ holds the standing explanation; a `?` bubble beside an annotation opens the matc
 [Docs hub](docs-hub.md#help-bubbles) maps every bubble.
 
 When the slip is `OPEN` and the viewer is in the `pick` step (has remaining leg slots), `#slip-panel` renders a compact
-**"Top A-grade ideas"** strip below the step banner. It runs `analyzer.LoadBoardSignals` and `board.SelectHighlights`
-over cached SQLite odds and signals—making zero external API calls—to surface up to 3 A-grade legs and up to 2 A-grade
-2–3 leg parlay combos. Each card shows its `A` pill, a concise reason, odds with a muted implied percentage chance (and
-combined implied chance on combo headers), an inline `<details>` [four-pillar grade breakdown](analyzer.md), and one-tap
-`+ Add` (or `"Add all N"` via `POST /slips/{id}/legs/batch`, which disables as `"Needs N open slots"` when fewer than
-`N` slots remain). When no A-grade plays exist or the viewer finishes picking, the strip hides cleanly.
+**"Cleanest builds on the board"** strip below the step banner. It runs `analyzer.LoadBoardSignals` and
+`board.SelectHighlights` over cached SQLite odds and signals—making zero external API calls—to surface up to 3 A-grade
+legs and up to 2 A-grade 2–3 leg parlay combos. Each card shows its Build Grade pill, a concise reason, human-first
+`Vegas Implied` `1 in X` probability ahead of American odds (and combined implied chance on combo headers), a trigger
+that opens the 3-layer [Build Grade drawer](analyzer.md), and one-tap `+ Add` (or `"Add all N"` via
+`POST /slips/{id}/legs/batch`, which disables as `"Needs N open slots"` when fewer than `N` slots remain). When no
+clean-build plays exist or the viewer finishes picking, the strip hides cleanly.
 
 `slips.NextStep` is one pure function over the slip, its members, its legs, the week's games, the viewer, and `now`. It
 returns the step, the legs still needed, the names the slip waits on, the first kickoff still ahead, and the slip's
@@ -206,20 +207,22 @@ line, American odds, and a display `selection` generated from those fields.
 - `OTHER` legs skip the analyzer and grade by hand.
 
 The slip panel draws each leg as a row: a leading media badge when available, then the selection with an Over/Under
-badge on totals and O/U props, the odds with a muted implied percentage chance (e.g., `-110 (52%)`), a "Research &rarr;"
-link (to `/research/bet` for upcoming non-`OTHER` legs, falling back to player or game research for kicked-off or
-`OTHER` legs), `+ Add` (opening the eligible-slip chooser on other slips), the model chip, the grade pill, and the
-result. The grade pill opens that leg's four-pillar breakdown, and its `?` bubble opens Docs; the implied chance and
-nfelo model chip carry glossary bubbles. A matched player leg shows the player's portrait (or team logo, or initials); a
-team leg shows the team logo; a `TOTAL` leg shows paired away and home logos; an unlinked leg stays plain text. A
-`SPREAD` or `ML` leg with a fresh nfelo model shows it beside the odds (`nfelo -5.0` or `nfelo 76%`), omitted when
-missing, stale (>72h), or live. `db.Store.CreateLeg` starts every leg `PENDING` and treats odds 0 as -110.
+badge on totals and O/U props, human-first `Vegas Implied` `1 in X` copy ahead of American odds (e.g.,
+`52% implied · ~1 in 2` followed by `-110`), a "Research &rarr;" link (to `/research/bet` for upcoming non-`OTHER` legs,
+falling back to player or game research for kicked-off or `OTHER` legs), `+ Add` (opening the eligible-slip chooser on
+other slips), the model chip, the Build Grade pill (plus up to 3 clickable Signal Pills), and the result. Tapping the
+Build Grade pill or any Signal Pill opens the 3-layer Build Grade drawer (Ground-Rule Banner, separated Market Reality
+vs. Slip Diagnostics, optional cleanup nudge, and inline Layer 3 "Why?" popovers + Model Card). A matched player leg
+shows the player's portrait (or team logo, or initials); a team leg shows the team logo; a `TOTAL` leg shows paired away
+and home logos; an unlinked leg stays plain text. A `SPREAD` or `ML` leg with a fresh nfelo model shows it beside the
+odds (`nfelo -5.0` or `nfelo 76%`), omitted when missing, stale (>72h), or live. `db.Store.CreateLeg` starts every leg
+`PENDING` and treats odds 0 as -110.
 
 The slip's **reference odds** multiply each leg's reference price: the median of the prices the slip members' home books
 carry for that leg via `db.MatchBookOdds` (one price per book, preferring an exact `Line` match and falling back to the
 book's current line for the same selection). A leg whose members' books do not price it keeps its own price. The payout
-calculator shows muted implied percentage chances inline beside both **Combined** and **Reference** odds, omitting them
-when no legs count (empty or all-`PUSH`/`VOID` slips). Each chance pairs with a `?` bubble. The formulas are in
+calculator shows human-first `Vegas Implied` `1 in X` copy ahead of both **Combined** and **Reference** odds, omitting
+them when no legs count (empty or all-`PUSH`/`VOID` slips). Each chance pairs with a `?` bubble. The formulas are in
 [Odds math](../reference/odds-math.md).
 
 ### Selection identity
@@ -280,9 +283,9 @@ full page and an `hx-get` that swaps `#pick-body` and pushes the full page URL.
 
 A card opens the detail: a pinned header with paired matchup logos, the matchup, kickoff, venue, a Research link, an
 "All games" back link, and a horizontal category chip bar (All plus non-empty categories). Below—when the slip is OPEN
-with open slots—sits **"Top plays in this game"** (up to 3 A-grade legs and 1 same-game A-grade combo with one-tap +
-Add), followed by the **Group by** switcher (Category default, Player, Grade) and sort chips. The header and chips stay
-below the top bar while rows scroll sideways on a phone with no visible scrollbar.
+with open slots—sits **"Cleanest builds in this game"** (up to 3 A-grade legs and 1 same-game A-grade combo with
+one-tap + Add), followed by the **Group by** switcher (Category default, Player, Grade) and sort chips. The header and
+chips stay below the top bar while rows scroll sideways on a phone with no visible scrollbar.
 
 Category chips are All (default when `cat` is omitted or empty), Lines, Passing, Rushing, Receiving, TDs, and Kicking.
 Team totals fold into Lines; a category chip appears only when it has rows or is active, and its badge counts its rows.
@@ -298,9 +301,10 @@ An unknown game, a kicked-off game, or a game the window hides falls back to the
   sorted by score so Over and Under can land in different tiers.
 
 Sections start collapsed when search is empty and open automatically when searching; `app.js` preserves open section
-keys across HTMX swaps and resets them when the game changes. Every gradable option carries a sibling Grade A–F popover
-and a compact "Research &rarr;" link outside the pick button and form, powered by `board.ScoreRows` over cached SQLite
-signals with zero external API calls. Option buttons pair price with implied chance (-110 (52%)).
+keys across HTMX swaps and resets them when the game changes. Every gradable option carries a sibling Build Grade pill
+that opens the 3-layer Build Grade drawer and a compact "Research &rarr;" link outside the pick button and form, powered
+by `board.ScoreRows` over cached SQLite signals with zero external API calls. Option buttons display human-first
+`Vegas Implied` `1 in X` copy ahead of American odds (`52% implied · ~1 in 2` / `-110`).
 
 Search filters the open game's rows. Sorts are Popular (default), Grade, Player, Odds, Line, and Matchup. `SortPopular`
 ranks game lines by visibility tier (spread, total, moneyline, team total) and player props by cached player usage,
@@ -462,9 +466,11 @@ live progress bars and deterministic hit chances without spending paid odds cred
 
 ## Grading
 
-Every leg carries a result: `PENDING`, `NEEDS_GRADING`, `WON`, `LOST`, `PUSH`, or `VOID`. New legs are `PENDING`. Grades
-sit above results. The A–F pill is the analyzer's quality read; the result chip records what happened. Grades and
-warning cards carry a `?` bubble into Docs. See [Analyzer](analyzer.md#what-the-banner-shows).
+Every leg carries a result: `PENDING`, `NEEDS_GRADING`, `WON`, `LOST`, `PUSH`, or `VOID`. New legs are `PENDING`. Build
+Grades sit above results: the A–F pill is the analyzer's pre-kickoff construction read, and the result chip records
+what happened. On settled slips (`WON` or `LOST`) with a pre-kickoff Build Grade, the slip header also stamps a
+**Process vs. Outcome** badge (`Clean Hit`, `Tough Beat`, `Total Bailout`, or `Book Donation` via
+`analyzer.ClassifyProcessResult`). See [Analyzer](analyzer.md#what-the-banner-shows).
 
 Any slip member can grade any leg, not just their own, at any time; locking in or a kickoff does not stop a grade. The
 result chip on each leg opens a menu of `PENDING`, `WON`, `LOST`, `PUSH`, and `VOID`. Each choice sends
