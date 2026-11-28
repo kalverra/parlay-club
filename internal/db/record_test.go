@@ -2,6 +2,7 @@ package db_test
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -112,4 +113,78 @@ func createSeasonWeek(t *testing.T, store *db.Store, season, weekNum int) db.Wee
 	week, err := store.UpsertWeek(t.Context(), season, 2, weekNum)
 	require.NoError(t, err)
 	return week
+}
+
+func TestVotesForGroupSeasonScopesAndSums(t *testing.T) {
+	t.Parallel()
+
+	store, _ := openTestStore(t)
+	ada := createUser(t, store, "Ada")
+	sam := createUser(t, store, "Sam")
+	ben := createUser(t, store, "Ben")
+
+	groupA := createTestGroup(t, store, ada)
+	_, err := store.JoinByToken(t.Context(), sam.ID, groupA.InviteToken)
+	require.NoError(t, err)
+	groupB := createTestGroup(t, store, ben)
+
+	wk2024 := createSeasonWeek(t, store, 2024, 1)
+	wk2025 := createSeasonWeek(t, store, 2025, 1)
+
+	slip2025Graded := createTestSlip(t, store, groupA, wk2025, "2025 W1", 2, ada, sam)
+	require.NoError(t, store.SetSlipGrade(t.Context(), slip2025Graded.ID, parlay.Won, db.SlipGraded))
+
+	slip2025Locked := createTestSlip(t, store, groupA, wk2025, "2025 W1 Locked", 2, ada, sam)
+	require.NoError(t, store.SetSlipStatus(t.Context(), slip2025Locked.ID, db.SlipLocked))
+
+	slip2024Graded := createTestSlip(t, store, groupA, wk2024, "2024 W1", 2, ada, sam)
+	require.NoError(t, store.SetSlipGrade(t.Context(), slip2024Graded.ID, parlay.Lost, db.SlipGraded))
+
+	slipB2025Graded := createTestSlip(t, store, groupB, wk2025, "B 2025 W1", 2, ben)
+	require.NoError(t, store.SetSlipGrade(t.Context(), slipB2025Graded.ID, parlay.Won, db.SlipGraded))
+
+	legUp, err := store.CreateLeg(t.Context(), db.Leg{
+		SlipID: slip2025Graded.ID, UserID: ada.ID, MarketType: "ML", Selection: "BUF ML", Odds: -120,
+	})
+	require.NoError(t, err)
+	legDown, err := store.CreateLeg(t.Context(), db.Leg{
+		SlipID: slip2025Graded.ID, UserID: sam.ID, MarketType: "SPREAD", Selection: "KC -3.5", Odds: -110,
+	})
+	require.NoError(t, err)
+	legLocked, err := store.CreateLeg(t.Context(), db.Leg{
+		SlipID: slip2025Locked.ID, UserID: ada.ID, MarketType: "ML", Selection: "DET ML", Odds: -130,
+	})
+	require.NoError(t, err)
+	leg2024, err := store.CreateLeg(t.Context(), db.Leg{
+		SlipID: slip2024Graded.ID, UserID: ada.ID, MarketType: "ML", Selection: "BAL ML", Odds: -140,
+	})
+	require.NoError(t, err)
+	legGroupB, err := store.CreateLeg(t.Context(), db.Leg{
+		SlipID: slipB2025Graded.ID, UserID: ben.ID, MarketType: "ML", Selection: "SF ML", Odds: -150,
+	})
+	require.NoError(t, err)
+
+	at := time.Date(2025, 9, 7, 17, 0, 0, 0, time.UTC)
+	// legUp: +1 + 1 = +2
+	require.NoError(t, store.SetLegVote(t.Context(), legUp.ID, ada.ID, 1, at))
+	require.NoError(t, store.SetLegVote(t.Context(), legUp.ID, sam.ID, 1, at))
+	// legDown: +1 - 1 - 1 = -1
+	require.NoError(t, store.SetLegVote(t.Context(), legDown.ID, ada.ID, 1, at))
+	require.NoError(t, store.SetLegVote(t.Context(), legDown.ID, sam.ID, -1, at))
+	require.NoError(t, store.SetLegVote(t.Context(), legDown.ID, ben.ID, -1, at))
+	// Out-of-scope votes (non-graded slip, prior season, other group)
+	require.NoError(t, store.SetLegVote(t.Context(), legLocked.ID, sam.ID, 1, at))
+	require.NoError(t, store.SetLegVote(t.Context(), leg2024.ID, sam.ID, 1, at))
+	require.NoError(t, store.SetLegVote(t.Context(), legGroupB.ID, ben.ID, 1, at))
+
+	votes, err := store.VotesForGroupSeason(t.Context(), groupA.ID, 2025)
+	require.NoError(t, err)
+	assert.Equal(t, map[int64]int{
+		legUp.ID:   2,
+		legDown.ID: -1,
+	}, votes)
+
+	emptyVotes, err := store.VotesForGroupSeason(t.Context(), groupA.ID, 2026)
+	require.NoError(t, err)
+	assert.Empty(t, emptyVotes)
 }

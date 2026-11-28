@@ -1396,3 +1396,54 @@ func TestEvaluateAllEnginesSideBySideAndSGPReplay(t *testing.T) {
 	assert.Greater(t, v2.Calibration.NaiveIndepLogLoss, 0.0)
 	assert.Less(t, v2.Calibration.SGPLogLoss, v2.Calibration.NaiveIndepLogLoss)
 }
+
+func TestSuiteReportLegGrades(t *testing.T) {
+	t.Parallel()
+
+	assert.Nil(t, (SuiteReport{}).LegGrades("v1"))
+
+	suite := SuiteReport{
+		ActiveRubric: "v1",
+		Reports: []Report{
+			{
+				RubricName: "v0",
+				legOutcomes: []legOutcome{
+					{legID: 10, band: "C"},
+				},
+			},
+			{
+				RubricName: "v1",
+				legOutcomes: []legOutcome{
+					{legID: 10, band: "B"},
+					{legID: 11, band: ungradedBand},
+				},
+			},
+			{
+				RubricName: "v2",
+				legOutcomes: []legOutcome{
+					{legID: 10, band: "A"},
+					{legID: 11, band: "D"},
+					{legID: 12, band: ungradedBand},
+					{legID: 13, band: ""},
+					{legID: 0, band: "A"},
+					{legID: -1, band: "B"},
+					{legID: 14, band: "A", isMarket: true},
+				},
+			},
+		},
+	}
+
+	// Exact engine match filters ungraded, blank, non-positive IDs, and market legs.
+	assert.Equal(t, map[int64]string{
+		10: "A",
+		11: "D",
+	}, suite.LegGrades("v2"))
+
+	// Unknown or empty engine falls back to ActiveRubric.
+	assert.Equal(t, map[int64]string{10: "B"}, suite.LegGrades("unknown"))
+	assert.Equal(t, map[int64]string{10: "B"}, suite.LegGrades(""))
+
+	// When neither engineName nor ActiveRubric matches, fall back to Reports[0].
+	suite.ActiveRubric = "missing"
+	assert.Equal(t, map[int64]string{10: "C"}, suite.LegGrades("unknown"))
+}

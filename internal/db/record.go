@@ -169,6 +169,38 @@ func (s *Store) GradedLegsForGroupSeason(ctx context.Context, groupID int64, sea
 	return legs, nil
 }
 
+// VotesForGroupSeason returns the net vote tally (sum of +1/-1 votes) per
+// leg ID for every leg on a GRADED slip in groupID during season.
+func (s *Store) VotesForGroupSeason(ctx context.Context, groupID int64, season int) (map[int64]int, error) {
+	rows, err := s.readConn().QueryContext(ctx, `
+		SELECT v.leg_id, COALESCE(SUM(v.value), 0)
+		FROM leg_votes v
+		JOIN legs l ON l.id = v.leg_id
+		JOIN slips s ON s.id = l.slip_id
+		JOIN weeks wk ON wk.id = s.week_id
+		WHERE s.group_id = ? AND wk.season = ? AND s.status = ?
+		GROUP BY v.leg_id`,
+		groupID, season, string(SlipGraded))
+	if err != nil {
+		return nil, fmt.Errorf("sum votes for group %d season %d: %w", groupID, season, err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	votes := make(map[int64]int)
+	for rows.Next() {
+		var legID int64
+		var net int
+		if err := rows.Scan(&legID, &net); err != nil {
+			return nil, fmt.Errorf("sum votes for group %d season %d: %w", groupID, season, err)
+		}
+		votes[legID] = net
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("sum votes for group %d season %d: %w", groupID, season, err)
+	}
+	return votes, nil
+}
+
 // RecordUsersForGroupSeason returns every user who is a member of groupID or
 // who authored a leg on a GRADED slip in groupID during season.
 func (s *Store) RecordUsersForGroupSeason(ctx context.Context, groupID int64, season int) ([]User, error) {

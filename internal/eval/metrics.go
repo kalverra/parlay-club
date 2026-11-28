@@ -113,6 +113,45 @@ type SuiteReport struct {
 	Diffs        []DiffReport `json:"diffs"`
 }
 
+// LegGrades returns the normalized letter grade ("A"-"F") keyed by leg ID
+// for the report matching engineName, falling back to ActiveRubric and then
+// the first report in the suite. Ungraded and market-only legs are omitted.
+func (s SuiteReport) LegGrades(engineName string) map[int64]string {
+	report, ok := s.reportFor(engineName)
+	if !ok {
+		return nil
+	}
+	grades := make(map[int64]string, len(report.legOutcomes))
+	for _, o := range report.legOutcomes {
+		if o.isMarket || o.legID <= 0 || o.band == "" || o.band == ungradedBand {
+			continue
+		}
+		grades[o.legID] = o.band
+	}
+	return grades
+}
+
+func (s SuiteReport) reportFor(engineName string) (Report, bool) {
+	if len(s.Reports) == 0 {
+		return Report{}, false
+	}
+	if engineName != "" {
+		for _, r := range s.Reports {
+			if r.RubricName == engineName {
+				return r, true
+			}
+		}
+	}
+	if s.ActiveRubric != "" {
+		for _, r := range s.Reports {
+			if r.RubricName == s.ActiveRubric {
+				return r, true
+			}
+		}
+	}
+	return s.Reports[0], true
+}
+
 // BandDiff records the metric delta from baseline to candidate for one band.
 type BandDiff struct {
 	Band             string  `json:"band"`

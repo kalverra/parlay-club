@@ -216,7 +216,7 @@ Complexity: medium (coordinates leg-grade extraction in `internal/eval`, season 
 
 Risk: low (pure read-only logic with no schema changes and full unit-test coverage of every tag boundary and query)
 
-- [ ] Add `SuiteReport.LegGrades(engineName string) map[int64]string` in `internal/eval/metrics.go` and
+- [x] Add `SuiteReport.LegGrades(engineName string) map[int64]string` in `internal/eval/metrics.go` and
       `Store.VotesForGroupSeason(ctx, groupID, season)` in `internal/db/record.go`, with unit tests covering engine
       selection, ungraded/market filtering, and group/season/graded-slip vote scoping.
 - [ ] Extend `internal/record` (`record.go` and new `tags.go`) with `Leg.ID`, `Leg.Grade`, `Leg.NetVotes`,
