@@ -266,7 +266,7 @@ existing category filtering and sorting consistent)
 Risk: low (pure in-memory board transformations over cached data with deterministic unit tests in
 `internal/board/board_test.go`)
 
-- [ ] Add `GroupBy` (`category`, `player`, `grade`), `SortGrade`, `Row.Grade`, `DetailSection`, and `ScoreRows` to
+- [x] Add `GroupBy` (`category`, `player`, `grade`), `SortGrade`, `Row.Grade`, `DetailSection`, and `ScoreRows` to
   `internal/board/board.go`, updating `board.Detail` so empty `GroupBy` defaults to `GroupByCategory` across all
   non-empty categories (with optional `Category` narrowing), `GroupByPlayer` merges each player's props across
   categories alongside a `Game lines` section, and `GroupByGrade` buckets individual sides by `A`–`F` with tests in

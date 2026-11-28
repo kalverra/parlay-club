@@ -1622,3 +1622,220 @@ func TestPairKeepsSplitTotalAndTeamTotalPaired(t *testing.T) {
 	teamTotal := pairGroup(t, paired, "TEAM_TOTAL", "BUF", "")
 	assert.Equal(t, []string{"OVER", "UNDER"}, optionSides(teamTotal))
 }
+
+func TestGroupByAndSortGradeLabels(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, []board.GroupBy{
+		board.GroupByCategory,
+		board.GroupByPlayer,
+		board.GroupByGrade,
+	}, board.DetailGroupBys)
+	assert.Equal(t, "Category", board.GroupByCategory.Label())
+	assert.Equal(t, "Player", board.GroupByPlayer.Label())
+	assert.Equal(t, "Grade", board.GroupByGrade.Label())
+	assert.Equal(t, "custom", board.GroupBy("custom").Label())
+
+	assert.Contains(t, board.DetailSorts, board.SortGrade)
+	assert.Equal(t, "Grade", board.SortGrade.Label())
+}
+
+func TestScoreRowsPopulatesGradesAndSkipsOtherOrMissingGames(t *testing.T) {
+	t.Parallel()
+
+	kickoff := at(t, 8, 13, 0)
+	g := game("401", kickoff)
+	built := board.Build([]db.Game{g}, []db.Odds{
+		odds("401", "draftkings", "SPREAD", "BUF", "", "TEAM", new(-3.0), -110),
+		odds("401", "draftkings", "PASS_YDS", "BUF", "Josh Allen", "OVER", new(245.5), -110),
+	}, nil, "", nil, kickoff.Add(-time.Hour))
+	built = append(built,
+		board.Row{GameID: "401", Market: "OTHER", Text: "Custom leg"},
+		board.Row{GameID: "missing", Market: "ML", Team: "BUF", Side: "TEAM", Odds: -110, Text: "BUF ML"},
+	)
+
+	games := map[string]analyzer.Game{
+		"401": {
+			ID:   "401",
+			Home: "BUF",
+			Away: "MIA",
+		},
+	}
+
+	scored := board.ScoreRows(built, games, nil, nil)
+	require.Len(t, scored, len(built))
+	for i := range built {
+		assert.Empty(t, built[i].Grade.Letter, "input rows should not be mutated")
+	}
+
+	for _, row := range scored {
+		switch row.GameID {
+		case "401":
+			if row.Market == "OTHER" {
+				assert.Empty(t, row.Grade.Letter)
+			} else {
+				assert.NotEmpty(t, row.Grade.Letter)
+				assert.Positive(t, row.Grade.Score)
+			}
+		case "missing":
+			assert.Empty(t, row.Grade.Letter)
+		}
+	}
+}
+
+func TestDetailGroupByCategoryAcrossAllNonEmptyAndNarrowing(t *testing.T) {
+	t.Parallel()
+
+	kickoff := at(t, 8, 13, 0)
+	g := game("401", kickoff)
+	rows := []db.Odds{
+		odds("401", "draftkings", "SPREAD", "BUF", "", "TEAM", new(-3.0), -110),
+		odds("401", "draftkings", "TEAM_TOTAL", "BUF", "", "OVER", new(24.5), -110),
+		odds("401", "draftkings", "PASS_YDS", "BUF", "Josh Allen", "OVER", new(245.5), -110),
+		odds("401", "draftkings", "ANYTIME_TD", "BUF", "James Cook", "YES", nil, 150),
+	}
+	built := board.Build([]db.Game{g}, rows, nil, "", nil, kickoff.Add(-time.Hour))
+
+	detail := board.Detail(g, built, board.Query{Now: kickoff.Add(-time.Hour)})
+	assert.Equal(t, board.GroupByCategory, detail.GroupBy)
+	require.Len(t, detail.Sections, 3)
+
+	assert.Equal(t, "lines", detail.Sections[0].Key)
+	assert.Equal(t, "Game lines", detail.Sections[0].Label)
+	assert.Equal(t, 2, detail.Sections[0].Count)
+	assert.Len(t, detail.Sections[0].Lines, 2)
+	assert.Empty(t, detail.Sections[0].Players)
+
+	assert.Equal(t, "passing", detail.Sections[1].Key)
+	assert.Equal(t, "Passing", detail.Sections[1].Label)
+	assert.Equal(t, 1, detail.Sections[1].Count)
+	assert.Len(t, detail.Sections[1].Players, 1)
+	assert.Empty(t, detail.Sections[1].Lines)
+
+	assert.Equal(t, "tds", detail.Sections[2].Key)
+	assert.Equal(t, "TDs", detail.Sections[2].Label)
+	assert.Equal(t, 1, detail.Sections[2].Count)
+	assert.Len(t, detail.Sections[2].Players, 1)
+
+	narrow := board.Detail(g, built, board.Query{
+		GroupBy:  board.GroupBy("unknown"),
+		Category: board.CategoryTeamTotals,
+		Now:      kickoff.Add(-time.Hour),
+	})
+	assert.Equal(t, board.GroupByCategory, narrow.GroupBy)
+	require.Len(t, narrow.Sections, 1)
+	assert.Equal(t, "lines", narrow.Sections[0].Key)
+	assert.Len(t, narrow.Sections[0].Lines, 2)
+}
+
+func TestDetailGroupByPlayerMergesPropsAcrossCategoriesWithGameLines(t *testing.T) {
+	t.Parallel()
+
+	kickoff := at(t, 8, 13, 0)
+	g := game("401", kickoff)
+	roster := []db.RosterPlayer{
+		{AthleteID: "1", Team: "BUF", FullName: "Josh Allen", Position: "QB"},
+		{AthleteID: "2", Team: "BUF", FullName: "James Cook", Position: "RB"},
+	}
+	rows := []db.Odds{
+		odds("401", "draftkings", "SPREAD", "BUF", "", "TEAM", new(-3.0), -110),
+		odds("401", "draftkings", "PASS_YDS", "BUF", "Josh Allen", "OVER", new(245.5), -110),
+		odds("401", "draftkings", "PASS_TDS", "BUF", "Josh Allen", "OVER", new(1.5), -125),
+		odds("401", "draftkings", "RUSH_YDS", "BUF", "Josh Allen", "OVER", new(32.5), -110),
+		odds("401", "draftkings", "ANYTIME_TD", "BUF", "Josh Allen", "YES", nil, 130),
+		odds("401", "draftkings", "RUSH_YDS", "BUF", "James Cook", "OVER", new(64.5), -110),
+	}
+	built := board.Build([]db.Game{g}, rows, roster, "", nil, kickoff.Add(-time.Hour))
+	for i := range built {
+		switch built[i].PlayerName {
+		case "Josh Allen":
+			built[i].Grade = analyzer.LegGrade{Letter: "A", Score: 91}
+		case "James Cook":
+			built[i].Grade = analyzer.LegGrade{Letter: "C", Score: 70}
+		default:
+			built[i].Grade = analyzer.LegGrade{Letter: "B", Score: 82}
+		}
+	}
+
+	detail := board.Detail(g, built, board.Query{
+		GroupBy: board.GroupByPlayer,
+		Sort:    board.SortGrade,
+		Now:     kickoff.Add(-time.Hour),
+	})
+	assert.Equal(t, board.GroupByPlayer, detail.GroupBy)
+	assert.Equal(t, board.SortGrade, detail.Sort)
+	require.Len(t, detail.Sections, 2)
+
+	playersSec := detail.Sections[0]
+	assert.Equal(t, "players", playersSec.Key)
+	assert.Equal(t, "Players", playersSec.Label)
+	assert.Equal(t, 5, playersSec.Count)
+	require.Len(t, playersSec.Players, 2)
+	assert.Equal(t, "Josh Allen", playersSec.Players[0].Name, "higher grade sorts first")
+	assert.Len(t, playersSec.Players[0].Lines, 4, "passing, rushing, and anytime TD merge onto one card")
+	assert.Equal(t, "James Cook", playersSec.Players[1].Name)
+
+	linesSec := detail.Sections[1]
+	assert.Equal(t, "lines", linesSec.Key)
+	assert.Equal(t, "Game lines", linesSec.Label)
+	assert.Equal(t, 1, linesSec.Count)
+	require.Len(t, linesSec.Lines, 1)
+	assert.Equal(t, "SPREAD", linesSec.Lines[0].Market)
+}
+
+func TestDetailGroupByGradeBucketsIndividualSidesAndSorts(t *testing.T) {
+	t.Parallel()
+
+	kickoff := at(t, 8, 13, 0)
+	g := game("401", kickoff)
+	rows := []db.Odds{
+		odds("401", "draftkings", "PASS_YDS", "BUF", "Josh Allen", "OVER", new(245.5), -110),
+		odds("401", "draftkings", "PASS_YDS", "BUF", "Josh Allen", "UNDER", new(245.5), -110),
+		odds("401", "draftkings", "RUSH_YDS", "BUF", "James Cook", "OVER", new(64.5), -115),
+		odds("401", "draftkings", "ML", "BUF", "", "TEAM", nil, -150),
+		odds("401", "draftkings", "TOTAL", "", "", "OVER", new(47.5), -105),
+	}
+	built := board.Build([]db.Game{g}, rows, nil, "", nil, kickoff.Add(-time.Hour))
+	for i := range built {
+		switch {
+		case built[i].PlayerName == "Josh Allen" && built[i].Side == "OVER":
+			built[i].Grade = analyzer.LegGrade{Letter: "A", Score: 92}
+		case built[i].PlayerName == "Josh Allen" && built[i].Side == "UNDER":
+			built[i].Grade = analyzer.LegGrade{Letter: "D", Score: 58}
+		case built[i].PlayerName == "James Cook":
+			built[i].Grade = analyzer.LegGrade{Letter: "A", Score: 95}
+		case built[i].Market == "ML":
+			built[i].Grade = analyzer.LegGrade{Letter: "F", Score: 40}
+		}
+	}
+
+	detail := board.Detail(g, built, board.Query{
+		GroupBy: board.GroupByGrade,
+		Now:     kickoff.Add(-time.Hour),
+	})
+	assert.Equal(t, board.GroupByGrade, detail.GroupBy)
+	require.Len(t, detail.Sections, 4, "empty B and C buckets are omitted")
+
+	assert.Equal(t, "grade_a", detail.Sections[0].Key)
+	assert.Equal(t, "Grade A", detail.Sections[0].Label)
+	assert.Equal(t, "A", detail.Sections[0].Badge)
+	require.Len(t, detail.Sections[0].Options, 2)
+	assert.Equal(t, "James Cook Over 64.5 Rush Yds", detail.Sections[0].Options[0].Text)
+	assert.Equal(t, "Josh Allen Over 245.5 Pass Yds", detail.Sections[0].Options[1].Text)
+
+	assert.Equal(t, "grade_d", detail.Sections[1].Key)
+	assert.Equal(t, "D", detail.Sections[1].Badge)
+	require.Len(t, detail.Sections[1].Options, 1)
+	assert.Equal(t, "Josh Allen Under 245.5 Pass Yds", detail.Sections[1].Options[0].Text)
+
+	assert.Equal(t, "grade_f", detail.Sections[2].Key)
+	assert.Equal(t, "F", detail.Sections[2].Badge)
+	require.Len(t, detail.Sections[2].Options, 1)
+	assert.Equal(t, "BUF ML", detail.Sections[2].Options[0].Text)
+
+	assert.Equal(t, "ungraded", detail.Sections[3].Key)
+	assert.Equal(t, "Ungraded", detail.Sections[3].Label)
+	assert.Empty(t, detail.Sections[3].Badge)
+	require.Len(t, detail.Sections[3].Options, 1)
+	assert.Equal(t, "Over 47.5", detail.Sections[3].Options[0].Text)
+}

@@ -106,11 +106,39 @@ func (w Window) Label() string {
 	}
 }
 
+// GroupBy controls how Detail groups a game's selections.
+type GroupBy string
+
+// The ways the open game detail can group its selections.
+const (
+	GroupByCategory GroupBy = "category"
+	GroupByPlayer   GroupBy = "player"
+	GroupByGrade    GroupBy = "grade"
+)
+
+// DetailGroupBys lists the open game's grouping modes in display order.
+var DetailGroupBys = []GroupBy{GroupByCategory, GroupByPlayer, GroupByGrade}
+
+// Label is the chip text.
+func (g GroupBy) Label() string {
+	switch g {
+	case GroupByCategory:
+		return "Category"
+	case GroupByPlayer:
+		return "Player"
+	case GroupByGrade:
+		return "Grade"
+	default:
+		return string(g)
+	}
+}
+
 // Sort orders the results.
 type Sort string
 
 // The ways the pick board can order its rows.
 const (
+	SortGrade   Sort = "grade"
 	SortPlayer  Sort = "player"
 	SortOdds    Sort = "odds"
 	SortLine    Sort = "line"
@@ -119,11 +147,13 @@ const (
 
 // DetailSorts lists the open game's sort chips in display order. One game has
 // one kickoff, so kickoff drops out and player is the default.
-var DetailSorts = []Sort{SortPlayer, SortOdds, SortLine, SortMatchup}
+var DetailSorts = []Sort{SortGrade, SortPlayer, SortOdds, SortLine, SortMatchup}
 
 // Label is the chip text.
 func (s Sort) Label() string {
 	switch s {
+	case SortGrade:
+		return "Grade"
 	case SortPlayer:
 		return "Player"
 	case SortOdds:
@@ -179,6 +209,7 @@ type Row struct {
 	TrayDriftNote  string
 	Badge          string
 	ComboWarning   string
+	Grade          analyzer.LegGrade
 }
 
 // GameCard is one game on the slate: the matchup, its kickoff, the game lines
@@ -272,14 +303,26 @@ type PlayerGroup struct {
 	Lines       []LineGroup
 }
 
-// GameDetail is the open game's header, its tabs, and the rows of the active
-// tab. Lines holds the game lines when Lines is active; Players holds the
-// player cards otherwise.
+// DetailSection is one labeled section in GameDetail.
+type DetailSection struct {
+	Key     string
+	Label   string
+	Badge   string
+	Count   int
+	Lines   []LineGroup
+	Players []PlayerGroup
+	Options []Row
+}
+
+// GameDetail is the open game's header, its tabs, its grouped sections, and the
+// legacy active-tab rows.
 type GameDetail struct {
 	Game     GameCard
+	GroupBy  GroupBy
 	Category Category
 	Sort     Sort
 	Tabs     []Tab
+	Sections []DetailSection
 	Lines    []LineGroup
 	Players  []PlayerGroup
 }
@@ -296,6 +339,7 @@ type BoardSignals struct { //nolint:revive // Name specified in design.
 // Query is one search, filter, and sort request.
 type Query struct {
 	Q        string
+	GroupBy  GroupBy
 	Category Category
 	Window   Window
 	Sort     Sort
@@ -912,9 +956,42 @@ func BuildSlate(games []db.Game, rows []Row, roster []db.RosterPlayer, q Query) 
 	}
 }
 
-// Detail shapes one game's built rows into the header, tabs, and lines the open
-// game shows. The query supplies the search text, the open tab, and the sort;
-// an unknown or empty category falls back to the first tab with rows.
+// ScoreRows returns a copy of rows with Row.Grade populated for every
+// non-OTHER row whose game is present in games. When engine is nil,
+// analyzer.ActiveEngine is used.
+func ScoreRows(
+	rows []Row,
+	games map[string]analyzer.Game,
+	stats map[string]analyzer.PlayerStats,
+	engine analyzer.GradingEngine,
+) []Row {
+	out := make([]Row, len(rows))
+	copy(out, rows)
+	if len(out) == 0 || len(games) == 0 {
+		return out
+	}
+	if engine == nil {
+		engine = analyzer.ActiveEngine
+	}
+	if engine == nil {
+		return out
+	}
+	for i := range out {
+		if out[i].GameID == "" || out[i].Market == "OTHER" {
+			continue
+		}
+		if _, ok := games[out[i].GameID]; !ok {
+			continue
+		}
+		out[i].Grade = engine.ScoreLeg(RowToAnalyzerLeg(out[i]), games, stats)
+	}
+	return out
+}
+
+// Detail shapes one game's built rows into the header, tabs, grouped sections,
+// and active-tab rows the open game shows. Empty GroupBy defaults to
+// GroupByCategory across all non-empty categories, with optional Category
+// narrowing.
 func Detail(game db.Game, rows []Row, q Query) GameDetail {
 	gameRows := rowsForGame(rows, game.ID)
 	needle := normalize(q.Q)
@@ -925,12 +1002,15 @@ func Detail(game db.Game, rows []Row, q Query) GameDetail {
 		}
 		visible = append(visible, row)
 	}
+	visible = ApplySignals(game, visible, q.Signals)
 
 	counts := tabCounts(visible)
 	category := tabCategory(q.Category, counts)
 	mode := detailSort(q.Sort)
+	groupBy := detailGroupBy(q.GroupBy)
 	detail := GameDetail{
 		Game:     cardFor(game, gameRows),
+		GroupBy:  groupBy,
 		Category: category,
 		Sort:     mode,
 	}
@@ -946,19 +1026,211 @@ func Detail(game db.Game, rows []Row, q Query) GameDetail {
 		})
 	}
 
-	tabRows := make([]Row, 0, len(visible))
-	for _, row := range visible {
-		if foldCategory(row.Category) == category {
-			tabRows = append(tabRows, row)
-		}
-	}
-	tabRows = ApplySignals(game, tabRows, q.Signals)
+	tabRows := filterRowsByCategory(visible, category)
 	if category == CategoryLines {
 		detail.Lines = lineGroups(game, tabRows, mode, q.Signals)
 	} else {
 		detail.Players = playerGroups(game, tabRows, mode, q.Signals)
 	}
+
+	sectionRows := visible
+	if narrowCat, ok := narrowCategory(q.Category); ok {
+		sectionRows = filterRowsByCategory(visible, narrowCat)
+	}
+	switch groupBy {
+	case GroupByCategory:
+		detail.Sections = categorySections(game, sectionRows, mode, q.Signals)
+	case GroupByPlayer:
+		detail.Sections = playerSections(game, sectionRows, mode, q.Signals)
+	case GroupByGrade:
+		detail.Sections = gradeSections(game, sectionRows, mode, q.Signals)
+	}
 	return detail
+}
+
+func detailGroupBy(mode GroupBy) GroupBy {
+	switch mode {
+	case GroupByCategory, GroupByPlayer, GroupByGrade:
+		return mode
+	default:
+		return GroupByCategory
+	}
+}
+
+func narrowCategory(requested Category) (Category, bool) {
+	switch requested {
+	case CategoryLines,
+		CategoryTeamTotals,
+		CategoryPassing,
+		CategoryRushing,
+		CategoryReceiving,
+		CategoryTDs,
+		CategoryKicking:
+		return foldCategory(requested), true
+	default:
+		return "", false
+	}
+}
+
+func filterRowsByCategory(rows []Row, category Category) []Row {
+	out := make([]Row, 0, len(rows))
+	for _, row := range rows {
+		if foldCategory(row.Category) == category {
+			out = append(out, row)
+		}
+	}
+	return out
+}
+
+func categorySections(game db.Game, rows []Row, mode Sort, signals BoardSignals) []DetailSection {
+	byCategory := make(map[Category][]Row, len(tabCategories))
+	for _, row := range rows {
+		cat := foldCategory(row.Category)
+		byCategory[cat] = append(byCategory[cat], row)
+	}
+	var sections []DetailSection
+	for _, cat := range tabCategories {
+		catRows := byCategory[cat]
+		if len(catRows) == 0 {
+			continue
+		}
+		label := cat.Label()
+		if cat == CategoryLines {
+			label = "Game lines"
+		}
+		sec := DetailSection{
+			Key:   string(cat),
+			Label: label,
+			Count: len(catRows),
+		}
+		if cat == CategoryLines {
+			sec.Lines = lineGroups(game, catRows, mode, signals)
+		} else {
+			sec.Players = playerGroups(game, catRows, mode, signals)
+		}
+		sections = append(sections, sec)
+	}
+	return sections
+}
+
+func playerSections(game db.Game, rows []Row, mode Sort, signals BoardSignals) []DetailSection {
+	var playerRows, gameLineRows []Row
+	for _, row := range rows {
+		if isPlayerMarket(row.Market) || row.PlayerName != "" {
+			playerRows = append(playerRows, row)
+		} else {
+			gameLineRows = append(gameLineRows, row)
+		}
+	}
+	var sections []DetailSection
+	if len(playerRows) > 0 {
+		sections = append(sections, DetailSection{
+			Key:     "players",
+			Label:   "Players",
+			Count:   len(playerRows),
+			Players: playerGroups(game, playerRows, mode, signals),
+		})
+	}
+	if len(gameLineRows) > 0 {
+		sections = append(sections, DetailSection{
+			Key:   "lines",
+			Label: "Game lines",
+			Count: len(gameLineRows),
+			Lines: lineGroups(game, gameLineRows, mode, signals),
+		})
+	}
+	return sections
+}
+
+var gradeBucketOrder = []string{"A", "B", "C", "D", "F"}
+
+func gradeSections(game db.Game, rows []Row, mode Sort, signals BoardSignals) []DetailSection {
+	buckets := make(map[string][]Row, len(gradeBucketOrder)+1)
+	for _, row := range rows {
+		letter := row.Grade.Letter
+		switch letter {
+		case "A", "B", "C", "D", "F":
+			buckets[letter] = append(buckets[letter], row)
+		default:
+			buckets[""] = append(buckets[""], row)
+		}
+	}
+	var sections []DetailSection
+	for _, letter := range gradeBucketOrder {
+		bucketRows := buckets[letter]
+		if len(bucketRows) == 0 {
+			continue
+		}
+		sortGradeRows(game, bucketRows, mode, signals)
+		sections = append(sections, DetailSection{
+			Key:     "grade_" + strings.ToLower(letter),
+			Label:   "Grade " + letter,
+			Badge:   letter,
+			Count:   len(bucketRows),
+			Options: bucketRows,
+		})
+	}
+	if ungraded := buckets[""]; len(ungraded) > 0 {
+		sortGradeRows(game, ungraded, mode, signals)
+		sections = append(sections, DetailSection{
+			Key:     "ungraded",
+			Label:   "Ungraded",
+			Count:   len(ungraded),
+			Options: ungraded,
+		})
+	}
+	return sections
+}
+
+func sortGradeRows(game db.Game, rows []Row, mode Sort, signals BoardSignals) {
+	sort.SliceStable(rows, func(i, j int) bool {
+		left, right := rows[i], rows[j]
+		if left.Grade.Score != right.Grade.Score {
+			return left.Grade.Score > right.Grade.Score
+		}
+		switch mode {
+		case SortOdds:
+			if a, b := rowDecimalPrice(left), rowDecimalPrice(right); a != b {
+				return a < b
+			}
+		case SortLine:
+			if a, b := rowLineValue(left), rowLineValue(right); a != b {
+				return a > b
+			}
+		case SortMatchup:
+			if a, b := rowSignalScore(game, left, signals), rowSignalScore(game, right, signals); a != b {
+				return a > b
+			}
+		case SortPlayer:
+			if left.PlayerName != right.PlayerName {
+				if left.PlayerName == "" {
+					return false
+				}
+				if right.PlayerName == "" {
+					return true
+				}
+				return left.PlayerName < right.PlayerName
+			}
+		}
+		if categoryOrder(left.Category) != categoryOrder(right.Category) {
+			return categoryOrder(left.Category) < categoryOrder(right.Category)
+		}
+		return left.Text < right.Text
+	})
+}
+
+func rowDecimalPrice(row Row) float64 {
+	if row.Odds == 0 {
+		return math.Inf(1)
+	}
+	return parlay.AmericanToDecimal(row.Odds)
+}
+
+func rowLineValue(row Row) float64 {
+	if row.Line == nil {
+		return math.Inf(-1)
+	}
+	return *row.Line
 }
 
 // tabCategories lists the open game's tabs in display order.
@@ -1016,7 +1288,7 @@ func tabCategory(requested Category, counts map[Category]int) Category {
 // anything unknown reads as player.
 func detailSort(mode Sort) Sort {
 	switch mode {
-	case SortPlayer, SortOdds, SortLine, SortMatchup:
+	case SortGrade, SortPlayer, SortOdds, SortLine, SortMatchup:
 		return mode
 	default:
 		return SortPlayer
@@ -1212,6 +1484,10 @@ func sortLineGroups(game db.Game, groups []LineGroup, mode Sort, signals BoardSi
 	sort.SliceStable(groups, func(i, j int) bool {
 		left, right := groups[i], groups[j]
 		switch mode {
+		case SortGrade:
+			if a, b := groupGradeScore(left), groupGradeScore(right); a != b {
+				return a > b
+			}
 		case SortOdds:
 			if a, b := shortestPrice(left), shortestPrice(right); a != b {
 				return a < b
@@ -1227,6 +1503,19 @@ func sortLineGroups(game db.Game, groups []LineGroup, mode Sort, signals BoardSi
 		}
 		return lineGroupLess(left, right)
 	})
+}
+
+func groupGradeScore(group LineGroup) int {
+	best := -1
+	for _, option := range group.Options {
+		if option.Grade.Letter == "" {
+			continue
+		}
+		if option.Grade.Score > best {
+			best = option.Grade.Score
+		}
+	}
+	return best
 }
 
 // lineGroupLess is the natural order: the game lines first, then props by
@@ -1357,6 +1646,10 @@ func sortPlayers(game db.Game, players []PlayerGroup, mode Sort, signals BoardSi
 	sort.SliceStable(players, func(i, j int) bool {
 		left, right := players[i], players[j]
 		switch mode {
+		case SortGrade:
+			if a, b := playerGradeScore(left), playerGradeScore(right); a != b {
+				return a > b
+			}
 		case SortOdds:
 			if a, b := playerPrice(left), playerPrice(right); a != b {
 				return a < b
@@ -1372,6 +1665,16 @@ func sortPlayers(game db.Game, players []PlayerGroup, mode Sort, signals BoardSi
 		}
 		return playerLess(left, right)
 	})
+}
+
+func playerGradeScore(player PlayerGroup) int {
+	best := -1
+	for _, line := range player.Lines {
+		if score := groupGradeScore(line); score > best {
+			best = score
+		}
+	}
+	return best
 }
 
 // playerLess orders players by name, with an unnamed card last.
