@@ -1447,3 +1447,242 @@ func TestSuiteReportLegGrades(t *testing.T) {
 	suite.ActiveRubric = "missing"
 	assert.Equal(t, map[int64]string{10: "C"}, suite.LegGrades("unknown"))
 }
+
+type dualTrackStubEngine struct {
+	name       string
+	rawByID    map[int64]float64
+	blendByID  map[int64]float64
+	marketByID map[int64]float64
+}
+
+func (s dualTrackStubEngine) Name() string { return s.name }
+
+func (s dualTrackStubEngine) ScoreLeg(
+	leg analyzer.Leg,
+	_ map[string]analyzer.Game,
+	_ map[string]analyzer.PlayerStats,
+) analyzer.LegGrade {
+	raw := s.rawByID[leg.ID]
+	blend := s.blendByID[leg.ID]
+	mkt := s.marketByID[leg.ID]
+	letter := "B"
+	score := 75
+	if raw == 0 && blend == 0 {
+		letter = ""
+		score = 0
+	}
+	return analyzer.LegGrade{
+		LegID:          leg.ID,
+		Letter:         letter,
+		Score:          score,
+		RawModelProb:   raw,
+		CalibratedProb: blend,
+		MarketProb:     mkt,
+	}
+}
+
+func (s dualTrackStubEngine) EvaluateSlip(
+	legs []analyzer.Leg,
+	games map[string]analyzer.Game,
+	stats map[string]analyzer.PlayerStats,
+) analyzer.SlipEvaluation {
+	grades := make([]analyzer.LegGrade, len(legs))
+	for i, l := range legs {
+		grades[i] = s.ScoreLeg(l, games, stats)
+	}
+	return analyzer.SlipEvaluation{
+		Grade: analyzer.SlipGrade{
+			Letter:    "B",
+			Score:     75,
+			LegGrades: grades,
+		},
+	}
+}
+
+func TestMarketExplanationMetrics_ZeroErrorAndMissingBenchmarkSkipping(t *testing.T) {
+	t.Parallel()
+
+	// Legs 1-4 have exact RawModelProb == MarketProb; leg 5 lacks a sharp
+	// benchmark (MarketProb == 0); leg 6 has no model run (RawModelProb == 0).
+	legs := []ReplayedLeg{
+		{Leg: analyzer.Leg{ID: 1, GameID: "g1", Market: "REC_YDS", Odds: -110}, Result: parlay.Won, DecimalOdds: 1.91},
+		{Leg: analyzer.Leg{ID: 2, GameID: "g1", Market: "REC_YDS", Odds: -110}, Result: parlay.Lost, DecimalOdds: 1.91},
+		{Leg: analyzer.Leg{ID: 3, GameID: "g1", Market: "REC_YDS", Odds: -110}, Result: parlay.Won, DecimalOdds: 1.91},
+		{Leg: analyzer.Leg{ID: 4, GameID: "g1", Market: "REC_YDS", Odds: -110}, Result: parlay.Lost, DecimalOdds: 1.91},
+		{
+			Leg:         analyzer.Leg{ID: 5, GameID: "g1", Market: "ANYTIME_TD", Odds: 150},
+			Result:      parlay.Lost,
+			DecimalOdds: 2.50,
+		},
+		{Leg: analyzer.Leg{ID: 6, GameID: "g1", Market: "OTHER", Odds: -110}, Result: parlay.Won, DecimalOdds: 1.91},
+	}
+
+	engExact := dualTrackStubEngine{
+		name: "exact",
+		rawByID: map[int64]float64{
+			1: 0.35, 2: 0.45, 3: 0.55, 4: 0.65,
+			5: 0.40, // missing MarketProb -> must be skipped
+		},
+		blendByID: map[int64]float64{1: 0.35, 2: 0.45, 3: 0.55, 4: 0.65, 5: 0.40},
+		marketByID: map[int64]float64{
+			1: 0.35, 2: 0.45, 3: 0.55, 4: 0.65,
+			6: 0.50, // missing RawModelProb -> must be skipped
+		},
+	}
+
+	ds := ReplayDataset{
+		Weeks: []ReplayedWeek{{Season: 2025, WeekNum: 1, Games: testGame(), MarketLegs: legs}},
+	}
+
+	exactReport := EvaluateEngine(ds, engExact)
+	exp := exactReport.MarketExplanation
+	assert.Equal(t, 4, exp.SampleCount)
+	assert.InDelta(t, 0.0, exp.MeanAbsError, 1e-12)
+	assert.InDelta(t, 0.0, exp.RMSE, 1e-12)
+	assert.InDelta(t, 0.0, exp.MeanKLDivergence, 1e-12)
+	assert.InDelta(t, 1.0, exp.CorrelationR, 1e-12)
+	assert.InDelta(t, 1.0, exp.Within5ppRate, 1e-12)
+
+	// Divergent model: 2 legs within 5pp (0.03 and 0.05), 2 legs outside (0.10 and 0.10).
+	engDiv := dualTrackStubEngine{
+		name: "divergent",
+		rawByID: map[int64]float64{
+			1: 0.38, 2: 0.50, 3: 0.65, 4: 0.55,
+			5: 0.40,
+		},
+		blendByID:  map[int64]float64{1: 0.36, 2: 0.47, 3: 0.58, 4: 0.62, 5: 0.40},
+		marketByID: map[int64]float64{1: 0.35, 2: 0.45, 3: 0.55, 4: 0.65, 6: 0.50},
+	}
+	divReport := EvaluateEngine(ds, engDiv)
+	divExp := divReport.MarketExplanation
+	assert.Equal(t, 4, divExp.SampleCount)
+	assert.InDelta(t, (0.03+0.05+0.10+0.10)/4.0, divExp.MeanAbsError, 1e-12)
+	wantRMSE := math.Sqrt((0.03*0.03 + 0.05*0.05 + 0.10*0.10 + 0.10*0.10) / 4.0)
+	assert.InDelta(t, wantRMSE, divExp.RMSE, 1e-12)
+	assert.Greater(t, divExp.MeanKLDivergence, 0.0)
+	assert.InDelta(t, 0.50, divExp.Within5ppRate, 1e-12)
+	assert.False(t, math.IsNaN(divExp.CorrelationR))
+}
+
+func TestMarketBeatingMetrics_SkillAndAlphaGateThresholds(t *testing.T) {
+	t.Parallel()
+
+	buildDataset := func(n, wins int, decOdds, rawP, blendP, mktP float64) Report {
+		legs := make([]ReplayedLeg, 0, n+1)
+		rawByID := make(map[int64]float64, n+1)
+		blendByID := make(map[int64]float64, n+1)
+		mktByID := make(map[int64]float64, n+1)
+		for i := range n {
+			id := int64(i + 1)
+			res := parlay.Lost
+			if i < wins {
+				res = parlay.Won
+			}
+			legs = append(legs, ReplayedLeg{
+				Leg:         analyzer.Leg{ID: id, GameID: "g1", Market: "REC_YDS", Odds: -110},
+				Result:      res,
+				DecimalOdds: decOdds,
+			})
+			rawByID[id] = rawP
+			blendByID[id] = blendP
+			mktByID[id] = mktP
+		}
+		// Add a leg missing MarketProb; it must be skipped from MarketBeating.
+		missingID := int64(n + 1)
+		legs = append(legs, ReplayedLeg{
+			Leg:         analyzer.Leg{ID: missingID, GameID: "g1", Market: "ANYTIME_TD", Odds: 150},
+			Result:      parlay.Won,
+			DecimalOdds: 2.50,
+		})
+		rawByID[missingID] = 0.60
+		blendByID[missingID] = 0.60
+
+		eng := dualTrackStubEngine{
+			name:       "alpha-test",
+			rawByID:    rawByID,
+			blendByID:  blendByID,
+			marketByID: mktByID,
+		}
+		return EvaluateEngine(ReplayDataset{
+			Weeks: []ReplayedWeek{{Season: 2025, WeekNum: 2, Games: testGame(), MarketLegs: legs}},
+		}, eng)
+	}
+
+	// 1) Below minimum sample threshold (249 < 250), even with positive skill and ROI -> gate fails.
+	belowMin := buildDataset(249, 160, 2.0, 0.65, 0.55, 0.50).MarketBeating
+	assert.Equal(t, 249, belowMin.SampleCount)
+	assert.Greater(t, belowMin.LogLossSkill, 0.0)
+	assert.Greater(t, belowMin.BrierSkill, 0.0)
+	assert.Greater(t, belowMin.FlatROI, 0.0)
+	assert.Less(t, belowMin.RawModelLogLoss, belowMin.BlendedLogLoss)
+	assert.Less(t, belowMin.BlendedLogLoss, belowMin.MarketLogLoss)
+	assert.False(t, belowMin.AlphaGatePassed)
+
+	// 2) At sample threshold (250), positive skill and positive ROI -> gate passes.
+	passing := buildDataset(250, 162, 2.0, 0.65, 0.55, 0.50).MarketBeating
+	assert.Equal(t, 250, passing.SampleCount)
+	assert.Greater(t, passing.LogLossSkill, 0.0)
+	assert.Greater(t, passing.FlatROI, 0.0)
+	assert.True(t, passing.AlphaGatePassed)
+
+	// 3) At sample threshold (250), positive ROI but negative LogLossSkill -> gate fails.
+	noSkill := buildDataset(250, 162, 2.0, 0.40, 0.47, 0.50).MarketBeating
+	assert.Equal(t, 250, noSkill.SampleCount)
+	assert.Less(t, noSkill.LogLossSkill, 0.0)
+	assert.Greater(t, noSkill.FlatROI, 0.0)
+	assert.False(t, noSkill.AlphaGatePassed)
+
+	// 4) At sample threshold (250), positive LogLossSkill but negative FlatROI (heavy vig) -> gate fails.
+	negROI := buildDataset(250, 130, 1.50, 0.52, 0.51, 0.50).MarketBeating
+	assert.Equal(t, 250, negROI.SampleCount)
+	assert.Greater(t, negROI.LogLossSkill, 0.0)
+	assert.Less(t, negROI.FlatROI, 0.0)
+	assert.False(t, negROI.AlphaGatePassed)
+}
+
+func TestSuiteReportSlipGrades(t *testing.T) {
+	t.Parallel()
+
+	assert.Nil(t, (SuiteReport{}).SlipGrades("v1"))
+
+	suite := SuiteReport{
+		ActiveRubric: "v1",
+		Reports: []Report{
+			{
+				RubricName: "v0",
+				slipOutcomes: []slipOutcome{
+					{slipID: 100, band: "C"},
+				},
+			},
+			{
+				RubricName: "v1",
+				slipOutcomes: []slipOutcome{
+					{slipID: 100, band: "B"},
+					{slipID: 101, band: ungradedBand},
+				},
+			},
+			{
+				RubricName: "v2",
+				slipOutcomes: []slipOutcome{
+					{slipID: 100, band: "A"},
+					{slipID: 101, band: "D"},
+					{slipID: 102, band: ungradedBand},
+					{slipID: 103, band: ""},
+					{slipID: 0, band: "A"},
+					{slipID: -1, band: "B"},
+				},
+			},
+		},
+	}
+
+	assert.Equal(t, map[int64]string{
+		100: "A",
+		101: "D",
+	}, suite.SlipGrades("v2"))
+
+	assert.Equal(t, map[int64]string{100: "B"}, suite.SlipGrades("unknown"))
+	assert.Equal(t, map[int64]string{100: "B"}, suite.SlipGrades(""))
+
+	suite.ActiveRubric = "missing"
+	assert.Equal(t, map[int64]string{100: "C"}, suite.SlipGrades("unknown"))
+}

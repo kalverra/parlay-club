@@ -271,7 +271,7 @@ view models to separate raw-model market explanation from market-beating skill)
 
 Risk: low (read-only evaluation and reporting code backed by deterministic replay tests and the benchmark fixture)
 
-- [ ] Add `MarketExplanationMetrics` (MAE, RMSE, KL divergence, Pearson r, within-5pp rate on `RawModelProb` vs.
+- [x] Add `MarketExplanationMetrics` (MAE, RMSE, KL divergence, Pearson r, within-5pp rate on `RawModelProb` vs.
       `MarketProb`) and `MarketBeatingMetrics` (raw vs. blended vs. market log loss, skill scores, ROI, and
       `AlphaGatePassed`) plus `SuiteReport.SlipGrades` in `internal/eval`, with unit tests verifying zero-error
       matching, missing-benchmark skipping, and alpha-gate thresholds.

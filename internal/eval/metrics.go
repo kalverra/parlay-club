@@ -16,6 +16,8 @@ const (
 	minBinSpreadRatio      = 0.80
 	minCalibProb           = 1e-6
 	maxCalibProb           = 1.0 - 1e-6
+	within5ppTolerance     = 0.05 + 1e-12
+	alphaGateMinSamples    = 250
 )
 
 var bandOrder = []string{"A", "B", "C", "D", "F", ungradedBand}
@@ -44,6 +46,30 @@ type CalibrationMetrics struct {
 	NaiveIndepLogLoss float64          `json:"naive_indep_log_loss,omitempty"`
 	SGPCount          int              `json:"sgp_count,omitempty"`
 	Reliability       []ReliabilityBin `json:"reliability,omitempty"`
+}
+
+// MarketExplanationMetrics measures how closely the standalone unblended model
+// reproduces de-vigged Vegas/sharp market probabilities (match Vegas first).
+type MarketExplanationMetrics struct {
+	SampleCount      int     `json:"sample_count"`
+	MeanAbsError     float64 `json:"mean_abs_error"`     // mean |RawModelProb - MarketProb|
+	RMSE             float64 `json:"rmse"`               // sqrt(mean((RawModelProb - MarketProb)^2))
+	MeanKLDivergence float64 `json:"mean_kl_divergence"` // D_KL(Market || RawModel)
+	CorrelationR     float64 `json:"correlation_r"`      // Pearson r(RawModelProb, MarketProb)
+	Within5ppRate    float64 `json:"within_5pp_rate"`    // share with |RawModelProb - MarketProb| <= 0.05
+}
+
+// MarketBeatingMetrics measures whether the standalone or blended model beats
+// the sharp market baseline (objective alpha gate).
+type MarketBeatingMetrics struct {
+	SampleCount     int     `json:"sample_count"`
+	RawModelLogLoss float64 `json:"raw_model_log_loss"`
+	BlendedLogLoss  float64 `json:"blended_log_loss"`
+	MarketLogLoss   float64 `json:"market_log_loss"`
+	LogLossSkill    float64 `json:"log_loss_skill"` // MarketLogLoss - RawModelLogLoss (>0 beats market)
+	BrierSkill      float64 `json:"brier_skill"`    // MarketBrier - RawModelBrier (>0 beats market)
+	FlatROI         float64 `json:"flat_roi"`
+	AlphaGatePassed bool    `json:"alpha_gate_passed"` // SampleCount >= 250 && LogLossSkill > 0 && FlatROI > 0
 }
 
 // BandStats holds calibration and return metrics for one grade band.
@@ -90,18 +116,21 @@ type WeekSummary struct {
 // Report summarizes calibration, factor attribution, and monotonicity for one
 // rubric or GradingEngine evaluated on a ReplayDataset.
 type Report struct {
-	RubricName       string             `json:"rubric_name"`
-	Coverage         DataCoverage       `json:"coverage"`
-	Calibration      CalibrationMetrics `json:"calibration"`
-	LegBands         []BandStats        `json:"leg_bands"`
-	SlipBands        []BandStats        `json:"slip_bands"`
-	Weekly           []WeekSummary      `json:"weekly"`
-	Factors          []FactorStats      `json:"factors"`
-	SlipFactors      []FactorStats      `json:"slip_factors,omitempty"`
-	LegMonotonic     bool               `json:"leg_monotonic"`
-	LegMonotonicWin  bool               `json:"leg_monotonic_win"`
-	LegMonotonicLift bool               `json:"leg_monotonic_lift"`
-	legOutcomes      []legOutcome
+	RubricName        string                   `json:"rubric_name"`
+	Coverage          DataCoverage             `json:"coverage"`
+	Calibration       CalibrationMetrics       `json:"calibration"`
+	MarketExplanation MarketExplanationMetrics `json:"market_explanation"`
+	MarketBeating     MarketBeatingMetrics     `json:"market_beating"`
+	LegBands          []BandStats              `json:"leg_bands"`
+	SlipBands         []BandStats              `json:"slip_bands"`
+	Weekly            []WeekSummary            `json:"weekly"`
+	Factors           []FactorStats            `json:"factors"`
+	SlipFactors       []FactorStats            `json:"slip_factors,omitempty"`
+	LegMonotonic      bool                     `json:"leg_monotonic"`
+	LegMonotonicWin   bool                     `json:"leg_monotonic_win"`
+	LegMonotonicLift  bool                     `json:"leg_monotonic_lift"`
+	legOutcomes       []legOutcome
+	slipOutcomes      []slipOutcome
 }
 
 // SuiteReport holds evaluation reports for a suite of rubrics and pairwise
@@ -127,6 +156,24 @@ func (s SuiteReport) LegGrades(engineName string) map[int64]string {
 			continue
 		}
 		grades[o.legID] = o.band
+	}
+	return grades
+}
+
+// SlipGrades returns the normalized letter grade ("A"-"F") keyed by slip ID
+// for the report matching engineName, falling back to ActiveRubric and then
+// the first report in the suite. Ungraded slips and non-positive slip IDs are omitted.
+func (s SuiteReport) SlipGrades(engineName string) map[int64]string {
+	report, ok := s.reportFor(engineName)
+	if !ok {
+		return nil
+	}
+	grades := make(map[int64]string, len(report.slipOutcomes))
+	for _, o := range report.slipOutcomes {
+		if o.slipID <= 0 || o.band == "" || o.band == ungradedBand {
+			continue
+		}
+		grades[o.slipID] = o.band
 	}
 	return grades
 }
@@ -181,6 +228,11 @@ type DiffReport struct {
 	LegBandDiffs  []BandDiff      `json:"leg_band_diffs"`
 	SlipBandDiffs []BandDiff      `json:"slip_band_diffs"`
 	Migrations    []MigrationCell `json:"migrations"`
+}
+
+type slipOutcome struct {
+	slipID int64
+	band   string
 }
 
 type legOutcome struct {
@@ -456,7 +508,10 @@ func evaluateWithEngine(
 	factors := make(map[string]*factorAccum)
 	slipFactors := make(map[string]*factorAccum)
 	var calib calibAccum
+	var explain marketExplainAccum
+	var beat marketBeatAccum
 	var outcomes []legOutcome
+	var slipOutcomes []slipOutcome
 	weekly := make([]WeekSummary, 0, len(dataset.Weeks))
 
 	for _, week := range dataset.Weeks {
@@ -471,6 +526,8 @@ func evaluateWithEngine(
 			weekLegBands[band].add(rl.Result, dec)
 			weekOverallLegs.add(rl.Result, dec)
 			calib.addLeg(rl, lg, week.Games)
+			explain.addLeg(lg)
+			beat.addLeg(rl, lg)
 
 			decided := rl.Result == parlay.Won || rl.Result == parlay.Lost
 			outcomes = append(outcomes, legOutcome{
@@ -499,6 +556,10 @@ func evaluateWithEngine(
 
 			slipGrade := engine.EvaluateSlip(analyzerLegs, week.Games, week.Stats).Grade
 			slipBand := normalizeBand(slipGrade.Letter)
+			slipOutcomes = append(slipOutcomes, slipOutcome{
+				slipID: slip.SlipID,
+				band:   slipBand,
+			})
 			slipDec := slipDecimalOdds(slip)
 			slipBands[slipBand].add(slip.Result, slipDec)
 			weekSlipBands[slipBand].add(slip.Result, slipDec)
@@ -556,18 +617,21 @@ func evaluateWithEngine(
 	monoWin, monoLift := checkMonotonicity(legBandStats)
 
 	return Report{
-		RubricName:       engine.Name(),
-		Coverage:         dataset.Coverage,
-		Calibration:      calib.metrics(),
-		LegBands:         legBandStats,
-		SlipBands:        slipBandStats,
-		Weekly:           weekly,
-		Factors:          finalizeFactorStats(factors),
-		SlipFactors:      finalizeFactorStats(slipFactors),
-		LegMonotonic:     monoWin && monoLift,
-		LegMonotonicWin:  monoWin,
-		LegMonotonicLift: monoLift,
-		legOutcomes:      outcomes,
+		RubricName:        engine.Name(),
+		Coverage:          dataset.Coverage,
+		Calibration:       calib.metrics(),
+		MarketExplanation: explain.metrics(),
+		MarketBeating:     beat.metrics(),
+		LegBands:          legBandStats,
+		SlipBands:         slipBandStats,
+		Weekly:            weekly,
+		Factors:           finalizeFactorStats(factors),
+		SlipFactors:       finalizeFactorStats(slipFactors),
+		LegMonotonic:      monoWin && monoLift,
+		LegMonotonicWin:   monoWin,
+		LegMonotonicLift:  monoLift,
+		legOutcomes:       outcomes,
+		slipOutcomes:      slipOutcomes,
 	}
 }
 
@@ -1013,4 +1077,160 @@ func reliabilityBinIndex(p float64, nBins int) int {
 		}
 	}
 	return nBins - 1
+}
+
+type marketExplainAccum struct {
+	rawProbs  []float64
+	mktProbs  []float64
+	absErrSum float64
+	sqErrSum  float64
+	klSum     float64
+	within5pp int
+}
+
+func (a *marketExplainAccum) addLeg(lg analyzer.LegGrade) {
+	if !(lg.RawModelProb > 0 && lg.RawModelProb < 1) || !(lg.MarketProb > 0 && lg.MarketProb < 1) {
+		return
+	}
+	pRaw := clampCalibProb(lg.RawModelProb)
+	pMkt := clampCalibProb(lg.MarketProb)
+	diff := pRaw - pMkt
+	absDiff := math.Abs(diff)
+
+	a.rawProbs = append(a.rawProbs, pRaw)
+	a.mktProbs = append(a.mktProbs, pMkt)
+	a.absErrSum += absDiff
+	a.sqErrSum += diff * diff
+	a.klSum += bernoulliKL(pMkt, pRaw)
+	if absDiff <= within5ppTolerance {
+		a.within5pp++
+	}
+}
+
+func (a *marketExplainAccum) metrics() MarketExplanationMetrics {
+	n := len(a.rawProbs)
+	if n == 0 {
+		return MarketExplanationMetrics{}
+	}
+	nf := float64(n)
+	return MarketExplanationMetrics{
+		SampleCount:      n,
+		MeanAbsError:     a.absErrSum / nf,
+		RMSE:             math.Sqrt(a.sqErrSum / nf),
+		MeanKLDivergence: a.klSum / nf,
+		CorrelationR:     pearsonR(a.rawProbs, a.mktProbs),
+		Within5ppRate:    float64(a.within5pp) / nf,
+	}
+}
+
+func bernoulliKL(p, q float64) float64 {
+	kl := p*math.Log(p/q) + (1.0-p)*math.Log((1.0-p)/(1.0-q))
+	if kl < 0 {
+		return 0
+	}
+	return kl
+}
+
+func pearsonR(xs, ys []float64) float64 {
+	n := len(xs)
+	if n < 2 || n != len(ys) {
+		return 0
+	}
+	var sumX, sumY float64
+	for i := range n {
+		sumX += xs[i]
+		sumY += ys[i]
+	}
+	meanX := sumX / float64(n)
+	meanY := sumY / float64(n)
+
+	var cov, varX, varY float64
+	for i := range n {
+		dx := xs[i] - meanX
+		dy := ys[i] - meanY
+		cov += dx * dy
+		varX += dx * dx
+		varY += dy * dy
+	}
+	if varX <= 0 || varY <= 0 {
+		return 0
+	}
+	return cov / math.Sqrt(varX*varY)
+}
+
+type marketBeatAccum struct {
+	count        int
+	rawLLSum     float64
+	blendedLLSum float64
+	marketLLSum  float64
+	rawBrierSum  float64
+	marketBrier  float64
+	roiCount     int
+	roiUnitsSum  float64
+}
+
+func (a *marketBeatAccum) addLeg(rl ReplayedLeg, lg analyzer.LegGrade) {
+	if rl.Result != parlay.Won && rl.Result != parlay.Lost {
+		return
+	}
+	if !(lg.RawModelProb > 0 && lg.RawModelProb < 1) || !(lg.MarketProb > 0 && lg.MarketProb < 1) {
+		return
+	}
+	outcome := 0.0
+	if rl.Result == parlay.Won {
+		outcome = 1.0
+	}
+
+	pRaw := clampCalibProb(lg.RawModelProb)
+	pMkt := clampCalibProb(lg.MarketProb)
+	pBlend := pRaw
+	if lg.CalibratedProb > 0 && lg.CalibratedProb < 1 {
+		pBlend = clampCalibProb(lg.CalibratedProb)
+	}
+
+	a.count++
+	a.rawLLSum += binaryLogLossSample(pRaw, outcome)
+	a.blendedLLSum += binaryLogLossSample(pBlend, outcome)
+	a.marketLLSum += binaryLogLossSample(pMkt, outcome)
+
+	rawDiff := pRaw - outcome
+	mktDiff := pMkt - outcome
+	a.rawBrierSum += rawDiff * rawDiff
+	a.marketBrier += mktDiff * mktDiff
+
+	if dec := legDecimalOdds(rl); dec > 1 {
+		a.roiCount++
+		a.roiUnitsSum += parlay.Units(rl.Result, dec)
+	}
+}
+
+func (a *marketBeatAccum) metrics() MarketBeatingMetrics {
+	if a.count == 0 {
+		return MarketBeatingMetrics{}
+	}
+	n := float64(a.count)
+	rawLL := a.rawLLSum / n
+	blendedLL := a.blendedLLSum / n
+	marketLL := a.marketLLSum / n
+	rawBrier := a.rawBrierSum / n
+	marketBrier := a.marketBrier / n
+
+	var flatROI float64
+	if a.roiCount > 0 {
+		flatROI = a.roiUnitsSum / float64(a.roiCount)
+	}
+
+	logLossSkill := marketLL - rawLL
+	brierSkill := marketBrier - rawBrier
+
+	return MarketBeatingMetrics{
+		SampleCount:     a.count,
+		RawModelLogLoss: rawLL,
+		BlendedLogLoss:  blendedLL,
+		MarketLogLoss:   marketLL,
+		LogLossSkill:    logLossSkill,
+		BrierSkill:      brierSkill,
+		FlatROI:         flatROI,
+		AlphaGatePassed: a.count >= alphaGateMinSamples && logLossSkill > 0 && flatROI > 0,
+	}
 }
