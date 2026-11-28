@@ -219,7 +219,7 @@ Risk: low (pure read-only logic with no schema changes and full unit-test covera
 - [x] Add `SuiteReport.LegGrades(engineName string) map[int64]string` in `internal/eval/metrics.go` and
       `Store.VotesForGroupSeason(ctx, groupID, season)` in `internal/db/record.go`, with unit tests covering engine
       selection, ungraded/market filtering, and group/season/graded-slip vote scoping.
-- [ ] Extend `internal/record` (`record.go` and new `tags.go`) with `Leg.ID`, `Leg.Grade`, `Leg.NetVotes`,
+- [x] Extend `internal/record` (`record.go` and new `tags.go`) with `Leg.ID`, `Leg.Grade`, `Leg.NetVotes`,
       `MemberRow.ImpliedLift`, active leg streaks, and the 14 deterministic praise/insult tags with plain-English rules
       and member-specific explanations; add boundary and streak unit tests in `internal/record/record_test.go`.
 

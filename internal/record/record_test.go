@@ -207,3 +207,448 @@ func TestBuildNoTerroristBadgeWhenZeroLosses(t *testing.T) {
 	assert.Zero(t, book.Leaderboard[0].TerroristCount)
 	assert.False(t, book.Leaderboard[0].ParlayTerrorist)
 }
+
+func TestImpliedLiftAndLegStreaks(t *testing.T) {
+	t.Parallel()
+
+	t0 := time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC)
+	members := []record.Member{
+		{ID: 1, Name: "Ada"},
+		{ID: 2, Name: "Sam"},
+		{ID: 3, Name: "Ben"},
+	}
+
+	// Pass slips out of chronological order; Ada has:
+	// - Slip 1 (Week 1): WON (+100), PUSH (-110)
+	// - Slip 2 (Week 2): LOST (-110) -> resets win streak
+	// - Slip 3 (Week 3): WON (-110), VOID (-110), WON (+150)
+	// - Slip 4 (Week 4): WON (+200), PUSH (+100), WON (-150), WON (-110)
+	// Ada's active win streak: Slip 3 (2 wins, VOID skipped) + Slip 4 (3 wins, PUSH skipped) = 5!
+	// Ada's decided legs: 7 (5 WON, 2 LOST).
+	// Sam has 5 decided legs (below MinDecidedLegs -> ImpliedLift nil).
+	// Ben has 6 decided legs with invalid Odds == 0 -> ImpliedLift nil.
+	slips := []record.Slip{
+		{ID: 4, Season: 2026, SeasonType: 2, WeekNum: 4, CreatedAt: t0, Status: "GRADED", Result: parlay.Push},
+		{ID: 2, Season: 2026, SeasonType: 2, WeekNum: 2, CreatedAt: t0, Status: "GRADED", Result: parlay.Lost},
+		{ID: 1, Season: 2026, SeasonType: 2, WeekNum: 1, CreatedAt: t0, Status: "GRADED", Result: parlay.Push},
+		{ID: 3, Season: 2026, SeasonType: 2, WeekNum: 3, CreatedAt: t0, Status: "GRADED", Result: parlay.Won},
+	}
+
+	adaOdds := []int{100, -110, -110, 150, 200, -150, -110}
+	legs := []record.Leg{
+		// Slip 1 (pass leg ID 2 before leg ID 1 to verify Leg.ID ordering within a slip)
+		{ID: 2, SlipID: 1, UserID: 1, Odds: -110, Result: parlay.Push},
+		{ID: 1, SlipID: 1, UserID: 1, Odds: 100, Result: parlay.Won},
+		// Slip 2
+		{ID: 3, SlipID: 2, UserID: 1, Odds: -110, Result: parlay.Lost},
+		// Slip 3
+		{ID: 6, SlipID: 3, UserID: 1, Odds: 150, Result: parlay.Won},
+		{ID: 5, SlipID: 3, UserID: 1, Odds: -110, Result: parlay.Void},
+		{ID: 4, SlipID: 3, UserID: 1, Odds: -110, Result: parlay.Won},
+		// Slip 4
+		{ID: 7, SlipID: 4, UserID: 1, Odds: 200, Result: parlay.Won},
+		{ID: 8, SlipID: 4, UserID: 1, Odds: 100, Result: parlay.Push},
+		{ID: 9, SlipID: 4, UserID: 1, Odds: -150, Result: parlay.Won},
+		{ID: 10, SlipID: 4, UserID: 1, Odds: -110, Result: parlay.Won},
+
+		// Sam: 5 decided legs (< MinDecidedLegs)
+		{ID: 11, SlipID: 1, UserID: 2, Odds: -110, Result: parlay.Won},
+		{ID: 12, SlipID: 2, UserID: 2, Odds: -110, Result: parlay.Won},
+		{ID: 13, SlipID: 3, UserID: 2, Odds: -110, Result: parlay.Won},
+		{ID: 14, SlipID: 4, UserID: 2, Odds: -110, Result: parlay.Won},
+		{ID: 15, SlipID: 4, UserID: 2, Odds: -110, Result: parlay.Lost},
+
+		// Ben: 6 decided legs, all with invalid Odds == 0
+		{ID: 16, SlipID: 1, UserID: 3, Odds: 0, Result: parlay.Won},
+		{ID: 17, SlipID: 1, UserID: 3, Odds: 0, Result: parlay.Won},
+		{ID: 18, SlipID: 2, UserID: 3, Odds: 0, Result: parlay.Lost},
+		{ID: 19, SlipID: 3, UserID: 3, Odds: 0, Result: parlay.Won},
+		{ID: 20, SlipID: 4, UserID: 3, Odds: 0, Result: parlay.Won},
+		{ID: 21, SlipID: 4, UserID: 3, Odds: 0, Result: parlay.Lost},
+	}
+
+	book := record.Build(2026, slips, legs, members, nil)
+	byUser := rowsByUser(book.Leaderboard)
+
+	ada := byUser[1]
+	assert.Equal(t, 5, ada.CurrentWinStreak)
+	assert.Equal(t, 0, ada.CurrentLossStreak)
+	require.NotNil(t, ada.HitPct)
+	require.NotNil(t, ada.ImpliedLift)
+
+	var sumImplied float64
+	for _, o := range adaOdds {
+		sumImplied += 100.0 / parlay.AmericanToDecimal(o)
+	}
+	wantLift := *ada.HitPct - (sumImplied / float64(len(adaOdds)))
+	assert.InDelta(t, wantLift, *ada.ImpliedLift, 1e-9)
+
+	sam := byUser[2]
+	assert.Nil(t, sam.ImpliedLift, "ImpliedLift must be nil below MinDecidedLegs")
+	assert.Equal(t, 0, sam.CurrentWinStreak)
+	assert.Equal(t, 1, sam.CurrentLossStreak)
+
+	ben := byUser[3]
+	assert.NotNil(t, ben.HitPct)
+	assert.Nil(t, ben.ImpliedLift, "ImpliedLift must be nil when no decided legs have valid odds")
+}
+
+func TestAllFourteenTagsBoundaries(t *testing.T) {
+	t.Parallel()
+
+	type legSpec struct {
+		odds     int
+		result   parlay.Result
+		grade    string
+		netVotes int
+		soloKill bool
+	}
+
+	buildForLegs := func(specs []legSpec) record.MemberRow {
+		t0 := time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC)
+		var slips []record.Slip
+		var legs []record.Leg
+		for i, sp := range specs {
+			slipID := int64(i + 1)
+			slipRes := parlay.Won
+			switch sp.result {
+			case parlay.Lost:
+				slipRes = parlay.Lost
+			case parlay.Push:
+				slipRes = parlay.Push
+			}
+			slips = append(slips, record.Slip{
+				ID:         slipID,
+				Season:     2026,
+				SeasonType: 2,
+				WeekNum:    i + 1,
+				CreatedAt:  t0,
+				Status:     "GRADED",
+				Result:     slipRes,
+			})
+			legs = append(legs, record.Leg{
+				ID:       int64(i*2 + 1),
+				SlipID:   slipID,
+				UserID:   1,
+				Odds:     sp.odds,
+				Result:   sp.result,
+				Grade:    sp.grade,
+				NetVotes: sp.netVotes,
+			})
+			// Add a teammate leg on lost slips unless this leg is a solo kill.
+			if sp.result == parlay.Lost && !sp.soloKill {
+				legs = append(legs, record.Leg{
+					ID:     int64(i*2 + 2),
+					SlipID: slipID,
+					UserID: 2,
+					Odds:   -110,
+					Result: parlay.Lost,
+				})
+			}
+		}
+		book := record.Build(2026, slips, legs, []record.Member{
+			{ID: 1, Name: "Ada"},
+			{ID: 2, Name: "Sam"},
+		}, nil)
+		return rowsByUser(book.Leaderboard)[1]
+	}
+
+	repeatLegs := func(n int, sp legSpec) []legSpec {
+		out := make([]legSpec, n)
+		for i := range out {
+			out[i] = sp
+		}
+		return out
+	}
+
+	tests := []struct {
+		name     string
+		tagKey   string
+		wantTone record.TagTone
+		on       []legSpec
+		off      []legSpec
+	}{
+		{
+			name:     "natural",
+			tagKey:   "natural",
+			wantTone: record.TagTonePraise,
+			// 3 wins of 5 D/F = 60.0% (exact threshold)
+			on: append(
+				repeatLegs(3, legSpec{odds: -110, result: parlay.Won, grade: "D"}),
+				repeatLegs(2, legSpec{odds: -110, result: parlay.Lost, grade: "F"})...,
+			),
+			// 3 wins of 6 D/F = 50.0% (< 60.0%)
+			off: append(
+				repeatLegs(3, legSpec{odds: -110, result: parlay.Won, grade: "D"}),
+				repeatLegs(3, legSpec{odds: -110, result: parlay.Lost, grade: "F"})...,
+			),
+		},
+		{
+			name:     "ball_knower",
+			tagKey:   "ball_knower",
+			wantTone: record.TagTonePraise,
+			// 31/50 at +100 (50.0% implied exact) -> 62.0% hit -> +12.0 pts
+			on: append(
+				repeatLegs(31, legSpec{odds: 100, result: parlay.Won}),
+				repeatLegs(19, legSpec{odds: 100, result: parlay.Lost})...,
+			),
+			// 30/50 at +100 -> 60.0% hit -> +10.0 pts (< +12.0)
+			off: append(
+				repeatLegs(30, legSpec{odds: 100, result: parlay.Won}),
+				repeatLegs(20, legSpec{odds: 100, result: parlay.Lost})...,
+			),
+		},
+		{
+			name:     "film_room_god",
+			tagKey:   "film_room_god",
+			wantTone: record.TagTonePraise,
+			// 3/4 A/B = 75.0%
+			on: append(
+				repeatLegs(3, legSpec{odds: -110, result: parlay.Won, grade: "A"}),
+				legSpec{odds: -110, result: parlay.Lost, grade: "B"},
+			),
+			// 3/3 A/B (< 4 min sample)
+			off: repeatLegs(3, legSpec{odds: -110, result: parlay.Won, grade: "A"}),
+		},
+		{
+			name:     "sniper",
+			tagKey:   "sniper",
+			wantTone: record.TagTonePraise,
+			// 2/4 at +120 = 50.0%
+			on: append(
+				repeatLegs(2, legSpec{odds: 120, result: parlay.Won}),
+				repeatLegs(2, legSpec{odds: 120, result: parlay.Lost})...,
+			),
+			// 2/2 at +120 (< 3 min sample)
+			off: repeatLegs(2, legSpec{odds: 120, result: parlay.Won}),
+		},
+		{
+			name:     "the_backpack",
+			tagKey:   "the_backpack",
+			wantTone: record.TagTonePraise,
+			// 13/20 = 65.0%, 0 solo kills
+			on: append(
+				repeatLegs(13, legSpec{odds: -110, result: parlay.Won}),
+				repeatLegs(7, legSpec{odds: -110, result: parlay.Lost})...,
+			),
+			// 7/8 = 87.5%, but 1 solo kill -> disqualified
+			off: append(
+				repeatLegs(7, legSpec{odds: -110, result: parlay.Won}),
+				legSpec{odds: -110, result: parlay.Lost, soloKill: true},
+			),
+		},
+		{
+			name:     "heater",
+			tagKey:   "heater",
+			wantTone: record.TagTonePraise,
+			// 5-leg active win streak (with PUSH in middle)
+			on: []legSpec{
+				{odds: -110, result: parlay.Lost},
+				{odds: -110, result: parlay.Won},
+				{odds: -110, result: parlay.Won},
+				{odds: -110, result: parlay.Push},
+				{odds: -110, result: parlay.Won},
+				{odds: -110, result: parlay.Won},
+				{odds: -110, result: parlay.Won},
+			},
+			// 4-leg active win streak (below 5)
+			off: repeatLegs(4, legSpec{odds: -110, result: parlay.Won}),
+		},
+		{
+			name:     "told_you_so",
+			tagKey:   "told_you_so",
+			wantTone: record.TagTonePraise,
+			// 3/5 net-downvoted = 60.0%
+			on: append(
+				repeatLegs(3, legSpec{odds: -110, result: parlay.Won, netVotes: -1}),
+				repeatLegs(2, legSpec{odds: -110, result: parlay.Lost, netVotes: -2})...,
+			),
+			// 2/4 net-downvoted = 50.0% (< 60.0%)
+			off: append(
+				repeatLegs(2, legSpec{odds: -110, result: parlay.Won, netVotes: -1}),
+				repeatLegs(2, legSpec{odds: -110, result: parlay.Lost, netVotes: -1})...,
+			),
+		},
+		{
+			name:     "parlay_terrorist",
+			tagKey:   "parlay_terrorist",
+			wantTone: record.TagToneInsult,
+			on:       []legSpec{{odds: -110, result: parlay.Lost, soloKill: true}},
+			off:      []legSpec{{odds: -110, result: parlay.Lost, soloKill: false}},
+		},
+		{
+			name:     "certified_donkey",
+			tagKey:   "certified_donkey",
+			wantTone: record.TagToneInsult,
+			// 19/50 at +100 (50.0% implied exact) -> 38.0% hit -> -12.0 pts
+			on: append(
+				repeatLegs(19, legSpec{odds: 100, result: parlay.Won}),
+				repeatLegs(31, legSpec{odds: 100, result: parlay.Lost})...,
+			),
+			// 20/50 at +100 -> 40.0% hit -> -10.0 pts (> -12.0)
+			off: append(
+				repeatLegs(20, legSpec{odds: 100, result: parlay.Won}),
+				repeatLegs(30, legSpec{odds: 100, result: parlay.Lost})...,
+			),
+		},
+		{
+			name:     "glue_eater",
+			tagKey:   "glue_eater",
+			wantTone: record.TagToneInsult,
+			// 7/20 A/B = 35.0%
+			on: append(
+				repeatLegs(7, legSpec{odds: -110, result: parlay.Won, grade: "A"}),
+				repeatLegs(13, legSpec{odds: -110, result: parlay.Lost, grade: "B"})...,
+			),
+			// 2/5 A/B = 40.0% (> 35.0%)
+			off: append(
+				repeatLegs(2, legSpec{odds: -110, result: parlay.Won, grade: "A"}),
+				repeatLegs(3, legSpec{odds: -110, result: parlay.Lost, grade: "B"})...,
+			),
+		},
+		{
+			name:     "vegas_favorite_idiot",
+			tagKey:   "vegas_favorite_idiot",
+			wantTone: record.TagToneInsult,
+			// 1/5 at +120 = 20.0%
+			on: append(
+				[]legSpec{{odds: 120, result: parlay.Won}},
+				repeatLegs(4, legSpec{odds: 120, result: parlay.Lost})...,
+			),
+			// 1/4 at +120 = 25.0% (> 20.0%)
+			off: append(
+				[]legSpec{{odds: 120, result: parlay.Won}},
+				repeatLegs(3, legSpec{odds: 120, result: parlay.Lost})...,
+			),
+		},
+		{
+			name:     "scared_money",
+			tagKey:   "scared_money",
+			wantTone: record.TagToneInsult,
+			on:       repeatLegs(6, legSpec{odds: -220, result: parlay.Won}),
+			off:      repeatLegs(6, legSpec{odds: -219, result: parlay.Won}),
+		},
+		{
+			name:     "stinker",
+			tagKey:   "stinker",
+			wantTone: record.TagToneInsult,
+			// 5-leg active loss streak (with VOID in middle)
+			on: []legSpec{
+				{odds: -110, result: parlay.Won},
+				{odds: -110, result: parlay.Lost},
+				{odds: -110, result: parlay.Lost},
+				{odds: -110, result: parlay.Void},
+				{odds: -110, result: parlay.Lost},
+				{odds: -110, result: parlay.Lost},
+				{odds: -110, result: parlay.Lost},
+			},
+			// 5-leg loss streak broken by final WIN
+			off: append(
+				repeatLegs(5, legSpec{odds: -110, result: parlay.Lost}),
+				legSpec{odds: -110, result: parlay.Won},
+			),
+		},
+		{
+			name:     "fraud",
+			tagKey:   "fraud",
+			wantTone: record.TagToneInsult,
+			// 7/20 net-upvoted = 35.0%
+			on: append(
+				repeatLegs(7, legSpec{odds: -110, result: parlay.Won, netVotes: 1}),
+				repeatLegs(13, legSpec{odds: -110, result: parlay.Lost, netVotes: 2})...,
+			),
+			// 2/5 net-upvoted = 40.0% (> 35.0%)
+			off: append(
+				repeatLegs(2, legSpec{odds: -110, result: parlay.Won, netVotes: 1}),
+				repeatLegs(3, legSpec{odds: -110, result: parlay.Lost, netVotes: 1})...,
+			),
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			onRow := buildForLegs(tc.on)
+			tag, ok := findTag(onRow.Tags, tc.tagKey)
+			require.True(t, ok, "expected tag %q to fire on qualifying input", tc.tagKey)
+			assert.Equal(t, tc.wantTone, tag.Tone)
+			assert.NotEmpty(t, tag.Label)
+			assert.NotEmpty(t, tag.Rule)
+			assert.NotEmpty(t, tag.Explanation)
+
+			offRow := buildForLegs(tc.off)
+			_, offOK := findTag(offRow.Tags, tc.tagKey)
+			assert.False(t, offOK, "expected tag %q not to fire below threshold", tc.tagKey)
+		})
+	}
+}
+
+func TestTagOrderingPraiseBeforeInsultAndTerroristFirst(t *testing.T) {
+	t.Parallel()
+
+	t0 := time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC)
+	// Member 1 earns:
+	// - Praise: natural, heater (5-leg win streak at end, all D-graded)
+	// - Insult: parlay_terrorist (1 solo kill early), glue_eater (0/4 A-graded early)
+	// - Scared money too: all odds -250
+	slips := make([]record.Slip, 0, 10)
+	legs := make([]record.Leg, 0, 10)
+	addSlip := func(id int64, res parlay.Result, leg record.Leg) {
+		slips = append(slips, record.Slip{
+			ID: id, Season: 2026, SeasonType: 2, WeekNum: int(id),
+			CreatedAt: t0, Status: "GRADED", Result: res,
+		})
+		leg.ID = id
+		leg.SlipID = id
+		leg.UserID = 1
+		legs = append(legs, leg)
+	}
+
+	// 4 lost A-graded legs (1 solo kill for parlay_terrorist, 3 with a second loser)
+	addSlip(1, parlay.Lost, record.Leg{Odds: -250, Result: parlay.Lost, Grade: "A"})
+	for id := int64(2); id <= 4; id++ {
+		addSlip(id, parlay.Lost, record.Leg{Odds: -250, Result: parlay.Lost, Grade: "A"})
+		legs = append(legs, record.Leg{ID: 100 + id, SlipID: id, UserID: 2, Odds: -110, Result: parlay.Lost})
+	}
+	// 5 won D-graded legs at the end -> natural + heater
+	for id := int64(5); id <= 9; id++ {
+		addSlip(id, parlay.Won, record.Leg{Odds: -250, Result: parlay.Won, Grade: "D"})
+	}
+
+	book := record.Build(2026, slips, legs, []record.Member{
+		{ID: 1, Name: "Ada"},
+		{ID: 2, Name: "Sam"},
+	}, nil)
+	ada := rowsByUser(book.Leaderboard)[1]
+
+	gotKeys := make([]string, 0, len(ada.Tags))
+	for _, tag := range ada.Tags {
+		gotKeys = append(gotKeys, tag.Key)
+	}
+	assert.Equal(t, []string{
+		"natural",
+		"heater",
+		"parlay_terrorist",
+		"certified_donkey",
+		"glue_eater",
+		"scared_money",
+	}, gotKeys)
+}
+
+func rowsByUser(rows []record.MemberRow) map[int64]record.MemberRow {
+	out := make(map[int64]record.MemberRow, len(rows))
+	for _, r := range rows {
+		out[r.UserID] = r
+	}
+	return out
+}
+
+func findTag(tags []record.Tag, key string) (record.Tag, bool) {
+	for _, tag := range tags {
+		if tag.Key == key {
+			return tag, true
+		}
+	}
+	return record.Tag{}, false
+}

@@ -30,10 +30,13 @@ type Slip struct {
 
 // Leg is one pick on a slip.
 type Leg struct {
-	SlipID int64
-	UserID int64
-	Odds   int
-	Result parlay.Result
+	ID       int64
+	SlipID   int64
+	UserID   int64
+	Odds     int
+	Result   parlay.Result
+	Grade    string
+	NetVotes int
 }
 
 // Member is one group member who may appear on the leaderboard.
@@ -69,21 +72,25 @@ type Book struct {
 
 // MemberRow is one member's season summary on the Record Book leaderboard.
 type MemberRow struct {
-	UserID          int64
-	Name            string
-	AvatarColor     string
-	TotalLegs       int
-	WonLegs         int
-	LostLegs        int
-	PushLegs        int
-	VoidLegs        int
-	DecidedLegs     int
-	HitPct          *float64
-	AvgLegOdds      int
-	TerroristCount  int
-	ParlayTerrorist bool
-	WagerCount      int
-	DollarPL        *float64
+	UserID            int64
+	Name              string
+	AvatarColor       string
+	TotalLegs         int
+	WonLegs           int
+	LostLegs          int
+	PushLegs          int
+	VoidLegs          int
+	DecidedLegs       int
+	HitPct            *float64
+	ImpliedLift       *float64
+	AvgLegOdds        int
+	CurrentWinStreak  int
+	CurrentLossStreak int
+	TerroristCount    int
+	ParlayTerrorist   bool
+	WagerCount        int
+	DollarPL          *float64
+	Tags              []Tag
 }
 
 // Build computes the Record Book for season from a group's graded slips,
@@ -110,6 +117,12 @@ func Build(season int, slips []Slip, legs []Leg, members []Member, wagers []Wage
 			continue
 		}
 		legsBySlip[leg.SlipID] = append(legsBySlip[leg.SlipID], leg)
+	}
+	for slipID, slipLegs := range legsBySlip {
+		slices.SortStableFunc(slipLegs, func(a, b Leg) int {
+			return cmp.Compare(a.ID, b.ID)
+		})
+		legsBySlip[slipID] = slipLegs
 	}
 
 	memberByID := make(map[int64]Member, len(members))
@@ -187,9 +200,15 @@ func accumulateSlips(
 			case parlay.Won:
 				st.wonLegs++
 				st.addOdds(leg.Odds)
+				st.recordDecidedLeg(leg, true)
+				st.currentWinStreak++
+				st.currentLossStreak = 0
 			case parlay.Lost:
 				st.lostLegs++
 				st.addOdds(leg.Odds)
+				st.recordDecidedLeg(leg, false)
+				st.currentLossStreak++
+				st.currentWinStreak = 0
 				lostLegUsers = append(lostLegUsers, leg.UserID)
 			case parlay.Push:
 				st.pushLegs++
@@ -247,6 +266,14 @@ func buildLeaderboardRows(stats map[int64]*memberStats) []MemberRow {
 			hitPct = &pct
 		}
 
+		var impliedLift *float64
+		var meanImpliedPct float64
+		if hitPct != nil && st.impliedCount > 0 {
+			meanImpliedPct = st.impliedProbSum / float64(st.impliedCount) * 100
+			lift := *hitPct - meanImpliedPct
+			impliedLift = &lift
+		}
+
 		var avgOdds int
 		if st.oddsCount > 0 {
 			avgOdds = parlay.DecimalToAmerican(st.oddsDecimalSum / float64(st.oddsCount))
@@ -258,39 +285,97 @@ func buildLeaderboardRows(stats map[int64]*memberStats) []MemberRow {
 			dollarPL = &val
 		}
 
-		rows = append(rows, MemberRow{
-			UserID:          st.member.ID,
-			Name:            st.member.Name,
-			AvatarColor:     st.member.AvatarColor,
-			TotalLegs:       st.totalLegs,
-			WonLegs:         st.wonLegs,
-			LostLegs:        st.lostLegs,
-			PushLegs:        st.pushLegs,
-			VoidLegs:        st.voidLegs,
-			DecidedLegs:     decided,
-			HitPct:          hitPct,
-			AvgLegOdds:      avgOdds,
-			TerroristCount:  st.terroristCount,
-			ParlayTerrorist: maxTerrorist > 0 && st.terroristCount == maxTerrorist,
-			WagerCount:      st.wagerCount,
-			DollarPL:        dollarPL,
-		})
+		row := MemberRow{
+			UserID:            st.member.ID,
+			Name:              st.member.Name,
+			AvatarColor:       st.member.AvatarColor,
+			TotalLegs:         st.totalLegs,
+			WonLegs:           st.wonLegs,
+			LostLegs:          st.lostLegs,
+			PushLegs:          st.pushLegs,
+			VoidLegs:          st.voidLegs,
+			DecidedLegs:       decided,
+			HitPct:            hitPct,
+			ImpliedLift:       impliedLift,
+			AvgLegOdds:        avgOdds,
+			CurrentWinStreak:  st.currentWinStreak,
+			CurrentLossStreak: st.currentLossStreak,
+			TerroristCount:    st.terroristCount,
+			ParlayTerrorist:   maxTerrorist > 0 && st.terroristCount == maxTerrorist,
+			WagerCount:        st.wagerCount,
+			DollarPL:          dollarPL,
+		}
+		row.Tags = evaluateTags(row, st, meanImpliedPct)
+		rows = append(rows, row)
 	}
 	return rows
 }
 
 type memberStats struct {
-	member         Member
-	totalLegs      int
-	wonLegs        int
-	lostLegs       int
-	pushLegs       int
-	voidLegs       int
-	oddsDecimalSum float64
-	oddsCount      int
-	terroristCount int
-	wagerCount     int
-	dollarPL       float64
+	member            Member
+	totalLegs         int
+	wonLegs           int
+	lostLegs          int
+	pushLegs          int
+	voidLegs          int
+	oddsDecimalSum    float64
+	oddsCount         int
+	impliedProbSum    float64
+	impliedCount      int
+	abDecided         int
+	abWon             int
+	dfDecided         int
+	dfWon             int
+	dogDecided        int
+	dogWon            int
+	downvotedDecided  int
+	downvotedWon      int
+	upvotedDecided    int
+	upvotedWon        int
+	currentWinStreak  int
+	currentLossStreak int
+	terroristCount    int
+	wagerCount        int
+	dollarPL          float64
+}
+
+func (st *memberStats) recordDecidedLeg(leg Leg, won bool) {
+	if prob := parlay.ImpliedProb(leg.Odds); prob > 0 {
+		st.impliedProbSum += prob
+		st.impliedCount++
+	}
+
+	switch strings.ToUpper(strings.TrimSpace(leg.Grade)) {
+	case "A", "B":
+		st.abDecided++
+		if won {
+			st.abWon++
+		}
+	case "D", "F":
+		st.dfDecided++
+		if won {
+			st.dfWon++
+		}
+	}
+
+	if leg.Odds >= 120 {
+		st.dogDecided++
+		if won {
+			st.dogWon++
+		}
+	}
+
+	if leg.NetVotes < 0 {
+		st.downvotedDecided++
+		if won {
+			st.downvotedWon++
+		}
+	} else if leg.NetVotes > 0 {
+		st.upvotedDecided++
+		if won {
+			st.upvotedWon++
+		}
+	}
 }
 
 func (st *memberStats) addOdds(american int) {
