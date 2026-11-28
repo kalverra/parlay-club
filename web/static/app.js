@@ -111,6 +111,9 @@ document.addEventListener("htmx:afterSwap", (event) => {
   if (target && target.id === "pick-tray-body") {
     openDockSheet();
   }
+  if (target && target.id === "bet-add-dialog-body") {
+    openBetAddDialog();
+  }
 });
 
 document.addEventListener("htmx:oobAfterSwap", (event) => {
@@ -646,6 +649,10 @@ document.addEventListener("click", (event) => {
     closeDockSheet();
     return;
   }
+  if (event.target.closest("[data-close-bet-add-dialog]")) {
+    closeBetAddDialog();
+    return;
+  }
   if (event.target.closest("[data-bug-dialog-close]")) {
     closeBugDialog();
     return;
@@ -730,6 +737,30 @@ if (dockSheet) {
       dockSheetBody.replaceChildren();
     }
   });
+}
+
+const betAddDialog = document.getElementById("bet-add-dialog");
+const betAddDialogBody = document.getElementById("bet-add-dialog-body");
+
+function openBetAddDialog() {
+  if (betAddDialog && !betAddDialog.open) {
+    betAddDialog.showModal();
+  }
+}
+
+function closeBetAddDialog() {
+  if (betAddDialog && betAddDialog.open) {
+    betAddDialog.close();
+  }
+}
+
+if (betAddDialog) {
+  betAddDialog.addEventListener("close", () => {
+    if (betAddDialogBody) {
+      betAddDialogBody.replaceChildren();
+    }
+  });
+  document.body.addEventListener("slip-updated", closeBetAddDialog);
 }
 
 // HTMX leaves a 4xx response in place by default. Rule refusals answer 422

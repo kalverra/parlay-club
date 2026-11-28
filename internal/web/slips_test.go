@@ -2633,3 +2633,80 @@ func TestSlipPanelRendersSideBadgesForOULegs(t *testing.T) {
 	assert.Contains(t, body, "▼")
 	assert.Equal(t, 2, strings.Count(body, "data-side-badge="))
 }
+
+func TestSlipHubCrossSlipLegAddButtons(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	game := addGame(t, fixture, gameKickoff())
+	teammate, err := fixture.store.CreateUserWithIdentity(
+		t.Context(),
+		"Teammate",
+		"teammate@example.com",
+		"teammate-sub",
+		"",
+	)
+	require.NoError(t, err)
+	_, err = fixture.store.JoinByToken(t.Context(), teammate.ID, fixture.group.InviteToken)
+	require.NoError(t, err)
+	require.NoError(t, fixture.store.AddSlipMember(t.Context(), fixture.slip.ID, teammate.ID))
+
+	_, err = fixture.store.CreateSlip(
+		t.Context(),
+		fixture.group.ID,
+		fixture.week.ID,
+		nil,
+		"Second Slip",
+		db.SlateScopeFullWeek,
+		2,
+		[]int64{fixture.user.ID},
+	)
+	require.NoError(t, err)
+
+	// Teammate's upcoming non-OTHER leg on slip 1 -> gets + Add chooser button.
+	addStoredLeg(t, fixture, db.Leg{
+		UserID:     teammate.ID,
+		GameID:     new(game.ID),
+		MarketType: "TOTAL",
+		Selection:  "Over 47.5",
+		Side:       new("OVER"),
+		Line:       new(47.5),
+		Odds:       -110,
+	})
+	// Teammate's OTHER leg on slip 1 -> no + Add button.
+	addStoredLeg(t, fixture, db.Leg{
+		UserID:     teammate.ID,
+		GameID:     new(game.ID),
+		MarketType: "OTHER",
+		Selection:  "Custom teammate prop",
+		Odds:       140,
+	})
+	// Viewer's own upcoming leg on open slip 1 -> Edit/Delete, no + Add button.
+	addStoredLeg(t, fixture, db.Leg{
+		UserID:     fixture.user.ID,
+		GameID:     new(game.ID),
+		MarketType: "SPREAD",
+		Selection:  "BUF -3.5",
+		Team:       new("BUF"),
+		Side:       new("TEAM"),
+		Line:       new(-3.5),
+		Odds:       -110,
+	})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodGet,
+		fmt.Sprintf("/slips/%d", fixture.slip.ID),
+		nil,
+	)
+	fixture.handler.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	body := html.UnescapeString(rec.Body.String())
+	assert.Contains(t, body, `<dialog id="bet-add-dialog" class="leg-sheet"`)
+	assert.Contains(t, body, `hx-get="/bets/add-sheet?`)
+	assert.Contains(t, body, `hx-target="#bet-add-dialog-body"`)
+	// Only the teammate's upcoming non-OTHER leg gets the + Add chooser button.
+	assert.Equal(t, 1, strings.Count(body, `hx-target="#bet-add-dialog-body"`))
+}

@@ -405,10 +405,43 @@
                       {{if .SplitLine}}
                         <p class="mt-1 font-mono text-[10px] tabular-nums text-ink-muted">{{.SplitLine}}</p>
                       {{end}}
-                      {{if .BetHref}}
-                        <p class="mt-1">
-                          <a href="{{.BetHref}}" class="text-[11px] font-medium text-ink underline decoration-line-strong underline-offset-2 hover:opacity-75">Research &rarr;</a>
-                        </p>
+                      {{if or .BetHref .AddPostURL .AddHref}}
+                        <div class="mt-1.5 flex flex-wrap items-center gap-3">
+                          {{if .BetHref}}
+                            <a href="{{.BetHref}}" class="text-[11px] font-medium text-ink underline decoration-line-strong underline-offset-2 hover:opacity-75">Research &rarr;</a>
+                          {{end}}
+                          {{if .AddPostURL}}
+                            <form action="{{.AddPostURL}}" method="post" hx-post="{{.AddPostURL}}">
+                              <input type="hidden" name="quick" value="1">
+                              <input type="hidden" name="from" value="research">
+                              <input type="hidden" name="return" value="{{.ReturnURL}}">
+                              <input type="hidden" name="game_id" value="{{.GameID}}">
+                              <input type="hidden" name="market_type" value="{{.MarketType}}">
+                              <input type="hidden" name="team" value="{{.Team}}">
+                              <input type="hidden" name="side" value="{{.Side}}">
+                              <input type="hidden" name="player_name" value="{{.PlayerName}}">
+                              {{if .PlayerID}}<input type="hidden" name="player_id" value="{{.PlayerID}}">{{end}}
+                              {{if .Line}}<input type="hidden" name="line" value="{{.Line}}">{{end}}
+                              <input type="hidden" name="odds" value="{{.OddsValue}}">
+                              <button
+                                type="submit"
+                                class="rounded-lg bg-accent px-2.5 py-1 text-[11px] font-semibold text-accent-ink hover:opacity-90"
+                              >
+                                + Add
+                              </button>
+                            </form>
+                          {{else if .AddHref}}
+                            <button
+                              type="button"
+                              hx-get="{{.AddHref}}"
+                              hx-target="#bet-add-dialog-body"
+                              hx-swap="innerHTML"
+                              class="rounded-lg bg-accent px-2.5 py-1 text-[11px] font-semibold text-accent-ink hover:opacity-90"
+                            >
+                              + Add
+                            </button>
+                          {{end}}
+                        </div>
                       {{end}}
                     </div>
                     <div class="shrink-0 text-right">

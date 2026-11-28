@@ -2,6 +2,7 @@ package web_test
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -2597,4 +2598,227 @@ func TestBetResearchHrefSharedAcrossSurfaces(t *testing.T) {
 	assert.Contains(t, relatedBlock, "/research/bet?")
 	assert.Contains(t, relatedBlock, "slip_id="+slipIDText)
 	assert.Contains(t, relatedBlock, "Research &rarr;")
+}
+
+func TestBetAddSheetListsEligibleSlipsAndEmptyState(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	game := addGame(t, fixture, gameKickoff())
+	seedResearchExplorer(t, fixture, game)
+	handler := researchHandlerWithRefresher(t, fixture, fixture.user, &researchTestRefresher{})
+
+	// 1. Missing or invalid params return 404.
+	for _, path := range []string{
+		"/bets/add-sheet",
+		"/bets/add-sheet?game_id=" + game.ID,
+		"/bets/add-sheet?game_id=missing&market=SPREAD",
+		"/bets/add-sheet?game_id=" + game.ID + "&market=OTHER",
+	} {
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil))
+		assert.Equal(t, http.StatusNotFound, rec.Code, path)
+	}
+
+	// 2. Create additional slips: one out-of-scope (CUSTOM on a different game),
+	// one full (locked-in step), and one eligible open slip.
+	eligibleSlip, err := fixture.store.CreateSlip(
+		t.Context(),
+		fixture.group.ID,
+		fixture.week.ID,
+		nil,
+		"Eligible Sunday",
+		db.SlateScopeFullWeek,
+		2,
+		[]int64{fixture.user.ID},
+	)
+	require.NoError(t, err)
+
+	otherGame, err := fixture.store.UpsertGame(t.Context(), db.Game{
+		ID:        "401772002",
+		WeekID:    fixture.week.ID,
+		HomeTeam:  "KC",
+		AwayTeam:  "LV",
+		Kickoff:   gameKickoff().Add(3 * time.Hour),
+		Status:    db.GameScheduled,
+		UpdatedAt: time.Now().UTC(),
+	})
+	require.NoError(t, err)
+	_, err = fixture.store.CreateSlipWithGames(
+		t.Context(),
+		fixture.group.ID,
+		fixture.week.ID,
+		nil,
+		"Out of Scope",
+		db.SlateScopeCustom,
+		2,
+		[]int64{fixture.user.ID},
+		[]string{otherGame.ID},
+	)
+	require.NoError(t, err)
+
+	fullSlip, err := fixture.store.CreateSlip(
+		t.Context(),
+		fixture.group.ID,
+		fixture.week.ID,
+		nil,
+		"Full Slip",
+		db.SlateScopeFullWeek,
+		1,
+		[]int64{fixture.user.ID},
+	)
+	require.NoError(t, err)
+	_, err = fixture.store.CreateLeg(t.Context(), db.Leg{
+		SlipID:     fullSlip.ID,
+		UserID:     fixture.user.ID,
+		GameID:     &game.ID,
+		MarketType: "ML",
+		Team:       new("BUF"),
+		Side:       new("TEAM"),
+		Selection:  "BUF ML",
+		Odds:       -150,
+	})
+	require.NoError(t, err)
+
+	sheetURL := "/bets/add-sheet?" + url.Values{
+		"game_id":     {game.ID},
+		"market":      {"PASS_YDS"},
+		"side":        {"OVER"},
+		"team":        {"BUF"},
+		"player_id":   {"3918298"},
+		"player_name": {"Josh Allen"},
+		"line":        {"265.5"},
+		"odds":        {"-110"},
+		"return":      {"/research"},
+	}.Encode()
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, sheetURL, nil))
+	require.Equal(t, http.StatusOK, rec.Code)
+	body := rec.Body.String()
+
+	assert.Contains(t, body, "Add to slip")
+	assert.Contains(t, body, "data-close-bet-add-dialog")
+	assert.Contains(t, body, fixture.slip.Name)
+	assert.Contains(t, body, "Eligible Sunday")
+	assert.NotContains(t, body, "Out of Scope")
+	assert.NotContains(t, body, "Full Slip")
+	assert.Contains(t, body, fmt.Sprintf(`action="/slips/%d/legs"`, eligibleSlip.ID))
+	assert.Contains(t, body, fmt.Sprintf(`hx-post="/slips/%d/legs"`, eligibleSlip.ID))
+	assert.Contains(t, body, `name="quick" value="1"`)
+	assert.Contains(t, body, `name="from" value="research"`)
+
+	// 3. Submitting to Eligible Sunday adds the leg and redirects to /research.
+	addRec := postForm(t, handler, fmt.Sprintf("/slips/%d/legs", eligibleSlip.ID), url.Values{
+		"quick":       {"1"},
+		"from":        {"research"},
+		"return":      {"/research"},
+		"game_id":     {game.ID},
+		"market_type": {"PASS_YDS"},
+		"team":        {"BUF"},
+		"side":        {"OVER"},
+		"player_id":   {"3918298"},
+		"player_name": {"Josh Allen"},
+		"line":        {"265.5"},
+		"odds":        {"-110"},
+	})
+	assert.Equal(t, http.StatusOK, addRec.Code)
+	assert.Equal(t, "/research", addRec.Header().Get("Hx-Redirect"))
+	legs, err := fixture.store.LegsForSlip(t.Context(), eligibleSlip.ID)
+	require.NoError(t, err)
+	require.Len(t, legs, 1)
+	assert.Equal(t, "PASS_YDS", legs[0].MarketType)
+
+	// 4. Empty state when no eligible open slip remains.
+	require.NoError(t, fixture.store.SetSlipStatus(t.Context(), fixture.slip.ID, db.SlipLocked))
+	require.NoError(t, fixture.store.SetSlipStatus(t.Context(), eligibleSlip.ID, db.SlipLocked))
+
+	emptyRec := httptest.NewRecorder()
+	handler.ServeHTTP(emptyRec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, sheetURL, nil))
+	require.Equal(t, http.StatusOK, emptyRec.Code)
+	emptyBody := emptyRec.Body.String()
+	assert.Contains(t, emptyBody, "No open slips in your pick step have room for this game.")
+	assert.Contains(t, emptyBody, fmt.Sprintf(`/slips/new?week=%d`, fixture.week.ID))
+
+	// 5. Kicked-off game shows closed-lines empty state.
+	startedGame, err := fixture.store.UpsertGame(t.Context(), db.Game{
+		ID:        "401772098",
+		WeekID:    fixture.week.ID,
+		HomeTeam:  "NYJ",
+		AwayTeam:  "KC",
+		Kickoff:   time.Now().UTC().Add(-2 * time.Hour),
+		Status:    db.GameFinal,
+		UpdatedAt: time.Now().UTC(),
+	})
+	require.NoError(t, err)
+	startedSheet := "/bets/add-sheet?game_id=" + startedGame.ID + "&market=SPREAD&side=TEAM&team=KC"
+	startedRec := httptest.NewRecorder()
+	handler.ServeHTTP(startedRec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, startedSheet, nil))
+	require.Equal(t, http.StatusOK, startedRec.Code)
+	assert.Contains(t, startedRec.Body.String(), "This game has kicked off, so its lines are closed.")
+}
+
+func TestAddButtonsOnResearchCardsAndRelatedBets(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSlipFixture(t, 2)
+	game := addGame(t, fixture, gameKickoff())
+	seedResearchExplorer(t, fixture, game)
+	handler := researchHandlerWithRefresher(t, fixture, fixture.user, &researchTestRefresher{})
+
+	// 1. Research Explorer mounts #bet-add-dialog and wires + Add on cards to /bets/add-sheet.
+	resRec := httptest.NewRecorder()
+	handler.ServeHTTP(resRec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/research", nil))
+	require.Equal(t, http.StatusOK, resRec.Code)
+	resBody := resRec.Body.String()
+	assert.Contains(t, resBody, `<dialog id="bet-add-dialog" class="leg-sheet"`)
+	assert.Contains(t, resBody, `id="bet-add-dialog-body"`)
+	assert.Contains(t, resBody, `hx-get="/bets/add-sheet?`)
+	assert.Contains(t, resBody, `hx-target="#bet-add-dialog-body"`)
+	assert.Contains(t, resBody, "+ Add")
+
+	// 2. /research/bet without slip_id wires Related bets + Add to /bets/add-sheet.
+	baseBetURL := "/research/bet?" + url.Values{
+		"game_id":     {game.ID},
+		"market":      {"PASS_YDS"},
+		"player_id":   {"3918298"},
+		"player_name": {"Josh Allen"},
+		"side":        {"OVER"},
+	}.Encode()
+	noSlipRec := httptest.NewRecorder()
+	handler.ServeHTTP(noSlipRec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, baseBetURL, nil))
+	require.Equal(t, http.StatusOK, noSlipRec.Code)
+	noSlipBody := noSlipRec.Body.String()
+	relatedStart := strings.Index(noSlipBody, "More in this game")
+	require.Greater(t, relatedStart, -1)
+	relatedNoSlip := noSlipBody[relatedStart:]
+	assert.Contains(t, relatedNoSlip, `hx-get="/bets/add-sheet?`)
+	assert.Contains(t, relatedNoSlip, `hx-target="#bet-add-dialog-body"`)
+	assert.Contains(t, relatedNoSlip, "+ Add")
+
+	// 3. /research/bet with eligible slip_id wires Related bets + Add directly to /slips/{id}/legs.
+	slipIDText := strconv.FormatInt(fixture.slip.ID, 10)
+	withSlipURL := baseBetURL + "&slip_id=" + slipIDText
+	withSlipRec := httptest.NewRecorder()
+	handler.ServeHTTP(withSlipRec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, withSlipURL, nil))
+	require.Equal(t, http.StatusOK, withSlipRec.Code)
+	withSlipBody := withSlipRec.Body.String()
+	relatedWithSlipStart := strings.Index(withSlipBody, "More in this game")
+	require.Greater(t, relatedWithSlipStart, -1)
+	relatedWithSlip := withSlipBody[relatedWithSlipStart:]
+	assert.Contains(t, relatedWithSlip, fmt.Sprintf(`hx-post="/slips/%d/legs"`, fixture.slip.ID))
+	assert.NotContains(t, relatedWithSlip, `hx-get="/bets/add-sheet?`)
+	assert.Contains(t, relatedWithSlip, "+ Add")
+
+	// 4. When slip_id is locked (ineligible), Related bets fall back to /bets/add-sheet.
+	require.NoError(t, fixture.store.SetSlipStatus(t.Context(), fixture.slip.ID, db.SlipLocked))
+	lockedRec := httptest.NewRecorder()
+	handler.ServeHTTP(lockedRec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, withSlipURL, nil))
+	require.Equal(t, http.StatusOK, lockedRec.Code)
+	lockedBody := lockedRec.Body.String()
+	relatedLockedStart := strings.Index(lockedBody, "More in this game")
+	require.Greater(t, relatedLockedStart, -1)
+	relatedLocked := lockedBody[relatedLockedStart:]
+	assert.Contains(t, relatedLocked, `hx-get="/bets/add-sheet?`)
+	assert.Contains(t, relatedLocked, `hx-target="#bet-add-dialog-body"`)
 }

@@ -283,6 +283,7 @@ type LegView struct {
 	CanEdit         bool
 	CanGrade        bool
 	ResearchURL     string
+	AddURL          string
 	PlayerHeadshot  string
 	PlayerInitials  string
 	TeamLogo        string
@@ -2369,8 +2370,21 @@ func legViews(
 ) map[int64][]LegView {
 	byUser := make(map[int64][]LegView, len(names))
 	for _, leg := range legs {
+		canEdit := open && hasUser && leg.UserID == viewerID
 		canVote := open && hasUser && viewerIsMember && leg.UserID != viewerID
 		sideBadge, sideClass := legSideBadge(leg.Side)
+		addURL := ""
+		if hasUser && !canEdit && leg.MarketType != "" && leg.MarketType != "OTHER" && leg.GameID != nil &&
+			*leg.GameID != "" {
+			if game, ok := media.games[*leg.GameID]; ok && now.Before(game.Kickoff) {
+				addURL = betAddSheetHref(
+					db.LegSelection(leg),
+					researchLineText(leg.Line),
+					leg.Odds,
+					fmt.Sprintf("/slips/%d", slipID),
+				)
+			}
+		}
 		view := LegView{
 			ID:            leg.ID,
 			Selection:     leg.Selection,
@@ -2384,9 +2398,10 @@ func legViews(
 			Result:        string(leg.Result),
 			GradedBy:      legGradedBy(leg.GradedBy),
 			OwnerName:     names[leg.UserID],
-			CanEdit:       open && hasUser && leg.UserID == viewerID,
+			CanEdit:       canEdit,
 			CanGrade:      viewerIsMember,
 			ResearchURL:   legResearchURL(leg, media, slipID, now),
+			AddURL:        addURL,
 			Votes:         legVoteView(votes, leg, canVote),
 			Live:          legLiveView(legProgs[leg.ID]),
 		}

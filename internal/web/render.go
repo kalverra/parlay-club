@@ -56,6 +56,7 @@ var partialFiles = map[string]string{
 	"research-game":      partialsFile,
 	"research-player":    partialsFile,
 	"research-explore":   partialsFile,
+	"bet-add-sheet":      partialsFile,
 	"bug-report-success": partialsFile,
 	"bug-report-error":   partialsFile,
 }

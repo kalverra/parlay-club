@@ -37,6 +37,7 @@ func (h *researchHandlers) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /research/games/{id}/props", h.researchGameProps)
 	mux.HandleFunc("GET /research/players/{espnID}", h.researchPlayer)
 	mux.HandleFunc("POST /research/matches", h.saveMatch)
+	mux.HandleFunc("GET /bets/add-sheet", h.betAddSheet)
 }
 
 // ResearchPage is the full Research tab: the explorer plus, for a targeted
@@ -132,6 +133,9 @@ type ResearchCardView struct {
 	Badge           string
 	SplitLine       string
 	BetHref         string
+	AddHref         string
+	AddPostURL      string
+	ReturnURL       string
 	GameSheetHref   string
 	PlayerSheetHref string
 }
@@ -225,6 +229,25 @@ type BetAddSlipView struct {
 	SlipName string
 	PostURL  string
 	Summary  string
+}
+
+// BetAddSheetView is the #bet-add-dialog-body partial for choosing an
+// eligible open slip to add a bet to.
+type BetAddSheetView struct {
+	GameID     string
+	MarketType string
+	Team       string
+	Side       string
+	PlayerID   string
+	PlayerName string
+	Line       string
+	Odds       string
+	Selection  string
+	Matchup    string
+	ReturnURL  string
+	WeekID     int64
+	KickedOff  bool
+	AddSlips   []BetAddSlipView
 }
 
 // TeamBetContextView is the cached game context a game-market bet shows:
@@ -667,8 +690,19 @@ func (h *researchHandlers) buildBetResearch(ctx context.Context, r *http.Request
 	if parsed, err := strconv.ParseInt(strings.TrimSpace(rawSlipID), 10, 64); err == nil && parsed > 0 {
 		slipID = parsed
 	}
-	view.Related = relatedBetCards(game, rows, games, stats, *bet, view.BackHref, homeBook, slipID)
 	view.AddSlips = preferBetSlip(h.betAddSlips(ctx, game), rawSlipID)
+	activeAddURL := ""
+	if slipID > 0 {
+		for _, option := range view.AddSlips {
+			if option.SlipID == slipID {
+				activeAddURL = option.PostURL
+				break
+			}
+		}
+	}
+	view.Related = relatedBetCards(
+		game, rows, games, stats, *bet, view.BackHref, view.ReturnURL, homeBook, slipID, activeAddURL,
+	)
 	return view
 }
 
@@ -1229,9 +1263,9 @@ func relatedBetCards(
 	games map[string]analyzer.Game,
 	stats map[string]analyzer.PlayerStats,
 	current board.Row,
-	from string,
-	homeBook string,
+	from, returnURL, homeBook string,
 	slipID int64,
+	activeAddURL string,
 ) []ResearchCardView {
 	result := board.Explore(rows, games, stats, board.ExploreQuery{
 		GameID: game.ID,
@@ -1264,7 +1298,95 @@ func relatedBetCards(
 	if len(related) > maxRelated {
 		related = related[:maxRelated]
 	}
-	return researchCards([]db.Game{game}, related, from, homeBook, slipID)
+	cards := researchCards([]db.Game{game}, related, from, homeBook, slipID)
+	if returnURL == "" {
+		returnURL = from
+	}
+	for i := range cards {
+		cards[i].ReturnURL = returnURL
+		if activeAddURL != "" {
+			cards[i].AddPostURL = activeAddURL
+			cards[i].AddHref = ""
+			continue
+		}
+		sel := db.SelectionKey{
+			GameID:     cards[i].GameID,
+			MarketType: cards[i].MarketType,
+			Team:       cards[i].Team,
+			PlayerName: cards[i].PlayerName,
+			PlayerID:   cards[i].PlayerID,
+			Side:       cards[i].Side,
+		}
+		cards[i].AddHref = betAddSheetHref(sel, cards[i].Line, cards[i].OddsValue, returnURL)
+	}
+	return cards
+}
+
+// betAddSheet renders the eligible-slip chooser dialog body for one bet.
+func (h *researchHandlers) betAddSheet(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query()
+	gameID := strings.TrimSpace(query.Get("game_id"))
+	market := strings.ToUpper(strings.TrimSpace(query.Get("market")))
+	if market == "" {
+		market = strings.ToUpper(strings.TrimSpace(query.Get("market_type")))
+	}
+	if h.deps.Store == nil || gameID == "" || market == "" || market == "OTHER" {
+		http.NotFound(w, r)
+		return
+	}
+	game, err := h.deps.Store.GameByID(r.Context(), gameID)
+	if errors.Is(err, db.ErrGameNotFound) {
+		http.NotFound(w, r)
+		return
+	}
+	if err != nil {
+		h.deps.Logger.Error().Err(err).Str("game_id", gameID).Msg("load game for bet add sheet")
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+
+	side := strings.ToUpper(strings.TrimSpace(query.Get("side")))
+	team := strings.TrimSpace(query.Get("team"))
+	playerID := strings.TrimSpace(query.Get("player_id"))
+	playerName := strings.TrimSpace(query.Get("player_name"))
+	lineStr := strings.TrimSpace(query.Get("line"))
+	oddsStr := strings.TrimSpace(query.Get("odds"))
+	selection := strings.TrimSpace(query.Get("selection"))
+	if selection == "" {
+		var lineVal *float64
+		if lineStr != "" {
+			if parsed, err := strconv.ParseFloat(lineStr, 64); err == nil {
+				lineVal = &parsed
+			}
+		}
+		selection = db.BuildLegSelection(market, team, playerName, side, lineVal)
+	}
+	returnURL := safeReturnPath(query.Get("return"))
+	if returnURL == "" {
+		returnURL = "/research"
+	}
+	matchup := game.AwayTeam + " @ " + game.HomeTeam
+	if matchup == " @ " {
+		matchup = game.ID
+	}
+	now := h.deps.now()
+	view := BetAddSheetView{
+		GameID:     game.ID,
+		MarketType: market,
+		Team:       team,
+		Side:       side,
+		PlayerID:   playerID,
+		PlayerName: playerName,
+		Line:       lineStr,
+		Odds:       oddsStr,
+		Selection:  selection,
+		Matchup:    matchup,
+		ReturnURL:  returnURL,
+		WeekID:     game.WeekID,
+		KickedOff:  !now.Before(game.Kickoff),
+		AddSlips:   h.betAddSlips(r.Context(), game),
+	}
+	h.renderPartial(w, "bet-add-sheet", view)
 }
 
 // betAddSlips lists the viewer's open slips that are still in the pick step and
@@ -1824,14 +1946,16 @@ func researchCards(games []db.Game, rows []board.ScoredRow, from, homeBook strin
 			AwayLogo:        db.StringValue(game.AwayLogo),
 			HomeLogo:        db.StringValue(game.HomeLogo),
 		}
-		card.BetHref = betResearchHref(db.SelectionKey{
+		sel := db.SelectionKey{
 			GameID:     row.GameID,
 			MarketType: row.Market,
 			Team:       row.Team,
 			PlayerName: row.PlayerName,
 			PlayerID:   row.PlayerID,
 			Side:       row.Side,
-		}, from, slipID)
+		}
+		card.BetHref = betResearchHref(sel, from, slipID)
+		card.AddHref = betAddSheetHref(sel, card.Line, row.Odds, from)
 		if row.Odds == 0 {
 			card.Odds = "—"
 		}
@@ -1910,6 +2034,39 @@ func betResearchHref(sel db.SelectionKey, from string, slipID int64) string {
 		values.Set("slip_id", strconv.FormatInt(slipID, 10))
 	}
 	return "/research/bet?" + values.Encode()
+}
+
+// betAddSheetHref builds the HTMX URL for the eligible-slip chooser dialog.
+// Returns "" when the selection cannot be added to a slip.
+func betAddSheetHref(sel db.SelectionKey, line string, odds int, returnURL string) string {
+	if sel.GameID == "" || sel.MarketType == "" || sel.MarketType == "OTHER" {
+		return ""
+	}
+	values := url.Values{}
+	values.Set("game_id", sel.GameID)
+	values.Set("market", sel.MarketType)
+	if sel.Side != "" {
+		values.Set("side", sel.Side)
+	}
+	if sel.Team != "" {
+		values.Set("team", sel.Team)
+	}
+	if sel.PlayerID != "" {
+		values.Set("player_id", sel.PlayerID)
+	}
+	if sel.PlayerName != "" {
+		values.Set("player_name", sel.PlayerName)
+	}
+	if line != "" {
+		values.Set("line", line)
+	}
+	if odds != 0 {
+		values.Set("odds", strconv.Itoa(odds))
+	}
+	if returnURL != "" {
+		values.Set("return", returnURL)
+	}
+	return "/bets/add-sheet?" + values.Encode()
 }
 
 // finishResearchExploreTargets records the sheet links and the explicit props

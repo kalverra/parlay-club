@@ -155,7 +155,15 @@
       </div>
     </nav>
     {{end}}
-    {{if .User}}{{template "bug-report-dialog" .}}{{end}}
+    {{if .User}}
+      <dialog id="bet-add-dialog" class="leg-sheet" aria-label="Add bet to slip">
+        <div
+          id="bet-add-dialog-body"
+          class="rounded-t-2xl border border-line bg-surface p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] text-ink shadow-2xl sm:rounded-2xl"
+        ></div>
+      </dialog>
+      {{template "bug-report-dialog" .}}
+    {{end}}
   </body>
 </html>
 {{end}}

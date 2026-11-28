@@ -263,7 +263,7 @@ and remaining leg slots consistently with `slips.Service`)
 - [x] Share one `betResearchHref` helper across pick-board options, highlights legs/parlays, slip legs (with fallback
   for kicked-off or `OTHER` legs), research cards, and related bets in `internal/web/` and `web/templates/`, adding
   compact Research links to every bet tile with handler tests.
-- [ ] Add `GET /bets/add-sheet` in `internal/web/research.go`, mount `<dialog id="bet-add-dialog">` in
+- [x] Add `GET /bets/add-sheet` in `internal/web/research.go`, mount `<dialog id="bet-add-dialog">` in
   `web/templates/layout.html` and `web/static/app.js`, and wire `+ Add` buttons on research cards, related bets, and
   cross-slip leg mentions to open the chooser (or add directly when picking for an active slip), with tests in
   `internal/web/research_test.go` and `internal/web/slips_test.go`.
