@@ -126,7 +126,10 @@ type ResearchCardView struct {
 	Odds            string
 	OddsValue       int
 	Implied         string
+	ImpliedHuman    string
 	GradeLetter     string
+	GradeDisplay    string
+	GradeDescriptor string
 	GradeScore      int
 	GradeClass      string
 	Reason          string
@@ -176,6 +179,7 @@ type BetResearchView struct {
 	Odds            int
 	OddsText        string
 	Implied         string
+	ImpliedHuman    string
 	LineInput       string
 	Reason          string
 	Grade           GradeView
@@ -195,32 +199,35 @@ type BetResearchView struct {
 
 // BetPricingView compares the cached books for one selection.
 type BetPricingView struct {
-	HasPrices        bool
-	HomeBook         string
-	HomeLine         string
-	HomePrice        string
-	ConsensusLine    string
-	ConsensusPrice   string
-	ConsensusImplied string
-	BestBook         string
-	BestLine         string
-	BestPrice        string
-	BestImplied      string
-	DevigEdge        string
-	DevigNote        string
-	SnapshotBooks    []BetBookView
-	BookCount        int
-	Books            []BetBookView
+	HasPrices             bool
+	HomeBook              string
+	HomeLine              string
+	HomePrice             string
+	ConsensusLine         string
+	ConsensusPrice        string
+	ConsensusImplied      string
+	ConsensusImpliedHuman string
+	BestBook              string
+	BestLine              string
+	BestPrice             string
+	BestImplied           string
+	BestImpliedHuman      string
+	DevigEdge             string
+	DevigNote             string
+	SnapshotBooks         []BetBookView
+	BookCount             int
+	Books                 []BetBookView
 }
 
 // BetBookView is one book's cached line and price for the bet.
 type BetBookView struct {
-	Book    string
-	Line    string
-	Price   string
-	Implied string
-	Home    bool
-	Best    bool
+	Book         string
+	Line         string
+	Price        string
+	Implied      string
+	ImpliedHuman string
+	Home         bool
+	Best         bool
 }
 
 // BetAddSlipView is one open slip the viewer can add this bet to.
@@ -652,6 +659,7 @@ func (h *researchHandlers) buildBetResearch(ctx context.Context, r *http.Request
 	view.Odds = bet.Odds
 	view.OddsText = formatOdds(bet.Odds)
 	view.Implied = formatImpliedChance(parlay.ImpliedProb(bet.Odds))
+	view.ImpliedHuman = formatImpliedHuman(parlay.ImpliedProb(bet.Odds))
 	view.LineInput = researchLineText(bet.Line)
 	view.SplitLine = splitLineBadge(bet.Market, bet.DK, bet.FD, bet.LinesDiffer, homeBook)
 	view.Grade = LegGradeView(grade)
@@ -826,6 +834,7 @@ func buildBetPricing(odds []db.Odds, row board.Row, game db.Game, homeBook strin
 	}
 	view.ConsensusLine = researchLineText(line)
 	view.ConsensusPrice, view.ConsensusImplied = betPriceTexts(betMedianPrice(pool))
+	view.ConsensusImpliedHuman = formatImpliedHuman(parlay.ImpliedProb(betMedianPrice(pool)))
 
 	best := pool[0]
 	for _, price := range pool[1:] {
@@ -836,6 +845,7 @@ func buildBetPricing(odds []db.Odds, row board.Row, game db.Game, homeBook strin
 	view.BestBook = best.book
 	view.BestLine = researchLineText(best.line)
 	view.BestPrice, view.BestImplied = betPriceTexts(best.odds)
+	view.BestImpliedHuman = formatImpliedHuman(parlay.ImpliedProb(best.odds))
 
 	homeKey := db.NormalizeBook(view.HomeBook)
 	bestKey := best.key
@@ -845,6 +855,7 @@ func buildBetPricing(odds []db.Odds, row board.Row, game db.Game, homeBook strin
 			Line: researchLineText(price.line),
 		}
 		bookView.Price, bookView.Implied = betPriceTexts(price.odds)
+		bookView.ImpliedHuman = formatImpliedHuman(parlay.ImpliedProb(price.odds))
 		bookView.Home = homeKey != "" && price.key == homeKey
 		bookView.Best = price.key == bestKey
 		view.Books = append(view.Books, bookView)
@@ -1936,7 +1947,10 @@ func researchCards(games []db.Game, rows []board.ScoredRow, from, homeBook strin
 			KickoffFallback: kickoffFallback(row.Kickoff),
 			Odds:            formatOdds(row.Odds),
 			OddsValue:       row.Odds,
+			ImpliedHuman:    formatImpliedHuman(parlay.ImpliedProb(row.Odds)),
 			GradeLetter:     scored.Grade.Letter,
+			GradeDisplay:    scored.Grade.Diagnostics.DisplayGrade,
+			GradeDescriptor: scored.Grade.Diagnostics.Descriptor,
 			GradeScore:      scored.Grade.Score,
 			GradeClass:      gradeClass(scored.Grade.Letter),
 			Reason:          scored.Reason,

@@ -2025,17 +2025,18 @@ func TestSlipHubRendersTopAGradeIdeasDuringPickStep(t *testing.T) {
 	// Before any odds are cached, the strip stays hidden.
 	emptyPage := get(fmt.Sprintf("/slips/%d", fixture.slip.ID))
 	require.Equal(t, http.StatusOK, emptyPage.Code)
-	assert.NotContains(t, emptyPage.Body.String(), "Top A-grade ideas")
+	assert.NotContains(t, emptyPage.Body.String(), "Cleanest builds on the board")
 
 	seedAGradeBoardForHubTest(t, fixture, game)
 
 	pageResp := get(fmt.Sprintf("/slips/%d", fixture.slip.ID))
 	require.Equal(t, http.StatusOK, pageResp.Code)
 	body := pageResp.Body.String()
-	assert.Contains(t, body, "Top A-grade ideas")
+	assert.Contains(t, body, "Cleanest builds on the board")
 	assert.Contains(t, body, "data-highlight-leg")
 	assert.Contains(t, body, "data-highlight-parlay")
 	assert.Contains(t, body, "grade-a")
+	assert.Contains(t, body, "border-grade-clean bg-grade-clean-soft text-grade-clean-ink")
 	assert.Contains(t, body, "Josh Allen")
 	assert.Contains(t, body, "James Cook")
 	assert.Contains(t, body, "Add all 2")
@@ -2045,7 +2046,7 @@ func TestSlipHubRendersTopAGradeIdeasDuringPickStep(t *testing.T) {
 	// Panel partial also renders the strip.
 	panelResp := get(fmt.Sprintf("/slips/%d/panel", fixture.slip.ID))
 	require.Equal(t, http.StatusOK, panelResp.Code)
-	assert.Contains(t, panelResp.Body.String(), "Top A-grade ideas")
+	assert.Contains(t, panelResp.Body.String(), "Cleanest builds on the board")
 }
 
 func TestSlipHubHighlightsHideAndDisableWhenSlotsFullOrLocked(t *testing.T) {
@@ -2065,7 +2066,7 @@ func TestSlipHubHighlightsHideAndDisableWhenSlotsFullOrLocked(t *testing.T) {
 	})
 	require.Equal(t, http.StatusOK, addOne.Code, addOne.Body.String())
 	partialBody := addOne.Body.String()
-	assert.Contains(t, partialBody, "Top A-grade ideas")
+	assert.Contains(t, partialBody, "Cleanest builds on the board")
 	assert.Contains(t, partialBody, "Needs 2 open slots")
 	assert.NotContains(t, partialBody, "Add all 2")
 
@@ -2078,12 +2079,12 @@ func TestSlipHubHighlightsHideAndDisableWhenSlotsFullOrLocked(t *testing.T) {
 		"odds":        {"-110"},
 	})
 	require.Equal(t, http.StatusOK, addTwo.Code, addTwo.Body.String())
-	assert.NotContains(t, addTwo.Body.String(), "Top A-grade ideas")
+	assert.NotContains(t, addTwo.Body.String(), "Cleanest builds on the board")
 
 	// Lock in -> StepExport -> highlights strip stays hidden.
 	lockResp := postForm(t, fixture.handler, fmt.Sprintf("/slips/%d/lock", fixture.slip.ID), url.Values{})
 	require.Equal(t, http.StatusOK, lockResp.Code, lockResp.Body.String())
-	assert.NotContains(t, lockResp.Body.String(), "Top A-grade ideas")
+	assert.NotContains(t, lockResp.Body.String(), "Cleanest builds on the board")
 }
 
 func TestSlipHubRendersImpliedChancesAndOmitsEmptyOrVoided(t *testing.T) {
@@ -2131,16 +2132,27 @@ func TestSlipHubRendersImpliedChancesAndOmitsEmptyOrVoided(t *testing.T) {
 	hubResp := get(fmt.Sprintf("/slips/%d", fixture.slip.ID))
 	require.Equal(t, http.StatusOK, hubResp.Code)
 	hubBody := hubResp.Body.String()
-	assert.Contains(t, hubBody, "(52%)")
-	assert.Contains(t, hubBody, "(40%)")
-	assert.Contains(t, hubBody, "21% chance")
+	assert.Contains(t, hubBody, `data-provenance="Vegas Implied"`)
+	assert.Contains(t, hubBody, "52% implied")
+	assert.Contains(t, hubBody, "~1 in 2")
+	assert.Less(
+		t,
+		strings.Index(hubBody, "52% implied"),
+		strings.Index(hubBody, "-110"),
+		"human implied probability precedes American odds",
+	)
+	assert.Contains(t, hubBody, "40% implied")
+	assert.Contains(t, hubBody, "~1 in 3")
+	assert.Contains(t, hubBody, "21% implied")
+	assert.Contains(t, hubBody, "~1 in 5")
 
 	// Payout endpoint renders both combined and reference implied chances.
 	payoutResp := get(fmt.Sprintf("/slips/%d/payout?stake=10&boost=0", fixture.slip.ID))
 	require.Equal(t, http.StatusOK, payoutResp.Code)
 	payoutBody := payoutResp.Body.String()
 	assert.Contains(t, payoutBody, "Implied chance from combined odds")
-	assert.Contains(t, payoutBody, "21% chance")
+	assert.Contains(t, payoutBody, "21% implied")
+	assert.Contains(t, payoutBody, "~1 in 5")
 	assert.Contains(t, payoutBody, "Implied chance from reference odds")
 
 	// Voiding all legs drops CombinedOdds to 1.00x and omits payout implied chances.
@@ -2178,10 +2190,12 @@ func TestSlipHubHighlightsRenderImpliedChances(t *testing.T) {
 	body := rec.Body.String()
 	assert.Contains(t, body, "data-highlight-leg")
 	assert.Contains(t, body, "data-highlight-parlay")
-	// Single-leg highlights and combo leg items use the dual-book price (-105 -> 51%).
-	assert.Contains(t, body, "(51%)")
-	// 2-leg combo of -105 and -105 is +281 -> (26%).
-	assert.Contains(t, body, "(26%)")
+	// Single-leg highlights and combo leg items use the dual-book price (-105 -> 51% implied).
+	assert.Contains(t, body, "51% implied")
+	assert.Contains(t, body, "~1 in 2")
+	// 2-leg combo of -105 and -105 is +281 -> 26% implied.
+	assert.Contains(t, body, "26% implied")
+	assert.Contains(t, body, "~1 in 4")
 }
 
 func TestSlipHubLiveProgressStates(t *testing.T) {
@@ -2512,8 +2526,8 @@ func TestSlipPanelGradeSummaryStripV2AndV1Fallback(t *testing.T) {
 		body := html.UnescapeString(rec.Body.String())
 		assert.Contains(t, body, "data-grade-summary")
 		assert.Contains(t, body, "Overall")
-		assert.Contains(t, body, "Hit chance")
-		assert.Contains(t, body, "Payout value")
+		assert.Contains(t, body, "Model Context")
+		assert.Contains(t, body, "Book pricing")
 		assert.GreaterOrEqual(t, strings.Count(body, "data-grade-summary"), 3, "2 legs + 1 slip summary")
 		assert.NotContains(t, body, "+EV")
 	})

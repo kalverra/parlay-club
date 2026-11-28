@@ -3739,14 +3739,14 @@ func TestPickBoardSurfacesAGradeCountsAndTopPlaysInGame(t *testing.T) {
 		return rec
 	}
 
-	// Pick board shows A-grade count on game1's slate card and "Top plays in this game"
+	// Pick board shows A-grade count on game1's slate card and "Cleanest builds in this game"
 	// on game1's detail, while omitting the count on game2 (0 A-grade plays).
 	boardResp := get(fmt.Sprintf("/slips/%d/pick?game=%s", fixture.slip.ID, game1.ID))
 	require.Equal(t, http.StatusOK, boardResp.Code)
 	boardBody := boardResp.Body.String()
 	assert.Contains(t, boardBody, "data-game-a-grade-count")
 	assert.Contains(t, boardBody, "A-grade")
-	assert.Contains(t, boardBody, "Top plays in this game")
+	assert.Contains(t, boardBody, "Cleanest builds in this game")
 	assert.Contains(t, boardBody, "data-highlight-leg")
 	assert.Contains(t, boardBody, "data-highlight-parlay")
 	assert.Contains(t, boardBody, "Add all 2")
@@ -3759,14 +3759,14 @@ func TestPickBoardSurfacesAGradeCountsAndTopPlaysInGame(t *testing.T) {
 	require.Equal(t, http.StatusOK, slateResp.Code)
 	assert.Contains(t, slateResp.Body.String(), "data-game-a-grade-count")
 
-	// Detail partial for game1 shows "Top plays in this game"; game2 hides it.
+	// Detail partial for game1 shows "Cleanest builds in this game"; game2 hides it.
 	detail1 := get(fmt.Sprintf("/slips/%d/pick/detail?game=%s", fixture.slip.ID, game1.ID))
 	require.Equal(t, http.StatusOK, detail1.Code)
-	assert.Contains(t, detail1.Body.String(), "Top plays in this game")
+	assert.Contains(t, detail1.Body.String(), "Cleanest builds in this game")
 
 	detail2 := get(fmt.Sprintf("/slips/%d/pick/detail?game=%s", fixture.slip.ID, game2.ID))
 	require.Equal(t, http.StatusOK, detail2.Code)
-	assert.NotContains(t, detail2.Body.String(), "Top plays in this game")
+	assert.NotContains(t, detail2.Body.String(), "Cleanest builds in this game")
 
 	// Single-leg one-tap "+ Add" with from=pick returns #pick-body and leaves 1 slot open,
 	// disabling the 2-leg bulk button with "Needs 2 open slots".
@@ -3785,7 +3785,7 @@ func TestPickBoardSurfacesAGradeCountsAndTopPlaysInGame(t *testing.T) {
 	require.Equal(t, http.StatusOK, addOne.Code, addOne.Body.String())
 	assert.Contains(t, addOne.Header().Get("Hx-Trigger"), "tray-updated")
 	assert.Contains(t, addOne.Body.String(), `id="pick-body"`)
-	assert.Contains(t, addOne.Body.String(), "Top plays in this game")
+	assert.Contains(t, addOne.Body.String(), "Cleanest builds in this game")
 	assert.Contains(t, addOne.Body.String(), "Needs 2 open slots")
 	assert.NotContains(t, addOne.Body.String(), "Add all 2")
 
@@ -3816,7 +3816,7 @@ func TestPickBoardSurfacesAGradeCountsAndTopPlaysInGame(t *testing.T) {
 	})
 	require.Equal(t, http.StatusOK, batchResp.Code, batchResp.Body.String())
 	assert.Contains(t, batchResp.Body.String(), `id="pick-body"`)
-	assert.NotContains(t, batchResp.Body.String(), "Top plays in this game")
+	assert.NotContains(t, batchResp.Body.String(), "Cleanest builds in this game")
 }
 
 func TestPickBoardTrayAndDockRenderImpliedChances(t *testing.T) {
@@ -3846,9 +3846,11 @@ func TestPickBoardTrayAndDockRenderImpliedChances(t *testing.T) {
 	detailBefore := get(fmt.Sprintf("/slips/%d/pick/detail?game=%s", fixture.slip.ID, game.ID))
 	require.Equal(t, http.StatusOK, detailBefore.Code)
 	detailBeforeBody := detailBefore.Body.String()
-	assert.Contains(t, detailBeforeBody, "(60%)")
-	assert.Contains(t, detailBeforeBody, "(43%)")
-	assert.Contains(t, detailBeforeBody, "(52%)")
+	assert.Contains(t, detailBeforeBody, `data-provenance="Vegas Implied"`)
+	assert.Contains(t, detailBeforeBody, "60% implied")
+	assert.Contains(t, detailBeforeBody, "~2 in 3")
+	assert.Contains(t, detailBeforeBody, "43% implied")
+	assert.Contains(t, detailBeforeBody, "52% implied")
 	assert.Contains(t, detailBeforeBody, "tap to add")
 
 	// Adding one side of a pair row renders "tap to remove" on it and "tap to switch" on the other.
@@ -3863,9 +3865,9 @@ func TestPickBoardTrayAndDockRenderImpliedChances(t *testing.T) {
 	})
 	require.Equal(t, http.StatusOK, addML.Code, addML.Body.String())
 	pairBody := addML.Body.String()
-	assert.Contains(t, pairBody, "(60%)")
+	assert.Contains(t, pairBody, "60% implied")
 	assert.Contains(t, pairBody, "tap to remove")
-	assert.Contains(t, pairBody, "(43%)")
+	assert.Contains(t, pairBody, "43% implied")
 	assert.Contains(t, pairBody, "tap to switch")
 
 	// Add a second leg (-110 -> 52%) to reach the 2-leg limit.
@@ -3884,14 +3886,14 @@ func TestPickBoardTrayAndDockRenderImpliedChances(t *testing.T) {
 	detailAtLimit := get(fmt.Sprintf("/slips/%d/pick/detail?game=%s", fixture.slip.ID, game.ID))
 	require.Equal(t, http.StatusOK, detailAtLimit.Code)
 	assert.Contains(t, detailAtLimit.Body.String(), "swap in")
-	assert.Contains(t, detailAtLimit.Body.String(), "(52%)")
+	assert.Contains(t, detailAtLimit.Body.String(), "52% implied")
 
 	// Tray leg rows render each leg's implied chance.
 	trayResp := get(fmt.Sprintf("/slips/%d/tray", fixture.slip.ID))
 	require.Equal(t, http.StatusOK, trayResp.Code)
 	trayBody := trayResp.Body.String()
-	assert.Contains(t, trayBody, "(60%)")
-	assert.Contains(t, trayBody, "(52%)")
+	assert.Contains(t, trayBody, "60% implied")
+	assert.Contains(t, trayBody, "52% implied")
 
 	// Dock renders combined implied chance: (-150 * -110 = 3.18x -> 31%).
 	dockResp := get(fmt.Sprintf("/slips/%d/pick/dock", fixture.slip.ID))
@@ -3899,7 +3901,8 @@ func TestPickBoardTrayAndDockRenderImpliedChances(t *testing.T) {
 	dockBody := dockResp.Body.String()
 	assert.Contains(t, dockBody, "2 of 2")
 	assert.Contains(t, dockBody, "Implied chance from combined odds")
-	assert.Contains(t, dockBody, "31%")
+	assert.Contains(t, dockBody, "31% implied")
+	assert.Contains(t, dockBody, "~1 in 3")
 }
 
 func TestPickBoardGameCardsCondenseLinesWeatherGradesAndPlayers(t *testing.T) {
@@ -4474,9 +4477,9 @@ func TestPickDetailRendersGroupBySwitcherAllChipsSectionsAndSiblingGradePopovers
 	assert.Contains(t, catBody, `data-section="lines"`)
 	assert.Contains(t, catBody, `data-section="passing"`)
 	assert.Contains(t, catBody, `data-section="rushing"`)
-	assert.Contains(t, catBody, `data-leg-grade data-help-popover`)
+	assert.Contains(t, catBody, `data-grade-scope data-leg-grade`)
 	assert.Contains(t, catBody, `Grade `)
-	assert.Contains(t, catBody, `absolute left-0 right-0 z-30 mt-1 max-w-full`)
+	assert.Contains(t, catBody, `data-grade-drawer`)
 	assert.Contains(t, catBody, `data-grade-summary`)
 	assert.Contains(t, catBody, `data-grade-pillars`)
 	assertNoPopoverInFormOrButton(t, catBody)
@@ -4659,11 +4662,14 @@ func TestPickBoardCompactOUControlsAndHoistedSplitLine(t *testing.T) {
 	assert.Contains(t, unpicked, `hx-post="/slips/`)
 	assert.Contains(t, unpicked, `hx-target="#pick-detail"`)
 	assert.NotContains(t, unpicked, "tap to add")
-	// Grade <details> is a sibling outside <form> and <button>.
-	formClose := strings.Index(unpicked, "</form>")
-	gradeOpen := strings.Index(unpicked, "<details data-leg-grade")
+	// Grade drawer scope is a sibling outside <form> and <button> in the O/U group.
+	ouIdx := strings.Index(unpicked, `class="pick-line-group"`)
+	require.Greater(t, ouIdx, -1)
+	ouBlock := unpicked[ouIdx:]
+	formClose := strings.Index(ouBlock, "</form>")
+	gradeOpen := strings.Index(ouBlock, "data-leg-grade")
 	require.Positive(t, formClose)
-	require.Greater(t, gradeOpen, formClose, "grade popover must be a sibling outside the <form>")
+	require.Greater(t, gradeOpen, formClose, "grade drawer must be a sibling outside the <form>")
 
 	// 2. Pick OVER from the board: returns pick-line-group with remove (OVER) and switch (UNDER) + at-limit N/A.
 	addRec := postForm(t, fixture.handler, fmt.Sprintf("/slips/%d/legs", fixture.slip.ID), url.Values{

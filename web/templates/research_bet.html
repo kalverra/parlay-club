@@ -41,12 +41,13 @@
               </p>
             </div>
             <div class="shrink-0 text-right">
-              <span
-                class="inline-block rounded-full border px-2 py-0.5 text-sm font-semibold {{.View.Grade.Class}}"
-                title="Grade {{.View.Grade.Letter}} ({{.View.Grade.Score}}/100)"
-              >{{if .View.Grade.Letter}}{{.View.Grade.Letter}}{{else}}&mdash;{{end}}</span>
-              <p class="mt-1 font-mono text-sm font-semibold tabular-nums text-ink">
-                {{.View.OddsText}}{{if .View.Implied}} <span class="font-normal text-ink-muted">({{.View.Implied}})</span>{{end}}
+              {{if .View.Grade.Letter}}
+                {{template "build-grade-l1" (dict "Grade" .View.Grade "HeaderLabel" (printf "Build grade: %s (%d/100)" .View.Grade.DisplayGrade .View.Grade.Score) "GuideHref" (printf "/docs/grading?from=%s#leg-grades" .View.ReturnURL) "IsSlip" false "Label" "" "EmptyText" "No scoring factors were applied to this bet." "ShowVegas" false)}}
+              {{else}}
+                <span class="inline-block rounded-full border px-2 py-0.5 text-sm font-semibold {{.View.Grade.Class}}">&mdash;</span>
+              {{end}}
+              <p class="mt-1 text-xs text-ink-muted">
+                {{if .View.ImpliedHuman}}<span class="text-[10px] font-semibold uppercase tracking-wide text-ink-subtle" data-provenance="Vegas Implied">Vegas Implied</span> <span class="font-medium text-ink">{{.View.ImpliedHuman}}</span> &middot; {{end}}<span class="font-mono text-sm font-semibold tabular-nums text-ink">{{.View.OddsText}}</span>
               </p>
             </div>
           </div>
@@ -105,7 +106,10 @@
         {{if or .View.Grade.HitChance .View.Grade.PayoutLabel}}
           <div class="flex flex-wrap items-center gap-1.5 text-[11px]">
             {{if .View.Grade.HitChance}}
-              <span class="rounded-full border border-line bg-surface-2 px-1.5 py-0.5 font-mono font-semibold tabular-nums text-ink">{{.View.Grade.HitChance}}</span>
+              <span class="inline-flex items-center gap-1 rounded-full border border-line bg-surface-2 px-1.5 py-0.5 text-ink">
+                <span class="text-[9px] font-semibold uppercase tracking-wide text-ink-subtle" data-provenance="Model Context">Model Context</span>
+                <span class="font-mono font-semibold tabular-nums">{{.View.Grade.HitChance}}</span>
+              </span>
             {{end}}
             {{if .View.Grade.PayoutLabel}}
               <span class="rounded-full border px-1.5 py-0.5 font-semibold {{.View.Grade.PayoutToneClass}}">{{.View.Grade.PayoutLabel}}</span>
@@ -127,7 +131,7 @@
                 {{if .Line}}<span class="font-mono text-xs tabular-nums text-ink-muted">{{.Line}}</span>{{end}}
               </div>
               <div class="mt-0.5 flex items-center justify-between gap-1 text-[11px] text-ink-muted">
-                {{if .Implied}}<span>{{.Implied}}</span>{{else}}<span></span>{{end}}
+                {{if .ImpliedHuman}}<span>{{.ImpliedHuman}}</span>{{else if .Implied}}<span>{{.Implied}}</span>{{else}}<span></span>{{end}}
                 {{if .Best}}<span class="rounded border border-positive bg-positive-soft px-1 py-0.5 text-[10px] font-semibold text-positive-ink">Best</span>{{end}}
               </div>
             </div>
@@ -142,9 +146,10 @@
       {{end}}
 
       {{if .View.Pricing.DevigEdge}}
-        <p class="mt-2 rounded-lg border border-line bg-surface-2 px-3 py-2 text-[11px] text-ink-muted">
+        <p class="mt-2 flex flex-wrap items-center gap-1.5 rounded-lg border border-line bg-surface-2 px-3 py-2 text-[11px] text-ink-muted">
+          <span class="rounded border border-line bg-surface px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-ink-subtle" data-provenance="Fair No-Vig Est.">Fair No-Vig Est.</span>
           <span class="font-mono font-semibold tabular-nums text-ink">{{.View.Pricing.DevigEdge}}</span>
-          {{if .View.Pricing.DevigNote}}{{.View.Pricing.DevigNote}}{{end}}
+          {{if .View.Pricing.DevigNote}}<span>{{.View.Pricing.DevigNote}}</span>{{end}}
         </p>
       {{end}}
 
@@ -294,31 +299,36 @@
     {{end}}
 
     <!-- Detailed breakdown (lower fold) -->
-    <div class="ui-card p-4" data-grade-breakdown>
+    <div class="ui-card space-y-3 p-4" data-grade-breakdown>
       <div class="flex items-center justify-between gap-2">
         <h2 class="text-xs font-semibold uppercase tracking-wide text-ink-muted">Grade &amp; analyzer</h2>
         <span class="text-[11px] text-ink-muted">{{.View.Grade.Score}}/100</span>
       </div>
+      {{if .View.Grade.Letter}}
+        <div class="text-xs">
+          {{template "grade-breakdown" (dict "Grade" .View.Grade "HeaderLabel" (printf "Build grade: %s (%d/100)" .View.Grade.DisplayGrade .View.Grade.Score) "GuideHref" (printf "/docs/grading?from=%s#leg-grades" .View.ReturnURL) "IsSlip" false "EmptyText" "No scoring factors were applied to this bet.")}}
+        </div>
+      {{end}}
       {{if .View.Grade.Factors}}
-        <ul class="mt-3 space-y-1.5">
+        <ul class="space-y-1.5">
           {{range .View.Grade.Factors}}
             <li class="flex items-start justify-between gap-2 rounded-lg border border-line bg-surface-2 px-3 py-2">
               <div class="min-w-0">
                 <p class="text-xs font-medium text-ink">{{.Label}}</p>
                 {{if .Detail}}<p class="mt-0.5 text-[11px] text-ink-muted">{{.Detail}}</p>{{end}}
               </div>
-              <span class="shrink-0 font-mono text-xs font-semibold tabular-nums {{if .Positive}}text-positive-ink{{else if .Negative}}text-danger-ink{{else}}text-ink-muted{{end}}">
+              <span class="shrink-0 font-mono text-xs font-semibold tabular-nums {{if .Positive}}text-grade-clean-ink{{else if .Negative}}text-danger-ink{{else}}text-ink-muted{{end}}">
                 {{.DeltaText}}
               </span>
             </li>
           {{end}}
         </ul>
-      {{else}}
-        <p class="mt-2 text-sm text-ink-muted">No scoring factors were applied to this bet.</p>
+      {{else if not .View.Grade.Pillars}}
+        <p class="text-sm text-ink-muted">No scoring factors were applied to this bet.</p>
       {{end}}
 
       {{if not .View.Warnings}}
-        <p class="mt-3 text-[11px] text-ink-muted">No analyzer warnings on this bet.</p>
+        <p class="text-[11px] text-ink-muted">No analyzer warnings on this bet.</p>
       {{end}}
     </div>
 
@@ -336,7 +346,7 @@
               {{.View.Pricing.ConsensusPrice}}
             </p>
             <p class="text-[11px] text-ink-muted">
-              {{if .View.Pricing.ConsensusLine}}{{.View.Pricing.ConsensusLine}} &middot; {{end}}{{.View.Pricing.ConsensusImplied}}
+              {{if .View.Pricing.ConsensusLine}}{{.View.Pricing.ConsensusLine}} &middot; {{end}}{{if .View.Pricing.ConsensusImpliedHuman}}{{.View.Pricing.ConsensusImpliedHuman}}{{else}}{{.View.Pricing.ConsensusImplied}}{{end}}
             </p>
           </div>
           <div class="rounded-lg border border-accent bg-accent-soft p-2.5">
@@ -345,7 +355,7 @@
               {{.View.Pricing.BestPrice}}
             </p>
             <p class="text-[11px] text-ink-muted">
-              {{.View.Pricing.BestBook}}{{if .View.Pricing.BestLine}} &middot; {{.View.Pricing.BestLine}}{{end}}{{if .View.Pricing.BestImplied}} &middot; {{.View.Pricing.BestImplied}}{{end}}
+              {{.View.Pricing.BestBook}}{{if .View.Pricing.BestLine}} &middot; {{.View.Pricing.BestLine}}{{end}}{{if .View.Pricing.BestImpliedHuman}} &middot; {{.View.Pricing.BestImpliedHuman}}{{else if .View.Pricing.BestImplied}} &middot; {{.View.Pricing.BestImplied}}{{end}}
             </p>
           </div>
           <div class="rounded-lg border border-line bg-surface-2 p-2.5">
@@ -371,8 +381,8 @@
               </div>
               <div class="flex shrink-0 items-center gap-3 text-right">
                 {{if .Line}}<span class="font-mono tabular-nums text-ink-muted">{{.Line}}</span>{{end}}
+                {{if .ImpliedHuman}}<span class="text-ink-subtle">{{.ImpliedHuman}}</span>{{else if .Implied}}<span class="text-ink-subtle">{{.Implied}}</span>{{end}}
                 <span class="font-mono font-semibold tabular-nums text-ink">{{.Price}}</span>
-                {{if .Implied}}<span class="text-ink-subtle">{{.Implied}}</span>{{end}}
               </div>
             </li>
           {{end}}
@@ -445,8 +455,8 @@
                       {{end}}
                     </div>
                     <div class="shrink-0 text-right">
-                      <span class="inline-block rounded-full border px-1.5 py-0.5 text-[11px] font-semibold {{.GradeClass}}">{{if .GradeLetter}}{{.GradeLetter}}{{else}}&mdash;{{end}}</span>
-                      <p class="mt-0.5 font-mono text-xs font-semibold tabular-nums text-ink">{{.Odds}}</p>
+                      <span class="inline-block rounded-full border px-1.5 py-0.5 text-[11px] font-semibold {{.GradeClass}}">{{if .GradeDisplay}}{{.GradeDisplay}}{{else if .GradeLetter}}{{.GradeLetter}}{{else}}&mdash;{{end}}{{if .GradeDescriptor}} &middot; {{.GradeDescriptor}}{{end}}</span>
+                      <p class="mt-0.5 text-[11px] text-ink-muted">{{if .ImpliedHuman}}{{.ImpliedHuman}} &middot; {{end}}<span class="font-mono font-semibold tabular-nums text-ink">{{.Odds}}</span></p>
                     </div>
                   </div>
                 </div>

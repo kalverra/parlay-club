@@ -12,6 +12,7 @@ import (
 
 	"github.com/kalverra/parlay-club/internal/analyzer"
 	"github.com/kalverra/parlay-club/internal/db"
+	"github.com/kalverra/parlay-club/internal/parlay"
 )
 
 // AnalyzerView is the sharp-friend banner under the slip's legs.
@@ -21,20 +22,68 @@ type AnalyzerView struct {
 	Warnings []AnalyzerWarningView
 }
 
-// GradeView is a clickable A-F grade pill with an inline breakdown.
+// GradeView is a clickable Build Grade pill with 3-layer progressive disclosure.
 type GradeView struct {
 	Letter          string
+	DisplayGrade    string // e.g. "A-", "B+", "C-", "D", "F" (falls back to Letter)
+	Descriptor      string // 2-word structural reality check
 	Score           int
 	Class           string
 	Summary         string
+	GroundRule      string // pinned 1-sentence ground-rule banner for Layer 2
 	HitChance       string // e.g. "~61%" or "<1%"; empty when CalibratedProb <= 0
-	PayoutLabel     string // "Strong value" | "Fair value" | "Slight juice" | "Steep juice"
+	HitReality      string // e.g. "61% est. · ~2 in 3" (Model Context)
+	VegasImplied    string // e.g. "13% implied · ~1 in 8" (Vegas Implied)
+	VegasReality    string // e.g. "13% implied (hits ~1 in 8 times)"
+	FairNoVig       string // e.g. "54% fair · ~1 in 2" (Fair No-Vig Est.)
+	RawModel        string // e.g. "56% model · ~5 in 9" (Model Context)
+	HoldText        string // e.g. "4.5% hold"
+	CorrTaxText     string // e.g. "12.0% SGP tax"
+	HasMarketBox    bool
+	RealismLabel    string // "Likely Side" | "Coin Flip" | "Underdog" | "Longshot" | "Lottery Ticket"
+	RealismPct      int    // 0..100 position on Coin Flip -> Lottery Ticket scale
+	BookCutSummary  string
+	SynergySummary  string
+	ContextSummary  string
+	PayoutLabel     string // "Clean price" | "Fair price" | "Slight juice" | "Steep vig"
 	PayoutToneClass string // matches Price & Vig pillar tone
 	Uncertain       bool
 	CorrSummary     string
 	Pillars         []PillarView
 	Why             []string
 	Factors         []GradeFactorView
+	SignalPills     []SignalPillView  // max 3 clickable Layer 1/2 pills
+	ContextRadar    []ContextNoteView // max 2 priced-in context notes
+	CleanupNudge    string            // optional 1-line structural improvement
+	WhyPopovers     []GradeWhyPopover // Layer 3 live-slip popovers
+	ModelCard       []string          // 4-bullet Model Card
+}
+
+// SignalPillView is a compact clickable diagnostic badge on Layer 1 cards.
+type SignalPillView struct {
+	Key       string
+	Icon      string
+	Label     string
+	Tone      string
+	ToneClass string
+	Target    string // "synergy", "book_cut", "hit_rate", "context"
+	Detail    string
+}
+
+// ContextNoteView is one Context Radar feature tagged as already priced in.
+type ContextNoteView struct {
+	Label    string
+	PricedIn string
+	Tag      string // "Already in the line" | "Likely Priced In"
+}
+
+// GradeWhyPopover is one Layer 3 inline "Why does this matter?" micro-lesson
+// interpolating the live slip or leg numbers.
+type GradeWhyPopover struct {
+	Key     string
+	Title   string
+	Summary string
+	Body    string
 }
 
 // PillarView is one v2 scoring pillar inside a grade breakdown popover.
@@ -81,6 +130,7 @@ type AnalyzerGuidePage struct {
 	Nav          []DocsNavView
 	EngineName   string
 	V2Active     bool
+	ModelCard    []string
 	Pillars      []GuidePillarView
 	LegWeights   string
 	LegScriptWts string
@@ -180,6 +230,7 @@ func (h *slipHandlers) analyzerGuide(w http.ResponseWriter, r *http.Request) {
 		Nav:          docsNav("grading", backURL),
 		EngineName:   engineName,
 		V2Active:     engineName == "v2",
+		ModelCard:    buildModelCard(),
 		Pillars:      guidePillars(analyzer.DefaultV2Config),
 		LegWeights:   formatLegWeights(analyzer.DefaultV2Config),
 		LegScriptWts: formatLegScriptWeights(analyzer.DefaultV2Config),
@@ -275,52 +326,65 @@ func analyzerView(
 	return view, legGrades
 }
 
+const groundRuleText = "Build grades check ticket structure and book vig—not whether a bet will win."
+
+type gradeBuildInput struct {
+	letter         string
+	score          int
+	summary        string
+	calibratedProb float64
+	rawModelProb   float64
+	vegasProb      float64
+	fairNoVigProb  float64
+	uncertain      bool
+	corrMult       float64
+	multiLeg       bool
+	pillars        []analyzer.PillarScore
+	factors        []analyzer.GradeFactor
+	diagnostics    analyzer.BuildDiagnostics
+}
+
 // LegGradeView shapes an analyzer.LegGrade into a template-ready GradeView.
 func LegGradeView(lg analyzer.LegGrade) GradeView {
-	return buildGradeView(
-		lg.Letter,
-		lg.Score,
-		"",
-		lg.CalibratedProb,
-		lg.Uncertain,
-		0,
-		false,
-		lg.Pillars,
-		lg.Factors,
-	)
+	return buildGradeView(gradeBuildInput{
+		letter:         lg.Letter,
+		score:          lg.Score,
+		calibratedProb: lg.CalibratedProb,
+		rawModelProb:   lg.RawModelProb,
+		vegasProb:      lg.VegasImpliedProb,
+		fairNoVigProb:  lg.FairNoVigProb,
+		uncertain:      lg.Uncertain,
+		pillars:        lg.Pillars,
+		factors:        lg.Factors,
+		diagnostics:    lg.Diagnostics,
+	})
 }
 
 // SlipGradeView shapes an analyzer.SlipGrade into a template-ready GradeView.
 func SlipGradeView(sg analyzer.SlipGrade) GradeView {
-	return buildGradeView(
-		sg.Letter,
-		sg.Score,
-		sg.Summary,
-		sg.CalibratedProb,
-		sg.Uncertain,
-		sg.CorrMultiplier,
-		len(sg.LegGrades) > 1,
-		sg.Pillars,
-		sg.Factors,
-	)
+	return buildGradeView(gradeBuildInput{
+		letter:         sg.Letter,
+		score:          sg.Score,
+		summary:        sg.Summary,
+		calibratedProb: sg.CalibratedProb,
+		rawModelProb:   sg.RawModelProb,
+		vegasProb:      sg.VegasImpliedProb,
+		fairNoVigProb:  sg.FairNoVigProb,
+		uncertain:      sg.Uncertain,
+		corrMult:       sg.CorrMultiplier,
+		multiLeg:       len(sg.LegGrades) > 1,
+		pillars:        sg.Pillars,
+		factors:        sg.Factors,
+		diagnostics:    sg.Diagnostics,
+	})
 }
 
-func buildGradeView(
-	letter string,
-	score int,
-	summary string,
-	calibratedProb float64,
-	uncertain bool,
-	corrMult float64,
-	multiLeg bool,
-	pillars []analyzer.PillarScore,
-	factors []analyzer.GradeFactor,
-) GradeView {
-	if letter == "" {
+func buildGradeView(in gradeBuildInput) GradeView {
+	if in.letter == "" {
 		return GradeView{}
 	}
-	factorViews := make([]GradeFactorView, 0, len(factors))
-	for _, f := range factors {
+	factorViews := make([]GradeFactorView, 0, len(in.factors))
+	for _, f := range in.factors {
 		factorViews = append(factorViews, GradeFactorView{
 			Rule:      f.Rule,
 			Label:     f.Label,
@@ -330,8 +394,9 @@ func buildGradeView(
 			Detail:    f.Detail,
 		})
 	}
-	pillarViews := make([]PillarView, 0, len(pillars))
-	for _, p := range pillars {
+	pillarViews := make([]PillarView, 0, len(in.pillars))
+	var bookCutSummary, synergySummary, contextSummary string
+	for _, p := range in.pillars {
 		toneClass, barClass := pillarToneClasses(p.Tone)
 		pillarViews = append(pillarViews, PillarView{
 			Key:       p.Key,
@@ -342,31 +407,343 @@ func buildGradeView(
 			BarClass:  barClass,
 			Summary:   p.Summary,
 		})
+		switch p.Key {
+		case analyzer.PillarPriceVig:
+			bookCutSummary = p.Summary
+		case analyzer.PillarScriptFit:
+			synergySummary = p.Summary
+		case analyzer.PillarContextTraps:
+			contextSummary = p.Summary
+		}
 	}
 
 	var why []string
 	var corrSummary string
-	if len(pillars) > 0 {
-		why = collectWhyBullets(pillars)
-		if multiLeg {
-			corrSummary = formatCorrSummary(corrMult)
+	if len(in.pillars) > 0 {
+		why = collectWhyBullets(in.pillars)
+		if in.multiLeg {
+			corrSummary = formatCorrSummary(in.corrMult)
 		}
 	}
-	payoutLabel, payoutToneClass := payoutValueFromPillars(pillars)
+	payoutLabel, payoutToneClass := payoutValueFromPillars(in.pillars)
+
+	diag := in.diagnostics
+	displayGrade := strings.TrimSpace(diag.DisplayGrade)
+	if displayGrade == "" {
+		displayGrade = in.letter
+	}
+	descriptor := strings.TrimSpace(diag.Descriptor)
+	if descriptor == "" && len(in.pillars) > 0 {
+		descriptor = fallbackBandDescriptor(in.letter)
+	}
+
+	vegasProb := firstPositiveProb(diag.VegasImpliedProb, in.vegasProb)
+	fairProb := firstPositiveProb(diag.FairNoVigProb, in.fairNoVigProb)
+	rawModelProb := firstPositiveProb(diag.RawModelProb, in.rawModelProb)
+
+	vegasImplied := formatImpliedHuman(vegasProb)
+	vegasReality := parlay.FormatImpliedReality(vegasProb)
+	fairNoVig := formatFairHuman(fairProb)
+	rawModel := formatModelHuman(rawModelProb)
+	hitReality := formatModelHuman(in.calibratedProb)
+	holdText := formatHoldText(diag.HoldPct)
+	corrTaxText := formatCorrTaxText(diag.CorrTaxPct)
+
+	hasMarketBox := len(in.pillars) > 0 &&
+		(vegasImplied != "" || fairNoVig != "" || rawModel != "" || hitReality != "" || holdText != "")
+
+	realismProb := firstPositiveProb(in.calibratedProb, vegasProb)
+	realismLabel, realismPct := computeRealism(realismProb)
+
+	signalPills := buildSignalPillViews(diag.SignalPills)
+	contextRadar := buildContextNoteViews(diag.ContextRadar)
+
+	var whyPopovers []GradeWhyPopover
+	if len(in.pillars) > 0 {
+		whyPopovers = buildWhyPopovers(
+			vegasProb,
+			in.calibratedProb,
+			diag.HoldPct,
+			diag.CorrTaxPct,
+			in.corrMult,
+			in.multiLeg,
+			contextRadar,
+		)
+	}
 
 	return GradeView{
-		Letter:          letter,
-		Score:           score,
-		Class:           gradeClass(letter),
-		Summary:         summary,
-		HitChance:       formatHitChance(calibratedProb),
+		Letter:          in.letter,
+		DisplayGrade:    displayGrade,
+		Descriptor:      descriptor,
+		Score:           in.score,
+		Class:           gradeClass(in.letter),
+		Summary:         in.summary,
+		GroundRule:      groundRuleText,
+		HitChance:       formatHitChance(in.calibratedProb),
+		HitReality:      hitReality,
+		VegasImplied:    vegasImplied,
+		VegasReality:    vegasReality,
+		FairNoVig:       fairNoVig,
+		RawModel:        rawModel,
+		HoldText:        holdText,
+		CorrTaxText:     corrTaxText,
+		HasMarketBox:    hasMarketBox,
+		RealismLabel:    realismLabel,
+		RealismPct:      realismPct,
+		BookCutSummary:  bookCutSummary,
+		SynergySummary:  synergySummary,
+		ContextSummary:  contextSummary,
 		PayoutLabel:     payoutLabel,
 		PayoutToneClass: payoutToneClass,
-		Uncertain:       uncertain,
+		Uncertain:       in.uncertain,
 		CorrSummary:     corrSummary,
 		Pillars:         pillarViews,
 		Why:             why,
 		Factors:         factorViews,
+		SignalPills:     signalPills,
+		ContextRadar:    contextRadar,
+		CleanupNudge:    strings.TrimSpace(diag.CleanupNudge),
+		WhyPopovers:     whyPopovers,
+		ModelCard:       buildModelCard(),
+	}
+}
+
+func firstPositiveProb(primary, fallback float64) float64 {
+	if primary > 0 && primary < 1 && !math.IsNaN(primary) {
+		return primary
+	}
+	if fallback > 0 && fallback < 1 && !math.IsNaN(fallback) {
+		return fallback
+	}
+	return 0
+}
+
+func formatImpliedHuman(prob float64) string {
+	return formatProbWithVerb(prob, "implied")
+}
+
+func formatFairHuman(prob float64) string {
+	return formatProbWithVerb(prob, "fair")
+}
+
+func formatModelHuman(prob float64) string {
+	return formatProbWithVerb(prob, "est.")
+}
+
+func formatProbWithVerb(prob float64, verb string) string {
+	pct := formatImpliedChance(prob)
+	if pct == "" {
+		return ""
+	}
+	oneIn := parlay.FormatOneIn(prob)
+	if oneIn == "" {
+		return pct + " " + verb
+	}
+	return fmt.Sprintf("%s %s · %s", pct, verb, oneIn)
+}
+
+func formatHoldText(holdPct float64) string {
+	if holdPct <= 0 || math.IsNaN(holdPct) {
+		return ""
+	}
+	return fmt.Sprintf("%.1f%% hold", holdPct)
+}
+
+func formatCorrTaxText(corrTaxPct float64) string {
+	if corrTaxPct <= 0 || math.IsNaN(corrTaxPct) {
+		return ""
+	}
+	return fmt.Sprintf("%.1f%% SGP tax", corrTaxPct)
+}
+
+func fallbackBandDescriptor(letter string) string {
+	switch letter {
+	case "A":
+		return "Clean Build"
+	case "B":
+		return "Solid Build"
+	case "C":
+		return "Mixed Build"
+	case "D":
+		return "Fragile Build"
+	default:
+		return "Broken Build"
+	}
+}
+
+func computeRealism(prob float64) (label string, barPct int) {
+	if prob <= 0 || prob >= 1 || math.IsNaN(prob) {
+		return "", 0
+	}
+	switch {
+	case prob >= 0.56:
+		label = "Likely Side"
+	case prob >= 0.45:
+		label = "Coin Flip"
+	case prob >= 0.25:
+		label = "Underdog"
+	case prob >= 0.12:
+		label = "Longshot"
+	default:
+		label = "Lottery Ticket"
+	}
+	// Map 55%+ -> 5% (Coin Flip end) down to 1% -> 98% (Lottery Ticket end).
+	dist := max(0.0, (0.55-prob)/0.55)
+	barPct = min(max(int(math.Round(dist*100)), 5), 98)
+	return label, barPct
+}
+
+func buildSignalPillViews(pills []analyzer.SignalPill) []SignalPillView {
+	if len(pills) == 0 {
+		return nil
+	}
+	limit := min(len(pills), 3)
+	out := make([]SignalPillView, 0, limit)
+	for _, p := range pills[:limit] {
+		out = append(out, SignalPillView{
+			Key:       p.Key,
+			Icon:      p.Icon,
+			Label:     p.Label,
+			Tone:      p.Tone,
+			ToneClass: signalPillToneClass(p.Tone, p.Key),
+			Target:    p.Target,
+			Detail:    p.Detail,
+		})
+	}
+	return out
+}
+
+func signalPillToneClass(tone, key string) string {
+	switch tone {
+	case analyzer.ToneBad:
+		return "border-danger bg-danger-soft text-danger-ink"
+	case analyzer.ToneWarn:
+		return "border-warning bg-warning-soft text-warning-ink"
+	default:
+		if key == analyzer.PillCorrelatedStack || key == analyzer.PillSharpPrice {
+			return "border-grade-clean bg-grade-clean-soft text-grade-clean-ink"
+		}
+		return "border-grade-solid bg-grade-solid-soft text-grade-solid-ink"
+	}
+}
+
+func buildContextNoteViews(notes []analyzer.ContextNote) []ContextNoteView {
+	if len(notes) == 0 {
+		return nil
+	}
+	limit := min(len(notes), 2)
+	out := make([]ContextNoteView, 0, limit)
+	for _, n := range notes[:limit] {
+		tag := strings.TrimSpace(n.Tag)
+		if tag == "" {
+			tag = analyzer.TagAlreadyInLine
+		}
+		out = append(out, ContextNoteView{
+			Label:    n.Label,
+			PricedIn: n.PricedIn,
+			Tag:      tag,
+		})
+	}
+	return out
+}
+
+func buildWhyPopovers(
+	vegasProb, calibratedProb, holdPct, corrTaxPct, corrMult float64,
+	multiLeg bool,
+	contextRadar []ContextNoteView,
+) []GradeWhyPopover {
+	var impliedBody string
+	switch {
+	case vegasProb > 0:
+		impliedBody = fmt.Sprintf(
+			"At this ticket's price, the book implies %s. Odds aren't just a payout—they set the hit-rate hurdle you have to clear just to break even.",
+			parlay.FormatImpliedReality(vegasProb),
+		)
+	case calibratedProb > 0:
+		impliedBody = fmt.Sprintf(
+			"Even without retail odds listed, this profile estimates %s. Turning prices into hit frequency keeps longshots in perspective.",
+			parlay.FormatImpliedReality(calibratedProb),
+		)
+	default:
+		impliedBody = "Odds aren't just a payout—they translate straight into the hit rate needed to break even. Bigger payouts mean a steeper climb to cash consistently."
+	}
+
+	var vigBody string
+	if holdPct > 0 {
+		vigBody = fmt.Sprintf(
+			"The book is building roughly %.1f%% vig into this price compared to a fair no-vig benchmark. That house cut compounds across every leg you add to a parlay.",
+			holdPct,
+		)
+	} else {
+		vigBody = "Sportsbooks bake a 4–5% house cut into standard lines, and that cut compounds across parlay legs. Avoiding heavy juice keeps more of the return when the ticket hits."
+	}
+
+	var corrBody string
+	switch {
+	case corrTaxPct > 0:
+		corrBody = fmt.Sprintf(
+			"These legs rise together (%.2fx script synergy), yet the book is shaving about %.1f%% off the payout via SGP pricing. You carry the script risk without getting full parlay pay.",
+			corrMult,
+			corrTaxPct,
+		)
+	case multiLeg && corrMult >= 1.03:
+		corrBody = fmt.Sprintf(
+			"Your legs share %.2fx positive script synergy without a heavy SGP payout shave. Same-game stacks help only when the book doesn't tax away the correlation.",
+			corrMult,
+		)
+	case multiLeg && corrMult > 0 && corrMult <= 0.97:
+		corrBody = fmt.Sprintf(
+			"These legs pull against each other (%.2fx script multiplier). When one leg cashing makes another harder, standard parlay math underpays the real risk.",
+			corrMult,
+		)
+	default:
+		corrBody = "Same-game parlays often carry a hidden correlation tax where the book shades combined odds below independent math. Checking both script fit and the book's cut shows whether a stack helps."
+	}
+
+	var contextBody string
+	if len(contextRadar) > 0 {
+		contextBody = fmt.Sprintf(
+			"Signals like %q are public context that oddsmakers bake into the opening number. A strong matchup or hot streak only helps if the posted line hasn't already moved past it.",
+			contextRadar[0].Label,
+		)
+	} else {
+		contextBody = "Public trends, weather, and defense ranks are usually reflected in the line before kickoff. Look for fair pricing rather than chasing headlines the book already adjusted for."
+	}
+
+	return []GradeWhyPopover{
+		{
+			Key:     "implied_prob",
+			Title:   "Implied Probability",
+			Summary: "Why does this matter?",
+			Body:    impliedBody,
+		},
+		{
+			Key:     "vig_hold",
+			Title:   "Vig / Hold",
+			Summary: "Why does this matter?",
+			Body:    vigBody,
+		},
+		{
+			Key:     "corr_tax",
+			Title:   "Correlation Tax",
+			Summary: "Why does this matter?",
+			Body:    corrBody,
+		},
+		{
+			Key:     "already_priced_in",
+			Title:   "Already in the line",
+			Summary: "Why does this matter?",
+			Body:    contextBody,
+		},
+	}
+}
+
+func buildModelCard() []string {
+	return []string{
+		"Structural grade, not a lock: scores ticket price, leg synergy, hit-rate stability, and context traps.",
+		"Provenance first: separates Vegas Implied odds, Fair No-Vig Est. sharp lines, and Model Context projections.",
+		"Same-game math: uses a Gaussian copula to spot positive stacks, script conflicts, and SGP payout taxes.",
+		"100% deterministic: plain Go rules over cached odds, nflverse usage, nfelo, weather, and injury reports.",
 	}
 }
 
@@ -391,13 +768,13 @@ func payoutValueFromPillars(pillars []analyzer.PillarScore) (label, toneClass st
 		score := clampScore(p.Score)
 		switch {
 		case score >= 85:
-			label = "Strong value"
+			label = "Clean price"
 		case score >= 73:
-			label = "Fair value"
+			label = "Fair price"
 		case score >= 58:
 			label = "Slight juice"
 		default:
-			label = "Steep juice"
+			label = "Steep vig"
 		}
 		toneClass, _ = pillarToneClasses(p.Tone)
 		return label, toneClass
@@ -412,7 +789,7 @@ func clampScore(score int) int {
 func pillarToneClasses(tone string) (badgeClass, barClass string) {
 	switch tone {
 	case analyzer.ToneGood:
-		return "border-positive bg-positive-soft text-positive-ink", "bg-positive"
+		return "border-grade-clean bg-grade-clean-soft text-grade-clean-ink", "bg-grade-clean"
 	case analyzer.ToneWarn:
 		return "border-warning bg-warning-soft text-warning-ink", "bg-warning"
 	case analyzer.ToneBad:

@@ -9,7 +9,7 @@
     <div class="flex flex-wrap items-center justify-between gap-2">
       <h1 class="text-xl font-semibold">Grading &amp; Analyzer Guide</h1>
       {{if .EngineName}}
-        <span class="rounded-full border px-2.5 py-0.5 text-xs font-medium {{if .V2Active}}border-positive bg-positive-soft text-positive-ink{{else}}border-line-strong bg-surface text-ink-muted{{end}}">
+        <span class="rounded-full border px-2.5 py-0.5 text-xs font-medium {{if .V2Active}}border-grade-clean bg-grade-clean-soft text-grade-clean-ink{{else}}border-line-strong bg-surface text-ink-muted{{end}}">
           Active engine: {{.EngineName}}
         </span>
       {{end}}
@@ -19,6 +19,7 @@
     </p>
     {{template "docs-nav" .}}
     <nav class="flex flex-wrap gap-2 pt-1 text-xs">
+      <a href="#build-grades" class="rounded-full border border-line-strong bg-surface px-2.5 py-1 text-ink hover:bg-surface-2">Build grades</a>
       <a href="#pillars" class="rounded-full border border-line-strong bg-surface px-2.5 py-1 text-ink hover:bg-surface-2">Four pillars</a>
       <a href="#leg-grades" class="rounded-full border border-line-strong bg-surface px-2.5 py-1 text-ink hover:bg-surface-2">Leg grades</a>
       <a href="#slip-grade" class="rounded-full border border-line-strong bg-surface px-2.5 py-1 text-ink hover:bg-surface-2">Slip grade</a>
@@ -27,11 +28,30 @@
     </nav>
   </div>
 
+  <section id="build-grades" class="ui-card scroll-mt-16 space-y-3 p-4" data-guide-model-card>
+    <div>
+      <h2 class="text-base font-semibold text-ink">Build Grades &amp; Market Reality</h2>
+      <p class="mt-1 text-sm text-ink-muted">
+        Build grades check ticket construction, book vig, and correlation—never a prediction that a bet will win. Every probability chip separates <span class="font-medium text-ink">Vegas Implied</span> odds, <span class="font-medium text-ink">Fair No-Vig Est.</span> benchmarks, and <span class="font-medium text-ink">Model Context</span> projections, and public trends already baked into lines are tagged <span class="font-medium text-ink">Already in the line</span>.
+      </p>
+    </div>
+    {{if .ModelCard}}
+      <div class="rounded-lg border border-line bg-surface-2 p-3 space-y-1.5">
+        <p class="text-xs font-semibold text-ink">Model card</p>
+        <ul class="list-disc space-y-1 pl-4 text-xs text-ink-muted">
+          {{range .ModelCard}}
+            <li>{{.}}</li>
+          {{end}}
+        </ul>
+      </div>
+    {{end}}
+  </section>
+
   <section id="pillars" class="ui-card scroll-mt-16 space-y-3 p-4">
     <div>
       <h2 class="text-base font-semibold text-ink">Four-Pillar Grading (v2)</h2>
       <p class="mt-1 text-sm text-ink-muted">
-        Instead of one flat checklist, each leg and slip scores four separate 0&ndash;100 pillars. That way a strong same-game stack with steep book juice shows green Script Fit and red Price &amp; Vig side by side.
+        Instead of one flat checklist, each leg and slip scores four separate 0&ndash;100 pillars. That way a strong same-game stack with steep book juice shows teal Script Fit and coral Price &amp; Vig side by side.
       </p>
     </div>
 
@@ -116,7 +136,7 @@
         <span class="font-semibold text-ink">Script multiplier (copula):</span> A deterministic Gaussian copula estimates joint hit probability across same-game legs and compares it against naive leg multiplication.
       </li>
       <li class="rounded-lg border border-line bg-surface-2 p-3">
-        <span class="font-semibold text-ink">SGP correlation tax:</span> Flags same-game stacks whose script rises together (green Script Fit) while the book's combined odds already charge steep extra juice (lower Price &amp; Vig).
+        <span class="font-semibold text-ink">SGP correlation tax:</span> Flags same-game stacks whose script rises together (teal Script Fit) while the book's combined odds already charge steep extra juice (lower Price &amp; Vig).
       </li>
       <li class="rounded-lg border border-line bg-surface-2 p-3">
         <span class="font-semibold text-ink">Parlay &amp; chalk drag:</span> Compounding juice beyond 3 legs and multiple heavy favorites (-230 or shorter) weigh on Price &amp; Vig and Stability.

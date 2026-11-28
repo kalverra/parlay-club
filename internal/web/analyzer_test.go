@@ -467,6 +467,8 @@ func TestAnalyzerGuideRendersAllRulesAndAnchors(t *testing.T) {
 	require.Equal(t, http.StatusOK, recorder.Code)
 	body := recorder.Body.String()
 	assert.Contains(t, body, `href="/slips/42"`)
+	assert.Contains(t, body, `id="build-grades"`)
+	assert.Contains(t, body, `data-guide-model-card`)
 	assert.Contains(t, body, `id="pillars"`)
 	assert.Contains(t, body, `id="leg-grades"`)
 	assert.Contains(t, body, `id="slip-grade"`)
@@ -477,6 +479,9 @@ func TestAnalyzerGuideRendersAllRulesAndAnchors(t *testing.T) {
 	assert.Contains(t, body, `data-guide-pillar="context_traps"`)
 	assert.Contains(t, body, `data-guide-uncertainty`)
 	assert.Contains(t, body, "Active engine: v2")
+	assert.Contains(t, body, "border-grade-clean bg-grade-clean-soft text-grade-clean-ink")
+	assert.Contains(t, body, "Structural grade, not a lock")
+	assert.Contains(t, body, "100% deterministic")
 	assert.Contains(t, body, "Grade A")
 	assert.Contains(t, body, "Grade F")
 	assert.Contains(t, body, "grade-a")
@@ -911,11 +916,40 @@ func TestGradeBreakdownsRenderFourPillarsAndV1FallbackTemplates(t *testing.T) {
 	require.NoError(t, err)
 
 	v2LegGrade := webui.LegGradeView(analyzer.LegGrade{
-		LegID:          11,
-		Letter:         "B",
-		Score:          77,
-		CalibratedProb: 0.54,
-		Uncertain:      true,
+		LegID:            11,
+		Letter:           "B",
+		Score:            77,
+		CalibratedProb:   0.54,
+		RawModelProb:     0.56,
+		VegasImpliedProb: 0.488,
+		FairNoVigProb:    0.52,
+		Uncertain:        true,
+		Diagnostics: analyzer.BuildDiagnostics{
+			DisplayGrade:     "B",
+			Descriptor:       "Solid Build",
+			VegasImpliedProb: 0.488,
+			FairNoVigProb:    0.52,
+			RawModelProb:     0.56,
+			HoldPct:          6.2,
+			SignalPills: []analyzer.SignalPill{
+				{
+					Key:    analyzer.PillSharpPrice,
+					Icon:   "+",
+					Label:  "Clean Price",
+					Tone:   "info",
+					Target: analyzer.TargetBookCut,
+					Detail: "Getting +105 vs. fair price near -108.",
+				},
+			},
+			ContextRadar: []analyzer.ContextNote{
+				{
+					Label:    "Questionable ankle tag",
+					PricedIn: "Injury uncertainty is already reflected in the line.",
+					Tag:      analyzer.TagAlreadyInLine,
+				},
+			},
+			CleanupNudge: "Verify pregame active status before kickoff.",
+		},
 		Pillars: []analyzer.PillarScore{
 			{
 				Key:     analyzer.PillarPriceVig,
@@ -956,13 +990,41 @@ func TestGradeBreakdownsRenderFourPillarsAndV1FallbackTemplates(t *testing.T) {
 	})
 
 	v2SlipGrade := webui.SlipGradeView(analyzer.SlipGrade{
-		Letter:         "B",
-		Score:          79,
-		Summary:        "Strong 2-leg correlated ticket",
-		CalibratedProb: 0.31,
-		Uncertain:      true,
-		CorrMultiplier: 1.16,
-		LegGrades:      []analyzer.LegGrade{{LegID: 11, Letter: "B"}, {LegID: 12, Letter: "A"}},
+		Letter:           "B",
+		Score:            79,
+		Summary:          "Strong 2-leg correlated ticket",
+		CalibratedProb:   0.31,
+		VegasImpliedProb: 0.278,
+		FairNoVigProb:    0.295,
+		Uncertain:        true,
+		CorrMultiplier:   1.16,
+		LegGrades:        []analyzer.LegGrade{{LegID: 11, Letter: "B"}, {LegID: 12, Letter: "A"}},
+		Diagnostics: analyzer.BuildDiagnostics{
+			DisplayGrade:     "B+",
+			Descriptor:       "Solid Build",
+			VegasImpliedProb: 0.278,
+			FairNoVigProb:    0.295,
+			HoldPct:          5.8,
+			CorrTaxPct:       13.8,
+			SignalPills: []analyzer.SignalPill{
+				{
+					Key:    analyzer.PillHeavySGPTax,
+					Icon:   "%",
+					Label:  "Heavy SGP Tax",
+					Tone:   analyzer.ToneWarn,
+					Target: analyzer.TargetBookCut,
+					Detail: "Book prices already tax this same-game correlation.",
+				},
+			},
+			ContextRadar: []analyzer.ContextNote{
+				{
+					Label:    "High 49.5 game total",
+					PricedIn: "Shootout scoring expectations are already baked into the lines.",
+					Tag:      analyzer.TagAlreadyInLine,
+				},
+			},
+			CleanupNudge: "Shop another book for the correlated stack.",
+		},
 		Pillars: []analyzer.PillarScore{
 			{
 				Key:     analyzer.PillarPriceVig,
@@ -1074,15 +1136,37 @@ func TestGradeBreakdownsRenderFourPillarsAndV1FallbackTemplates(t *testing.T) {
 			"highlights-strip": string(highlightsHTML),
 		} {
 			body := html.UnescapeString(raw)
+			assert.Contains(t, body, "data-grade-drawer", name)
+			assert.Contains(t, body, "data-ground-rule-banner", name)
+			assert.Contains(t, body, "data-market-reality", name)
+			assert.Contains(t, body, "data-slip-diagnostics", name)
+			assert.Contains(t, body, `data-provenance="Vegas Implied"`, name)
+			assert.Contains(t, body, `data-provenance="Fair No-Vig Est."`, name)
+			assert.Contains(t, body, `data-provenance="Model Context"`, name)
 			assert.Contains(t, body, "data-grade-summary", name)
 			assert.Contains(t, body, "Overall", name)
-			assert.Contains(t, body, "Hit chance", name)
-			assert.Contains(t, body, "Payout value", name)
+			assert.Contains(t, body, "Model Context", name)
+			assert.Contains(t, body, "Book pricing", name)
 			assert.Contains(t, body, "~54%", name)
 			assert.Contains(t, body, "~31%", name)
-			assert.Contains(t, body, "Strong value", name)
+			assert.Contains(t, body, "Clean price", name)
 			assert.Contains(t, body, "Slight juice", name)
 			assert.NotContains(t, body, "+EV", name)
+			assert.Contains(t, body, "data-build-descriptor", name)
+			assert.Contains(t, body, "Solid Build", name)
+			assert.Contains(t, body, "data-signal-pill", name)
+			assert.Contains(t, body, "Heavy SGP Tax", name)
+			assert.Contains(t, body, `data-diag-row="hit_rate"`, name)
+			assert.Contains(t, body, "Coin Flip", name)
+			assert.Contains(t, body, "Lottery Ticket", name)
+			assert.Contains(t, body, `data-context-tag="Already in the line"`, name)
+			assert.Contains(t, body, "data-cleanup-nudge", name)
+			assert.Contains(t, body, "data-layer3-why", name)
+			assert.Contains(t, body, `data-why-popover="implied_prob"`, name)
+			assert.Contains(t, body, `data-why-popover="vig_hold"`, name)
+			assert.Contains(t, body, `data-why-popover="corr_tax"`, name)
+			assert.Contains(t, body, `data-why-popover="already_priced_in"`, name)
+			assert.Contains(t, body, "data-model-card", name)
 			assert.Contains(t, body, "data-grade-pillars", name)
 			assert.Contains(t, body, `data-pillar="price_vig"`, name)
 			assert.Contains(t, body, `data-pillar="script_fit"`, name)
@@ -1092,7 +1176,7 @@ func TestGradeBreakdownsRenderFourPillarsAndV1FallbackTemplates(t *testing.T) {
 			assert.Contains(t, body, "Script Fit", name)
 			assert.Contains(t, body, "Stability & Tail Risk", name)
 			assert.Contains(t, body, "Context & Traps", name)
-			assert.Contains(t, body, "bg-positive", name)
+			assert.Contains(t, body, "bg-grade-clean", name)
 			assert.Contains(t, body, "bg-warning", name)
 			assert.Contains(t, body, "bg-danger", name)
 			assert.Contains(t, body, "bg-ink-subtle", name)
@@ -1183,21 +1267,21 @@ func TestGradeViewSummaryFields(t *testing.T) {
 			wantClass string
 		}{
 			{
-				name:      "strong value",
+				name:      "clean price",
 				prob:      0.614,
 				price:     88,
 				tone:      analyzer.ToneGood,
 				wantHit:   "~61%",
-				wantLabel: "Strong value",
-				wantClass: "text-positive-ink",
+				wantLabel: "Clean price",
+				wantClass: "text-grade-clean-ink",
 			},
 			{
-				name:      "fair value",
+				name:      "fair price",
 				prob:      0.502,
 				price:     75,
 				tone:      analyzer.ToneNeutral,
 				wantHit:   "~50%",
-				wantLabel: "Fair value",
+				wantLabel: "Fair price",
 				wantClass: "text-ink-muted",
 			},
 			{
@@ -1210,12 +1294,12 @@ func TestGradeViewSummaryFields(t *testing.T) {
 				wantClass: "text-warning-ink",
 			},
 			{
-				name:      "steep juice",
+				name:      "steep vig",
 				prob:      0.997,
 				price:     45,
 				tone:      analyzer.ToneBad,
 				wantHit:   ">99%",
-				wantLabel: "Steep juice",
+				wantLabel: "Steep vig",
 				wantClass: "text-danger-ink",
 			},
 		}
@@ -1262,8 +1346,8 @@ func TestGradeViewSummaryFields(t *testing.T) {
 			}},
 		})
 		assert.Equal(t, "~34%", gv.HitChance)
-		assert.Equal(t, "Strong value", gv.PayoutLabel)
-		assert.Contains(t, gv.PayoutToneClass, "text-positive-ink")
+		assert.Equal(t, "Clean price", gv.PayoutLabel)
+		assert.Contains(t, gv.PayoutToneClass, "text-grade-clean-ink")
 		assert.NotContains(t, gv.PayoutLabel, "+EV")
 	})
 
@@ -1403,10 +1487,20 @@ func TestSlipPanelTrayAndGuideWithEngineV2Handler(t *testing.T) {
 		body := html.UnescapeString(rec.Body.String())
 		assert.Contains(t, body, "data-leg-grade", path)
 		assert.Contains(t, body, "data-slip-grade", path)
+		assert.Contains(t, body, "data-grade-drawer", path)
+		assert.Contains(t, body, "data-ground-rule-banner", path)
+		assert.Contains(t, body, "data-market-reality", path)
+		assert.Contains(t, body, "data-slip-diagnostics", path)
 		assert.Contains(t, body, "data-grade-summary", path)
 		assert.Contains(t, body, "Overall", path)
-		assert.Contains(t, body, "Hit chance", path)
-		assert.Contains(t, body, "Payout value", path)
+		assert.Contains(t, body, "Model Context", path)
+		assert.Contains(t, body, "Book pricing", path)
+		assert.Contains(t, body, `data-provenance="Vegas Implied"`, path)
+		assert.Contains(t, body, `data-provenance="Fair No-Vig Est."`, path)
+		assert.Contains(t, body, `data-provenance="Model Context"`, path)
+		assert.Contains(t, body, `data-context-tag="Already in the line"`, path)
+		assert.Contains(t, body, "data-layer3-why", path)
+		assert.Contains(t, body, "data-model-card", path)
 		assert.NotContains(t, body, "+EV", path)
 		assert.Contains(t, body, "data-grade-pillars", path)
 		assert.Contains(t, body, "Price & Vig", path)
@@ -1418,7 +1512,7 @@ func TestSlipPanelTrayAndGuideWithEngineV2Handler(t *testing.T) {
 		assert.Contains(t, body, "High uncertainty", path)
 		assert.Contains(t, body, "data-corr-summary", path)
 		assert.Contains(t, body, "Script multiplier:", path)
-		assert.Contains(t, body, "w-72 max-w-full", path)
+		assert.Contains(t, body, `class="leg-sheet"`, path)
 	}
 
 	guideRec := httptest.NewRecorder()
@@ -1433,11 +1527,62 @@ func TestSlipPanelTrayAndGuideWithEngineV2Handler(t *testing.T) {
 
 	guideBody := html.UnescapeString(guideRec.Body.String())
 	assert.Contains(t, guideBody, "Active engine: v2")
+	assert.Contains(t, guideBody, "Build Grades & Market Reality")
 	assert.Contains(t, guideBody, "Four-Pillar Grading (v2)")
 	assert.Contains(t, guideBody, "Power de-vigging")
 	assert.Contains(t, guideBody, "Gaussian copula")
 	assert.Contains(t, guideBody, "SGP correlation tax")
 	assert.Contains(t, guideBody, "High uncertainty badge")
+}
+
+func TestBuildGradeViewCapsSignalPillsAndInterpolatesLivePopovers(t *testing.T) {
+	t.Parallel()
+
+	gv := webui.SlipGradeView(analyzer.SlipGrade{
+		Letter:           "D",
+		Score:            52,
+		CalibratedProb:   0.08,
+		VegasImpliedProb: 0.13,
+		FairNoVigProb:    0.11,
+		CorrMultiplier:   1.18,
+		LegGrades:        []analyzer.LegGrade{{LegID: 1, Letter: "C"}, {LegID: 2, Letter: "D"}},
+		Diagnostics: analyzer.BuildDiagnostics{
+			DisplayGrade:     "D",
+			Descriptor:       "Vig Trap",
+			VegasImpliedProb: 0.13,
+			FairNoVigProb:    0.11,
+			HoldPct:          15.4,
+			CorrTaxPct:       15.3,
+			SignalPills: []analyzer.SignalPill{
+				{Key: "p1", Label: "Heavy SGP Tax", Tone: analyzer.ToneBad, Target: analyzer.TargetBookCut},
+				{Key: "p2", Label: "Longshot Odds", Tone: analyzer.ToneWarn, Target: analyzer.TargetHitRate},
+				{Key: "p3", Label: "Leg Bloat", Tone: analyzer.ToneWarn, Target: analyzer.TargetHitRate},
+				{Key: "p4", Label: "Extra Fourth", Tone: "info", Target: analyzer.TargetContext},
+			},
+			ContextRadar: []analyzer.ContextNote{
+				{Label: "High 51.5 game total", PricedIn: "Already baked in.", Tag: analyzer.TagAlreadyInLine},
+			},
+			CleanupNudge: "Dropping the -450 leg cuts your payout by 18% but removes an extra way to lose.",
+		},
+		Pillars: []analyzer.PillarScore{
+			{Key: analyzer.PillarPriceVig, Label: analyzer.PillarLabelPriceVig, Score: 42, Tone: analyzer.ToneBad},
+		},
+	})
+
+	assert.Equal(t, "D", gv.DisplayGrade)
+	assert.Equal(t, "Vig Trap", gv.Descriptor)
+	assert.Contains(t, gv.VegasImplied, "13% implied")
+	assert.Contains(t, gv.VegasImplied, "~1 in 8")
+	assert.Contains(t, gv.FairNoVig, "11% fair")
+	assert.Contains(t, gv.FairNoVig, "~1 in 9")
+	assert.Len(t, gv.SignalPills, 3, "Layer 1 caps Signal Pills at 3")
+	assert.Equal(t, "Lottery Ticket", gv.RealismLabel)
+	assert.Len(t, gv.ModelCard, 4)
+	require.Len(t, gv.WhyPopovers, 4)
+	assert.Contains(t, gv.WhyPopovers[0].Body, "13% implied (hits ~1 in 8 times)")
+	assert.Contains(t, gv.WhyPopovers[1].Body, "15.4% vig")
+	assert.Contains(t, gv.WhyPopovers[2].Body, "15.3% off the payout")
+	assert.Contains(t, gv.WhyPopovers[3].Body, "High 51.5 game total")
 }
 
 func newSlipFixtureWithEngine(t *testing.T, legsPerMember int, engine analyzer.GradingEngine) *slipFixture {

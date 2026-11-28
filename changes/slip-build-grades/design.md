@@ -293,7 +293,7 @@ visual contrast are only partially covered by Go template tests)
 - [x] Replace green `.grade-a` tokens with cool/neutral build-grade tokens across all 4 themes in
       `web/tailwind/input.css` (reserving `--positive` strictly for settled wins), run `go generate ./...`, and verify
       no grade badge class maps to `--positive`.
-- [ ] Update `internal/web/analyzer.go` and templates (`partials.html`, `research_bet.html`, `analyzer_guide.html`) to
+- [x] Update `internal/web/analyzer.go` and templates (`partials.html`, `research_bet.html`, `analyzer_guide.html`) to
       render Layer 1 (Build Grade + 2-word descriptor, human-first `Vegas Implied` `1 in X` copy, max 3 clickable Signal
       Pills), Layer 2 (breakdown drawer with Ground-Rule Banner, separated Market Reality vs. Slip Diagnostics with
       provenance tags, Context Radar `Already in the line` pills, and optional 1-line cleanup nudge), and Layer 3

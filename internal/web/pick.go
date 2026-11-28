@@ -193,6 +193,7 @@ type PickRowView struct {
 	Odds          int
 	Price         string
 	ImpliedChance string
+	ImpliedHuman  string
 	Text          string
 	PickID        int64
 	UpdateID      int64
@@ -211,17 +212,18 @@ type PickRowView struct {
 // PickDockView is the viewer's own picks: the fixed dock's count and combined
 // price, and the tray sheet's legs, warnings, and one next step.
 type PickDockView struct {
-	SlipID           int64
-	Picked           int
-	Limit            int
-	Combined         string
-	CombinedAmerican string
-	CombinedImplied  string
-	Legs             []TrayLegView
-	Grade            GradeView
-	Warnings         []AnalyzerWarningView
-	ActionLabel      string
-	ActionHref       string
+	SlipID               int64
+	Picked               int
+	Limit                int
+	Combined             string
+	CombinedAmerican     string
+	CombinedImplied      string
+	CombinedImpliedHuman string
+	Legs                 []TrayLegView
+	Grade                GradeView
+	Warnings             []AnalyzerWarningView
+	ActionLabel          string
+	ActionHref           string
 }
 
 // TrayLegView is one of the viewer's legs in the tray.
@@ -232,6 +234,7 @@ type TrayLegView struct {
 	SideClass     string
 	Odds          string
 	ImpliedChance string
+	ImpliedHuman  string
 	Grade         GradeView
 	Locked        bool
 	SplitLine     string
@@ -1413,6 +1416,7 @@ func (h *slipHandlers) dockFrom(
 			SideClass:     sideClass,
 			Odds:          formatOdds(leg.Odds),
 			ImpliedChance: formatImpliedChance(parlay.ImpliedProb(leg.Odds)),
+			ImpliedHuman:  formatImpliedHuman(parlay.ImpliedProb(leg.Odds)),
 			Locked:        locked,
 		}
 		if row, ok := rowByLegID[leg.ID]; ok {
@@ -1434,6 +1438,7 @@ func (h *slipHandlers) dockFrom(
 	view.Combined = fmt.Sprintf("%.2fx", combined)
 	view.CombinedAmerican = formatOdds(parlay.DecimalToAmerican(combined))
 	view.CombinedImplied = formatImpliedChance(parlay.DecimalImpliedProb(combined))
+	view.CombinedImpliedHuman = formatImpliedHuman(parlay.DecimalImpliedProb(combined))
 
 	gamesByID, stats := analyzer.LoadSlipSignals(ctx, h.deps.Store, now, slip.WeekID, games, legs)
 	analysis, legGrades := analyzerView(legs, gamesByID, stats, names, h.deps.GradingEngine)
@@ -1630,6 +1635,7 @@ func pickRowView(
 		Odds:          row.Odds,
 		Price:         formatOdds(row.Odds),
 		ImpliedChance: formatImpliedChance(parlay.ImpliedProb(row.Odds)),
+		ImpliedHuman:  formatImpliedHuman(parlay.ImpliedProb(row.Odds)),
 		Text:          row.Text,
 		PickID:        row.Picked,
 		AtLimit:       atLimit,
@@ -2041,15 +2047,17 @@ var gameCardGradeOrder = []string{"A", "B", "C", "D", "F"}
 func gameGradeBadgeClass(letter string) string {
 	switch letter {
 	case "A":
-		return "border-positive bg-positive-soft text-positive-ink"
+		return "grade-a"
 	case "B":
-		return "border-accent bg-accent-soft text-ink"
+		return "grade-b"
 	case "C":
-		return "border-line bg-surface-2 text-ink-muted"
+		return "grade-c"
 	case "D":
-		return "border-warning bg-warning-soft text-warning-ink"
+		return "grade-d"
+	case "F":
+		return "grade-f"
 	default:
-		return "border-danger bg-danger-soft text-danger-ink"
+		return "grade-neutral"
 	}
 }
 

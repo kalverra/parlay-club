@@ -151,7 +151,7 @@ type HighlightsView struct {
 	Parlays        []ParlayHighlightView
 }
 
-// LegHighlightView is one A-grade leg idea with its grade, reason, and
+// LegHighlightView is one cleanly built leg idea with its grade, reason, and
 // one-tap add-leg form fields.
 type LegHighlightView struct {
 	GameID        string
@@ -164,6 +164,7 @@ type LegHighlightView struct {
 	Odds          int
 	Price         string
 	ImpliedChance string
+	ImpliedHuman  string
 	Text          string
 	Grade         GradeView
 	SplitLine     string
@@ -171,16 +172,17 @@ type LegHighlightView struct {
 	ResearchURL   string
 }
 
-// ParlayHighlightView is one A-grade 2- or 3-leg combo idea.
+// ParlayHighlightView is one cleanly built 2- or 3-leg combo idea.
 type ParlayHighlightView struct {
-	Legs            []LegHighlightView
-	Grade           GradeView
-	CombinedOdds    string
-	CombinedImplied string
-	Label           string
-	Reason          string
-	LegCount        int
-	CanAddAll       bool
+	Legs                 []LegHighlightView
+	Grade                GradeView
+	CombinedOdds         string
+	CombinedImplied      string
+	CombinedImpliedHuman string
+	Label                string
+	Reason               string
+	LegCount             int
+	CanAddAll            bool
 }
 
 // SiblingSlipView is one choice in the sibling slip switcher.
@@ -303,6 +305,7 @@ type LegView struct {
 	SideClass       string
 	Odds            string
 	ImpliedChance   string
+	ImpliedHuman    string
 	Model           string // nfelo chip; "" when there is no fresh model
 	SplitLine       string
 	Grade           GradeView
@@ -415,18 +418,20 @@ type MemberOption struct {
 
 // PayoutView is the payout calculator's rendered values.
 type PayoutView struct {
-	SlipID            int64
-	HasLegs           bool
-	Stake             string
-	Boost             string
-	Combined          string
-	CombinedAmerican  string
-	CombinedImplied   string
-	Reference         string
-	ReferenceAmerican string
-	ReferenceImplied  string
-	Return            string
-	Profit            string
+	SlipID                int64
+	HasLegs               bool
+	Stake                 string
+	Boost                 string
+	Combined              string
+	CombinedAmerican      string
+	CombinedImplied       string
+	CombinedImpliedHuman  string
+	Reference             string
+	ReferenceAmerican     string
+	ReferenceImplied      string
+	ReferenceImpliedHuman string
+	Return                string
+	Profit                string
 }
 
 // WagerView is the signed-in user's logged bet form on a slip.
@@ -2293,14 +2298,15 @@ func highlightsView(
 			pLegs = append(pLegs, legHighlightView(leg, homeBook, slipID, from))
 		}
 		parlays = append(parlays, ParlayHighlightView{
-			Legs:            pLegs,
-			Grade:           SlipGradeView(p.Grade),
-			CombinedOdds:    formatOdds(p.CombinedOdds),
-			CombinedImplied: formatImpliedChance(parlay.ImpliedProb(p.CombinedOdds)),
-			Label:           p.Label,
-			Reason:          p.Reason,
-			LegCount:        len(pLegs),
-			CanAddAll:       remainingSlots >= len(pLegs),
+			Legs:                 pLegs,
+			Grade:                SlipGradeView(p.Grade),
+			CombinedOdds:         formatOdds(p.CombinedOdds),
+			CombinedImplied:      formatImpliedChance(parlay.ImpliedProb(p.CombinedOdds)),
+			CombinedImpliedHuman: formatImpliedHuman(parlay.ImpliedProb(p.CombinedOdds)),
+			Label:                p.Label,
+			Reason:               p.Reason,
+			LegCount:             len(pLegs),
+			CanAddAll:            remainingSlots >= len(pLegs),
 		})
 	}
 	return HighlightsView{
@@ -2327,6 +2333,7 @@ func legHighlightView(h board.LegHighlight, homeBook string, slipID int64, from 
 		Odds:          h.Row.Odds,
 		Price:         formatOdds(h.Row.Odds),
 		ImpliedChance: formatImpliedChance(parlay.ImpliedProb(h.Row.Odds)),
+		ImpliedHuman:  formatImpliedHuman(parlay.ImpliedProb(h.Row.Odds)),
 		Text:          h.Row.Text,
 		Grade:         LegGradeView(h.Grade),
 		SplitLine:     splitLineBadge(h.Row.Market, h.Row.DK, h.Row.FD, h.Row.LinesDiffer, homeBook),
@@ -2481,6 +2488,7 @@ func legViews(
 			SideClass:     sideClass,
 			Odds:          formatOdds(leg.Odds),
 			ImpliedChance: formatImpliedChance(parlay.ImpliedProb(leg.Odds)),
+			ImpliedHuman:  formatImpliedHuman(parlay.ImpliedProb(leg.Odds)),
 			Model:         legModel(leg, games),
 			SplitLine:     splitLines[leg.ID],
 			Grade:         legGrades[leg.ID],
@@ -2683,18 +2691,20 @@ func (h *slipHandlers) payoutView(
 	}
 	total := parlay.Payout(stake, combined, boost)
 	return PayoutView{
-		SlipID:            slip.ID,
-		HasLegs:           len(legs) > 0,
-		Stake:             formatFloat(stake),
-		Boost:             formatFloat(boost),
-		Combined:          fmt.Sprintf("%.2fx", combined),
-		CombinedAmerican:  formatOdds(parlay.DecimalToAmerican(combined)),
-		CombinedImplied:   formatImpliedChance(parlay.DecimalImpliedProb(combined)),
-		Reference:         fmt.Sprintf("%.2fx", reference),
-		ReferenceAmerican: formatOdds(parlay.DecimalToAmerican(reference)),
-		ReferenceImplied:  formatImpliedChance(parlay.DecimalImpliedProb(reference)),
-		Return:            money(total),
-		Profit:            money(total - stake),
+		SlipID:                slip.ID,
+		HasLegs:               len(legs) > 0,
+		Stake:                 formatFloat(stake),
+		Boost:                 formatFloat(boost),
+		Combined:              fmt.Sprintf("%.2fx", combined),
+		CombinedAmerican:      formatOdds(parlay.DecimalToAmerican(combined)),
+		CombinedImplied:       formatImpliedChance(parlay.DecimalImpliedProb(combined)),
+		CombinedImpliedHuman:  formatImpliedHuman(parlay.DecimalImpliedProb(combined)),
+		Reference:             fmt.Sprintf("%.2fx", reference),
+		ReferenceAmerican:     formatOdds(parlay.DecimalToAmerican(reference)),
+		ReferenceImplied:      formatImpliedChance(parlay.DecimalImpliedProb(reference)),
+		ReferenceImpliedHuman: formatImpliedHuman(parlay.DecimalImpliedProb(reference)),
+		Return:                money(total),
+		Profit:                money(total - stake),
 	}, nil
 }
 

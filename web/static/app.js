@@ -677,6 +677,20 @@ document.addEventListener("click", (event) => {
     closeTagExplainDialog();
     return;
   }
+  const gradeDrawerTrigger = event.target.closest("[data-grade-drawer-trigger]");
+  if (gradeDrawerTrigger) {
+    openGradeDrawer(gradeDrawerTrigger);
+    return;
+  }
+  if (event.target.closest("[data-close-grade-drawer]")) {
+    closeGradeDrawer(event.target.closest("dialog[data-grade-drawer]"));
+    return;
+  }
+  const openDrawerBackdrop = event.target instanceof HTMLDialogElement && event.target.matches("dialog[data-grade-drawer]");
+  if (openDrawerBackdrop) {
+    closeGradeDrawer(event.target);
+    return;
+  }
   closeGroupSwitcher(event);
   closeHelpPopovers(event);
 });
@@ -823,6 +837,34 @@ function openTagExplainDialog(button) {
 function closeTagExplainDialog() {
   if (tagExplainDialog && tagExplainDialog.open) {
     tagExplainDialog.close();
+  }
+}
+
+function openGradeDrawer(trigger) {
+  const scope = trigger.closest("[data-grade-scope]");
+  const drawer = scope ? scope.querySelector("dialog[data-grade-drawer]") : null;
+  if (!drawer) {
+    return;
+  }
+  if (!drawer.open) {
+    drawer.showModal();
+  }
+  const target = trigger.getAttribute("data-focus-diag");
+  for (const row of drawer.querySelectorAll("[data-diag-row]")) {
+    row.classList.remove("ring-2", "ring-accent");
+  }
+  if (target) {
+    const focusRow = drawer.querySelector(`[data-diag-row="${target}"]`);
+    if (focusRow) {
+      focusRow.classList.add("ring-2", "ring-accent");
+      focusRow.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }
+  }
+}
+
+function closeGradeDrawer(drawer) {
+  if (drawer && drawer.open) {
+    drawer.close();
   }
 }
 
