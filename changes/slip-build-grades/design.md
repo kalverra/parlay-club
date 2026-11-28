@@ -310,6 +310,6 @@ Risk: low (read-only display badges over existing settled slip and eval-cache da
 - [x] Render post-game Process vs. Outcome badges (`Clean Hit`, `Tough Beat`, `Total Bailout`, `Book Donation`) on
   settled slip cards (`/slips/{id}`) and Record Book views (`/record` and `/record/members/{id}`), backed by
   `SuiteReport.SlipGrades` and unit/handler tests.
-- [ ] Docs: update `docs/concepts/analyzer.md`, `docs/reference/analyzer-rules.md`, and `docs/concepts/docs-hub.md` to
+- [x] Docs: update `docs/concepts/analyzer.md`, `docs/reference/analyzer-rules.md`, and `docs/concepts/docs-hub.md` to
   document Build Grades, the 3-layer progressive disclosure UX, Process vs. Outcome badges, and the Explaining Vegas
   vs. Beating Vegas eval tracks, then run `good-vibes docs lint`.

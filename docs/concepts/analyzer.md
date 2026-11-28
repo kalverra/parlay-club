@@ -26,37 +26,58 @@ flowchart LR
   Inputs["Legs + Games (Weather, nfelo, MarketScript, nflverse, Sharp) + PlayerStats"] --> Rules["AnalyzeSlip (18 Warnings)"]
   Inputs --> ModelV2["modelv2 (GBDT Distributions + EB Shrinkage + Calibration)"]
   Inputs --> Overlays["ContextOverlays (Injuries, Weather, Traps, ContextSignal)"]
-  ModelV2 --> EngineV2["EngineV2 (Four Pillars + QMC Gaussian Copula)"]
+  ModelV2 --> EngineV2["EngineV2 (4 Pillars + Copula + BuildDiagnostics)"]
   Overlays --> EngineV2
   Rules --> EngineV2
-  Board["Cached Board Rows + LoadBoardSignals"] --> Highlights["board.SelectHighlights (A-Grade Legs & Combos)"]
+  Board["Cached Board Rows + LoadBoardSignals"] --> Highlights["board.SelectHighlights (Cleanest Builds)"]
   EngineV2 --> Highlights
-  Rules --> UI["Slip Panel & Pick Tray (375px Breakdown)"]
+  Rules --> UI["3-Layer Progressive Disclosure (Glance Card -> Drawer -> Why? Popovers)"]
   EngineV2 --> UI
   Highlights --> UI
   UI -->|"tap ? bubble"| Guide["GET /docs/grading (alias /analyzer/guide)"]
   Guide <-->|"docs switcher"| Results["GET /docs/evals (alias /analyzer/results)"]
   EngineDocs["RuleDocs() + DefaultV2Config + GradeRubric()"] --> Guide
-  Cache["eval.Cache (Slips & Market)"] --> Results
+  Cache["eval.Cache (Explaining Vegas + Beating Vegas + SlipGrades)"] --> Results
+  Cache --> Record["Settled Slips & Record Book (Process vs. Outcome)"]
 ```
+
+## Build Grades and 3-layer progressive disclosure
+
+Pre-kickoff grades are **Build Grades**, not win predictions. Every letter (A–F with `+`/`-` subdivisions) pairs with a
+two-word structural descriptor (Clean Build, Tight Build, Longshot, Vig Trap, Self-Sabotage) that names what drives the
+ticket's construction quality—price vig, leg synergy, hit-rate realism, or priced-in context.
+
+To keep pre-kickoff grades visually distinct from settled outcomes across all four themes, `.grade-a` maps to cool teal
+(`--grade-clean`) and `.grade-b` maps to slate/blue (`--grade-solid`), while C uses amber and D/F use coral/rose.
+`--positive` green is reserved strictly for actual settled wins and Clean Hit outcome stamps.
+
+Across the slip panel, pick tray, highlights strip, and bet research view, `GradeView` (`internal/web/analyzer.go`)
+delivers diagnostics in three phone-first (375px) layers:
+
+- **Layer 1 (Glance Card)**: Displays the Build Grade and two-word descriptor, human-first hit probability (e.g.,
+  "13% implied · ~1 in 8", tagged Vegas Implied) ahead of secondary American odds, and up to three clickable Signal Pills
+  (Conflicting Legs, Heavy SGP Tax, Leg Bloat, Priced-In Narrative, and related structural flags).
+- **Layer 2 (Breakdown Drawer)**: Tapping the Build Grade or any Signal Pill opens a `.leg-sheet` `<dialog>` drawer
+  with a pinned one-sentence Ground-Rule Banner, a separated **Market Reality** box (Vegas Implied, Fair No-Vig Est.,
+  and sportsbook hold) vs. **Slip Diagnostics** (Hit-Rate Realism bar from Likely Side / Coin Flip to Lottery Ticket,
+  Leg Synergy, The Book's Cut / Correlation Tax, Context Radar features tagged Already in the line or Likely Priced In,
+  and the four 0–100 pillar meters), plus an optional one-line "What would make this cleaner?" cleanup nudge.
+- **Layer 3 (Inline "Why?" Popovers & Model Card)**: Inline `<details>` triggers inside Layer 2 explain Implied
+  Probability, Vig / Hold, Correlation Tax, and Already in the line using the live slip's actual numbers, paired with a
+  four-bullet Model Card ("How this grade works").
 
 ## What the banner shows
 
 The slip panel renders the Analyzer section under the legs, with a "How grading works" link to `/docs/grading`:
 
-- **Overall slip grade**: a clickable A–F pill with a one-line sharp-friend summary. Tapping it opens an inline
-  `<details>` breakdown formatted for 375px phone width: a 3-column **Overall / Hit chance / Payout value** summary
-  strip (showing the letter and score, `CalibratedProb` formatted as `~N%`—or `<1%` / `>99%`—using the copula-adjusted
-  joint probability on multi-leg slips, and a plain-language `Price & Vig` read of `Strong value`, `Fair value`,
-  `Slight juice`, or `Steep juice` without `+EV %` copy), an optional "High uncertainty" badge, a copula Script
-  multiplier summary on multi-leg slips, the four 0–100 pillar meters (Price & Vig, Script Fit, Stability & Tail Risk,
-  Context & Traps), up to three plain-English "Why" bullets from the strongest drivers, and a `?` bubble to
-  `/docs/grading#slip-grade`. When `Pillars` and `CalibratedProb` are absent (such as under `EngineV1`), the summary
-  strip is omitted and the popover falls back to the factor list.
-- **Per-leg grade pills**: each graded leg row displays its A–F pill; tapping it opens the same compact four-pillar
-  breakdown for that leg and a `?` bubble to `/docs/grading#leg-grades`. Legs with market `OTHER` or an unmatched game
-  show no grade pill.
-- **Warning cards**: with no warnings it shows a green "Looks clean". Otherwise it shows one card per warning, sorted
+- **Overall slip grade**: a clickable Layer 1 Build Grade pill with a one-line sharp-friend summary, Vegas Implied
+  reality, and up to three Signal Pills. Tapping the grade or any pill opens the Layer 2 Breakdown Drawer (or falls back
+  to the factor list when pillars and calibrated probability are absent under `EngineV1`), with a `?` bubble to
+  `/docs/grading#slip-grade`.
+- **Per-leg grade pills**: each graded leg row displays its Build Grade pill; tapping it opens the same Layer 2 drawer
+  for that leg and a `?` bubble to `/docs/grading#leg-grades`. Legs with market `OTHER` or an unmatched game show no
+  grade pill.
+- **Warning cards**: with no warnings it shows a clean-build status. Otherwise it shows one card per warning, sorted
   Danger, Warn, then Info and colored red, amber, and blue. Each card carries the message, the severity, a chip for
   every leg involved with its owner's name, and a `?` bubble to `/docs/grading#rule-<id>`.
 
@@ -82,34 +103,14 @@ a fresh forecast brings its grade and warning without a reload. See [Slips](slip
 ## Sportsbook combination eligibility
 
 `internal/analyzer/combo_rules.go` checks same-game leg combinations against rules that DraftKings and FanDuel reject
-or frequently restrict on parlays and same-game parlays (SGPs). Like every analyzer check, these rules are strictly
-**non-blocking**: conflicting options stay clickable on the pick board, legs can always be added to a slip, and locks
-are never prevented.
+(`book_combo_ineligible`, Danger) or frequently restrict (`book_combo_restricted`, Warn) on parlays and SGPs. Like every
+analyzer check, these rules are strictly **non-blocking**: conflicting options stay clickable on the pick board, legs
+can always be added to a slip, and locks are never prevented.
 
-Two rules cover hard blocks and SGP restrictions:
-
-- **`book_combo_ineligible` (Danger)**: Flags combinations DraftKings and FanDuel consistently reject on one slip:
-  - Duplicate selections (same game, market, side, and team or player and line).
-  - Opposite sides of the same market (both teams on spread or moneyline, game total Over and Under, same-team total
-    Over and Under, or same-player prop Over and Under in the same market).
-  - Same-team moneyline paired with that team's spread.
-  - Mutually exclusive moneyline on one team paired with an opponent favorite spread (`< 0`).
-  - Mutually exclusive team totals vs. game total (both teams' team-total Overs summing at or above a game-total Under,
-    or both teams' team-total Unders summing at or below a game-total Over).
-- **`book_combo_restricted` (Warn)**: Flags same-game combinations books frequently drop or restrict in SGP builders:
-  - Duplicate player-market milestones (same player, market, and side at different lines).
-  - Inverse same-player prop pairs on opposite Over/Under sides (`PASS_YDS` with `PASS_TDS`, `REC_YDS` with
-    `RECEPTIONS`, or `RUSH_YDS` with `RUSH_ATT`).
-  - Kicker points (`KICKER_PTS`) paired with a game total or team total in the same game.
-
-These warnings surface in two places using one shared rule set:
-
-- **Slip banner and pick tray**: `AnalyzeSlip` evaluates all legs on the slip and emits `book_combo_ineligible` and
-  `book_combo_restricted` cards alongside game-script warnings (with `#pick-tray` filtering to cards that name one of
-  the viewer's legs).
-- **Inline on the pick board**: `board.ApplySignals` calls `analyzer.CheckComboConflict` for each unpicked board row
-  against `BoardSignals.SlipLegs`, short-circuiting on `Danger` before `Warn`. When a conflict exists, the pick option
-  renders a compact non-blocking heads-up note (`Row.ComboWarning`) while leaving the option addable.
+These warnings surface in two places using one shared rule set: `AnalyzeSlip` emits them in the slip banner and
+`#pick-tray` (filtered to the viewer's legs), and `board.ApplySignals` calls `analyzer.CheckComboConflict` to render a
+compact non-blocking heads-up note (`Row.ComboWarning`) inline on the pick board. Exact combination triggers live in
+[Analyzer rules](../reference/analyzer-rules.md#sportsbook-eligibility).
 
 ## Calibrated four-pillar grading (v2)
 
@@ -167,49 +168,48 @@ market anchor (up to 95%) and surfaces the "High uncertainty" badge in the UI.
 
 ### Rolling up the four pillars
 
-Legs combine Price & Vig (40%), Stability & Tail Risk (25%), and Context & Traps (35%) — or 30/15/25/30% when
+Legs combine Price & Vig (40%), Stability & Tail Risk (25%), and Context & Traps (35%)—or 30/15/25/30% when
 single-leg script alignment applies. Slips combine Price & Vig (35%), Script Fit (25%), Stability & Tail Risk (20%),
-and Context & Traps (20%). Severe Danger overlays, strong negative correlation (multiplier below 0.85), or extreme vig
-cap scores below B, while Warn conflicts or uncertainty cap slips below A. Scores map to A (85–100), B (73–84),
-C (60–72), D (48–59), and F (0–47).
+and Context & Traps (20%). Severe Danger overlays, negative correlation (< 0.85), or extreme vig cap scores below B,
+while Warn conflicts or uncertainty cap slips below A. Exact band ranges and caps live in
+[Analyzer rules](../reference/analyzer-rules.md#pillar-rollup-weights-and-score-caps).
 
-## A-grade highlights
+## Cleanest builds (highlights)
 
 While a slip is open and the viewer still needs picks, `board.SelectHighlights` (`internal/board/highlights.go`)
-surfaces top A-grade plays from cached SQLite odds without triggering any external API calls:
+surfaces top A-grade plays ("Cleanest builds on the board") from cached SQLite odds using `LoadBoardSignals` and
+non-green Build Grade tokens, without triggering any external API calls:
 
-- **Batched board signals**: `LoadBoardSignals` loads games, weather, nfelo, nflverse team EPA, role-defense profiles,
-  EWMA usage, `MarketScript` anchors, sharp-book benchmarks, and player game logs in batched SQLite queries.
-- **Leg selection**: `SelectHighlights` scores unpicked, non-OTHER board rows with `ScoreLeg`, keeps A-grade legs
-  (score >= 85), ranks by score and payout, and caps at 1 leg per player (up to 3 legs by default).
-- **Bounded combo generation**: from up to 12 top A-grade legs (plus up to 6 B-grade same-game stack partners), it
-  evaluates conflict-free 2- and 3-leg combos with `ScoreSlip`, rejects any combo with a Warn or Danger conflict, and
-  keeps A-grade combos (up to 2 on the hub, or 1 same-game combo in `#pick-detail`).
+- **Leg selection**: scores unpicked, non-OTHER board rows with `ScoreLeg`, keeps A-grade legs (`>= 85`), ranks by
+  score and payout, and caps at 1 leg per player (up to 3 legs).
+- **Bounded combo generation**: evaluates conflict-free 2- and 3-leg combos from up to 12 top A-grade legs (plus up
+  to 6 B-grade same-game partners), keeping A-grade combos (up to 2 on the hub, or 1 same-game combo in `#pick-detail`).
 - **Consistency**: because highlights run through `ActiveEngine`, adding a highlighted leg or combo lands on the slip
   with the exact same grade. When nothing reaches A, the strip hides cleanly.
 
+## Post-game Process vs. Outcome
+
+Once a slip settles, pre-kickoff Build Grades pair with the settled Won or Lost result on `/slips/{id}`, `/record`, and
+`/record/members/{id}` to separate decision quality from variance: A–B grades yield **Clean Hit** (Won) or **Tough
+Beat** (Lost), while C–F grades yield **Total Bailout** (Won) or **Book Donation** (Lost). `ClassifyProcessOutcome` and
+`ClassifyProcessResult` (`internal/analyzer/diagnostics.go`) compute this 2×2 matrix from leak-free pre-kickoff grades
+reconstructed by `SuiteReport.SlipGrades` (`internal/eval/metrics.go`), leaving pushed, voided, pending, and ungraded
+entries unclassified.
+
 ### Offline evals and engine comparison
 
-Both `EngineV2` (active) and `EngineV1` (additive `RubricV1` baseline) stay registered in `BuiltInEngines` so offline
-evals and in-app results can compare them on identical pre-kickoff data. To prevent post-kickoff data leakage,
-`internal/eval` reads nflverse rows strictly prior to the target week and reconstructs overwritten inputs (game logs,
-injury statuses, rosters, and odds) only from pre-kickoff archive payloads, failing soft and reporting coverage counts
-when an archive entry is missing.
+Both `EngineV2` (active) and `EngineV1` (additive baseline) stay registered in `BuiltInEngines` so offline evals and
+in-app results can compare them on identical pre-kickoff data. To prevent post-kickoff data leakage, `internal/eval`
+reads nflverse rows strictly prior to the target week, reconstructs game logs, injuries, rosters, and sharp benchmarks
+only from pre-kickoff archive payloads (falling back to prior-week nflverse L5 logs when needed), and fails soft with
+coverage counts when an archive entry is missing.
 
-Two shared signal reconstructions keep replay aligned with live scoring:
-
-- **Pre-kickoff sharp benchmarks**: archived `odds:lines` and `odds:props:{gameID}` responses recorded before kickoff
-  are matched to each game, resolved against pre-kickoff rosters and prior-week nflverse rows, and passed through
-  `BuildSharpBenchmarks` to compute Power-devigged `SharpQuote` benchmarks.
-- **Prior-week nflverse L5 fallback**: when no pre-kickoff game-log archive exists for a player, `PlayerStats.Games`
-  falls back to strictly prior-week `nflverse_player_weeks` rows in the same season.
-
-Eval supports user slips (`ModeSlips`, default, keeping all pre-kickoff slip legs for copula/script evaluation while
-counting settled legs for calibration) and market-wide replay (`ModeMarket`, consensus pre-kickoff lines graded
-deterministically across final games). Evaluation computes proper scoring rules (Log Loss, Brier Score, Classwise ECE,
-10-bin reliability spread targeting at least 80% populated bins, Market Log Loss, and SGP Log Loss vs. naive
-independence) alongside A–F band calibration, lift, flat ROI, weekly progression, factor attribution, and band
-migrations. In CI, `.github/workflows/ci.yml` runs `cmd/eval` against the real 2025 Weeks 7–10 replay fixture
+Eval supports user slips (`ModeSlips`, default) and market-wide replay (`ModeMarket`) across two explicit tracks:
+**1. Explaining Vegas (Match First)**—how closely standalone unblended model probabilities match Power-devigged sharp
+market probabilities—and **2. Beating Vegas (Alpha Gate)**—whether standalone or blended probabilities beat the sharp
+market baseline on Log Loss, Brier Skill, and flat ROI across at least 250 settled samples. It also computes proper
+scoring rules, SGP correlation lift, A–F band calibration, factor attribution, band migrations, and
+`SuiteReport.SlipGrades`. In CI, `.github/workflows/ci.yml` runs `cmd/eval` against
 `internal/eval/testdata/benchmark_dataset.json`. See [Local development](../guides/local-dev.md#offline-grading-evals)
 for CLI and `mise run eval-prod` usage.
 

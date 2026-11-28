@@ -2,7 +2,7 @@
 id: analyzer-rules
 title: Analyzer rules
 type: reference
-summary: The stable IDs, severities, triggers, and example messages for all 18 analyzer rules, plus the v2 calibrated four-pillar grading model, Gaussian copula script scoring, extensible context overlays, and v1 rubric reference.
+summary: Stable IDs, triggers, and examples for all 18 analyzer rules, plus v2 four-pillar grading, BuildDiagnostics, Process vs. Outcome, Gaussian copula, context overlays, and v1 rubric.
 tags: [analyzer, rules, grades, pillars, copula, overlays, rubric, warnings, correlation, severity, slips, nfelo, nflverse, model, quarterback, props, player-stats]
 ---
 
@@ -280,6 +280,32 @@ Both `EngineV2` and `EngineV1` map clamped `0..100` integer scores to `A`–`F` 
 
 In v2, each individual `PillarScore` (`0..100`) maps to one tonal UI badge: `good` (`>= 80`), `neutral` (`68–79`),
 `warn` (`56–67`), or `bad` (`< 56`).
+
+### BuildDiagnostics and Process vs. Outcome (`internal/analyzer/diagnostics.go`)
+
+`EngineV2` populates `BuildDiagnostics` on every `LegGrade` and `SlipGrade` (see [Analyzer](../concepts/analyzer.md#build-grades-and-3-layer-progressive-disclosure) for the 3-layer UI):
+
+- **Subdivided grade and descriptor**: `DisplayGrade` subdivides each band with `+`/`-` suffixes, and `Descriptor`
+  assigns a two-word structural label (`Clean Build`, `Tight Build`, `Longshot`, `Vig Trap`, `Self-Sabotage`) based on
+  the dominant diagnostic driver rather than raw score alone.
+- **Probability provenance**: `VegasImpliedProb` (`1 / decimalOdds` or combined independent decimal odds),
+  `FairNoVigProb` (Power-devigged sharp/consensus probability, `0` when unavailable), `RawModelProb` (standalone
+  unblended model probability, `0` when no model ran), `HoldPct`, and `CorrTaxPct` (SGP payout shave vs. independent
+  odds). `parlay.FormatImpliedReality` formats probabilities into human-first `"N% implied (hits ~1 in X times)"` copy.
+- **Signal Pills (`SignalPills`)**: capped at `3`, ordered by severity (`PillConflictingLegs`, `PillHeavySGPTax`,
+  `PillSteepVig`, `PillLegBloat`, `PillHeavyChalk`, `PillLongshotVariance`, `PillPricedInNarrative`, `PillContextTrap`,
+  `PillCorrelatedStack`, `PillSharpPrice`), each linking to a Layer 2 anchor (`synergy`, `book_cut`, `hit_rate`,
+  `context`).
+- **Context Radar (`ContextRadar`)**: capped at `2` `ContextNote` items sourced from top model/matchup features and
+  tagged `Already in the line` or `Likely Priced In`.
+- **Cleanup Nudge (`CleanupNudge`)**: optional one-line structural improvement (such as dropping heavy chalk `<= -230`
+  or resolving a conflicting leg pair), omitted when a build is clean.
+
+Post-game, `ClassifyProcessOutcome(letter, won)` and `ClassifyProcessResult(letter, result)` map pre-kickoff letter
+grades (`A`–`B` vs. `C`–`F`, ignoring `+`/`-` suffixes) and settled `Won`/`Lost` outcomes onto four `ProcessOutcome`
+values (`clean_hit` / `Clean Hit` / `positive`, `tough_beat` / `Tough Beat` / `neutral`, `total_bailout` /
+`Total Bailout` / `warn`, `book_donation` / `Book Donation` / `bad`), returning the zero value for pushed, voided,
+pending, or ungraded entries.
 
 ## v2 Four-Pillar Grading Model (`ActiveEngine = EngineV2`)
 

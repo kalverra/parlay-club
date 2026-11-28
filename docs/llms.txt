@@ -33,7 +33,7 @@
 
 ## Reference
 
-- [Analyzer rules](reference/analyzer-rules.md): The stable IDs, severities, triggers, and example messages for all 18 analyzer rules, plus the v2 calibrated four-pillar grading model, Gaussian copula script scoring, extensible context overlays, and v1 rubric reference.
+- [Analyzer rules](reference/analyzer-rules.md): Stable IDs, triggers, and examples for all 18 analyzer rules, plus v2 four-pillar grading, BuildDiagnostics, Process vs. Outcome, Gaussian copula, context overlays, and v1 rubric.
 - [Configuration](reference/config.md): Environment variables the server reads, including dev defaults, odds and Web Push keys, the pre-fill and reminder bearer tokens, the Cloud Tasks queue, the sandbox switch, and the values it rejects in prod.
 - [Data sources](reference/data-sources.md): ESPN scoreboard, rosters, game logs, and injuries, Open-Meteo weather, Parlay API and The Odds API lines, props, and credits, nfelo, nflverse, player matching, and the API archive.
 - [Odds math](reference/odds-math.md): Formulas in internal/parlay for odds, implied probability, multiplicative, Power, and Shin de-vigging, price edge, fair EV, payouts, and units, plus internal/progress for live leg and parlay progress and hit probability.
